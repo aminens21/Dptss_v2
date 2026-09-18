@@ -98,7 +98,24 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
   // Request browser Notification permissions
   const requestPermission = async (): Promise<boolean> => {
     if (typeof window === 'undefined' || !('Notification' in window)) {
-      toast.error('المتصفح لا يدعم إشعارات النظام.');
+      toast.error('المتصفح أو النظام لا يدعم إشعارات الويب.');
+      return false;
+    }
+
+    // Check if running inside an embedded iframe (like AI Studio preview)
+    const isIframe = window.self !== window.top;
+    if (isIframe && Notification.permission !== 'granted') {
+      toast.error('لا يمكن تفعيل الإشعارات داخل المعاينة المضمنة (iFrame). المرجو فتح التطبيق في نافذة/تبويب جديد مستقل لطلب الصلاحية.', {
+        duration: 6000
+      });
+      return false;
+    }
+
+    // If permission was previously blocked/denied in browser settings
+    if (Notification.permission === 'denied') {
+      toast.error('تم حظر الإشعارات سابقاً في متصفحك. لفك الحظر: انقر على رمز القفل 🔒 بجانب رابط الموقع بأعلى المتصفح ثم اختر "تسمح بالدخول" للإشعارات.', {
+        duration: 7000
+      });
       return false;
     }
 
@@ -114,11 +131,14 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
         );
         return true;
       } else {
-        toast.error('تم رفض صلاحية الإشعارات.');
+        toast.error('تم رفض صلاحية الإشعارات. لتفعيلها: انقر على رمز القفل 🔒 بجانب رابط الموقع في شريط العناوين ثم قم بتفعيل الإشعارات.', {
+          duration: 6000
+        });
         return false;
       }
     } catch (err) {
       console.error('Error requesting notification permission:', err);
+      toast.error('تعذر طلب صلاحية الإشعارات من المتصفح.');
       return false;
     }
   };

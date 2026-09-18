@@ -21,7 +21,8 @@ import {
   SlidersHorizontal,
   PenTool,
   FileText,
-  Type
+  Type,
+  ChevronDown
 } from 'lucide-react';
 import { toPng, toBlob } from 'html-to-image';
 import toast from 'react-hot-toast';
@@ -115,6 +116,27 @@ export const TournamentCertificateModal: React.FC<TournamentCertificateModalProp
   const [isExporting, setIsExporting] = useState(false);
   const [viewMode, setViewMode] = useState<'split' | 'preview' | 'settings'>('split');
   const [previewZoom, setPreviewZoom] = useState<number>(1);
+  const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>({});
+
+  const toggleSection = (key: string) => {
+    setCollapsedSections(prev => ({ ...prev, [key]: !prev[key] }));
+  };
+
+  const toggleAllSections = (collapse: boolean) => {
+    setCollapsedSections({
+      templateMode: collapse,
+      studentData: collapse,
+      medalRank: collapse,
+      font: collapse,
+      honorific: collapse,
+      signatory: collapse,
+      theme: collapse,
+      logoSizes: collapse,
+      tournamentInfo: collapse,
+      sportVisual: collapse
+    });
+  };
+
   const certificateRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -202,67 +224,75 @@ export const TournamentCertificateModal: React.FC<TournamentCertificateModalProp
   };
 
   // Print Certificate (A4 Landscape)
-  const handlePrint = () => {
+  const handlePrint = async () => {
     if (!certificateRef.current) return;
-    const printContent = certificateRef.current.outerHTML;
-    const printWindow = window.open('', '_blank', 'width=1100,height=800');
-    if (!printWindow) {
-      toast.error('يرجى السماح بالنوافذ المنبثقة للطباعة');
-      return;
+    const toastId = toast.loading('جاري تجهيز الشهادة للطباعة بجودة عالية...');
+    try {
+      await new Promise(resolve => setTimeout(resolve, 150));
+      const dataUrl = await toPng(certificateRef.current, {
+        pixelRatio: 2.5,
+        cacheBust: true,
+        quality: 0.98
+      });
+
+      const printWindow = window.open('', '_blank', 'width=1100,height=800');
+      if (!printWindow) {
+        toast.error('يرجى السماح بالنوافذ المنبثقة للطباعة', { id: toastId });
+        return;
+      }
+
+      printWindow.document.write(`
+        <!DOCTYPE html>
+        <html dir="rtl" lang="ar">
+          <head>
+            <meta charset="utf-8" />
+            <title>طباعة شهادة تقديرية - ${championshipTitle}</title>
+            <style>
+              @page {
+                size: A4 landscape;
+                margin: 0;
+              }
+              html, body {
+                margin: 0;
+                padding: 0;
+                width: 100%;
+                height: 100%;
+                background-color: #ffffff;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                overflow: hidden;
+              }
+              img {
+                width: 100%;
+                height: 100%;
+                object-fit: contain;
+                display: block;
+                -webkit-print-color-adjust: exact !important;
+                print-color-adjust: exact !important;
+              }
+            </style>
+          </head>
+          <body>
+            <img src="${dataUrl}" alt="Certificate to Print" />
+            <script>
+              window.onload = function() {
+                setTimeout(function() {
+                  window.focus();
+                  window.print();
+                  window.close();
+                }, 400);
+              };
+            </script>
+          </body>
+        </html>
+      `);
+      printWindow.document.close();
+      toast.success('تم فتح نافذة الطباعة بنجاح!', { id: toastId });
+    } catch (error) {
+      console.error('Error preparing print:', error);
+      toast.error('تعذر تحضير الشهادة للطباعة، يرجى المحاولة مرة أخرى', { id: toastId });
     }
-
-    const fontDef = CERTIFICATE_FONTS.find(f => f.id === selectedFont) || CERTIFICATE_FONTS[0];
-
-    printWindow.document.write(`
-      <!DOCTYPE html>
-      <html dir="rtl" lang="ar">
-        <head>
-          <meta charset="utf-8" />
-          <title>شهادة تقديرية - ${championshipTitle}</title>
-          <link rel="preconnect" href="https://fonts.googleapis.com">
-          <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-          <link href="https://fonts.googleapis.com/css2?family=Amiri:ital,wght@0,400;0,700;1,400;1,700&family=Aref+Ruqaa:wght@400;700&family=Cairo:wght@400;500;600;700;800;900&family=Changa:wght@400;500;600;700;800&family=Lateef:wght@400;700&family=Noto+Kufi+Arabic:wght@400;500;600;700;800;900&family=Readex+Pro:wght@400;500;600;700&family=Scheherazade+New:wght@400;700&family=Tajawal:wght@400;500;700;800;900&display=swap" rel="stylesheet">
-          <style>
-            @page {
-              size: A4 landscape;
-              margin: 0;
-            }
-            body {
-              margin: 0;
-              padding: 0;
-              font-family: ${fontDef.css}, 'Amiri', 'Cairo', sans-serif;
-              background: #fff;
-              -webkit-print-color-adjust: exact !important;
-              print-color-adjust: exact !important;
-              display: flex;
-              justify-content: center;
-              align-items: center;
-              min-height: 100vh;
-            }
-            .cert-box {
-              width: 100vw;
-              height: 100vh;
-              box-sizing: border-box;
-            }
-          </style>
-        </head>
-        <body>
-          <div class="cert-box">
-            ${printContent}
-          </div>
-          <script>
-            window.onload = function() {
-              setTimeout(function() {
-                window.focus();
-                window.print();
-                window.close();
-              }, 400);
-            };
-          </script>
-        </body>
-      </html>
-    `);
-    printWindow.document.close();
   };
 
   // Themes helper
@@ -392,186 +422,177 @@ export const TournamentCertificateModal: React.FC<TournamentCertificateModalProp
           </div>
         </div>
 
-        {/* View Mode Selector (Unified / Full Preview / Settings Only) */}
-        <div className="flex items-center justify-between border-b border-slate-200 bg-slate-100/90 px-3 py-1.5 gap-2 shrink-0">
-          <div className="flex items-center gap-1 bg-slate-200/80 p-0.5 rounded-xl border border-slate-300/70 w-full sm:w-auto">
-            <button
-              type="button"
-              onClick={() => setViewMode('split')}
-              className={`flex-1 sm:flex-none px-3 py-1 rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
-                viewMode === 'split'
-                  ? 'bg-white text-amber-800 shadow-xs border border-slate-200/80 font-black'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              <Sparkles className="h-3.5 w-3.5 text-amber-600" />
-              <span>⚡ تعديل ومعاينة معاً (مدمج)</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setViewMode('preview')}
-              className={`flex-1 sm:flex-none px-3 py-1 rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
-                viewMode === 'preview'
-                  ? 'bg-white text-amber-800 shadow-xs border border-slate-200/80 font-black'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              <span>👁️ معاينة الشهادة (A4)</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setViewMode('settings')}
-              className={`flex-1 sm:flex-none px-3 py-1 rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
-                viewMode === 'settings'
-                  ? 'bg-white text-amber-800 shadow-xs border border-slate-200/80 font-black'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              <SlidersHorizontal className="h-3.5 w-3.5 text-slate-700" />
-              <span>⚙️ لوحة التعديل فقط</span>
-            </button>
-          </div>
-
-          <div className="hidden md:flex items-center gap-1.5 text-[11px] font-bold text-slate-600 bg-white px-2.5 py-1 rounded-lg border border-slate-200 shadow-3xs">
-            <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
-            <span>ورقة A4 أفقي (297 × 210 مم)</span>
-          </div>
-        </div>
-
-        {/* Modal Body: Split or Single Layout */}
+        {/* Modal Body: Split Layout (Always Unified) */}
         <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 overflow-y-auto lg:overflow-hidden">
           
           {/* Controls Panel */}
-          <div className={`border-l border-slate-200 overflow-y-auto p-4 sm:p-5 space-y-4 bg-slate-50/70 order-2 lg:order-1 ${
-            viewMode === 'settings'
-              ? 'col-span-1 lg:col-span-12 block'
-              : viewMode === 'split'
-              ? 'col-span-1 lg:col-span-5 block'
-              : 'hidden'
-          }`}>
+          <div className="col-span-1 lg:col-span-5 border-l border-slate-200 overflow-y-auto p-4 sm:p-5 space-y-4 bg-slate-50/70 order-2 lg:order-1 block">
             
             {/* Live Synchronized Banner */}
-            <div className="bg-amber-50 border border-amber-200/80 rounded-xl p-2.5 flex items-center justify-between text-xs text-amber-950 font-bold">
-              <span className="flex items-center gap-1.5">
-                <span className="w-2 h-2 rounded-full bg-amber-600" />
-                <span>التعديلات تنعكس فورياً ومباشرة على الشهادة A4</span>
+            <div className="bg-amber-50 border border-amber-200/80 rounded-xl p-2.5 flex items-center justify-between text-xs text-amber-950 font-bold gap-2">
+              <span className="flex items-center gap-1.5 min-w-0">
+                <span className="w-2 h-2 rounded-full bg-amber-600 animate-pulse shrink-0" />
+                <span className="truncate">التعديلات تنعكس فورياً ومباشرة</span>
               </span>
-              {viewMode === 'split' && (
+              <div className="flex items-center gap-1 shrink-0">
                 <button
                   type="button"
-                  onClick={() => setViewMode('preview')}
-                  className="text-amber-700 underline text-[11px] hover:text-amber-900 cursor-pointer"
+                  onClick={() => toggleAllSections(true)}
+                  className="text-[10px] px-2 py-0.5 rounded-md bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300/60 font-bold transition-colors cursor-pointer"
+                  title="طي جميع الخصائص"
                 >
-                  معاينة بحجم كامل
+                  طي الكل
                 </button>
-              )}
+                <button
+                  type="button"
+                  onClick={() => toggleAllSections(false)}
+                  className="text-[10px] px-2 py-0.5 rounded-md bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300/60 font-bold transition-colors cursor-pointer"
+                  title="إظهار جميع الخصائص"
+                >
+                  إظهار الكل
+                </button>
+              </div>
             </div>
             
             {/* Mode Selector: Blank for Handwriting vs Custom Typed */}
             <div className="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-3xs space-y-2">
-              <label className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
-                <Edit3 className="h-3.5 w-3.5 text-amber-600" />
-                <span>نمط ملء الشهادة</span>
-              </label>
-              <div className="grid grid-cols-2 gap-2">
+              <div className="flex items-center justify-between gap-2">
+                <label className="text-xs font-bold text-slate-800 flex items-center gap-1.5 min-w-0">
+                  <Edit3 className="h-3.5 w-3.5 text-amber-600 shrink-0" />
+                  <span className="truncate">نمط ملء الشهادة</span>
+                </label>
                 <button
                   type="button"
-                  onClick={() => setIsFormBlank(true)}
-                  className={`py-2 px-3 rounded-xl text-xs font-bold border flex flex-col items-center gap-1 transition-all cursor-pointer ${
-                    isFormBlank
-                      ? 'bg-amber-50 border-amber-500 text-amber-950 font-black shadow-3xs ring-2 ring-amber-500/20'
-                      : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
-                  }`}
+                  onClick={() => toggleSection('templateMode')}
+                  className="p-1 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-md transition-colors cursor-pointer shrink-0 ms-auto"
+                  title={collapsedSections['templateMode'] ? "إظهار الخاصية" : "إخفاء الخاصية"}
                 >
-                  <span className="text-sm">✍️ فارغة للملء اليدوي</span>
-                  <span className="text-[9px] text-slate-500 font-normal">خطوط منقطة لكتابة الأسماء لاحقاً</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setIsFormBlank(false)}
-                  className={`py-2 px-3 rounded-xl text-xs font-bold border flex flex-col items-center gap-1 transition-all cursor-pointer ${
-                    !isFormBlank
-                      ? 'bg-amber-50 border-amber-500 text-amber-950 font-black shadow-3xs ring-2 ring-amber-500/20'
-                      : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
-                  }`}
-                >
-                  <span className="text-sm">📝 ملء بيانات مطبوعة</span>
-                  <span className="text-[9px] text-slate-500 font-normal">طباعة اسم التلميذ والرتبة مباشرة</span>
+                  <ChevronDown className={`h-4 w-4 transform transition-transform duration-200 ${collapsedSections['templateMode'] ? 'rotate-180 text-amber-600 font-bold' : ''}`} />
                 </button>
               </div>
+              {!collapsedSections['templateMode'] && (
+                <div className="grid grid-cols-2 gap-2 pt-0.5">
+                  <button
+                    type="button"
+                    onClick={() => setIsFormBlank(true)}
+                    className={`py-2 px-3 rounded-xl text-xs font-bold border flex flex-col items-center gap-1 transition-all cursor-pointer ${
+                      isFormBlank
+                        ? 'bg-amber-50 border-amber-500 text-amber-950 font-black shadow-3xs ring-2 ring-amber-500/20'
+                        : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                    }`}
+                  >
+                    <span className="text-sm">✍️ فارغة للملء اليدوي</span>
+                    <span className="text-[9px] text-slate-500 font-normal">خطوط منقطة لكتابة الأسماء لاحقاً</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIsFormBlank(false)}
+                    className={`py-2 px-3 rounded-xl text-xs font-bold border flex flex-col items-center gap-1 transition-all cursor-pointer ${
+                      !isFormBlank
+                        ? 'bg-amber-50 border-amber-500 text-amber-950 font-black shadow-3xs ring-2 ring-amber-500/20'
+                        : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                    }`}
+                  >
+                    <span className="text-sm">📝 ملء بيانات مطبوعة</span>
+                    <span className="text-[9px] text-slate-500 font-normal">طباعة اسم التلميذ والرتبة مباشرة</span>
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* Filled Mode Specific Inputs */}
             {!isFormBlank && (
               <div className="bg-amber-50/70 p-3.5 rounded-2xl border border-amber-200 shadow-3xs space-y-2.5 animate-in fade-in duration-200">
-                <div className="text-[11px] font-bold text-amber-900 flex items-center gap-1">
-                  <span>بيانات التلميذ(ة) المكرم(ة):</span>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[11px] font-bold text-amber-900 truncate">
+                    بيانات التلميذ(ة) المكرم(ة):
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => toggleSection('studentData')}
+                    className="p-1 text-amber-700 hover:text-amber-900 hover:bg-amber-100/60 rounded-md transition-colors cursor-pointer shrink-0 ms-auto"
+                    title={collapsedSections['studentData'] ? "إظهار الخاصية" : "إخفاء الخاصية"}
+                  >
+                    <ChevronDown className={`h-4 w-4 transform transition-transform duration-200 ${collapsedSections['studentData'] ? 'rotate-180 font-bold' : ''}`} />
+                  </button>
                 </div>
-                <div>
-                  <span className="text-[10px] font-bold text-slate-600 block mb-0.5">اسم التلميذ(ة):</span>
-                  <input
-                    type="text"
-                    value={studentName}
-                    onChange={(e) => setStudentName(e.target.value)}
-                    placeholder="مثال: نور اليوسفي"
-                    className="w-full text-xs font-bold px-2.5 py-1.5 border border-amber-300 rounded-lg bg-white focus:ring-2 focus:ring-amber-500 focus:outline-hidden"
-                  />
-                </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <span className="text-[10px] font-bold text-slate-600 block mb-0.5">الرتبة / التتويج:</span>
-                    <select
-                      value={rankText}
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        setRankText(val);
-                        if (val.includes('الأولى')) setMedalNumber('1');
-                        else if (val.includes('الثانية')) setMedalNumber('2');
-                        else if (val.includes('الثالثة')) setMedalNumber('3');
-                        else if (val.includes('الرابعة')) setMedalNumber('4');
-                      }}
-                      className="w-full text-xs font-bold px-2 py-1.5 border border-amber-300 rounded-lg bg-white focus:ring-2 focus:ring-amber-500 focus:outline-hidden"
-                    >
-                      <option value="الرتبة الأولى">الرتبة الأولى 🥇</option>
-                      <option value="الرتبة الثانية">الرتبة الثانية 🥈</option>
-                      <option value="الرتبة الثالثة">الرتبة الثالثة 🥉</option>
-                      <option value="الرتبة الرابعة">الرتبة الرابعة</option>
-                      <option value="مشاركة فعالة ومتميزة">مشاركة فعالة ومتميزة 🌟</option>
-                    </select>
+                {!collapsedSections['studentData'] && (
+                  <div className="space-y-2.5 pt-0.5">
+                    <div>
+                      <span className="text-[10px] font-bold text-slate-600 block mb-0.5">اسم التلميذ(ة):</span>
+                      <input
+                        type="text"
+                        value={studentName}
+                        onChange={(e) => setStudentName(e.target.value)}
+                        placeholder="مثال: نور اليوسفي"
+                        className="w-full text-xs font-bold px-2.5 py-1.5 border border-amber-300 rounded-lg bg-white focus:ring-2 focus:ring-amber-500 focus:outline-hidden"
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <span className="text-[10px] font-bold text-slate-600 block mb-0.5">الرتبة / التتويج:</span>
+                        <select
+                          value={rankText}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setRankText(val);
+                            if (val.includes('الأولى')) setMedalNumber('1');
+                            else if (val.includes('الثانية')) setMedalNumber('2');
+                            else if (val.includes('الثالثة')) setMedalNumber('3');
+                            else if (val.includes('الرابعة')) setMedalNumber('4');
+                          }}
+                          className="w-full text-xs font-bold px-2 py-1.5 border border-amber-300 rounded-lg bg-white focus:ring-2 focus:ring-amber-500 focus:outline-hidden"
+                        >
+                          <option value="الرتبة الأولى">الرتبة الأولى 🥇</option>
+                          <option value="الرتبة الثانية">الرتبة الثانية 🥈</option>
+                          <option value="الرتبة الثالثة">الرتبة الثالثة 🥉</option>
+                          <option value="الرتبة الرابعة">الرتبة الرابعة</option>
+                          <option value="مشاركة فعالة ومتميزة">مشاركة فعالة ومتميزة 🌟</option>
+                        </select>
+                      </div>
+                      <div>
+                        <span className="text-[10px] font-bold text-slate-600 block mb-0.5">الفئة / الجنس (اختياري):</span>
+                        <input
+                          type="text"
+                          value={categoryGenderText}
+                          onChange={(e) => setCategoryGenderText(e.target.value)}
+                          placeholder="مثال: فئة الإناث أو صغار"
+                          className="w-full text-xs px-2 py-1.5 border border-amber-300 rounded-lg bg-white focus:ring-2 focus:ring-amber-500 focus:outline-hidden"
+                        />
+                      </div>
+                    </div>
                   </div>
-                  <div>
-                    <span className="text-[10px] font-bold text-slate-600 block mb-0.5">الفئة / الجنس (اختياري):</span>
-                    <input
-                      type="text"
-                      value={categoryGenderText}
-                      onChange={(e) => setCategoryGenderText(e.target.value)}
-                      placeholder="مثال: فئة الإناث أو صغار"
-                      className="w-full text-xs px-2 py-1.5 border border-amber-300 rounded-lg bg-white focus:ring-2 focus:ring-amber-500 focus:outline-hidden"
-                    />
-                  </div>
-                </div>
+                )}
               </div>
             )}
 
             {/* Medal Rank & Number Control (Controllable) */}
             <div className="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-3xs space-y-2.5">
-              <div className="flex items-center justify-between">
-                <label className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
-                  <Medal className="h-3.5 w-3.5 text-amber-600" />
-                  <span>الميدالية ورقم الرتبة</span>
-                </label>
-                <label className="flex items-center gap-1.5 cursor-pointer text-[11px] font-bold text-slate-600">
-                  <input
-                    type="checkbox"
-                    checked={showMedal}
-                    onChange={(e) => setShowMedal(e.target.checked)}
-                    className="rounded accent-amber-600 h-3.5 w-3.5 cursor-pointer"
-                  />
-                  <span>إظهار الميدالية</span>
-                </label>
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <Medal className="h-3.5 w-3.5 text-amber-600 shrink-0" />
+                  <span className="text-xs font-bold text-slate-800 truncate">الميدالية ورقم الرتبة</span>
+                  <label className="flex items-center gap-1 cursor-pointer text-[11px] font-bold text-slate-600 shrink-0">
+                    <input
+                      type="checkbox"
+                      checked={showMedal}
+                      onChange={(e) => setShowMedal(e.target.checked)}
+                      className="rounded accent-amber-600 h-3.5 w-3.5 cursor-pointer"
+                    />
+                    <span>إظهار</span>
+                  </label>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => toggleSection('medalRank')}
+                  className="p-1 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-md transition-colors cursor-pointer shrink-0 ms-auto"
+                  title={collapsedSections['medalRank'] ? "إظهار الخاصية" : "إخفاء الخاصية"}
+                >
+                  <ChevronDown className={`h-4 w-4 transform transition-transform duration-200 ${collapsedSections['medalRank'] ? 'rotate-180 text-amber-600 font-bold' : ''}`} />
+                </button>
               </div>
 
-              {showMedal && (
+              {!collapsedSections['medalRank'] && showMedal && (
                 <div className="space-y-2 pt-1 border-t border-slate-100">
                   <div className="flex items-center justify-between">
                     <span className="text-[10px] font-bold text-slate-600">رقم الميدالية حسب الرتبة:</span>
@@ -612,432 +633,516 @@ export const TournamentCertificateModal: React.FC<TournamentCertificateModalProp
 
             {/* Editable Font Selector */}
             <div className="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-3xs space-y-2">
-              <label className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
-                <Type className="h-3.5 w-3.5 text-amber-600" />
-                <span>نوع خط الشهادة التقديرية (Font)</span>
-              </label>
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
-                {CERTIFICATE_FONTS.map(f => (
-                  <button
-                    key={f.id}
-                    type="button"
-                    onClick={() => setSelectedFont(f.id)}
-                    className={`p-2 rounded-xl text-xs border transition-all cursor-pointer text-center flex flex-col items-center justify-center ${
-                      selectedFont === f.id
-                        ? 'bg-amber-50 text-amber-950 border-amber-500 ring-2 ring-amber-500/20 shadow-3xs font-black'
-                        : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50 font-medium'
-                    }`}
-                    style={{ fontFamily: f.css }}
-                  >
-                    <span className="text-sm font-bold">أ ب جـ</span>
-                    <span className="text-[10px] text-slate-600 truncate max-w-full">{f.id}</span>
-                  </button>
-                ))}
+              <div className="flex items-center justify-between gap-2">
+                <label className="text-xs font-bold text-slate-800 flex items-center gap-1.5 min-w-0">
+                  <Type className="h-3.5 w-3.5 text-amber-600 shrink-0" />
+                  <span className="truncate">نوع خط الشهادة التقديرية (Font)</span>
+                </label>
+                <button
+                  type="button"
+                  onClick={() => toggleSection('font')}
+                  className="p-1 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-md transition-colors cursor-pointer shrink-0 ms-auto"
+                  title={collapsedSections['font'] ? "إظهار الخاصية" : "إخفاء الخاصية"}
+                >
+                  <ChevronDown className={`h-4 w-4 transform transition-transform duration-200 ${collapsedSections['font'] ? 'rotate-180 text-amber-600 font-bold' : ''}`} />
+                </button>
               </div>
+              {!collapsedSections['font'] && (
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5 pt-0.5">
+                  {CERTIFICATE_FONTS.map(f => (
+                    <button
+                      key={f.id}
+                      type="button"
+                      onClick={() => setSelectedFont(f.id)}
+                      className={`p-2 rounded-xl text-xs border transition-all cursor-pointer text-center flex flex-col items-center justify-center ${
+                        selectedFont === f.id
+                          ? 'bg-amber-50 text-amber-950 border-amber-500 ring-2 ring-amber-500/20 shadow-3xs font-black'
+                          : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50 font-medium'
+                      }`}
+                      style={{ fontFamily: f.css }}
+                    >
+                      <span className="text-sm font-bold">أ ب جـ</span>
+                      <span className="text-[10px] text-slate-600 truncate max-w-full">{f.id}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
 
             {/* Editable Honorific / Introductory text */}
             <div className="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-3xs space-y-2.5">
-              <div className="flex items-center justify-between">
-                <label className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
-                  <FileText className="h-3.5 w-3.5 text-amber-600" />
-                  <span>ديباجة الشهادة (نص التقديم كاملاً قابل للتعديل)</span>
-                </label>
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <FileText className="h-3.5 w-3.5 text-amber-600 shrink-0" />
+                  <span className="text-xs font-bold text-slate-800 truncate">ديباجة الشهادة (نص التقديم)</span>
+                  <button
+                    type="button"
+                    onClick={() => setHonorificText(defaultHonorific)}
+                    className="text-[10px] text-amber-700 hover:underline font-bold cursor-pointer shrink-0"
+                  >
+                    استعادة
+                  </button>
+                </div>
                 <button
                   type="button"
-                  onClick={() => setHonorificText(defaultHonorific)}
-                  className="text-[10px] text-amber-700 hover:underline font-bold cursor-pointer"
+                  onClick={() => toggleSection('honorific')}
+                  className="p-1 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-md transition-colors cursor-pointer shrink-0 ms-auto"
+                  title={collapsedSections['honorific'] ? "إظهار الخاصية" : "إخفاء الخاصية"}
                 >
-                  استعادة الافتراضي
+                  <ChevronDown className={`h-4 w-4 transform transition-transform duration-200 ${collapsedSections['honorific'] ? 'rotate-180 text-amber-600 font-bold' : ''}`} />
                 </button>
               </div>
-              <textarea
-                rows={3}
-                value={honorificText}
-                onChange={(e) => setHonorificText(e.target.value)}
-                className="w-full text-xs font-bold px-3 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-amber-500 focus:outline-hidden leading-relaxed resize-none bg-amber-50/20"
-                placeholder="اكتب هنا النص الكامل لديباجة الشهادة..."
-              />
-              <div className="space-y-1">
-                <span className="text-[10px] font-bold text-slate-400 block">نماذج وصيغ ديباجة جاهزة (انقر للتطبيق):</span>
-                <div className="flex flex-col gap-1">
-                  {[
-                    `يتشرف رئيس الفرع الإقليمي للجامعة الملكية المغربية للرياضة المدرسية بالمديرية الإقليمية ب${cleanDirCity}`,
-                    `تتشرف اللجنة المنظمة للبطولة الإقليمية المدرسية بالمديرية الإقليمية ب${cleanDirCity}`,
-                    `يتشرف السيد المدير الإقليمي لوزارة التربية الوطنية والتعليم الأولي والرياضة ب${cleanDirCity}`,
-                    `يتشرف مكتب فرع الجامعة الملكية المغربية للرياضة المدرسية ب${cleanDirCity}`,
-                    `يتشرف السيد رئيس مصلحة الارتقاء بالرياضة المدرسية ب${cleanDirCity}`
-                  ].map((presetText, idx) => (
-                    <button
-                      key={idx}
-                      type="button"
-                      onClick={() => setHonorificText(presetText)}
-                      className={`text-[10px] text-right p-1.5 rounded-lg border transition-all cursor-pointer font-medium truncate ${
-                        honorificText === presetText
-                          ? 'bg-amber-100 text-amber-950 border-amber-400 font-bold'
-                          : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200'
-                      }`}
-                      title={presetText}
-                    >
-                      {presetText}
-                    </button>
-                  ))}
+              {!collapsedSections['honorific'] && (
+                <div className="space-y-2.5 pt-0.5">
+                  <textarea
+                    rows={3}
+                    value={honorificText}
+                    onChange={(e) => setHonorificText(e.target.value)}
+                    className="w-full text-xs font-bold px-3 py-2 border border-slate-300 rounded-xl focus:ring-2 focus:ring-amber-500 focus:outline-hidden leading-relaxed resize-none bg-amber-50/20"
+                    placeholder="اكتب هنا النص الكامل لديباجة الشهادة..."
+                  />
+                  <div className="space-y-1">
+                    <span className="text-[10px] font-bold text-slate-400 block">نماذج وصيغ ديباجة جاهزة (انقر للتطبيق):</span>
+                    <div className="flex flex-col gap-1">
+                      {[
+                        `يتشرف رئيس الفرع الإقليمي للجامعة الملكية المغربية للرياضة المدرسية بالمديرية الإقليمية ب${cleanDirCity}`,
+                        `تتشرف اللجنة المنظمة للبطولة الإقليمية المدرسية بالمديرية الإقليمية ب${cleanDirCity}`,
+                        `يتشرف السيد المدير الإقليمي لوزارة التربية الوطنية والتعليم الأولي والرياضة ب${cleanDirCity}`,
+                        `يتشرف مكتب فرع الجامعة الملكية المغربية للرياضة المدرسية ب${cleanDirCity}`,
+                        `يتشرف السيد رئيس مصلحة الارتقاء بالرياضة المدرسية ب${cleanDirCity}`
+                      ].map((presetText, idx) => (
+                        <button
+                          key={idx}
+                          type="button"
+                          onClick={() => setHonorificText(presetText)}
+                          className={`text-[10px] text-right p-1.5 rounded-lg border transition-all cursor-pointer font-medium truncate ${
+                            honorificText === presetText
+                              ? 'bg-amber-100 text-amber-950 border-amber-400 font-bold'
+                              : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200'
+                          }`}
+                          title={presetText}
+                        >
+                          {presetText}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
 
             {/* Signatory Role Controls */}
             <div className="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-3xs space-y-2">
-              <label className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
-                <PenTool className="h-3.5 w-3.5 text-amber-600" />
-                <span>صفة الموقّع على الشهادة</span>
-              </label>
-              <div>
-                <span className="text-[10px] font-bold text-slate-500 block mb-0.5">الصفة (توقيع ...):</span>
-                <input
-                  type="text"
-                  value={signatoryRole}
-                  onChange={(e) => setSignatoryRole(e.target.value)}
-                  placeholder="مثال: رئيس الفرع الإقليمي"
-                  className="w-full text-xs font-bold px-2.5 py-1.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:outline-hidden"
-                />
+              <div className="flex items-center justify-between gap-2">
+                <label className="text-xs font-bold text-slate-800 flex items-center gap-1.5 min-w-0">
+                  <PenTool className="h-3.5 w-3.5 text-amber-600 shrink-0" />
+                  <span className="truncate">صفة الموقّع على الشهادة</span>
+                </label>
+                <button
+                  type="button"
+                  onClick={() => toggleSection('signatory')}
+                  className="p-1 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-md transition-colors cursor-pointer shrink-0 ms-auto"
+                  title={collapsedSections['signatory'] ? "إظهار الخاصية" : "إخفاء الخاصية"}
+                >
+                  <ChevronDown className={`h-4 w-4 transform transition-transform duration-200 ${collapsedSections['signatory'] ? 'rotate-180 text-amber-600 font-bold' : ''}`} />
+                </button>
               </div>
-              <div className="flex items-center gap-1 flex-wrap">
-                <span className="text-[9px] font-bold text-slate-400">خيارات جاهزة:</span>
-                {['رئيس الفرع الإقليمي', 'المدير الإقليمي', 'رئيس مصلحة الارتقاء بالرياضة المدرسية', 'الكاتب العام'].map((role) => (
-                  <button
-                    key={role}
-                    type="button"
-                    onClick={() => setSignatoryRole(role)}
-                    className={`text-[9px] px-1.5 py-0.5 rounded border font-bold cursor-pointer transition-colors ${
-                      signatoryRole === role
-                        ? 'bg-amber-600 text-white border-amber-600'
-                        : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200'
-                    }`}
-                  >
-                    {role}
-                  </button>
-                ))}
-              </div>
-              <div>
-                <span className="text-[10px] font-bold text-slate-500 block mb-0.5">الصفة الفرعية / التفويض (اختياري):</span>
-                <input
-                  type="text"
-                  value={signatorySubRole}
-                  onChange={(e) => setSignatorySubRole(e.target.value)}
-                  placeholder="مثال: المدير الإقليمي (أو اتركه فارغاً)"
-                  className="w-full text-xs px-2.5 py-1.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:outline-hidden"
-                />
-              </div>
+              {!collapsedSections['signatory'] && (
+                <div className="space-y-2 pt-0.5">
+                  <div>
+                    <span className="text-[10px] font-bold text-slate-500 block mb-0.5">الصفة (توقيع ...):</span>
+                    <input
+                      type="text"
+                      value={signatoryRole}
+                      onChange={(e) => setSignatoryRole(e.target.value)}
+                      placeholder="مثال: رئيس الفرع الإقليمي"
+                      className="w-full text-xs font-bold px-2.5 py-1.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:outline-hidden"
+                    />
+                  </div>
+                  <div className="flex items-center gap-1 flex-wrap">
+                    <span className="text-[9px] font-bold text-slate-400">خيارات جاهزة:</span>
+                    {['رئيس الفرع الإقليمي', 'المدير الإقليمي', 'رئيس مصلحة الارتقاء بالرياضة المدرسية', 'الكاتب العام'].map((role) => (
+                      <button
+                        key={role}
+                        type="button"
+                        onClick={() => setSignatoryRole(role)}
+                        className={`text-[9px] px-1.5 py-0.5 rounded border font-bold cursor-pointer transition-colors ${
+                          signatoryRole === role
+                            ? 'bg-amber-600 text-white border-amber-600'
+                            : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200'
+                        }`}
+                      >
+                        {role}
+                      </button>
+                    ))}
+                  </div>
+                  <div>
+                    <span className="text-[10px] font-bold text-slate-500 block mb-0.5">الصفة الفرعية / التفويض (اختياري):</span>
+                    <input
+                      type="text"
+                      value={signatorySubRole}
+                      onChange={(e) => setSignatorySubRole(e.target.value)}
+                      placeholder="مثال: المدير الإقليمي (أو اتركه فارغاً)"
+                      className="w-full text-xs px-2.5 py-1.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:outline-hidden"
+                    />
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Quick Themes */}
             <div className="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-3xs space-y-2">
-              <label className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
-                <Palette className="h-3.5 w-3.5 text-red-600" />
-                <span>السمة اللونية والخلفية</span>
-              </label>
-              <div className="grid grid-cols-5 gap-1.5">
+              <div className="flex items-center justify-between gap-2">
+                <label className="text-xs font-bold text-slate-800 flex items-center gap-1.5 min-w-0">
+                  <Palette className="h-3.5 w-3.5 text-red-600 shrink-0" />
+                  <span className="truncate">السمة اللونية والخلفية</span>
+                </label>
                 <button
                   type="button"
-                  onClick={() => setTheme('crimson_gold')}
-                  className={`h-9 rounded-xl flex items-center justify-center text-xs font-bold border transition-all cursor-pointer ${
-                    theme === 'crimson_gold' ? 'ring-2 ring-red-500 border-red-500 bg-red-50 text-red-950 font-black' : 'border-slate-200 bg-white text-slate-700'
-                  }`}
-                  title="قرمزي ذهبي (مثل النموذج المرفق)"
+                  onClick={() => toggleSection('theme')}
+                  className="p-1 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-md transition-colors cursor-pointer shrink-0 ms-auto"
+                  title={collapsedSections['theme'] ? "إظهار الخاصية" : "إخفاء الخاصية"}
                 >
-                  🔴 قرمزي
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setTheme('orange_vibrant')}
-                  className={`h-9 rounded-xl flex items-center justify-center text-xs font-bold border transition-all cursor-pointer ${
-                    theme === 'orange_vibrant' ? 'ring-2 ring-orange-500 border-orange-500 bg-orange-50 text-orange-950 font-black' : 'border-slate-200 bg-white text-slate-700'
-                  }`}
-                  title="برتقالي رياضي"
-                >
-                  🟠 برتقالي
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setTheme('royal_blue')}
-                  className={`h-9 rounded-xl flex items-center justify-center text-xs font-bold border transition-all cursor-pointer ${
-                    theme === 'royal_blue' ? 'ring-2 ring-blue-500 border-blue-500 bg-blue-50 text-blue-950 font-black' : 'border-slate-200 bg-white text-slate-700'
-                  }`}
-                  title="أزرق ملكي"
-                >
-                  🔵 أزرق
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setTheme('morocco_emerald')}
-                  className={`h-9 rounded-xl flex items-center justify-center text-xs font-bold border transition-all cursor-pointer ${
-                    theme === 'morocco_emerald' ? 'ring-2 ring-emerald-500 border-emerald-500 bg-emerald-50 text-emerald-950 font-black' : 'border-slate-200 bg-white text-slate-700'
-                  }`}
-                  title="أخضر مغربي"
-                >
-                  🟢 أخضر
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setTheme('clean_slate')}
-                  className={`h-9 rounded-xl flex items-center justify-center text-xs font-bold border transition-all cursor-pointer ${
-                    theme === 'clean_slate' ? 'ring-2 ring-slate-600 border-slate-600 bg-slate-100 text-slate-950 font-black' : 'border-slate-200 bg-white text-slate-700'
-                  }`}
-                  title="رمادي أنيق"
-                >
-                  ⚪ رمادي
+                  <ChevronDown className={`h-4 w-4 transform transition-transform duration-200 ${collapsedSections['theme'] ? 'rotate-180 text-red-600 font-bold' : ''}`} />
                 </button>
               </div>
+              {!collapsedSections['theme'] && (
+                <div className="grid grid-cols-5 gap-1.5 pt-0.5">
+                  <button
+                    type="button"
+                    onClick={() => setTheme('crimson_gold')}
+                    className={`h-9 rounded-xl flex items-center justify-center text-xs font-bold border transition-all cursor-pointer ${
+                      theme === 'crimson_gold' ? 'ring-2 ring-red-500 border-red-500 bg-red-50 text-red-950 font-black' : 'border-slate-200 bg-white text-slate-700'
+                    }`}
+                    title="قرمزي ذهبي (مثل النموذج المرفق)"
+                  >
+                    🔴 قرمزي
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTheme('orange_vibrant')}
+                    className={`h-9 rounded-xl flex items-center justify-center text-xs font-bold border transition-all cursor-pointer ${
+                      theme === 'orange_vibrant' ? 'ring-2 ring-orange-500 border-orange-500 bg-orange-50 text-orange-950 font-black' : 'border-slate-200 bg-white text-slate-700'
+                    }`}
+                    title="برتقالي رياضي"
+                  >
+                    🟠 برتقالي
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTheme('royal_blue')}
+                    className={`h-9 rounded-xl flex items-center justify-center text-xs font-bold border transition-all cursor-pointer ${
+                      theme === 'royal_blue' ? 'ring-2 ring-blue-500 border-blue-500 bg-blue-50 text-blue-950 font-black' : 'border-slate-200 bg-white text-slate-700'
+                    }`}
+                    title="أزرق ملكي"
+                  >
+                    🔵 أزرق
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTheme('morocco_emerald')}
+                    className={`h-9 rounded-xl flex items-center justify-center text-xs font-bold border transition-all cursor-pointer ${
+                      theme === 'morocco_emerald' ? 'ring-2 ring-emerald-500 border-emerald-500 bg-emerald-50 text-emerald-950 font-black' : 'border-slate-200 bg-white text-slate-700'
+                    }`}
+                    title="أخضر مغربي"
+                  >
+                    🟢 أخضر
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTheme('clean_slate')}
+                    className={`h-9 rounded-xl flex items-center justify-center text-xs font-bold border transition-all cursor-pointer ${
+                      theme === 'clean_slate' ? 'ring-2 ring-slate-600 border-slate-600 bg-slate-100 text-slate-950 font-black' : 'border-slate-200 bg-white text-slate-700'
+                    }`}
+                    title="رمادي أنيق"
+                  >
+                    ⚪ رمادي
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* Logo Sizes Controls */}
             <div className="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-3xs space-y-3">
-              <div className="flex items-center justify-between">
-                <label className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
-                  <SlidersHorizontal className="h-3.5 w-3.5 text-amber-600" />
-                  <span>التحكم في حجم الشعارات (الشهادة)</span>
-                </label>
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <SlidersHorizontal className="h-3.5 w-3.5 text-amber-600 shrink-0" />
+                  <span className="text-xs font-bold text-slate-800 truncate">التحكم في حجم الشعارات (الشهادة)</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMinistryLogoSize(48);
+                      setFrmssLogoSize(48);
+                    }}
+                    className="text-[10px] text-amber-700 hover:underline font-bold cursor-pointer shrink-0"
+                  >
+                    إعادة ضبط
+                  </button>
+                </div>
                 <button
                   type="button"
-                  onClick={() => {
-                    setMinistryLogoSize(48);
-                    setFrmssLogoSize(48);
-                  }}
-                  className="text-[10px] text-amber-700 hover:underline font-bold cursor-pointer"
+                  onClick={() => toggleSection('logoSizes')}
+                  className="p-1 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-md transition-colors cursor-pointer shrink-0 ms-auto"
+                  title={collapsedSections['logoSizes'] ? "إظهار الخاصية" : "إخفاء الخاصية"}
                 >
-                  إعادة ضبط (48px)
+                  <ChevronDown className={`h-4 w-4 transform transition-transform duration-200 ${collapsedSections['logoSizes'] ? 'rotate-180 text-amber-600 font-bold' : ''}`} />
                 </button>
               </div>
 
-              {/* Ministry Logo Size */}
-              <div className="space-y-1.5 bg-slate-50 p-2.5 rounded-xl border border-slate-100">
-                <div className="flex items-center justify-between text-[11px] font-bold text-slate-700">
-                  <span>شعار الوزارة (الوسط):</span>
-                  <span className="font-mono text-amber-800 bg-white px-2 py-0.5 rounded border border-slate-200 text-[10px]">{ministryLogoSize}px</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-[10px] text-slate-400">صغير</span>
-                  <input
-                    type="range"
-                    min="30"
-                    max="90"
-                    value={ministryLogoSize}
-                    onChange={(e) => setMinistryLogoSize(Number(e.target.value))}
-                    className="flex-1 accent-amber-600 h-1.5 bg-slate-200 rounded-lg cursor-pointer"
-                  />
-                  <span className="text-[10px] text-slate-400">كبير</span>
-                </div>
-                <div className="grid grid-cols-4 gap-1 pt-1">
-                  {[36, 48, 62, 78].map((sz, idx) => (
-                    <button
-                      key={sz}
-                      type="button"
-                      onClick={() => setMinistryLogoSize(sz)}
-                      className={`py-1 text-[10px] font-bold rounded-md border transition-all cursor-pointer ${
-                        ministryLogoSize === sz ? 'bg-amber-600 text-white border-amber-600' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
-                      }`}
-                    >
-                      {idx === 0 ? 'صغير' : idx === 1 ? 'افتراضي' : idx === 2 ? 'كبير' : 'كبير جداً'}
-                    </button>
-                  ))}
-                </div>
-              </div>
+              {!collapsedSections['logoSizes'] && (
+                <div className="space-y-3 pt-0.5">
+                  {/* Ministry Logo Size */}
+                  <div className="space-y-1.5 bg-slate-50 p-2.5 rounded-xl border border-slate-100">
+                    <div className="flex items-center justify-between text-[11px] font-bold text-slate-700">
+                      <span>شعار الوزارة (الوسط):</span>
+                      <span className="font-mono text-amber-800 bg-white px-2 py-0.5 rounded border border-slate-200 text-[10px]">{ministryLogoSize}px</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] text-slate-400">صغير</span>
+                      <input
+                        type="range"
+                        min="30"
+                        max="90"
+                        value={ministryLogoSize}
+                        onChange={(e) => setMinistryLogoSize(Number(e.target.value))}
+                        className="flex-1 accent-amber-600 h-1.5 bg-slate-200 rounded-lg cursor-pointer"
+                      />
+                      <span className="text-[10px] text-slate-400">كبير</span>
+                    </div>
+                    <div className="grid grid-cols-4 gap-1 pt-1">
+                      {[36, 48, 62, 78].map((sz, idx) => (
+                        <button
+                          key={sz}
+                          type="button"
+                          onClick={() => setMinistryLogoSize(sz)}
+                          className={`py-1 text-[10px] font-bold rounded-md border transition-all cursor-pointer ${
+                            ministryLogoSize === sz ? 'bg-amber-600 text-white border-amber-600' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
+                          }`}
+                        >
+                          {idx === 0 ? 'صغير' : idx === 1 ? 'افتراضي' : idx === 2 ? 'كبير' : 'كبير جداً'}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
 
-              {/* FRMSS Logo Size */}
-              <div className="space-y-1.5 bg-slate-50 p-2.5 rounded-xl border border-slate-100">
-                <div className="flex items-center justify-between text-[11px] font-bold text-slate-700">
-                  <span>شعار الجامعة (الجانب):</span>
-                  <span className="font-mono text-red-700 bg-white px-2 py-0.5 rounded border border-slate-200 text-[10px]">{frmssLogoSize}px</span>
+                  {/* FRMSS Logo Size */}
+                  <div className="space-y-1.5 bg-slate-50 p-2.5 rounded-xl border border-slate-100">
+                    <div className="flex items-center justify-between text-[11px] font-bold text-slate-700">
+                      <span>شعار الجامعة (الجانب):</span>
+                      <span className="font-mono text-red-700 bg-white px-2 py-0.5 rounded border border-slate-200 text-[10px]">{frmssLogoSize}px</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] text-slate-400">صغير</span>
+                      <input
+                        type="range"
+                        min="30"
+                        max="90"
+                        value={frmssLogoSize}
+                        onChange={(e) => setFrmssLogoSize(Number(e.target.value))}
+                        className="flex-1 accent-red-600 h-1.5 bg-slate-200 rounded-lg cursor-pointer"
+                      />
+                      <span className="text-[10px] text-slate-400">كبير</span>
+                    </div>
+                    <div className="grid grid-cols-4 gap-1 pt-1">
+                      {[36, 48, 62, 78].map((sz, idx) => (
+                        <button
+                          key={sz}
+                          type="button"
+                          onClick={() => setFrmssLogoSize(sz)}
+                          className={`py-1 text-[10px] font-bold rounded-md border transition-all cursor-pointer ${
+                            frmssLogoSize === sz ? 'bg-red-600 text-white border-red-600' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
+                          }`}
+                        >
+                          {idx === 0 ? 'صغير' : idx === 1 ? 'افتراضي' : idx === 2 ? 'كبير' : 'كبير جداً'}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-[10px] text-slate-400">صغير</span>
-                  <input
-                    type="range"
-                    min="30"
-                    max="90"
-                    value={frmssLogoSize}
-                    onChange={(e) => setFrmssLogoSize(Number(e.target.value))}
-                    className="flex-1 accent-red-600 h-1.5 bg-slate-200 rounded-lg cursor-pointer"
-                  />
-                  <span className="text-[10px] text-slate-400">كبير</span>
-                </div>
-                <div className="grid grid-cols-4 gap-1 pt-1">
-                  {[36, 48, 62, 78].map((sz, idx) => (
-                    <button
-                      key={sz}
-                      type="button"
-                      onClick={() => setFrmssLogoSize(sz)}
-                      className={`py-1 text-[10px] font-bold rounded-md border transition-all cursor-pointer ${
-                        frmssLogoSize === sz ? 'bg-red-600 text-white border-red-600' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
-                      }`}
-                    >
-                      {idx === 0 ? 'صغير' : idx === 1 ? 'افتراضي' : idx === 2 ? 'كبير' : 'كبير جداً'}
-                    </button>
-                  ))}
-                </div>
-              </div>
+              )}
             </div>
 
             {/* Championship Title & Directorate */}
             <div className="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-3xs space-y-2.5">
-              <label className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
-                <Trophy className="h-3.5 w-3.5 text-amber-600" />
-                <span>عنوان البطولة والموسم الدراسي</span>
-              </label>
-              <div>
-                <span className="text-[10px] font-bold text-slate-500 block mb-0.5">عنوان البطولة:</span>
-                <input
-                  type="text"
-                  value={championshipTitle}
-                  onChange={(e) => setChampionshipTitle(e.target.value)}
-                  className="w-full text-xs font-bold px-2.5 py-1.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:outline-hidden"
-                />
+              <div className="flex items-center justify-between gap-2">
+                <label className="text-xs font-bold text-slate-800 flex items-center gap-1.5 min-w-0">
+                  <Trophy className="h-3.5 w-3.5 text-amber-600 shrink-0" />
+                  <span className="truncate">عنوان البطولة والموسم الدراسي</span>
+                </label>
+                <button
+                  type="button"
+                  onClick={() => toggleSection('tournamentInfo')}
+                  className="p-1 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-md transition-colors cursor-pointer shrink-0 ms-auto"
+                  title={collapsedSections['tournamentInfo'] ? "إظهار الخاصية" : "إخفاء الخاصية"}
+                >
+                  <ChevronDown className={`h-4 w-4 transform transition-transform duration-200 ${collapsedSections['tournamentInfo'] ? 'rotate-180 text-amber-600 font-bold' : ''}`} />
+                </button>
               </div>
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <span className="text-[10px] font-bold text-slate-500 block mb-0.5">الموسم الدراسي:</span>
-                  <input
-                    type="text"
-                    value={seasonText}
-                    onChange={(e) => setSeasonText(e.target.value)}
-                    className="w-full text-xs px-2.5 py-1.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:outline-hidden font-medium"
-                  />
+              {!collapsedSections['tournamentInfo'] && (
+                <div className="space-y-2.5 pt-0.5">
+                  <div>
+                    <span className="text-[10px] font-bold text-slate-500 block mb-0.5">عنوان البطولة:</span>
+                    <input
+                      type="text"
+                      value={championshipTitle}
+                      onChange={(e) => setChampionshipTitle(e.target.value)}
+                      className="w-full text-xs font-bold px-2.5 py-1.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:outline-hidden"
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <span className="text-[10px] font-bold text-slate-500 block mb-0.5">الموسم الدراسي:</span>
+                      <input
+                        type="text"
+                        value={seasonText}
+                        onChange={(e) => setSeasonText(e.target.value)}
+                        className="w-full text-xs px-2.5 py-1.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:outline-hidden font-medium"
+                      />
+                    </div>
+                    <div>
+                      <span className="text-[10px] font-bold text-slate-500 block mb-0.5">الفرع الإقليمي:</span>
+                      <input
+                        type="text"
+                        value={cleanDirCity}
+                        readOnly
+                        className="w-full text-xs px-2.5 py-1.5 border border-slate-200 rounded-lg bg-slate-100 text-slate-600 font-medium"
+                      />
+                    </div>
+                  </div>
                 </div>
-                <div>
-                  <span className="text-[10px] font-bold text-slate-500 block mb-0.5">الفرع الإقليمي:</span>
-                  <input
-                    type="text"
-                    value={cleanDirCity}
-                    readOnly
-                    className="w-full text-xs px-2.5 py-1.5 border border-slate-200 rounded-lg bg-slate-100 text-slate-600 font-medium"
-                  />
-                </div>
-              </div>
+              )}
             </div>
 
             {/* Sport Silhouette Visual */}
             <div className="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-3xs space-y-2">
-              <label className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
-                <FileImage className="h-3.5 w-3.5 text-indigo-600" />
-                <span>الرسم التعبيري الرياضي (أسفل يمين الشهادة)</span>
-              </label>
+              <div className="flex items-center justify-between gap-2">
+                <label className="text-xs font-bold text-slate-800 flex items-center gap-1.5 min-w-0">
+                  <FileImage className="h-3.5 w-3.5 text-indigo-600 shrink-0" />
+                  <span className="truncate">الرسم التعبيري الرياضي (أسفل يمين الشهادة)</span>
+                </label>
+                <button
+                  type="button"
+                  onClick={() => toggleSection('sportVisual')}
+                  className="p-1 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-md transition-colors cursor-pointer shrink-0 ms-auto"
+                  title={collapsedSections['sportVisual'] ? "إظهار الخاصية" : "إخفاء الخاصية"}
+                >
+                  <ChevronDown className={`h-4 w-4 transform transition-transform duration-200 ${collapsedSections['sportVisual'] ? 'rotate-180 text-indigo-600 font-bold' : ''}`} />
+                </button>
+              </div>
               
-              <div className="grid grid-cols-4 gap-1.5">
-                <button
-                  type="button"
-                  onClick={() => { setSportVisual('chess'); setCustomBgImage(null); }}
-                  className={`py-1.5 px-2 text-[10px] font-bold rounded-lg border transition-all cursor-pointer ${
-                    sportVisual === 'chess' && !customBgImage ? 'bg-indigo-50 border-indigo-500 text-indigo-800' : 'border-slate-200 bg-white'
-                  }`}
-                >
-                  ♟️ الشطرنج
-                </button>
-                <button
-                  type="button"
-                  onClick={() => { setSportVisual('athletics'); setCustomBgImage(null); }}
-                  className={`py-1.5 px-2 text-[10px] font-bold rounded-lg border transition-all cursor-pointer ${
-                    sportVisual === 'athletics' && !customBgImage ? 'bg-indigo-50 border-indigo-500 text-indigo-800' : 'border-slate-200 bg-white'
-                  }`}
-                >
-                  🏃 عدو وقوى
-                </button>
-                <button
-                  type="button"
-                  onClick={() => { setSportVisual('football'); setCustomBgImage(null); }}
-                  className={`py-1.5 px-2 text-[10px] font-bold rounded-lg border transition-all cursor-pointer ${
-                    sportVisual === 'football' && !customBgImage ? 'bg-indigo-50 border-indigo-500 text-indigo-800' : 'border-slate-200 bg-white'
-                  }`}
-                >
-                  ⚽ كرة القدم
-                </button>
-                <button
-                  type="button"
-                  onClick={() => { setSportVisual('basketball'); setCustomBgImage(null); }}
-                  className={`py-1.5 px-2 text-[10px] font-bold rounded-lg border transition-all cursor-pointer ${
-                    sportVisual === 'basketball' && !customBgImage ? 'bg-indigo-50 border-indigo-500 text-indigo-800' : 'border-slate-200 bg-white'
-                  }`}
-                >
-                  🏀 كرة السلة
-                </button>
-                <button
-                  type="button"
-                  onClick={() => { setSportVisual('handball'); setCustomBgImage(null); }}
-                  className={`py-1.5 px-2 text-[10px] font-bold rounded-lg border transition-all cursor-pointer ${
-                    sportVisual === 'handball' && !customBgImage ? 'bg-indigo-50 border-indigo-500 text-indigo-800' : 'border-slate-200 bg-white'
-                  }`}
-                >
-                  🤾 كرة اليد
-                </button>
-                <button
-                  type="button"
-                  onClick={() => { setSportVisual('volleyball'); setCustomBgImage(null); }}
-                  className={`py-1.5 px-2 text-[10px] font-bold rounded-lg border transition-all cursor-pointer ${
-                    sportVisual === 'volleyball' && !customBgImage ? 'bg-indigo-50 border-indigo-500 text-indigo-800' : 'border-slate-200 bg-white'
-                  }`}
-                >
-                  🏐 كرة الطائرة
-                </button>
-                <button
-                  type="button"
-                  onClick={() => { setSportVisual('table_tennis'); setCustomBgImage(null); }}
-                  className={`py-1.5 px-2 text-[10px] font-bold rounded-lg border transition-all cursor-pointer ${
-                    sportVisual === 'table_tennis' && !customBgImage ? 'bg-indigo-50 border-indigo-500 text-indigo-800' : 'border-slate-200 bg-white'
-                  }`}
-                >
-                  🏓 كرة الطاولة
-                </button>
-                <button
-                  type="button"
-                  onClick={() => { setSportVisual('trophy'); setCustomBgImage(null); }}
-                  className={`py-1.5 px-2 text-[10px] font-bold rounded-lg border transition-all cursor-pointer ${
-                    sportVisual === 'trophy' && !customBgImage ? 'bg-indigo-50 border-indigo-500 text-indigo-800' : 'border-slate-200 bg-white'
-                  }`}
-                >
-                  🏆 كأس البطولة
-                </button>
-              </div>
+              {!collapsedSections['sportVisual'] && (
+                <div className="space-y-2 pt-0.5">
+                  <div className="grid grid-cols-4 gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => { setSportVisual('chess'); setCustomBgImage(null); }}
+                      className={`py-1.5 px-2 text-[10px] font-bold rounded-lg border transition-all cursor-pointer ${
+                        sportVisual === 'chess' && !customBgImage ? 'bg-indigo-50 border-indigo-500 text-indigo-800' : 'border-slate-200 bg-white'
+                      }`}
+                    >
+                      ♟️ الشطرنج
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setSportVisual('athletics'); setCustomBgImage(null); }}
+                      className={`py-1.5 px-2 text-[10px] font-bold rounded-lg border transition-all cursor-pointer ${
+                        sportVisual === 'athletics' && !customBgImage ? 'bg-indigo-50 border-indigo-500 text-indigo-800' : 'border-slate-200 bg-white'
+                      }`}
+                    >
+                      🏃 عدو وقوى
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setSportVisual('football'); setCustomBgImage(null); }}
+                      className={`py-1.5 px-2 text-[10px] font-bold rounded-lg border transition-all cursor-pointer ${
+                        sportVisual === 'football' && !customBgImage ? 'bg-indigo-50 border-indigo-500 text-indigo-800' : 'border-slate-200 bg-white'
+                      }`}
+                    >
+                      ⚽ كرة القدم
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setSportVisual('basketball'); setCustomBgImage(null); }}
+                      className={`py-1.5 px-2 text-[10px] font-bold rounded-lg border transition-all cursor-pointer ${
+                        sportVisual === 'basketball' && !customBgImage ? 'bg-indigo-50 border-indigo-500 text-indigo-800' : 'border-slate-200 bg-white'
+                      }`}
+                    >
+                      🏀 كرة السلة
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setSportVisual('handball'); setCustomBgImage(null); }}
+                      className={`py-1.5 px-2 text-[10px] font-bold rounded-lg border transition-all cursor-pointer ${
+                        sportVisual === 'handball' && !customBgImage ? 'bg-indigo-50 border-indigo-500 text-indigo-800' : 'border-slate-200 bg-white'
+                      }`}
+                    >
+                      🤾 كرة اليد
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setSportVisual('volleyball'); setCustomBgImage(null); }}
+                      className={`py-1.5 px-2 text-[10px] font-bold rounded-lg border transition-all cursor-pointer ${
+                        sportVisual === 'volleyball' && !customBgImage ? 'bg-indigo-50 border-indigo-500 text-indigo-800' : 'border-slate-200 bg-white'
+                      }`}
+                    >
+                      🏐 كرة الطائرة
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setSportVisual('table_tennis'); setCustomBgImage(null); }}
+                      className={`py-1.5 px-2 text-[10px] font-bold rounded-lg border transition-all cursor-pointer ${
+                        sportVisual === 'table_tennis' && !customBgImage ? 'bg-indigo-50 border-indigo-500 text-indigo-800' : 'border-slate-200 bg-white'
+                      }`}
+                    >
+                      🏓 كرة الطاولة
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setSportVisual('trophy'); setCustomBgImage(null); }}
+                      className={`py-1.5 px-2 text-[10px] font-bold rounded-lg border transition-all cursor-pointer ${
+                        sportVisual === 'trophy' && !customBgImage ? 'bg-indigo-50 border-indigo-500 text-indigo-800' : 'border-slate-200 bg-white'
+                      }`}
+                    >
+                      🏆 كأس البطولة
+                    </button>
+                  </div>
 
-              {/* Upload custom background */}
-              <div className="pt-2 border-t border-slate-100 flex items-center justify-between gap-2">
-                <input
-                  type="file"
-                  ref={fileInputRef}
-                  onChange={handleImageUpload}
-                  accept="image/*"
-                  className="hidden"
-                />
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  className="flex-1 py-1.5 px-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-[10px] font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer border border-slate-200"
-                >
-                  <Upload className="h-3.5 w-3.5" />
-                  <span>رفع خلفية مخصصة للشهادة</span>
-                </button>
-                {customBgImage && (
-                  <button
-                    type="button"
-                    onClick={() => setCustomBgImage(null)}
-                    className="p-1.5 text-red-600 hover:bg-red-50 rounded-lg text-[10px] font-bold border border-red-200 cursor-pointer"
-                    title="الرجوع للتصميم الأصلي"
-                  >
-                    <RotateCcw className="h-3.5 w-3.5" />
-                  </button>
-                )}
-              </div>
+                  {/* Upload custom background */}
+                  <div className="pt-2 border-t border-slate-100 flex items-center justify-between gap-2">
+                    <input
+                      type="file"
+                      ref={fileInputRef}
+                      onChange={handleImageUpload}
+                      accept="image/*"
+                      className="hidden"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      className="flex-1 py-1.5 px-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-[10px] font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer border border-slate-200"
+                    >
+                      <Upload className="h-3.5 w-3.5" />
+                      <span>رفع خلفية مخصصة للشهادة</span>
+                    </button>
+                    {customBgImage && (
+                      <button
+                        type="button"
+                        onClick={() => setCustomBgImage(null)}
+                        className="p-1.5 text-red-600 hover:bg-red-50 rounded-lg text-[10px] font-bold border border-red-200 cursor-pointer"
+                        title="الرجوع للتصميم الأصلي"
+                      >
+                        <RotateCcw className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
 
           </div>
 
-          {/* Certificate Preview Panel */}
-          <div className={`bg-slate-200/90 p-2 sm:p-5 overflow-y-auto overflow-x-hidden flex flex-col items-center justify-start lg:justify-center order-1 lg:order-2 flex-1 pb-24 sm:pb-8 ${
-            viewMode === 'preview'
-              ? 'col-span-1 lg:col-span-12 flex'
-              : viewMode === 'split'
-              ? 'col-span-1 lg:col-span-7 flex'
-              : 'hidden'
-          }`}>
+          {/* Certificate Preview Panel (Always Unified) */}
+          <div className="col-span-1 lg:col-span-7 bg-slate-200/90 p-3 sm:p-5 flex flex-col items-center justify-start lg:justify-center order-1 lg:order-2 shrink-0 lg:flex-1 lg:overflow-y-auto lg:overflow-x-hidden pb-6 sm:pb-8">
             
             {/* Action & Zoom Bar Above Preview */}
             <div className="w-full max-w-[700px] mb-2 sm:mb-3 flex items-center justify-between gap-1.5 text-xs shrink-0">
@@ -1121,7 +1226,7 @@ export const TournamentCertificateModal: React.FC<TournamentCertificateModalProp
               <div
                 ref={certificateRef}
                 id="tournament-certificate-canvas"
-                className={`w-full max-w-[310px] xs:max-w-[350px] sm:max-w-[540px] md:max-w-[640px] lg:max-w-[700px] aspect-[1.414/1] rounded-xl sm:rounded-3xl shadow-2xl border-2 sm:border-4 ${currentTheme.borderOuter} ${currentTheme.bg} p-2 xs:p-2.5 sm:p-5 md:p-6 flex flex-col justify-between relative overflow-hidden select-none transition-transform`}
+                className={`w-full max-w-[285px] xs:max-w-[335px] sm:max-w-[540px] md:max-w-[640px] lg:max-w-[700px] aspect-[1.414/1] rounded-2xl sm:rounded-3xl shadow-2xl border-2 sm:border-4 ${currentTheme.borderOuter} ${currentTheme.bg} p-2.5 xs:p-3 sm:p-5 md:p-6 flex flex-col justify-between relative overflow-hidden select-none transition-all duration-150`}
                 style={{
                   fontFamily: (CERTIFICATE_FONTS.find(f => f.id === selectedFont)?.css || "'Amiri', serif"),
                   backgroundImage: customBgImage ? `url(${customBgImage})` : undefined,
