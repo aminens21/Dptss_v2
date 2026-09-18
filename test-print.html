@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html>
+<body>
+<button onclick="testPrint()">Test Print</button>
+<script>
+function testPrint() {
+  const iframe = document.createElement('iframe');
+  iframe.style.position = 'fixed';
+  iframe.style.right = '0';
+  iframe.style.bottom = '0';
+  iframe.style.width = '0';
+  iframe.style.height = '0';
+  iframe.style.border = 'none';
+  document.body.appendChild(iframe);
+
+  iframe.contentWindow.document.open();
+  iframe.contentWindow.document.write('<html><body><h1>Hello World</h1></body></html>');
+  iframe.contentWindow.document.close();
+
+  setTimeout(() => {
+    iframe.contentWindow.focus();
+    iframe.contentWindow.print();
+    // document.body.removeChild(iframe);
+  }, 500);
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,193 @@
+{
+  "collections": {
+    "users": {
+      "description": "User profiles and roles for the application.",
+      "fields": {
+        "fullName": "string",
+        "email": "string",
+        "phone": "string (optional)",
+        "role": "string (CENTRAL_ADMIN, SPORT_MANAGER, TEACHER, REFEREE)",
+        "sportId": "string (optional, for SPORT_MANAGER)",
+        "isActive": "boolean",
+        "createdAt": "timestamp",
+        "updatedAt": "timestamp",
+        "createdBy": "string"
+      },
+      "rules": {
+        "read": "request.auth != null",
+        "create": "request.auth != null && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'CENTRAL_ADMIN'",
+        "update": "request.auth != null && (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'CENTRAL_ADMIN' || request.auth.uid == resource.id)",
+        "delete": "request.auth != null && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'CENTRAL_ADMIN'"
+      }
+    },
+    "sports": {
+      "description": "List of sports managed in the directorate.",
+      "fields": {
+        "name": "string",
+        "description": "string",
+        "managerId": "string (optional)",
+        "ageCategories": "array of strings (optional)"
+      },
+      "rules": {
+        "read": "request.auth != null",
+        "create": "request.auth != null && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'CENTRAL_ADMIN'",
+        "update": "request.auth != null && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'CENTRAL_ADMIN'",
+        "delete": "request.auth != null && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'CENTRAL_ADMIN'"
+      }
+    },
+    "tournaments": {
+      "description": "Tournaments and competitions.",
+      "fields": {
+        "name": "string",
+        "seasonId": "string",
+        "sportId": "string",
+        "ageCategory": "string",
+        "gender": "string",
+        "level": "string",
+        "scope": "string",
+        "startDate": "timestamp",
+        "endDate": "timestamp",
+        "status": "string",
+        "description": "string"
+      },
+      "rules": {
+        "read": "true",
+        "create": "request.auth != null && (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'CENTRAL_ADMIN' || (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'SPORT_MANAGER' && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.sportId == request.resource.data.sportId))",
+        "update": "request.auth != null && (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'CENTRAL_ADMIN' || (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'SPORT_MANAGER' && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.sportId == resource.data.sportId))",
+        "delete": "request.auth != null && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'CENTRAL_ADMIN'"
+      }
+    },
+    "schools": {
+      "description": "Participating schools.",
+      "fields": {
+        "name": "string",
+        "type": "string",
+        "commune": "string",
+        "teacherName": "string",
+        "phone": "string (optional)"
+      },
+      "rules": {
+        "read": "true",
+        "create": "request.auth != null && (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'CENTRAL_ADMIN' || get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'SPORT_MANAGER')",
+        "update": "request.auth != null && (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'CENTRAL_ADMIN' || get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'SPORT_MANAGER')",
+        "delete": "request.auth != null && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'CENTRAL_ADMIN'"
+      }
+    },
+    "teams": {
+      "description": "Teams belonging to schools.",
+      "fields": {
+        "name": "string",
+        "schoolId": "string",
+        "sportId": "string",
+        "gender": "string",
+        "category": "string"
+      },
+      "rules": {
+        "read": "true",
+        "create": "request.auth != null && (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'CENTRAL_ADMIN' || (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'SPORT_MANAGER' && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.sportId == request.resource.data.sportId))",
+        "update": "request.auth != null && (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'CENTRAL_ADMIN' || (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'SPORT_MANAGER' && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.sportId == resource.data.sportId))",
+        "delete": "request.auth != null && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'CENTRAL_ADMIN'"
+      }
+    },
+    "matches": {
+      "description": "Scheduled matches and results.",
+      "fields": {
+        "tournamentId": "string",
+        "sportId": "string",
+        "stage": "string",
+        "team1Id": "string",
+        "team2Id": "string",
+        "date": "timestamp",
+        "startTime": "string",
+        "endTime": "string (optional)",
+        "venueId": "string",
+        "referee1Id": "string (optional)",
+        "referee2Id": "string (optional)",
+        "status": "string",
+        "score1": "number (optional)",
+        "score2": "number (optional)",
+        "notes": "string (optional)",
+        "updatedBy": "string (optional)",
+        "updatedAt": "timestamp"
+      },
+      "rules": {
+        "read": "true",
+        "create": "request.auth != null && (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'CENTRAL_ADMIN' || (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'SPORT_MANAGER' && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.sportId == request.resource.data.sportId))",
+        "update": "request.auth != null && (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'CENTRAL_ADMIN' || (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'SPORT_MANAGER' && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.sportId == resource.data.sportId))",
+        "delete": "request.auth != null && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'CENTRAL_ADMIN'"
+      }
+    },
+    "venues": {
+      "description": "Match venues and locations.",
+      "fields": {
+        "name": "string",
+        "city": "string",
+        "address": "string",
+        "capacity": "number (optional)",
+        "notes": "string (optional)"
+      },
+      "rules": {
+        "read": "true",
+        "create": "request.auth != null && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'CENTRAL_ADMIN'",
+        "update": "request.auth != null && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'CENTRAL_ADMIN'",
+        "delete": "request.auth != null && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'CENTRAL_ADMIN'"
+      }
+    },
+    "announcements": {
+      "description": "Public announcements and news.",
+      "fields": {
+        "title": "string",
+        "content": "string",
+        "date": "timestamp",
+        "priority": "string",
+        "expiryDate": "timestamp",
+        "authorId": "string"
+      },
+      "rules": {
+        "read": "true",
+        "create": "request.auth != null && (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'CENTRAL_ADMIN' || get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'SPORT_MANAGER')",
+        "update": "request.auth != null && (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'CENTRAL_ADMIN' || get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'SPORT_MANAGER')",
+        "delete": "request.auth != null && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'CENTRAL_ADMIN'"
+      }
+    },
+    "students": {
+      "description": "Rosters of students/pupils registered by teachers for school sports teams.",
+      "fields": {
+        "fullName": "string",
+        "gender": "string (Male, Female)",
+        "birthDate": "string (YYYY-MM-DD)",
+        "category": "string (U12, U15, U18, U20, OPEN)",
+        "schoolId": "string",
+        "schoolName": "string",
+        "sportId": "string",
+        "photoUrl": "string (optional)",
+        "createdAt": "timestamp",
+        "updatedAt": "timestamp"
+      },
+      "rules": {
+        "read": "request.auth != null",
+        "create": "request.auth != null",
+        "update": "request.auth != null",
+        "delete": "request.auth != null"
+      }
+    },
+    "notifications": {
+      "description": "System notifications targeted by sport specialty, role, or userIds.",
+      "fields": {
+        "title": "string",
+        "body": "string",
+        "sportId": "string (optional)",
+        "role": "string (optional)",
+        "userIds": "array of strings (optional)",
+        "createdAt": "timestamp",
+        "readBy": "array of strings (optional)"
+      },
+      "rules": {
+        "read": "request.auth != null",
+        "create": "request.auth != null",
+        "update": "request.auth != null",
+        "delete": "request.auth != null && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'CENTRAL_ADMIN'"
+      }
+    }
+  }
+}
