@@ -4,6 +4,10 @@ import { useAuth } from '../contexts/AuthContext';
 import { DataService, SPORTS_MAP, AGE_CATEGORIES, getAgeCategoriesForSeason, getCategoryGenderLabel, isClubTournament, normalizeCategoryKey, validateBirthDateForCategory } from '../lib/dataService';
 import { Student, Sport, Tournament, School, Directorate } from '../types';
 import { ParticipationFormPdfModal } from '../components/ParticipationFormPdfModal';
+import { CrossCountryBulkRegisterModal } from '../components/CrossCountryBulkRegisterModal';
+import { SportBulkRegisterModal } from '../components/SportBulkRegisterModal';
+import { CROSS_COUNTRY_CATEGORIES } from '../lib/crossCountryConfig';
+import * as XLSX from 'xlsx';
 import {
   Users,
   Plus,
@@ -26,7 +30,8 @@ import {
   Download,
   Printer,
   Lock,
-  Edit
+  Edit,
+  FileSpreadsheet
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -80,7 +85,9 @@ export const TeacherTeams: React.FC = () => {
   const [coachLeaseNumber, setCoachLeaseNumber] = useState('');
   const [coachPhone, setCoachPhone] = useState('');
   const [uploading, setUploading] = useState(false);
-  const [studentToDeleteId, setStudentToDeleteId] = useState<string | null>(null);
+  const [studentToDelete, setStudentToDelete] = useState<Student | null>(null);
+  const [studentToEditConfirm, setStudentToEditConfirm] = useState<Student | null>(null);
+  const [isDeletingStudent, setIsDeletingStudent] = useState(false);
   const formCardRef = useRef<HTMLDivElement>(null);
 
   // Locked registration constraint state (for preselected / programmed tournament contexts)
@@ -100,6 +107,9 @@ export const TeacherTeams: React.FC = () => {
 
   // PDF Export Modal State
   const [isPdfModalOpen, setIsPdfModalOpen] = useState(false);
+  const [isCrossCountryBulkOpen, setIsCrossCountryBulkOpen] = useState(false);
+  const [isSportBulkOpen, setIsSportBulkOpen] = useState(false);
+  const [crossCountryInitialRaceId, setCrossCountryInitialRaceId] = useState('u15_male');
   const [activeDirectorateObj, setActiveDirectorateObj] = useState<Directorate | null>(null);
   const [showOnlyParticipatingCoaches, setShowOnlyParticipatingCoaches] = useState(true);
   const [rosterGenderFilter, setRosterGenderFilter] = useState<'ALL' | 'Male' | 'Female'>('ALL');
@@ -124,8 +134,17 @@ export const TeacherTeams: React.FC = () => {
       const dirStudents = allStudents.filter(st => (st.directorateId || 'taourirt') === activeDirId);
       const targetSchool = isTeacher ? userProfile?.workLocation : (userProfile?.workLocation || urlSchool);
       if (isTeacher) {
-        if (userProfile?.workLocation) {
-          setStudents(dirStudents.filter(s => s.schoolName === userProfile.workLocation));
+        if (userProfile?.workLocation || userProfile?.schoolId) {
+          const cleanLoc = (userProfile?.workLocation || '').trim().toLowerCase();
+          setStudents(dirStudents.filter(s => {
+            const sName = (s.schoolName || '').trim().toLowerCase();
+            return (
+              (cleanLoc && (sName === cleanLoc || sName.includes(cleanLoc) || cleanLoc.includes(sName))) ||
+              (userProfile?.schoolId && s.schoolId === userProfile.schoolId)
+            );
+          }));
+        } else {
+          setStudents([]);
         }
       } else if (targetSchool) {
         setStudents(dirStudents.filter(s => s.schoolName === targetSchool));
@@ -194,8 +213,15 @@ export const TeacherTeams: React.FC = () => {
 
       // Filter students: Teachers can ONLY see and manage students of their own institution
       if (isTeacher) {
-        if (userProfile?.workLocation) {
-          setStudents(dirStudents.filter(s => s.schoolName === userProfile.workLocation));
+        if (userProfile?.workLocation || userProfile?.schoolId) {
+          const cleanLoc = (userProfile?.workLocation || '').trim().toLowerCase();
+          setStudents(dirStudents.filter(s => {
+            const sName = (s.schoolName || '').trim().toLowerCase();
+            return (
+              (cleanLoc && (sName === cleanLoc || sName.includes(cleanLoc) || cleanLoc.includes(sName))) ||
+              (userProfile?.schoolId && s.schoolId === userProfile.schoolId)
+            );
+          }));
         } else {
           setStudents([]);
         }
@@ -221,11 +247,17 @@ export const TeacherTeams: React.FC = () => {
     setSelectedCategoryKey(null);
     
     // Automatically pre-select first active category of this sport if any
-    const sport = sportsConfig.find(s => s.id === sportId);
-    if (sport && sport.ageCategories && sport.ageCategories.length > 0) {
-      setCategory(sport.ageCategories[0]);
+    const sportTourns = tournaments.filter(t => t.sportId === sportId);
+    const tournCats = Array.from(new Set(sportTourns.map(t => normalizeCategoryKey(t.ageCategory)).filter(Boolean)));
+    if (tournCats.length > 0) {
+      setCategory(tournCats[0]);
     } else {
-      setCategory('');
+      const sport = sportsConfig.find(s => s.id === sportId);
+      if (sport && sport.ageCategories && sport.ageCategories.length > 0) {
+        setCategory(sport.ageCategories[0]);
+      } else {
+        setCategory('');
+      }
     }
   };
 
@@ -448,7 +480,7 @@ export const TeacherTeams: React.FC = () => {
     if (!isTeacher) return true; // Central admin, etc. can manage everything
     if (!userProfile) return false;
     
-    // 1. Verify student belongs to the teacher's institution
+    // Verify student belongs to the teacher's institution
     const cleanStudentSchool = String(student.schoolName || '').trim().toLowerCase();
     const cleanTeacherSchool = String(userProfile.workLocation || '').trim().toLowerCase();
     const isSameSchoolName = cleanStudentSchool && cleanTeacherSchool && (
@@ -465,37 +497,21 @@ export const TeacherTeams: React.FC = () => {
       return false;
     }
 
-    // 2. Coach ownership check: A teacher CANNOT modify or delete another teacher's participation in the same institution
-    const sLease = String(student.coachLeaseNumber || '').trim();
-    const uLease = String(userProfile.leaseNumber || '').trim();
-    const sCoachName = String(student.coachName || '').trim().toLowerCase();
-    const uFullName = String(userProfile.fullName || '').trim().toLowerCase();
-
-    // If student has a coach SOM lease number
-    if (sLease) {
-      if (uLease && sLease === uLease) return true;
-      if (uLease && sLease !== uLease) return false;
-      if (sCoachName && uFullName && sCoachName === uFullName) return true;
-      return false;
-    }
-
-    // If student has a coach name without SOM
-    if (sCoachName) {
-      if (uFullName && (sCoachName === uFullName || sCoachName.includes(uFullName) || uFullName.includes(sCoachName))) {
-        return true;
-      }
-      return false;
-    }
-
-    // Unassigned coach within same school
+    // Teacher can edit and delete ANY participant belonging to their institution
     return true;
   };
 
-  const handleEditStudent = (student: Student) => {
+  // Step 1: Open Confirmation Modal before editing
+  const handleRequestEditStudent = (student: Student) => {
     if (!canTeacherManageStudent(student)) {
-      toast.error('غير مسموح لك بتعديل مشاركة مسجلة تحت تأطير أستاذ آخر بنفس المؤسسة.');
+      toast.error('غير مسموح لك بتعديل مشاركة لا تنتمي لمؤسستك التعليمية.');
       return;
     }
+    setStudentToEditConfirm(student);
+  };
+
+  // Step 2: Proceed with loading data into the form after confirmation
+  const confirmStartEdit = (student: Student) => {
     setEditingStudentId(student.id);
     setFullName(student.fullName);
     setMassarNumber(student.massarNumber || '');
@@ -503,10 +519,10 @@ export const TeacherTeams: React.FC = () => {
     setBirthDate(student.birthDate);
     setCategory(normalizeCategoryKey(student.category));
     
-    // Lock them during edit
-    setLockedGender(student.gender);
-    setLockedCategory(normalizeCategoryKey(student.category));
-    setLockedAffiliation(student.affiliationType || 'non_club');
+    // Unlock any temporary locks so teacher can correct data freely
+    setLockedGender(null);
+    setLockedCategory(null);
+    setLockedAffiliation(null);
 
     if (student.schoolId) {
       setSelectedSchoolId(student.schoolId);
@@ -534,10 +550,11 @@ export const TeacherTeams: React.FC = () => {
     setCoachLeaseNumber(student.coachLeaseNumber || userProfile?.leaseNumber || '');
     setCoachPhone(student.coachPhone || userProfile?.phone || '');
     
+    setStudentToEditConfirm(null);
     setIsFormOpen(true);
 
-    toast.success(`تم فتح استمارة التعديل بأعلى الصفحة لتعديل بيانات: ${student.fullName}`, {
-      icon: '📝',
+    toast.success(`تم فتح نموذج تعديل بيانات المشارك(ة): ${student.fullName}`, {
+      icon: '✏️',
       duration: 3500
     });
 
@@ -555,12 +572,11 @@ export const TeacherTeams: React.FC = () => {
 
   const handleBirthDateChange = (newDate: string) => {
     setBirthDate(newDate);
-    // If category is locked or editing a student, preserve the locked category without automatic recalculation
+    // If category is strictly locked by tournament context, validate against it
     if (!newDate) return;
 
-    if (lockedCategory || editingStudentId) {
-      const activeCat = lockedCategory || category;
-      const validation = validateBirthDateForCategory(newDate, activeCat, currentSeason, gender);
+    if (lockedCategory) {
+      const validation = validateBirthDateForCategory(newDate, lockedCategory, currentSeason, gender, selectedSportId);
       if (!validation.isValid && validation.errorMessage) {
         toast.error(validation.errorMessage, { duration: 4000 });
       }
@@ -591,17 +607,15 @@ export const TeacherTeams: React.FC = () => {
       } else if (activeSportCategories.includes('OPEN')) {
         setCategory('OPEN');
       } else if (activeSportCategories.length > 0) {
-        setCategory(detectedCatId);
-      } else {
-        setCategory(detectedCatId);
+        setCategory(activeSportCategories[0]);
       }
     }
   };
 
   const birthDateValidation = useMemo(() => {
     if (!birthDate || !category) return { isValid: true };
-    return validateBirthDateForCategory(birthDate, category, currentSeason, gender);
-  }, [birthDate, category, currentSeason, gender]);
+    return validateBirthDateForCategory(birthDate, category, currentSeason, gender, selectedSportId);
+  }, [birthDate, category, currentSeason, gender, selectedSportId]);
 
   const handleAddStudent = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -652,8 +666,15 @@ export const TeacherTeams: React.FC = () => {
       );
       const limitVal = participationType === 'individual' ? 3 : 5;
       if (sameGroupStudents.length >= limitVal) {
-        const typeLabel = participationType === 'individual' ? 'مشاركة فردية' : 'مشاركة فريق المؤسسة';
+        const typeLabel = participationType === 'individual' ? 'مشاركة فردية (3 كحد أقصى)' : 'مشاركة فريق المؤسسة (5 كحد أقصى)';
         toast.error(`خطأ في التسجيل: لقد بلغت السقف الأقصى للتسجيل لهذه الفئة والجنس لـ (${typeLabel}) وهو ${limitVal} تلاميذ.`);
+        return;
+      }
+      const totalCatStudents = activeSportStudents.filter(
+        s => s.id !== editingStudentId && normalizeCategoryKey(s.category) === normalizedCat && s.gender === gender
+      );
+      if (totalCatStudents.length >= 8) {
+        toast.error('خطأ في التسجيل: لقد بلغت السقف الإجمالي الأقصى المسموح به لهذه الفئة والجنس وهو 8 تلاميذ (3 فردي + 5 فريق المؤسسة).');
         return;
       }
       if (affiliationType === 'club_affiliated') {
@@ -675,7 +696,7 @@ export const TeacherTeams: React.FC = () => {
     }
 
     // Strict validation for birth date matching category
-    const validation = validateBirthDateForCategory(birthDate, category, currentSeason, gender);
+    const validation = validateBirthDateForCategory(birthDate, category, currentSeason, gender, selectedSportId);
     if (!validation.isValid) {
       toast.error(validation.errorMessage || 'خطأ في تاريخ الازدياد لا يتناسب مع الفئة المعنية');
       return;
@@ -781,26 +802,30 @@ export const TeacherTeams: React.FC = () => {
     }
   };
 
-  const handleDeleteStudent = (studentId: string) => {
-    const student = students.find(s => s.id === studentId);
-    if (student && !canTeacherManageStudent(student)) {
-      toast.error('غير مسموح لك بحذف مشاركة مسجلة تحت تأطير أستاذ آخر بنفس المؤسسة.');
+  const handleRequestDeleteStudent = (student: Student) => {
+    if (!canTeacherManageStudent(student)) {
+      toast.error('غير مسموح لك بحذف مشاركة لا تنتمي لمؤسستك التعليمية.');
       return;
     }
-    setStudentToDeleteId(studentId);
+    setStudentToDelete(student);
   };
 
   const executeDeleteStudent = async () => {
-    if (!studentToDeleteId) return;
+    if (!studentToDelete) return;
+    setIsDeletingStudent(true);
+    const toastId = toast.loading(`جاري حذف المشارك(ة) ${studentToDelete.fullName}...`);
     try {
-      await DataService.deleteStudent(studentToDeleteId);
-      setStudents(prev => prev.filter(s => s.id !== studentToDeleteId));
-      toast.success('تم حذف التلميذ من اللائحة بنجاح');
+      await DataService.deleteStudent(studentToDelete.id);
+      setStudents(prev => prev.filter(s => s.id !== studentToDelete.id));
+      toast.dismiss(toastId);
+      toast.success(`تم حذف المشارك "${studentToDelete.fullName}" من اللائحة بنجاح`);
     } catch (error) {
       console.error('Error deleting student:', error);
-      toast.error('تعذر حذف التلميذ');
+      toast.dismiss(toastId);
+      toast.error('تعذر حذف التلميذ حالياً');
     } finally {
-      setStudentToDeleteId(null);
+      setIsDeletingStudent(false);
+      setStudentToDelete(null);
     }
   };
 
@@ -809,7 +834,7 @@ export const TeacherTeams: React.FC = () => {
   const getSportIcon = (id: string) => SPORTS_MAP[id]?.icon || '🏆';
   
   const getCategoryLabel = (catId: string, gender?: string) => {
-    return getCategoryGenderLabel(catId, gender, currentSeason);
+    return getCategoryGenderLabel(catId, gender, currentSeason, selectedSportId);
   };
 
   // Filter students for the currently selected sport
@@ -865,23 +890,105 @@ export const TeacherTeams: React.FC = () => {
     return coaches;
   }, [activeSportStudents, predefinedCoaches, selectedSportId]);
 
+  // Cross Country Bulk Modal & Excel Export Handlers
+  const handleOpenCrossCountryBulk = (catKey?: string | null) => {
+    if (catKey) {
+      const parts = catKey.split('_');
+      const cat = parts[0]?.toLowerCase();
+      const g = parts[1]?.toLowerCase();
+      const match = CROSS_COUNTRY_CATEGORIES.find(c => 
+        c.category.toLowerCase() === cat && c.gender.toLowerCase() === g
+      );
+      if (match) {
+        setCrossCountryInitialRaceId(match.id);
+      }
+    }
+    setIsCrossCountryBulkOpen(true);
+  };
+
+  const handleExportStudentsListToExcel = (studentList: Student[], title: string) => {
+    if (!studentList || studentList.length === 0) {
+      toast.error('لا يوجد تلاميذ في هذه اللائحة لتصديرهم إلى Excel.');
+      return;
+    }
+
+    const excelData = studentList.map((s, index) => {
+      const roleLabel = s.sportId === 'cross_country'
+        ? (s.participationType === 'school_team' ? 'فريق المؤسسة (جماعي)' : 'مشاركة فردية (فردي)')
+        : (s.participationType === 'individual' ? 'فردي' : 'فريق');
+      const affLabel = s.affiliationType === 'club_affiliated' ? 'منتمي لعصبة / جمعية' : 'لا منتمي (مدرسي فقط)';
+
+      return {
+        'الرقم الترتيبي': index + 1,
+        'الاسم الكامل': s.fullName,
+        'رقم مسار (Massar)': s.massarNumber || '—',
+        'الجنس': s.gender === 'Male' ? 'ذكر' : 'أنثى',
+        'الفئة الرياضية': getCategoryLabel(s.category, s.gender),
+        'تاريخ الازدياد': s.birthDate,
+        'نوع المشاركة': roleLabel,
+        'المسافة المقررة': s.distance || (s.sportId === 'cross_country' ? getCrossCountryDistance(s.category, s.gender) : '—'),
+        'صفة الانتماء': affLabel,
+        'المؤسسة التعليمية': s.schoolName || schoolName || '—',
+        'الأستاذ المؤطر': s.coachName || userProfile?.fullName || '—',
+        'رقم تأجير المؤطر': s.coachLeaseNumber || userProfile?.leaseNumber || '—',
+        'هاتف المؤطر': s.coachPhone || userProfile?.phone || '—',
+        'الموسم الدراسي': currentSeason
+      };
+    });
+
+    const worksheet = XLSX.utils.json_to_sheet(excelData);
+    worksheet['!views'] = [{ RTL: true }];
+    worksheet['!cols'] = [
+      { wch: 6 },
+      { wch: 24 },
+      { wch: 16 },
+      { wch: 8 },
+      { wch: 18 },
+      { wch: 14 },
+      { wch: 22 },
+      { wch: 14 },
+      { wch: 20 },
+      { wch: 26 },
+      { wch: 20 },
+      { wch: 16 },
+      { wch: 14 },
+      { wch: 14 }
+    ];
+
+    const workbook = XLSX.utils.book_new();
+    const safeSheetName = title.replace(/[/\\?%*:|"<>]/g, '-').substring(0, 30);
+    XLSX.utils.book_append_sheet(workbook, worksheet, safeSheetName);
+
+    const cleanTitle = title.replace(/\s+/g, '_').replace(/[/\\?%*:|"<>]/g, '-');
+    const cleanSchool = (schoolName || 'المؤسسة').replace(/\s+/g, '_').replace(/[/\\?%*:|"<>]/g, '-');
+    const fileName = `لائحة_${cleanTitle}_${cleanSchool}_${currentSeason.replace(/[/\\?%*:|"<>]/g, '-')}.xlsx`;
+
+    XLSX.writeFile(workbook, fileName);
+    toast.success(`تم استخراج ${studentList.length} تلميذ(ة) إلى ملف Excel بنجاح! 📊`, { duration: 4000 });
+  };
+
+  const handleExportCurrentCategoryExcel = () => {
+    if (!selectedCategoryKey) return;
+    const parts = selectedCategoryKey.split('_');
+    const catLabel = getCategoryLabel(parts[0], parts[1]);
+    handleExportStudentsListToExcel(displayedSportStudents, `فئة_${catLabel}`);
+  };
+
+  const handleExportSportStudentsExcel = () => {
+    const sportObj = sportsConfig.find(s => s.id === selectedSportId);
+    const sportName = sportObj ? sportObj.name : 'الرياضة';
+    handleExportStudentsListToExcel(activeSportStudents, `جميع_تلاميذ_${sportName}`);
+  };
+
   // Active Sport Configuration
   const activeSportConfig = sportsConfig.find(s => s.id === selectedSportId);
   const activeSportCategories = useMemo(() => {
-    let rawCats: string[] = [];
-    if (activeSportConfig?.ageCategories && activeSportConfig.ageCategories.length > 0) {
-      rawCats = activeSportConfig.ageCategories;
-    } else {
-      const tournCats = tournaments.filter(t => t.sportId === selectedSportId).map(t => t.ageCategory).filter(Boolean);
-      if (tournCats.length > 0) {
-        rawCats = tournCats;
-      } else {
-        rawCats = getAgeCategoriesForSeason(currentSeason).map(c => c.id);
-      }
-    }
+    const rawCats = (activeSportConfig?.ageCategories && activeSportConfig.ageCategories.length > 0)
+      ? activeSportConfig.ageCategories
+      : getAgeCategoriesForSeason(currentSeason).map(c => c.id);
     const normalized = rawCats.map(c => normalizeCategoryKey(c));
     return Array.from(new Set(normalized));
-  }, [activeSportConfig, tournaments, selectedSportId, currentSeason]);
+  }, [activeSportConfig, currentSeason]);
 
   // Real-time limit checking for rendering warning indicators
   const isGeneralLimitReached = (() => {
@@ -988,10 +1095,10 @@ export const TeacherTeams: React.FC = () => {
               const sportStudents = students.filter(s => s.sportId === sport.id);
               const uniqueParticipatingCats = Array.from(new Set(sportStudents.map(s => s.category).filter(Boolean))) as string[];
               if (uniqueParticipatingCats.length > 0) {
-                return `الفئات المشارك فيها: ${uniqueParticipatingCats.map(c => getCategoryGenderLabel(c)).join(' - ')}`;
+                return `الفئات المشارك فيها: ${uniqueParticipatingCats.map(c => getCategoryGenderLabel(c, undefined, currentSeason, sport.id)).join(' - ')}`;
               }
               return hasConfiguredCategories
-                ? `الفئات المتاحة: ${sport.ageCategories?.map(c => getCategoryGenderLabel(c)).join(' - ')}`
+                ? `الفئات المتاحة: ${sport.ageCategories?.map(c => getCategoryGenderLabel(c, undefined, currentSeason, sport.id)).join(' - ')}`
                 : 'لم يتم تفعيل أي فئة';
             })()}
           </p>
@@ -1123,6 +1230,17 @@ export const TeacherTeams: React.FC = () => {
                 إجمالي التلاميذ: {activeSportStudents.length}
               </span>
               <button
+                type="button"
+                onClick={handleExportSportStudentsExcel}
+                disabled={activeSportStudents.length === 0}
+                title={activeSportStudents.length === 0 ? 'يرجى تسجيل تلاميذ أولاً لتصديرهم' : 'تصدير لائحة المشاركين إلى ملف Excel'}
+                className="bg-emerald-700 hover:bg-emerald-600 text-white font-bold text-xs px-3.5 py-2 rounded-xl shadow-xs flex items-center gap-1.5 transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+              >
+                <FileSpreadsheet className="h-4 w-4" />
+                <span>استخراج اللائحة Excel 📊</span>
+              </button>
+              <button
+                type="button"
                 onClick={() => setIsPdfModalOpen(true)}
                 disabled={activeSportStudents.length === 0}
                 title={activeSportStudents.length === 0 ? 'يرجى تسجيل تلاميذ أولاً لعرض المطبوع' : 'معاينة وعرض لائحة المشاركة الرسمية للطباعة والتحميل'}
@@ -1131,7 +1249,31 @@ export const TeacherTeams: React.FC = () => {
                 <FileText className="h-4 w-4" />
                 <span>عرض لائحة المشاركة</span>
               </button>
+              {selectedSportId === 'cross_country' ? (
+                <button
+                  type="button"
+                  onClick={() => handleOpenCrossCountryBulk(selectedCategoryKey)}
+                  disabled={!activeSportCategories || activeSportCategories.length === 0 || !activeSportConfig || !isSportProgrammed(activeSportConfig)}
+                  title="تسجيل 8 مشاركين في آن واحد (3 فردي + 5 فريق المؤسسة)"
+                  className="bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 text-slate-950 font-black text-xs px-4 py-2 rounded-xl shadow-xs flex items-center gap-1.5 transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer hover:scale-102 active:scale-98"
+                >
+                  <Sparkles className="h-4 w-4 text-slate-950" />
+                  <span>تسجيل 8 مشاركين (3 فردي + 5 فريق) ⚡</span>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setIsSportBulkOpen(true)}
+                  disabled={!activeSportCategories || activeSportCategories.length === 0 || !activeSportConfig || !isSportProgrammed(activeSportConfig)}
+                  title="تسجيل عدة مشاركين دفعة واحدة لتوفير الوقت"
+                  className="bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 text-slate-950 font-black text-xs px-4 py-2 rounded-xl shadow-xs flex items-center gap-1.5 transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer hover:scale-102 active:scale-98"
+                >
+                  <Sparkles className="h-4 w-4 text-slate-950" />
+                  <span>تسجيل جماعي دفعة واحدة ⚡</span>
+                </button>
+              )}
               <button
+                type="button"
                 onClick={() => handleOpenNewStudentForm()}
                 disabled={!activeSportCategories || activeSportCategories.length === 0 || !activeSportConfig || !isSportProgrammed(activeSportConfig)}
                 title={activeSportConfig && !isSportProgrammed(activeSportConfig) ? 'هذه البطولة في طور الإعداد وغير مفتوحة للتسجيل' : 'إضافة تلميذ جديد'}
@@ -1267,6 +1409,37 @@ export const TeacherTeams: React.FC = () => {
               </div>
 
               <form onSubmit={handleAddStudent} className="space-y-4">
+                {/* Active Edit Mode Banner */}
+                {editingStudentId && (
+                  <div className="p-3.5 bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-2xl flex items-center justify-between gap-3 shadow-xs animate-in fade-in">
+                    <div className="flex items-center gap-2.5 text-xs text-blue-950 font-bold">
+                      <div className="w-8 h-8 rounded-xl bg-blue-600 text-white flex items-center justify-center shrink-0 shadow-3xs">
+                        <Edit className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <p className="text-blue-900 font-black">وضع تعديل بيانات المشارك(ة)</p>
+                        <p className="text-[11px] text-blue-700 font-medium">
+                          جاري مراجعة وتعديل بيانات: <strong className="text-blue-950 underline">{fullName}</strong>
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditingStudentId(null);
+                        setFullName('');
+                        setMassarNumber('');
+                        setBirthDate('');
+                        setPhoto('');
+                        setAthleticsSpecialty('');
+                        toast('تم إلغاء وضع التعديل', { icon: '↩️' });
+                      }}
+                      className="px-3 py-1.5 bg-white hover:bg-slate-100 text-slate-700 text-[11px] font-bold rounded-xl border border-slate-200 transition-colors shadow-3xs cursor-pointer shrink-0"
+                    >
+                      إلغاء التعديل
+                    </button>
+                  </div>
+                )}
                 {/* Dynamic limit warning alert */}
                 {isGeneralLimitReached && (
                   <div className="p-4 bg-red-50 border border-red-200 text-red-950 rounded-xl flex gap-3 text-xs leading-relaxed animate-pulse">
@@ -1398,7 +1571,7 @@ export const TeacherTeams: React.FC = () => {
                   <div>
                     <label className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center justify-between">
                       <span>الجنس *</span>
-                      {(lockedGender || editingStudentId) ? (
+                      {lockedGender ? (
                         <span className="text-[10px] font-black px-2 py-0.5 rounded border bg-blue-50 text-blue-700 border-blue-200 flex items-center gap-1">
                           <Lock className="w-3 h-3" />
                           <span>مقفل وفق شروط البطولة ({gender === 'Male' ? 'ذكور' : 'إناث'})</span>
@@ -1411,7 +1584,7 @@ export const TeacherTeams: React.FC = () => {
                         </span>
                       )}
                     </label>
-                    {(lockedGender || editingStudentId) ? (
+                    {lockedGender ? (
                       <div className="w-full text-xs px-3.5 py-2.5 bg-slate-100/90 border border-slate-200 rounded-xl text-slate-800 font-bold flex items-center justify-between cursor-not-allowed">
                         <span className="flex items-center gap-2">
                           <span>{gender === 'Male' ? '👦' : '👧'}</span>
@@ -1458,7 +1631,7 @@ export const TeacherTeams: React.FC = () => {
                         تاريخ الازدياد *
                       </label>
                       <span className="text-[10px] text-blue-600 font-bold bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
-                        {(lockedCategory || editingStudentId) ? 'مطابق لشروط الفئة المفتوحة' : 'إحالة تلقائية للفئة'}
+                        {lockedCategory ? 'مطابق لشروط الفئة المفتوحة' : 'إحالة تلقائية للفئة'}
                       </span>
                     </div>
                     <input
@@ -1491,7 +1664,7 @@ export const TeacherTeams: React.FC = () => {
                       }`}>
                         <span className={gender === 'Male' ? 'text-blue-600' : 'text-pink-600'}>✓</span>
                         <span>
-                          {(lockedCategory || editingStudentId) ? 'فئة التلميذ(ة) المقفلة بالبطولة:' : (gender === 'Male' ? 'تمت إحالة التلميذ مباشرة إلى فئة:' : 'تمت إحالة التلميذة مباشرة إلى فئة:')}{' '}
+                          {lockedCategory ? 'فئة التلميذ(ة) المقفلة بالبطولة:' : (gender === 'Male' ? 'تمت إحالة التلميذ مباشرة إلى فئة:' : 'تمت إحالة التلميذة مباشرة إلى فئة:')}{' '}
                           <strong className="underline">{getCategoryLabel(category, gender)}</strong>
                         </span>
                       </div>
@@ -1504,7 +1677,7 @@ export const TeacherTeams: React.FC = () => {
                       <label className="block text-xs font-bold text-slate-700">
                         الفئة الرياضية المعنية ({gender === 'Male' ? 'فئات الذكور فقط' : 'فئات الإناث فقط'}) *
                       </label>
-                      {(lockedCategory || editingStudentId) ? (
+                      {lockedCategory ? (
                         <span className="text-[10px] font-black px-2 py-0.5 rounded border bg-blue-50 text-blue-700 border-blue-200 flex items-center gap-1">
                           <Lock className="w-3 h-3" />
                           <span>مقفل وفق شروط البطولة ({getCategoryLabel(category, gender)})</span>
@@ -1517,7 +1690,7 @@ export const TeacherTeams: React.FC = () => {
                         </span>
                       )}
                     </div>
-                    {(lockedCategory || editingStudentId) ? (
+                    {lockedCategory ? (
                       <div className="w-full text-xs px-3.5 py-2.5 bg-slate-100/90 border border-slate-200 rounded-xl text-slate-800 font-bold flex items-center justify-between cursor-not-allowed">
                         <span className="font-extrabold text-blue-900">{getCategoryLabel(category, gender)}</span>
                         <span className="text-[10px] text-slate-500 font-bold flex items-center gap-1 bg-white px-2 py-0.5 rounded border border-slate-200">
@@ -1616,14 +1789,14 @@ export const TeacherTeams: React.FC = () => {
                       <label className="block text-xs font-bold text-slate-700">
                         صفة الانتماء الرياضي للتلميذ(ة) *
                       </label>
-                      {(lockedAffiliation || editingStudentId) && (
+                      {lockedAffiliation && (
                         <span className="text-[10px] font-black px-2 py-0.5 rounded border bg-slate-100 text-slate-700 border-slate-300 flex items-center gap-1">
                           <Lock className="w-3 h-3" />
                           <span>مقفل وفق معايير البطولة ({affiliationType === 'club_affiliated' ? 'منتمي لنادي' : 'لا منتمي فقط'})</span>
                         </span>
                       )}
                     </div>
-                    {(lockedAffiliation || editingStudentId) ? (
+                    {lockedAffiliation ? (
                       <div className="w-full text-xs px-3.5 py-2.5 bg-slate-100/90 border border-slate-200 rounded-xl text-slate-800 font-bold flex items-center justify-between cursor-not-allowed">
                         <span className="flex items-center gap-2">
                           <span>{affiliationType === 'club_affiliated' ? '🟡' : '⚪'}</span>
@@ -1886,6 +2059,21 @@ export const TeacherTeams: React.FC = () => {
                           {matchingStudents.length > 0 && (
                             <button
                               type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleExportStudentsListToExcel(matchingStudents, `فئة_${label}`);
+                              }}
+                              className="text-[10px] text-emerald-700 hover:text-emerald-900 font-bold flex items-center gap-1 px-2 py-1 rounded bg-emerald-50 border border-emerald-200 cursor-pointer transition-colors shadow-3xs"
+                              title="تصدير هذه الفئة إلى ملف Excel"
+                            >
+                              <FileSpreadsheet className="w-3 h-3 text-emerald-600" />
+                              <span>Excel</span>
+                            </button>
+                          )}
+
+                          {matchingStudents.length > 0 && (
+                            <button
+                              type="button"
                               onClick={async (e) => {
                                 e.stopPropagation();
                                 if (!window.confirm(`هل أنت متأكد من حذف فئة "${label}" بالكامل وجميع المشاركين المسجلين بها (${matchingStudents.length} مشارك)؟`)) return;
@@ -1939,6 +2127,20 @@ export const TeacherTeams: React.FC = () => {
                               >
                                 <span>تعديل المؤطر</span>
                               </button>
+                              {selectedSportId === 'cross_country' && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleOpenCrossCountryBulk(`${catId}_${g}`);
+                                  }}
+                                  className="text-[10px] text-amber-900 hover:text-amber-950 font-black flex items-center gap-1 px-2 py-1 rounded bg-amber-100 hover:bg-amber-200 border border-amber-300 cursor-pointer transition-colors shadow-3xs"
+                                  title="تسجيل 8 مشاركين في هذه الفئة (3 فردي + 5 فريق المؤسسة)"
+                                >
+                                  <Sparkles className="w-3 h-3 text-amber-700" />
+                                  <span>تسجيل 8 ⚡</span>
+                                </button>
+                              )}
                               <button
                                 type="button"
                                 onClick={(e) => {
@@ -2108,14 +2310,37 @@ export const TeacherTeams: React.FC = () => {
                       <span className="text-slate-400 font-normal">({displayedSportStudents.length} تلاميذ)</span>
                     </h4>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => setIsPdfModalOpen(true)}
-                    className="self-start text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200 hover:bg-indigo-100 px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors cursor-pointer"
-                  >
-                    <FileText className="w-3.5 h-3.5" />
-                    <span>مطبوع المشاركة</span>
-                  </button>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={handleExportCurrentCategoryExcel}
+                      disabled={displayedSportStudents.length === 0}
+                      className="text-[10px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-300 hover:bg-emerald-100 px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50 shadow-3xs"
+                      title="استخراج لائحة تلاميذ هذه الفئة إلى ملف Excel"
+                    >
+                      <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
+                      <span>استخراج الفئة Excel 📊</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setIsPdfModalOpen(true)}
+                      className="text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200 hover:bg-indigo-100 px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors cursor-pointer shadow-3xs"
+                    >
+                      <FileText className="w-3.5 h-3.5" />
+                      <span>مطبوع المشاركة</span>
+                    </button>
+                    {selectedSportId === 'cross_country' && (
+                      <button
+                        type="button"
+                        onClick={() => handleOpenCrossCountryBulk(selectedCategoryKey)}
+                        className="text-[10px] font-black bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 text-slate-950 px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-all cursor-pointer shadow-xs hover:scale-102"
+                        title="تسجيل 8 مشاركين في آن واحد (3 فردي + 5 فريق المؤسسة)"
+                      >
+                        <Sparkles className="w-3.5 h-3.5 text-slate-950" />
+                        <span>تسجيل 8 مشاركين ⚡</span>
+                      </button>
+                    )}
+                  </div>
                 </div>
 
                 {/* Close Button to Deselect/Reset */}
@@ -2233,10 +2458,10 @@ export const TeacherTeams: React.FC = () => {
 
                             {/* Actions */}
                             <div className="flex items-center gap-1 shrink-0 mr-auto">
-                              {canTeacherManageStudent(stud) ? (
+                              {canTeacherManageStudent(stud) && (
                                 <>
                                   <button
-                                    onClick={() => handleEditStudent(stud)}
+                                    onClick={() => handleRequestEditStudent(stud)}
                                     title="تعديل بيانات التلميذ"
                                     className="p-1.5 text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors cursor-pointer inline-flex items-center"
                                   >
@@ -2245,21 +2470,13 @@ export const TeacherTeams: React.FC = () => {
                                     </svg>
                                   </button>
                                   <button
-                                    onClick={() => handleDeleteStudent(stud.id)}
+                                    onClick={() => handleRequestDeleteStudent(stud)}
                                     title="حذف التلميذ"
                                     className="p-1.5 text-red-600 bg-red-50 hover:bg-red-100 rounded-lg transition-colors cursor-pointer inline-flex items-center"
                                   >
                                     <Trash2 className="h-3.5 w-3.5" />
                                   </button>
                                 </>
-                              ) : (
-                                <span
-                                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-100 text-slate-500 text-[10px] font-bold border border-slate-200"
-                                  title={`مسجل تحت تأطير أستاذ آخر (${stud.coachName || 'مؤطر آخر'})`}
-                                >
-                                  <Lock className="w-3 h-3 text-slate-400 shrink-0" />
-                                  <span>مؤطر آخر</span>
-                                </span>
                               )}
                             </div>
                           </div>
@@ -2395,10 +2612,10 @@ export const TeacherTeams: React.FC = () => {
                               </td>
                               <td className="p-4 whitespace-nowrap text-left">
                                 <div className="flex items-center justify-end gap-1.5">
-                                  {canTeacherManageStudent(stud) ? (
+                                  {canTeacherManageStudent(stud) && (
                                     <>
                                       <button
-                                        onClick={() => handleEditStudent(stud)}
+                                        onClick={() => handleRequestEditStudent(stud)}
                                         title="تعديل بيانات التلميذ"
                                         className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer inline-flex items-center"
                                       >
@@ -2407,21 +2624,13 @@ export const TeacherTeams: React.FC = () => {
                                         </svg>
                                       </button>
                                       <button
-                                        onClick={() => handleDeleteStudent(stud.id)}
+                                        onClick={() => handleRequestDeleteStudent(stud)}
                                         title="حذف التلميذ"
                                         className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer inline-flex items-center"
                                       >
                                         <Trash2 className="h-4 w-4" />
                                       </button>
                                     </>
-                                  ) : (
-                                    <span
-                                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-100 text-slate-500 text-[10px] font-bold border border-slate-200"
-                                      title={`مسجل تحت تأطير أستاذ آخر (${stud.coachName || 'مؤطر آخر'})`}
-                                    >
-                                      <Lock className="w-3 h-3 text-slate-400 shrink-0" />
-                                      <span>مؤطر آخر</span>
-                                    </span>
                                   )}
                                 </div>
                               </td>
@@ -2458,35 +2667,151 @@ export const TeacherTeams: React.FC = () => {
         </div>
       )}
 
-      {/* Custom Confirmation Modal for Deletion */}
-      {studentToDeleteId && (
+      {/* Custom Confirmation Modal for Editing */}
+      {studentToEditConfirm && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs" dir="rtl">
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-xl max-w-sm w-full overflow-hidden animate-in fade-in zoom-in-95 duration-150 p-5 space-y-4">
-            <div className="flex items-center gap-3 text-red-600">
-              <div className="w-10 h-10 rounded-full bg-red-50 flex items-center justify-center text-xl">
-                ⚠️
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-md w-full overflow-hidden animate-in fade-in zoom-in-95 duration-150 p-5 space-y-4">
+            <div className="flex items-center gap-3 text-blue-600">
+              <div className="w-10 h-10 rounded-xl bg-blue-50 flex items-center justify-center text-xl shrink-0">
+                ✏️
               </div>
-              <h3 className="text-sm font-bold">تأكيد حذف المشارك</h3>
+              <div>
+                <h3 className="text-sm font-bold text-slate-800">تأكيد فتح تعديل بيانات المشارك</h3>
+                <p className="text-[11px] text-slate-500">حساب الأستاذ: إدارة وتعديل لوائح المشاركين</p>
+              </div>
             </div>
             
+            <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 space-y-2 text-xs relative">
+              {/* Photo Thumbnail if exists */}
+              <div className="absolute top-3.5 left-3.5 w-12 h-12 rounded-lg bg-slate-200 border border-slate-300 overflow-hidden flex items-center justify-center shadow-3xs">
+                {studentToEditConfirm.photoUrl ? (
+                  <img src={studentToEditConfirm.photoUrl} alt="صورة المشارك" className="w-full h-full object-cover" />
+                ) : (
+                  <span className="text-xl text-slate-400">👤</span>
+                )}
+              </div>
+
+              <div className="space-y-1.5 pl-14">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-slate-500 font-semibold shrink-0">اسم التلميذ(ة):</span>
+                  <span className="font-extrabold text-slate-900 truncate max-w-[180px]">{studentToEditConfirm.fullName}</span>
+                </div>
+                {studentToEditConfirm.massarNumber && (
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-slate-500 font-semibold shrink-0">رقم مسار:</span>
+                    <span className="font-mono font-bold text-slate-700">{studentToEditConfirm.massarNumber}</span>
+                  </div>
+                )}
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-slate-500 font-semibold shrink-0">تاريخ الازدياد:</span>
+                  <span className="font-mono font-bold text-slate-700">{studentToEditConfirm.birthDate || 'غير محدد'}</span>
+                </div>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-slate-500 font-semibold shrink-0">الفئة والجنس:</span>
+                  <span className="font-bold text-blue-700">
+                    {getCategoryLabel(studentToEditConfirm.category, studentToEditConfirm.gender)} ({studentToEditConfirm.gender === 'Male' ? 'ذكور' : 'إناث'})
+                  </span>
+                </div>
+                {studentToEditConfirm.participationType && (
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-slate-500 font-semibold shrink-0">نوع المشاركة:</span>
+                    <span className="font-bold text-blue-800">
+                      {studentToEditConfirm.participationType === 'school_team' ? '👥 فريق المؤسسة' : '👤 مشاركة فردية'}
+                    </span>
+                  </div>
+                )}
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-slate-500 font-semibold shrink-0">صنف العداء:</span>
+                  <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold border ${
+                    studentToEditConfirm.affiliationType === 'club_affiliated'
+                      ? 'bg-amber-100 text-amber-800 border-amber-200'
+                      : 'bg-slate-100 text-slate-700 border-slate-200'
+                  }`}>
+                    {studentToEditConfirm.affiliationType === 'club_affiliated' ? '🏆 مدرسي منخرط (نادي)' : '🏃 مدرسي (غير منخرط)'}
+                  </span>
+                </div>
+              </div>
+            </div>
+
             <p className="text-xs text-slate-600 leading-relaxed">
-              هل أنت متأكد من رغبتك في حذف هذا التلميذ من الفريق بشكل نهائي؟ لا يمكن التراجع عن هذا الإجراء لاحقاً.
+              هل ترغب في تعديل بيانات هذا التلميذ؟ بالضغط على تأكيد، سيتم تحميل بياناته في استمارة التسجيل بأعلى الصفحة لتحديثها وحفظها.
             </p>
 
             <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
               <button
                 type="button"
-                onClick={() => setStudentToDeleteId(null)}
-                className="px-3 py-1.5 rounded-lg text-xs font-bold border border-slate-200 text-slate-600 hover:bg-slate-50 cursor-pointer"
+                onClick={() => setStudentToEditConfirm(null)}
+                className="px-3.5 py-2 rounded-xl text-xs font-bold border border-slate-200 text-slate-600 hover:bg-slate-50 cursor-pointer transition-colors"
               >
                 إلغاء
               </button>
               <button
                 type="button"
-                onClick={executeDeleteStudent}
-                className="px-3 py-1.5 rounded-lg text-xs font-bold bg-red-600 text-white hover:bg-red-700 cursor-pointer shadow-3xs"
+                onClick={() => confirmStartEdit(studentToEditConfirm)}
+                className="px-4 py-2 rounded-xl text-xs font-bold bg-blue-600 text-white hover:bg-blue-700 cursor-pointer shadow-3xs transition-all flex items-center gap-1.5"
               >
-                نعم، احذف التلميذ
+                <Edit className="w-3.5 h-3.5" />
+                <span>نعم، تعديل البيانات</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Custom Confirmation Modal for Deletion */}
+      {studentToDelete && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs" dir="rtl">
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-md w-full overflow-hidden animate-in fade-in zoom-in-95 duration-150 p-5 space-y-4">
+            <div className="flex items-center gap-3 text-red-600">
+              <div className="w-10 h-10 rounded-xl bg-red-50 flex items-center justify-center text-xl shrink-0">
+                ⚠️
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-slate-800">تأكيد حذف المشارك نهائياً</h3>
+                <p className="text-[11px] text-slate-500">حساب الأستاذ: إدارة وتطهير لوائح المؤسسة</p>
+              </div>
+            </div>
+            
+            <div className="p-3 bg-red-50/50 rounded-xl border border-red-100 space-y-1.5 text-xs">
+              <div className="flex items-center justify-between">
+                <span className="text-slate-500 font-semibold">اسم التلميذ(ة):</span>
+                <span className="font-extrabold text-red-950">{studentToDelete.fullName}</span>
+              </div>
+              {studentToDelete.massarNumber && (
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-500 font-semibold">رقم مسار:</span>
+                  <span className="font-mono font-bold text-slate-700">{studentToDelete.massarNumber}</span>
+                </div>
+              )}
+              <div className="flex items-center justify-between">
+                <span className="text-slate-500 font-semibold">الفئة والجنس:</span>
+                <span className="font-bold text-slate-800">
+                  {getCategoryLabel(studentToDelete.category, studentToDelete.gender)} ({studentToDelete.gender === 'Male' ? 'ذكور' : 'إناث'})
+                </span>
+              </div>
+            </div>
+
+            <p className="text-xs text-slate-600 leading-relaxed">
+              هل أنت متأكد من رغبتك في حذف هذا التلميذ من لائحة المؤسسة بشكل نهائي؟ سيتم تحرير المقعد للتسجيل ولن يمكن التراجع عن هذا الإجراء لاحقاً.
+            </p>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                disabled={isDeletingStudent}
+                onClick={() => setStudentToDelete(null)}
+                className="px-3.5 py-2 rounded-xl text-xs font-bold border border-slate-200 text-slate-600 hover:bg-slate-50 cursor-pointer transition-colors"
+              >
+                إلغاء
+              </button>
+              <button
+                type="button"
+                disabled={isDeletingStudent}
+                onClick={executeDeleteStudent}
+                className="px-4 py-2 rounded-xl text-xs font-bold bg-red-600 text-white hover:bg-red-700 cursor-pointer shadow-3xs transition-all flex items-center gap-1.5 disabled:opacity-50"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>{isDeletingStudent ? 'جاري الحذف...' : 'نعم، حذف المشارك نهائياً'}</span>
               </button>
             </div>
           </div>
@@ -2506,6 +2831,44 @@ export const TeacherTeams: React.FC = () => {
           preselectedCategory={selectedCategoryKey ? selectedCategoryKey.split('_')[0] : undefined}
           preselectedGender={selectedCategoryKey ? selectedCategoryKey.split('_')[1] as 'Male' | 'Female' : undefined}
           preselectedAffiliation={selectedCategoryKey ? selectedCategoryKey.split('_')[2] as 'non_club' | 'club_affiliated' : undefined}
+        />
+      )}
+
+      {/* Cross Country 8-Participant Bulk Registration Modal */}
+      {isCrossCountryBulkOpen && (
+        <CrossCountryBulkRegisterModal
+          isOpen={isCrossCountryBulkOpen}
+          onClose={() => setIsCrossCountryBulkOpen(false)}
+          schools={schools}
+          initialCategoryDefId={crossCountryInitialRaceId}
+          preselectedSchoolName={schoolName}
+          allExistingStudents={students}
+          currentSeason={currentSeason}
+          onRegistered={async () => {
+            await loadInitialData();
+          }}
+        />
+      )}
+
+      {/* Generic Sport Bulk Registration Modal */}
+      {isSportBulkOpen && (
+        <SportBulkRegisterModal
+          isOpen={isSportBulkOpen}
+          onClose={() => setIsSportBulkOpen(false)}
+          sport={activeSportConfig}
+          schools={schools}
+          preselectedCategory={selectedCategoryKey ? selectedCategoryKey.split('_')[0] : undefined}
+          preselectedGender={
+            selectedCategoryKey
+              ? (selectedCategoryKey.split('_')[1]?.toLowerCase() === 'female' ? 'Female' : 'Male')
+              : 'Male'
+          }
+          preselectedSchoolName={schoolName}
+          allExistingStudents={students}
+          currentSeason={currentSeason}
+          onRegistered={async () => {
+            await loadInitialData();
+          }}
         />
       )}
     </div>

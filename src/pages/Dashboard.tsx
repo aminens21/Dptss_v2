@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { DataService, deduplicateById } from '../lib/dataService';
+import { DataService, deduplicateById, normalizeCategoryKey } from '../lib/dataService';
 import { Match, Tournament, School, Venue, Referee, User } from '../types';
 import {
   Trophy,
@@ -18,12 +18,16 @@ import {
   Activity,
   Plus,
   BarChart3,
-  MessageSquare
+  MessageSquare,
+  ShieldCheck,
+  QrCode
 } from 'lucide-react';
 import { CreateTournamentModal } from '../components/CreateTournamentModal';
 import { DailyWhatsAppNotificationCenter } from '../components/DailyWhatsAppNotificationCenter';
+import { FinishLineScannerModal } from '../components/FinishLineScannerModal';
 import { PWAInstallButton } from '../components/PWAInstallButton';
 import { AppLogo } from '../components/AppLogo';
+import { PermissionsModal } from '../components/PermissionsModal';
 import toast from 'react-hot-toast';
 
 export const Dashboard: React.FC = () => {
@@ -45,6 +49,8 @@ export const Dashboard: React.FC = () => {
   const [teacherMatches, setTeacherMatches] = useState<Match[]>([]);
   const [loading, setLoading] = useState(true);
   const [isTournamentModalOpen, setIsTournamentModalOpen] = useState(false);
+  const [isFinishLineScannerOpen, setIsFinishLineScannerOpen] = useState(false);
+  const [isPermissionsModalOpen, setIsPermissionsModalOpen] = useState(false);
 
   const isCentralAdmin = userProfile?.role === 'CENTRAL_ADMIN';
   const isRegionalManager = (userProfile?.role as any) === 'REGIONAL_MANAGER';
@@ -131,17 +137,100 @@ export const Dashboard: React.FC = () => {
   const handleCreateTournament = async (newTourns: Omit<Tournament, 'id'> | Omit<Tournament, 'id'>[]) => {
     try {
       const items = Array.isArray(newTourns) ? newTourns : [newTourns];
-      for (const item of items) {
-        await DataService.addTournament(item);
-      }
-      if (items.length > 1) {
-        toast.success(`تم إنشاء وبرمجة ${items.length} بطولات بنجاح!`);
+      if (items.length === 0) return;
+
+      const targetSportId = items[0].sportId;
+      const targetSeasonId = items[0].seasonId;
+      const targetDirId = items[0].directorateId || DataService.getActiveDirectorateId();
+
+      const latestTournaments = await DataService.getTournaments();
+      const existingSportTournaments = latestTournaments.filter(t => 
+        t.sportId === targetSportId && 
+        (!t.seasonId || !targetSeasonId || t.seasonId === targetSeasonId) &&
+        (!targetDirId || !t.directorateId || (t.directorateId || 'taourirt') === (targetDirId || 'taourirt'))
+      );
+
+      if (existingSportTournaments.length === 0) {
+        for (const item of items) {
+          await DataService.addTournament(item);
+        }
       } else {
-        toast.success('تمت إضافة وبرمجة البطولة بنجاح!');
+        const matchedExistingIds = new Set<string>();
+        const itemToExistingIdMap = new Map<number, string>();
+
+        items.forEach((item, idx) => {
+          const exact = existingSportTournaments.find(existing => {
+            if (matchedExistingIds.has(existing.id)) return false;
+            return (
+              normalizeCategoryKey(existing.ageCategory) === normalizeCategoryKey(item.ageCategory) &&
+              existing.gender === item.gender &&
+              (existing.affiliationType || 'non_club') === (item.affiliationType || 'non_club')
+            );
+          });
+          if (exact) {
+            matchedExistingIds.add(exact.id);
+            itemToExistingIdMap.set(idx, exact.id);
+          }
+        });
+
+        items.forEach((item, idx) => {
+          if (itemToExistingIdMap.has(idx)) return;
+          const remaining = existingSportTournaments.find(existing => !matchedExistingIds.has(existing.id));
+          if (remaining) {
+            matchedExistingIds.add(remaining.id);
+            itemToExistingIdMap.set(idx, remaining.id);
+          }
+        });
+
+        for (let idx = 0; idx < items.length; idx++) {
+          const item = items[idx];
+          const existingId = itemToExistingIdMap.get(idx);
+
+          if (existingId) {
+            await DataService.updateTournament(existingId, {
+              name: item.name,
+              startDate: item.startDate,
+              endDate: item.endDate,
+              registrationDeadline: item.registrationDeadline,
+              level: item.level,
+              scope: item.scope,
+              status: item.status,
+              description: item.description,
+              affiliationType: item.affiliationType,
+              seasonId: item.seasonId,
+              gender: item.gender,
+              ageCategory: item.ageCategory,
+              sportId: item.sportId,
+              directorateId: item.directorateId
+            });
+          } else {
+            await DataService.addTournament(item);
+          }
+        }
+
+        const toDelete = existingSportTournaments.filter(existing => !matchedExistingIds.has(existing.id));
+        for (const rem of toDelete) {
+          await DataService.deleteTournament(rem.id);
+        }
       }
+
+      const newSelectedCats = Array.from(new Set(items.map(i => normalizeCategoryKey(i.ageCategory)).filter(Boolean)));
+
+      await DataService.updateSportCategories(
+        targetSportId, 
+        newSelectedCats, 
+        undefined, 
+        undefined, 
+        undefined, 
+        undefined, 
+        true
+      );
+
+      toast.success('تمت إضافة وتعديل إعدادات البطولة بنجاح!');
       loadDashboardData();
     } catch (e) {
-      toast.error('حدث خطأ أثناء إنشاء البطولة');
+      console.error(e);
+      toast.error('حدث خطأ أثناء حفظ إعدادات البطولة');
     }
   };
 
@@ -236,6 +325,19 @@ export const Dashboard: React.FC = () => {
         </div>
       )}
 
+      {/* Daily WhatsApp Notification Center - Only for authorized roles */}
+      {canAccessWhatsAppNotificationCenter && (
+        <DailyWhatsAppNotificationCenter
+          matches={matches}
+          schools={schools}
+          tournaments={tournaments}
+          venues={venues}
+          referees={referees}
+          teachers={teachers}
+          onRefresh={loadDashboardData}
+        />
+      )}
+
       {/* High Density 4-Column Stat Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {/* Card 1 */}
@@ -303,21 +405,9 @@ export const Dashboard: React.FC = () => {
         </div>
       </div>
 
-      {/* WhatsApp Daily Notification Center (Primary Section - Only for Authorized Supervisors & Tech Committee Heads) */}
-      {canAccessWhatsAppNotificationCenter && (
-        <DailyWhatsAppNotificationCenter
-          matches={matches}
-          schools={schools}
-          tournaments={tournaments}
-          venues={venues}
-          referees={referees}
-          teachers={teachers}
-          onRefresh={loadDashboardData}
-        />
-      )}
-
       {/* Main Content Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
         {/* Matches Section */}
         <div className="lg:col-span-2 flex flex-col gap-6">
           
@@ -475,11 +565,24 @@ export const Dashboard: React.FC = () => {
         </div>
       </div>
 
-      {/* Modal */}
+      {/* Modals */}
       <CreateTournamentModal
         isOpen={isTournamentModalOpen}
         onClose={() => setIsTournamentModalOpen(false)}
         onCreated={handleCreateTournament}
+      />
+
+      {isFinishLineScannerOpen && (
+        <FinishLineScannerModal
+          isOpen={isFinishLineScannerOpen}
+          onClose={() => setIsFinishLineScannerOpen(false)}
+          onResultsUpdated={loadDashboardData}
+        />
+      )}
+
+      <PermissionsModal
+        isOpen={isPermissionsModalOpen}
+        onClose={() => setIsPermissionsModalOpen(false)}
       />
     </div>
   );

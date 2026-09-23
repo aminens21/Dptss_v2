@@ -1,4 +1,6 @@
 import { CrossCountryCategoryResult, PodiumWinner } from '../types';
+import * as XLSX from 'xlsx';
+import toast from 'react-hot-toast';
 
 export interface CrossCountryCategoryDef {
   id: string;
@@ -107,11 +109,14 @@ export interface TeamRankingResult {
   schoolName: string;
   totalPoints: number; // مجموع رتب العناصر الأربعة الأولى
   fourthRunnerRank: number; // رتبة العداء الرابع (للاحتكام عند التساوي)
+  thirdRunnerRank: number; // رتبة العداء الثالث
+  secondRunnerRank: number; // رتبة العداء الثاني
   firstRunnerRank: number; // رتبة أول عداء في الفريق
   runners: PodiumWinner[];
   top4Runners: PodiumWinner[];
   rank: number; // ترتيب الفريق (1، 2، 3...)
   isWinnerTeam: boolean; // الفريق الفائز بالمركز الأول المتأهل للبطولة الجهوية
+  isValidTeam: boolean; // هل اكتمل الفريق بـ 4 واصلين على الأقل؟
 }
 
 export interface RegionalQualifiedIndividual {
@@ -124,10 +129,11 @@ export interface RegionalQualifiedIndividual {
 }
 
 /**
- * حساب ترتيب الفرق للمؤسسات التعليمية:
- * 1. جمع رتب أول 4 عداءين في خط الوصول لكل مؤسسة.
- * 2. الفريق الحاصل على أقل مجموع نقاط يحتل المركز الأول.
- * 3. في حالة تساوي النقاط بين مؤسستين أو أكثر، يتم الاحتكام إلى رتبة العداء الرابع لكل فريق (الأفضل رتبة يفوز).
+ * حساب ترتيب الفرق للمؤسسات التعليمية طبقاً للقوانين الرسمية للرياضة المدرسية في العدو الريفي:
+ * 1. شروط تكوين الفريق: اقتصار الحساب على المشاركين بصفتهم "فريق المؤسسة" (استبعاد المشاركة الفردية).
+ * 2. الحد الأدنى للوصول: يجب وصول 4 عداءين على الأقل من نفس المؤسسة لخط النهاية لاحتساب نتائج الفريق.
+ * 3. مجموع النقاط: جمع رتب الوصول الفردية لأول 4 عداءين من المؤسسة (المجموع الأقل هو الأفضل 🏆).
+ * 4. معيار الحسم عند التعادل (Tie-Breaker): عند تساوي مجموع النقاط، يتم الاحتكام لـ رتبة العداء الرابع المكمل للفريق (الأفضل/الأسبق رتبة يفوز).
  */
 export function calculateTeamRankings(runners: PodiumWinner[]): TeamRankingResult[] {
   if (!runners || runners.length === 0) return [];
@@ -136,6 +142,12 @@ export function calculateTeamRankings(runners: PodiumWinner[]): TeamRankingResul
 
   runners.forEach(r => {
     if (!r.schoolName || !r.fullName) return;
+
+    // استبعاد المشاركين الفرديين صراحة
+    const partType = (r.participationType || '').trim().toLowerCase();
+    const isIndividual = partType === 'فردي' || partType === 'مشاركة فردية' || partType === 'individual';
+    if (isIndividual) return;
+
     const name = r.schoolName.trim();
     if (!schoolGroups[name]) {
       schoolGroups[name] = [];
@@ -147,38 +159,55 @@ export function calculateTeamRankings(runners: PodiumWinner[]): TeamRankingResul
     schoolName: string;
     totalPoints: number;
     fourthRunnerRank: number;
+    thirdRunnerRank: number;
+    secondRunnerRank: number;
     firstRunnerRank: number;
     runners: PodiumWinner[];
     top4Runners: PodiumWinner[];
+    isValidTeam: boolean;
   }[] = [];
 
   Object.entries(schoolGroups).forEach(([schoolName, schoolRunners]) => {
     const sorted = [...schoolRunners].sort((a, b) => a.rank - b.rank);
-    // يشترط وجود 4 عداءين على الأقل لتكوين فريق وإدخال المؤسسة في ترتيب الفرق
+    // يُشترط القوانين الرسمية وصول 4 عداءين على الأقل من نفس المؤسسة لخط النهاية
     if (sorted.length >= 4) {
       const top4 = sorted.slice(0, 4);
       const totalPoints = top4.reduce((sum, r) => sum + r.rank, 0);
       const fourthRunnerRank = top4[3].rank;
+      const thirdRunnerRank = top4[2].rank;
+      const secondRunnerRank = top4[1].rank;
       const firstRunnerRank = top4[0].rank;
 
       validTeams.push({
         schoolName,
         totalPoints,
         fourthRunnerRank,
+        thirdRunnerRank,
+        secondRunnerRank,
         firstRunnerRank,
         runners: sorted,
-        top4Runners: top4
+        top4Runners: top4,
+        isValidTeam: true
       });
     }
   });
 
-  // الترتيب: 1- الأقل نقاطاً ، 2- عند التساوي الأفضل رتبة للعداء الرابع ، 3- الأفضل رتبة للعداء الأول
+  // معايير الترتيب وحسم التعادل طبقاً لقوانين الجامعة الملكية المغربية للرياضة المدرسية:
+  // 1- المجموع الأقل من النقاط لأول 4 عداءين
+  // 2- عند التعادل في النقاط: الاحتكام لـ رتبة العداء الرابع المكمل للفريق (الأقل رتبة/الأسبق وصولاً يفوز)
+  // 3- عند التعادل في العداء الرابع: الاحتكام للعداء الثالث، ثم الثاني، ثم الأول
   validTeams.sort((a, b) => {
     if (a.totalPoints !== b.totalPoints) {
-      return a.totalPoints - b.totalPoints;
+      return a.totalPoints - b.totalPoints; // المجموع الأقل هو الأفضل
     }
     if (a.fourthRunnerRank !== b.fourthRunnerRank) {
-      return a.fourthRunnerRank - b.fourthRunnerRank;
+      return a.fourthRunnerRank - b.fourthRunnerRank; // أسبقية العداء الرابع
+    }
+    if (a.thirdRunnerRank !== b.thirdRunnerRank) {
+      return a.thirdRunnerRank - b.thirdRunnerRank;
+    }
+    if (a.secondRunnerRank !== b.secondRunnerRank) {
+      return a.secondRunnerRank - b.secondRunnerRank;
     }
     return a.firstRunnerRank - b.firstRunnerRank;
   });
@@ -242,122 +271,6 @@ export function calculateRegionalQualifications(
 }
 
 export const INITIAL_CROSS_COUNTRY_RESULTS: Record<string, CrossCountryCategoryResult> = {
-  u15_male: {
-    categoryId: 'u15_male',
-    category: 'U15',
-    gender: 'Male',
-    titleAr: 'سباق الصغار ذكور (U15)',
-    distance: '3000 م',
-    venueName: 'مضمار حلبة ألعاب القوى بتاوريرت',
-    podium: [
-      {
-        rank: 1,
-        fullName: 'ياسين بوعزة',
-        schoolName: 'ثانوية الفتح الإعدادية',
-        time: '09:42.10',
-        bibNumber: '104',
-        notes: 'بطل الفئة 🥇 (يتأهل مع فريقه إلى البطولة الجهوية)'
-      },
-      {
-        rank: 2,
-        fullName: 'محمد المهداوي',
-        schoolName: 'ثانوية الزيتون الإعدادية',
-        time: '09:55.40',
-        bibNumber: '118',
-        notes: 'مؤهل فردي جهوياً 🥈'
-      },
-      {
-        rank: 3,
-        fullName: 'حمزة القاسمي',
-        schoolName: 'ثانوية الفتح الإعدادية',
-        time: '10:08.80',
-        bibNumber: '132',
-        notes: 'المركز الثالث 🥉 (يتأهل مع فريقه إلى البطولة الجهوية)'
-      },
-      {
-        rank: 4,
-        fullName: 'أنس الرحماني',
-        schoolName: 'ثانوية علال بن عبد الله الإعدادية',
-        time: '10:19.30',
-        bibNumber: '112',
-        notes: 'مؤهل جهوياً كبديل صاعد (التعويض الفردي) 🎯'
-      },
-      {
-        rank: 5,
-        fullName: 'أيوب السليماني',
-        schoolName: 'ثانوية الفتح الإعدادية',
-        time: '10:28.15',
-        bibNumber: '125',
-        notes: 'عنصر بالفريق الفائز (الفتح)'
-      },
-      {
-        rank: 6,
-        fullName: 'عمر بوطيب',
-        schoolName: 'ثانوية الفتح الإعدادية',
-        time: '10:35.00',
-        bibNumber: '140',
-        notes: 'العداء الرابع بالفريق الفائز (الفتح)'
-      },
-      {
-        rank: 7,
-        fullName: 'وليد البقالي',
-        schoolName: 'ثانوية 20 غشت الإعدادية',
-        time: '10:42.10',
-        bibNumber: '151',
-        notes: 'مؤهل جهوياً كبديل صاعد (التعويض الفردي 2) 🎯'
-      },
-      {
-        rank: 8,
-        fullName: 'أشرف الجوطي',
-        schoolName: 'ثانوية الزيتون الإعدادية',
-        time: '10:50.00',
-        bibNumber: '160',
-        notes: 'فريق الزيتون (العداء الثاني)'
-      }
-    ]
-  },
-  u15_female: {
-    categoryId: 'u15_female',
-    category: 'U15',
-    gender: 'Female',
-    titleAr: 'سباق الصغيرات إناث (U15)',
-    distance: '2000 م',
-    venueName: 'مضمار حلبة ألعاب القوى بتاوريرت',
-    podium: [
-      {
-        rank: 1,
-        fullName: 'فاطمة الزهراء العمراني',
-        schoolName: 'ثانوية الفتح الإعدادية',
-        time: '07:15.30',
-        bibNumber: '205',
-        notes: 'مؤهلة للبطولة الجهوية 🥇'
-      },
-      {
-        rank: 2,
-        fullName: 'مريم الصالحي',
-        schoolName: 'ثانوية 20 غشت الإعدادية',
-        time: '07:28.00',
-        bibNumber: '214',
-        notes: 'مؤهلة للبطولة الجهوية 🥈'
-      },
-      {
-        rank: 3,
-        fullName: 'سعاد البقالي',
-        schoolName: 'ثانوية الزيتون الإعدادية',
-        time: '07:41.50',
-        bibNumber: '221',
-        notes: 'مؤهلة للبطولة الجهوية 🥉'
-      },
-      {
-        rank: 4,
-        fullName: 'سلمى العزوزي',
-        schoolName: 'ثانوية 20 غشت الإعدادية',
-        time: '07:50.00',
-        bibNumber: '230',
-        notes: 'عنصر فريق 20 غشت'
-      }
-    ]
-  },
   u12_male: {
     categoryId: 'u12_male',
     category: 'U12',
@@ -365,32 +278,7 @@ export const INITIAL_CROSS_COUNTRY_RESULTS: Record<string, CrossCountryCategoryR
     titleAr: 'سباق البراعم ذكور (U12)',
     distance: '1500 م',
     venueName: 'مضمار حلبة ألعاب القوى بتاوريرت',
-    podium: [
-      {
-        rank: 1,
-        fullName: 'أحمد التازي',
-        schoolName: 'مدرسة ابن خلدون الابتدائية',
-        time: '05:12.40',
-        bibNumber: '042',
-        notes: 'مؤهل للبطولة الجهوية 🥇'
-      },
-      {
-        rank: 2,
-        fullName: 'سفيان الوزاني',
-        schoolName: 'مدرسة المسيرة الخضراء',
-        time: '05:24.10',
-        bibNumber: '055',
-        notes: 'مؤهل للبطولة الجهوية 🥈'
-      },
-      {
-        rank: 3,
-        fullName: 'إلياس المصباحي',
-        schoolName: 'مدرسة وادي الذهب الابتدائية',
-        time: '05:33.80',
-        bibNumber: '061',
-        notes: 'مؤهل للبطولة الجهوية 🥉'
-      }
-    ]
+    podium: []
   },
   u12_female: {
     categoryId: 'u12_female',
@@ -399,32 +287,43 @@ export const INITIAL_CROSS_COUNTRY_RESULTS: Record<string, CrossCountryCategoryR
     titleAr: 'سباق البرعمات إناث (U12)',
     distance: '1000 م',
     venueName: 'مضمار حلبة ألعاب القوى بتاوريرت',
-    podium: [
-      {
-        rank: 1,
-        fullName: 'آية المرابط',
-        schoolName: 'مدرسة وادي الذهب الابتدائية',
-        time: '03:45.20',
-        bibNumber: '018',
-        notes: 'مؤهلة للبطولة الجهوية 🥇'
-      },
-      {
-        rank: 2,
-        fullName: 'هبة الشرقاوي',
-        schoolName: 'مدرسة ابن خلدون الابتدائية',
-        time: '03:54.60',
-        bibNumber: '022',
-        notes: 'مؤهلة للبطولة الجهوية 🥈'
-      },
-      {
-        rank: 3,
-        fullName: 'خديجة الحسني',
-        schoolName: 'مدرسة النخيل الابتدائية',
-        time: '04:02.10',
-        bibNumber: '031',
-        notes: 'مؤهلة للبطولة الجهوية 🥉'
-      }
-    ]
+    podium: []
+  },
+  u13_male: {
+    categoryId: 'u13_male',
+    category: 'U12',
+    gender: 'Male',
+    titleAr: 'سباق البراعم ذكور (U13/U12)',
+    distance: '1500 م',
+    venueName: 'مضمار حلبة ألعاب القوى بتاوريرت',
+    podium: []
+  },
+  u13_female: {
+    categoryId: 'u13_female',
+    category: 'U12',
+    gender: 'Female',
+    titleAr: 'سباق البرعمات إناث (U13/U12)',
+    distance: '1000 م',
+    venueName: 'مضمار حلبة ألعاب القوى بتاوريرت',
+    podium: []
+  },
+  u15_male: {
+    categoryId: 'u15_male',
+    category: 'U15',
+    gender: 'Male',
+    titleAr: 'سباق الصغار ذكور (U15)',
+    distance: '3000 م',
+    venueName: 'مضمار حلبة ألعاب القوى بتاوريرت',
+    podium: []
+  },
+  u15_female: {
+    categoryId: 'u15_female',
+    category: 'U15',
+    gender: 'Female',
+    titleAr: 'سباق الصغيرات إناث (U15)',
+    distance: '2000 م',
+    venueName: 'مضمار حلبة ألعاب القوى بتاوريرت',
+    podium: []
   },
   u18_male: {
     categoryId: 'u18_male',
@@ -433,32 +332,7 @@ export const INITIAL_CROSS_COUNTRY_RESULTS: Record<string, CrossCountryCategoryR
     titleAr: 'سباق الفتيان ذكور (U18)',
     distance: '4000 م',
     venueName: 'مضمار حلبة ألعاب القوى بتاوريرت',
-    podium: [
-      {
-        rank: 1,
-        fullName: 'يوسف شرفي',
-        schoolName: 'ثانوية الفتح التأهيلية',
-        time: '13:10.50',
-        bibNumber: '302',
-        notes: 'مؤهل للبطولة الجهوية 🥇'
-      },
-      {
-        rank: 2,
-        fullName: 'وليد الهاشمي',
-        schoolName: 'ثانوية المرينيين التأهيلية',
-        time: '13:24.00',
-        bibNumber: '315',
-        notes: 'مؤهل للبطولة الجهوية 🥈'
-      },
-      {
-        rank: 3,
-        fullName: 'بلال العزاوي',
-        schoolName: 'ثانوية ابن الهيثم التأهيلية',
-        time: '13:40.80',
-        bibNumber: '320',
-        notes: 'مؤهل للبطولة الجهوية 🥉'
-      }
-    ]
+    podium: []
   },
   u18_female: {
     categoryId: 'u18_female',
@@ -467,32 +341,7 @@ export const INITIAL_CROSS_COUNTRY_RESULTS: Record<string, CrossCountryCategoryR
     titleAr: 'سباق الفتيات إناث (U18)',
     distance: '3000 م',
     venueName: 'مضمار حلبة ألعاب القوى بتاوريرت',
-    podium: [
-      {
-        rank: 1,
-        fullName: 'إيمان المنصوري',
-        schoolName: 'ثانوية الفتح التأهيلية',
-        time: '11:05.10',
-        bibNumber: '401',
-        notes: 'مؤهلة للبطولة الجهوية 🥇'
-      },
-      {
-        rank: 2,
-        fullName: 'سلمى الإدريسي',
-        schoolName: 'ثانوية المرينيين التأهيلية',
-        time: '11:22.40',
-        bibNumber: '412',
-        notes: 'مؤهلة للبطولة الجهوية 🥈'
-      },
-      {
-        rank: 3,
-        fullName: 'أميمة التازي',
-        schoolName: 'ثانوية الزيتون التأهيلية',
-        time: '11:38.90',
-        bibNumber: '425',
-        notes: 'مؤهلة للبطولة الجهوية 🥉'
-      }
-    ]
+    podium: []
   },
   u20_male: {
     categoryId: 'u20_male',
@@ -501,32 +350,7 @@ export const INITIAL_CROSS_COUNTRY_RESULTS: Record<string, CrossCountryCategoryR
     titleAr: 'سباق الشبان ذكور (U20)',
     distance: '5000 م',
     venueName: 'مضمار حلبة ألعاب القوى بتاوريرت',
-    podium: [
-      {
-        rank: 1,
-        fullName: 'حميد الزياني',
-        schoolName: 'ثانوية المرينيين التأهيلية',
-        time: '16:45.00',
-        bibNumber: '501',
-        notes: 'مؤهل للبطولة الجهوية 🥇'
-      },
-      {
-        rank: 2,
-        fullName: 'رشيد البوعناني',
-        schoolName: 'ثانوية الفتح التأهيلية',
-        time: '17:02.30',
-        bibNumber: '511',
-        notes: 'مؤهل للبطولة الجهوية 🥈'
-      },
-      {
-        rank: 3,
-        fullName: 'زكرياء الداودي',
-        schoolName: 'ثانوية ابن الهيثم التقنية',
-        time: '17:19.80',
-        bibNumber: '522',
-        notes: 'مؤهل للبطولة الجهوية 🥉'
-      }
-    ]
+    podium: []
   },
   u20_female: {
     categoryId: 'u20_female',
@@ -535,31 +359,185 @@ export const INITIAL_CROSS_COUNTRY_RESULTS: Record<string, CrossCountryCategoryR
     titleAr: 'سباق الشابات إناث (U20)',
     distance: '3000 م',
     venueName: 'مضمار حلبة ألعاب القوى بتاوريرت',
-    podium: [
-      {
-        rank: 1,
-        fullName: 'كوثر العثماني',
-        schoolName: 'ثانوية الفتح التأهيلية',
-        time: '11:50.20',
-        bibNumber: '601',
-        notes: 'مؤهلة للبطولة الجهوية 🥇'
-      },
-      {
-        rank: 2,
-        fullName: 'شيماء الراشدي',
-        schoolName: 'ثانوية المرينيين التأهيلية',
-        time: '12:08.50',
-        bibNumber: '614',
-        notes: 'مؤهلة للبطولة الجهوية 🥈'
-      },
-      {
-        rank: 3,
-        fullName: 'دعاء الصنهاجي',
-        schoolName: 'ثانوية ابن الهيثم التأهيلية',
-        time: '12:25.10',
-        bibNumber: '620',
-        notes: 'مؤهلة للبطولة الجهوية 🥉'
-      }
-    ]
+    podium: []
   }
 };
+
+/**
+ * تصدير لائحة المتأهلين للبطولة الجهوية (خاص بالمسؤول المركزي ورئيس اللجنة التقنية للعدو الريفي)
+ */
+export function exportQualifiedListExcel(
+  results: Record<string, CrossCountryCategoryResult>,
+  activeSeason: string,
+  directorateName: string = 'مديرية تاوريرت'
+) {
+  try {
+    const wb = XLSX.utils.book_new();
+
+    // 1. Qualified Teams Sheet (الفرق المتأهلة بطلة الفئات)
+    const teamRows: Record<string, any>[] = [];
+    CROSS_COUNTRY_CATEGORIES.forEach(cat => {
+      const catRes = results[cat.id];
+      const teams = calculateTeamRankings(catRes?.podium || []);
+      const winningTeam = teams.find(t => t.isWinnerTeam);
+
+      if (winningTeam) {
+        teamRows.push({
+          'الفئة العمرية': cat.titleAr,
+          'اسم المؤسسة التعليمية البطلة 🏆': winningTeam.schoolName,
+          'مجموع نقاط أول 4 عداءين': winningTeam.totalPoints,
+          'رتبة العداء الرابع (حسم التعادل ⚖️)': winningTeam.fourthRunnerRank,
+          'عدد العداءين الواصلين': winningTeam.runners.length,
+          'عناصر الفريق المتأهلين رسمياً': winningTeam.top4Runners.map(r => `${r.fullName} (المرتبة ${r.rank})`).join(' ، '),
+          'المديرية': directorateName,
+          'صفة التأهل': 'تأهل جماعي رسمي للبطولة الجهوية 🏆'
+        });
+      } else {
+        teamRows.push({
+          'الفئة العمرية': cat.titleAr,
+          'اسم المؤسسة التعليمية البطلة 🏆': 'لم يكتمل فريق بـ 4 عداءين',
+          'مجموع نقاط أول 4 عداءين': '-',
+          'رتبة العداء الرابع (حسم التعادل ⚖️)': '-',
+          'عدد العداءين الواصلين': '-',
+          'عناصر الفريق المتأهلين رسمياً': '-',
+          'المديرية': directorateName,
+          'صفة التأهل': 'غير محدد'
+        });
+      }
+    });
+
+    const wsTeams = XLSX.utils.json_to_sheet(teamRows);
+    wsTeams['!views'] = [{ RTL: true }];
+    XLSX.utils.book_append_sheet(wb, wsTeams, 'الفرق_المتأهلة_جماعياً');
+
+    // 2. Qualified Individuals Sheet (العداؤون المتأهلون فردياً + البدلاء)
+    const individualRows: Record<string, any>[] = [];
+    CROSS_COUNTRY_CATEGORIES.forEach(cat => {
+      const catRes = results[cat.id];
+      const teams = calculateTeamRankings(catRes?.podium || []);
+      const winningTeamName = teams.length > 0 ? teams[0].schoolName : null;
+      const quals = calculateRegionalQualifications(catRes?.podium || [], winningTeamName);
+
+      if (quals.length > 0) {
+        quals.forEach(q => {
+          individualRows.push({
+            'الفئة العمرية': cat.titleAr,
+            'المقعد الفردي الجهوي': `#${q.qualifyingRank}`,
+            'اسم العداء(ة) المتأهل(ة)': q.runner.fullName,
+            'رقم الصدرية': q.runner.bibNumber || '-',
+            'المؤسسة التعليمية': q.runner.schoolName,
+            'الرتبة الأصلية عند خط الوصول': q.originalFinishRank,
+            'نوع التأهل': q.isReplacement ? 'بديل صاعد (تعويض فردي) 🎯' : 'تأهل فردي مباشر 🥇',
+            'السبب والتوضيح القانوني': q.reasonAr,
+            'الفريق البطل المتأهل جماعياً': winningTeamName || 'غ.مكتمل',
+            'المديرية': directorateName
+          });
+        });
+      } else {
+        individualRows.push({
+          'الفئة العمرية': cat.titleAr,
+          'المقعد الفردي الجهوي': '-',
+          'اسم العداء(ة) المتأهل(ة)': 'لا توجد نتائج مسجلة',
+          'رقم الصدرية': '-',
+          'المؤسسة التعليمية': '-',
+          'الرتبة الأصلية عند خط الوصول': '-',
+          'نوع التأهل': '-',
+          'السبب والتوضيح القانوني': '-',
+          'الفريق البطل المتأهل جماعياً': '-',
+          'المديرية': directorateName
+        });
+      }
+    });
+
+    const wsIndiv = XLSX.utils.json_to_sheet(individualRows);
+    wsIndiv['!views'] = [{ RTL: true }];
+    XLSX.utils.book_append_sheet(wb, wsIndiv, 'العداؤون_المتأهلون_فردياً');
+
+    XLSX.writeFile(wb, `لائحة_المتأهلين_الرسمية_للبطولة_الجهوية_${activeSeason.replace('/', '-')}.xlsx`);
+    toast.success('تم تصدير لائحة المتأهلين الرسمية للبطولة الجهوية بنجاح! 🏆');
+  } catch (err) {
+    console.error('Error exporting qualified list:', err);
+    toast.error('حدث خطأ أثناء تصدير لائحة المتأهلين');
+  }
+}
+
+/**
+ * تصدير لائحة النتائج الشاملة لجميع فئات العدو الريفي وترتيب الفرق
+ */
+export function exportFullResultsExcel(
+  results: Record<string, CrossCountryCategoryResult>,
+  activeSeason: string,
+  directorateName: string = 'مديرية تاوريرت'
+) {
+  try {
+    const wb = XLSX.utils.book_new();
+
+    // 1. Full Individual Results across all 8 categories
+    CROSS_COUNTRY_CATEGORIES.forEach(cat => {
+      const catRes = results[cat.id];
+      const podium = catRes?.podium || [];
+
+      const rows = podium.length > 0
+        ? podium.map((p, idx) => ({
+            'الرتبة العامة (الوصول)': idx + 1,
+            'رقم الصدرية': p.bibNumber || '-',
+            'اسم العداء(ة)': p.fullName,
+            'التوقيت': p.time || '-',
+            'المؤسسة التعليمية': p.schoolName,
+            'المديرية': p.directorateName || directorateName,
+            'الأكاديمية': p.academyName || 'الأكاديمية الجهوية',
+            'اسم المؤطر': p.supervisorName || '-',
+            'نوع المشاركة': p.participationType === 'school_team' || p.participationType === 'فريق' ? 'فريق المؤسسة' : 'مشاركة فردية',
+            'الملاحظات والنتيجة': p.notes || '-'
+          }))
+        : [
+            {
+              'الرتبة العامة (الوصول)': 'لا توجد نتائج مسجلة',
+              'رقم الصدرية': '-',
+              'اسم العداء(ة)': '-',
+              'التوقيت': '-',
+              'المؤسسة التعليمية': '-',
+              'المديرية': '-',
+              'الأكاديمية': '-',
+              'اسم المؤطر': '-',
+              'نوع المشاركة': '-',
+              'الملاحظات والنتيجة': '-'
+            }
+          ];
+
+      const ws = XLSX.utils.json_to_sheet(rows);
+      ws['!views'] = [{ RTL: true }];
+      XLSX.utils.book_append_sheet(wb, ws, cat.shortLabel.substring(0, 30));
+    });
+
+    // 2. Team Rankings Summary Sheet
+    const teamSummaryRows: Record<string, any>[] = [];
+    CROSS_COUNTRY_CATEGORIES.forEach(cat => {
+      const catRes = results[cat.id];
+      const teams = calculateTeamRankings(catRes?.podium || []);
+      teams.forEach(t => {
+        teamSummaryRows.push({
+          'الفئة العمرية': cat.titleAr,
+          'ترتيب الفريق': t.rank === 1 ? '🥇 المركز الأول (بطل الفئة المتأهل)' : t.rank === 2 ? '🥈 المركز الثاني' : t.rank === 3 ? '🥉 المركز الثالث' : t.rank,
+          'اسم المؤسسة التعليمية': t.schoolName,
+          'مجموع نقاط أول 4 عداءين': t.totalPoints,
+          'رتبة العداء الرابع (حسم التعادل ⚖️)': t.fourthRunnerRank,
+          'عدد العداءين الواصلين': t.runners.length,
+          'أسماء العناصر المحتسبين في التتويج': t.top4Runners.map(r => `${r.fullName} (مرتبة ${r.rank})`).join(' ، ')
+        });
+      });
+    });
+
+    if (teamSummaryRows.length > 0) {
+      const wsTeams = XLSX.utils.json_to_sheet(teamSummaryRows);
+      wsTeams['!views'] = [{ RTL: true }];
+      XLSX.utils.book_append_sheet(wb, wsTeams, 'ترتيب_فرق_المؤسسات');
+    }
+
+    XLSX.writeFile(wb, `لائحة_النتائج_الكاملة_للعدو_الريفي_${activeSeason.replace('/', '-')}.xlsx`);
+    toast.success('تم تصدير محضر لائحة النتائج الشاملة بنجاح! 📊');
+  } catch (err) {
+    console.error('Error exporting full results:', err);
+    toast.error('حدث خطأ أثناء تصدير محضر النتائج');
+  }
+}

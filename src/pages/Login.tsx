@@ -176,6 +176,7 @@ export const Login: React.FC = () => {
       // 1. Check if Super Admin
       if (isSuperAdminEmail(cleanEmail)) {
         toast.success(`مرحباً بك! تم تسجيل الدخول بصلاحيات المشرف العام المركزي (${cleanEmail})`);
+        navigate('/dashboard', { replace: true });
         return;
       }
 
@@ -184,6 +185,7 @@ export const Login: React.FC = () => {
       const managedDir = dirs.find(d => (d.adminEmails || []).some(ae => ae.trim().toLowerCase() === cleanEmail));
       if (managedDir) {
         toast.success(`مرحباً بك! تم تسجيل الدخول كمسير إقليمي لـ ${managedDir.name}`);
+        navigate('/dashboard', { replace: true });
         return;
       }
 
@@ -196,6 +198,7 @@ export const Login: React.FC = () => {
             // Already registered!
             DataService.setActiveDirectorateId(data.directorateId);
             toast.success(`مرحباً بك ذ. ${data.fullName || googleUser.displayName || ''}! تم تسجيل الدخول بنجاح`);
+            navigate('/dashboard', { replace: true });
             return;
           }
         }

@@ -19,14 +19,19 @@ import {
   UserCheck,
   Edit3,
   SlidersHorizontal,
+  Settings,
+  Eye,
+  Move,
   PenTool,
   FileText,
   Type,
   ChevronDown
 } from 'lucide-react';
 import { toPng, toBlob } from 'html-to-image';
+import jsPDF from 'jspdf';
 import toast from 'react-hot-toast';
 import { AppLogo } from './AppLogo';
+import { SportSilhouette } from './SportSilhouettes';
 import { Tournament, Directorate, Sport } from '../types';
 import { SPORTS_MAP, OfficialLogos } from '../lib/dataService';
 
@@ -44,15 +49,22 @@ interface TournamentCertificateModalProps {
 type CertificateTheme = 'crimson_gold' | 'orange_vibrant' | 'royal_blue' | 'morocco_emerald' | 'clean_slate';
 
 export const CERTIFICATE_FONTS = [
-  { id: 'Amiri', name: 'خط أميري (Amiri) - كلاسيكي أصيل ورسمي', css: "'Amiri', serif" },
-  { id: 'Cairo', name: 'خط القاهرة (Cairo) - حديث وواضح', css: "'Cairo', sans-serif" },
-  { id: 'Tajawal', name: 'خط تجوال (Tajawal) - عصري وأنيق', css: "'Tajawal', sans-serif" },
-  { id: 'Aref Ruqaa', name: 'خط الرقعة (Aref Ruqaa) - تراثي فخري', css: "'Aref Ruqaa', serif" },
-  { id: 'Noto Kufi Arabic', name: 'خط كوفي عربي (Noto Kufi) - هندسي ورسمي', css: "'Noto Kufi Arabic', sans-serif" },
-  { id: 'Changa', name: 'خط تشانغا (Changa) - بارز وقوي', css: "'Changa', sans-serif" },
-  { id: 'Readex Pro', name: 'خط ريديكس برو (Readex Pro) - دقيق ومتناسق', css: "'Readex Pro', sans-serif" },
-  { id: 'Lateef', name: 'خط لطيف (Lateef) - نسخي رشيق', css: "'Lateef', serif" },
-  { id: 'Scheherazade New', name: 'خط شهرزاد (Scheherazade) - عريق', css: "'Scheherazade New', serif" }
+  { id: 'Arabswell', name: 'Arabswell (خط عربسويل الرقعي)', sampleText: 'أ ب جـ د — Arabswell (خط عربسويل)', css: "'Arabswell', 'Aref Ruqaa Ink', 'Aref Ruqaa', cursive, serif" },
+  { id: 'Amiri', name: 'Amiri (خط أميري الأصيل)', sampleText: 'أ ب جـ د — Amiri (خط أميري الأصيل)', css: "'Amiri', serif" },
+  { id: 'Cairo', name: 'Cairo (خط القاهرة العصري)', sampleText: 'أ ب جـ د — Cairo (خط القاهرة العصري)', css: "'Cairo', sans-serif" },
+  { id: 'Tajawal', name: 'Tajawal (خط تجوال الأنيق)', sampleText: 'أ ب جـ د — Tajawal (خط تجوال الأنيق)', css: "'Tajawal', sans-serif" },
+  { id: 'Aref Ruqaa Ink', name: 'Aref Ruqaa Ink (خط حبر الرقعة)', sampleText: 'أ ب جـ د — Aref Ruqaa Ink (خط حبر الرقعة)', css: "'Aref Ruqaa Ink', 'Aref Ruqaa', serif" },
+  { id: 'Aref Ruqaa', name: 'Aref Ruqaa (خط الرقعة التراثي)', sampleText: 'أ ب جـ د — Aref Ruqaa (خط الرقعة التراثي)', css: "'Aref Ruqaa', serif" },
+  { id: 'Changa', name: 'Changa (خط تشانغا الرياضي)', sampleText: 'أ ب جـ د — Changa (خط تشانغا الرياضي)', css: "'Changa', sans-serif" },
+  { id: 'Reem Kufi', name: 'Reem Kufi (خط ريم الكوفي)', sampleText: 'أ ب جـ د — Reem Kufi (خط ريم الكوفي)', css: "'Reem Kufi', sans-serif" },
+  { id: 'El Messiri', name: 'El Messiri (خط المسيري الفني)', sampleText: 'أ ب جـ د — El Messiri (خط المسيري الفني)', css: "'El Messiri', sans-serif" },
+  { id: 'Lalezar', name: 'Lalezar (خط لاليزار البارز)', sampleText: 'أ ب جـ د — Lalezar (خط لاليزار البارز)', css: "'Lalezar', cursive" },
+  { id: 'Marhey', name: 'Marhey (خط مرحي الانسيابي)', sampleText: 'أ ب جـ د — Marhey (خط مرحي الانسيابي)', css: "'Marhey', cursive" },
+  { id: 'Rakkas', name: 'Rakkas (خط رقاص المزخرف)', sampleText: 'أ ب جـ د — Rakkas (خط رقاص المزخرف)', css: "'Rakkas', cursive" },
+  { id: 'Alexandria', name: 'Alexandria (خط الإسكندرية)', sampleText: 'أ ب جـ د — Alexandria (خط الإسكندرية)', css: "'Alexandria', sans-serif" },
+  { id: 'Almarai', name: 'Almarai (خط المراعي الواضح)', sampleText: 'أ ب جـ د — Almarai (خط المراعي الواضح)', css: "'Almarai', sans-serif" },
+  { id: 'Readex Pro', name: 'Readex Pro (خط ريديكس برو)', sampleText: 'أ ب جـ د — Readex Pro (خط ريديكس برو)', css: "'Readex Pro', sans-serif" },
+  { id: 'Noto Kufi Arabic', name: 'Noto Kufi (خط كوفي عربي)', sampleText: 'أ ب جـ د — Noto Kufi (خط كوفي عربي)', css: "'Noto Kufi Arabic', sans-serif" }
 ];
 
 export const TournamentCertificateModal: React.FC<TournamentCertificateModalProps> = ({
@@ -75,6 +87,10 @@ export const TournamentCertificateModal: React.FC<TournamentCertificateModalProp
   const [seasonText, setSeasonText] = useState(activeSeason);
   const [theme, setTheme] = useState<CertificateTheme>('crimson_gold');
   const [selectedFont, setSelectedFont] = useState<string>('Amiri');
+  // Font sizes (in px)
+  const [titleFontSize, setTitleFontSize] = useState<number>(36);
+  const [recipientFontSize, setRecipientFontSize] = useState<number>(28);
+  const [bodyFontSize, setBodyFontSize] = useState<number>(15);
   // Logo sizes (in px)
   const [ministryLogoSize, setMinistryLogoSize] = useState<number>(48);
   const [frmssLogoSize, setFrmssLogoSize] = useState<number>(48);
@@ -113,9 +129,31 @@ export const TournamentCertificateModal: React.FC<TournamentCertificateModalProp
   });
 
   const [customBgImage, setCustomBgImage] = useState<string | null>(null);
+  const [customSilhouette, setCustomSilhouette] = useState<string | null>(null);
+  const [silhouetteScale, setSilhouetteScale] = useState<number>(50);
+  const [silhouetteOpacity, setSilhouetteOpacity] = useState<number>(40);
+  const [silhouettePosition, setSilhouettePosition] = useState<{ x: number, y: number }>({ x: 0, y: 0 });
+  const silhouetteFileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleSilhouetteUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      if (file.size > 5 * 1024 * 1024) {
+        toast.error('حجم صورة الرسم الظلي كبير، يرجى اختيار صورة أقل من 5 ميغابايت');
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = () => {
+        setCustomSilhouette(reader.result as string);
+        toast.success('تم رفع صورة الرسم الظلي المخصصة للشهادة بنجاح!');
+      };
+      reader.readAsDataURL(file);
+    }
+  };
   const [isExporting, setIsExporting] = useState(false);
   const [viewMode, setViewMode] = useState<'split' | 'preview' | 'settings'>('split');
   const [previewZoom, setPreviewZoom] = useState<number>(1);
+  const [activeMobileTab, setActiveMobileTab] = useState<'controls' | 'preview'>('controls');
   const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>({});
 
   const toggleSection = (key: string) => {
@@ -172,17 +210,23 @@ export const TournamentCertificateModal: React.FC<TournamentCertificateModalProp
     }
   };
 
-  // Export as PNG
+  // Export as PNG (Pure Certificate Card Only - No Preview Canvas or Shadow)
   const handleDownloadImage = async () => {
     if (!certificateRef.current) return;
     setIsExporting(true);
-    const toastId = toast.loading('جاري توليد وتحميل الشهادة التقديرية بدقة عالية...');
+    const toastId = toast.loading('جاري توليد وتحميل الشهادة التقديرية بدقة عالية (PNG)...');
     try {
       await new Promise(resolve => setTimeout(resolve, 150));
       const dataUrl = await toPng(certificateRef.current, {
-        pixelRatio: 2.5,
+        pixelRatio: 3,
         cacheBust: true,
-        quality: 0.98
+        quality: 1.0,
+        style: {
+          transform: 'none',
+          boxShadow: 'none',
+          borderRadius: '0px',
+          margin: '0px'
+        }
       });
 
       const link = document.createElement('a');
@@ -190,10 +234,48 @@ export const TournamentCertificateModal: React.FC<TournamentCertificateModalProp
       link.href = dataUrl;
       link.click();
 
-      toast.success('تم تحميل الشهادة التقديرية بنجاح!', { id: toastId });
+      toast.success('تم تحميل الشهادة التقديرية كصورة PNG بنجاح!', { id: toastId });
     } catch (error) {
       console.error('Error exporting certificate image:', error);
       toast.error('تعذر تصدير الشهادة، يرجى المحاولة ثانية', { id: toastId });
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  // Export as PDF (A4 Landscape - Certificate Only)
+  const handleDownloadPdf = async () => {
+    if (!certificateRef.current) return;
+    setIsExporting(true);
+    const toastId = toast.loading('جاري توليد وتحميل ملف PDF للشهادة التقديرية...');
+    try {
+      await new Promise(resolve => setTimeout(resolve, 150));
+      const dataUrl = await toPng(certificateRef.current, {
+        pixelRatio: 3,
+        cacheBust: true,
+        quality: 1.0,
+        style: {
+          transform: 'none',
+          boxShadow: 'none',
+          borderRadius: '0px',
+          margin: '0px'
+        }
+      });
+
+      const pdf = new jsPDF({
+        orientation: 'landscape',
+        unit: 'mm',
+        format: 'a4'
+      });
+
+      // Fill A4 Landscape (297mm x 210mm) completely
+      pdf.addImage(dataUrl, 'PNG', 0, 0, 297, 210, undefined, 'FAST');
+      pdf.save(`شهادة_تقديرية-${sportName.replace(/\s+/g, '_')}-${Date.now()}.pdf`);
+
+      toast.success('تم تحميل ملف PDF للشهادة بنجاح!', { id: toastId });
+    } catch (error) {
+      console.error('Error exporting certificate PDF:', error);
+      toast.error('تعذر تصدير ملف PDF، يرجى المحاولة ثانية', { id: toastId });
     } finally {
       setIsExporting(false);
     }
@@ -205,7 +287,17 @@ export const TournamentCertificateModal: React.FC<TournamentCertificateModalProp
     setIsExporting(true);
     const toastId = toast.loading('جاري نسخ الشهادة إلى الحافظة...');
     try {
-      const blob = await toBlob(certificateRef.current, { pixelRatio: 2, cacheBust: true });
+      const blob = await toBlob(certificateRef.current, {
+        pixelRatio: 2.5,
+        cacheBust: true,
+        quality: 1.0,
+        style: {
+          transform: 'none',
+          boxShadow: 'none',
+          borderRadius: '0px',
+          margin: '0px'
+        }
+      });
       if (blob && navigator.clipboard && (window as any).ClipboardItem) {
         await navigator.clipboard.write([
           new (window as any).ClipboardItem({ 'image/png': blob })
@@ -230,9 +322,15 @@ export const TournamentCertificateModal: React.FC<TournamentCertificateModalProp
     try {
       await new Promise(resolve => setTimeout(resolve, 150));
       const dataUrl = await toPng(certificateRef.current, {
-        pixelRatio: 2.5,
+        pixelRatio: 3,
         cacheBust: true,
-        quality: 0.98
+        quality: 1.0,
+        style: {
+          transform: 'none',
+          boxShadow: 'none',
+          borderRadius: '0px',
+          margin: '0px'
+        }
       });
 
       const printWindow = window.open('', '_blank', 'width=1100,height=800');
@@ -400,10 +498,19 @@ export const TournamentCertificateModal: React.FC<TournamentCertificateModalProp
               onClick={handleDownloadImage}
               disabled={isExporting}
               className="inline-flex items-center gap-1 sm:gap-1.5 px-2.5 sm:px-3.5 py-1.5 sm:py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-[11px] sm:text-xs font-bold transition-all shadow-xs cursor-pointer disabled:opacity-50"
+              title="تحميل الشهادة كصورة PNG عالية الدقة بدون إطار المعاينة"
             >
               <Download className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
-              <span className="hidden sm:inline">تحميل كصورة</span>
-              <span className="sm:hidden">تحميل</span>
+              <span>تحميل PNG</span>
+            </button>
+            <button
+              onClick={handleDownloadPdf}
+              disabled={isExporting}
+              className="inline-flex items-center gap-1 sm:gap-1.5 px-2.5 sm:px-3.5 py-1.5 sm:py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white text-[11px] sm:text-xs font-bold transition-all shadow-xs cursor-pointer disabled:opacity-50"
+              title="تحميل الشهادة كملف PDF قياس A4 للمستند فقط"
+            >
+              <FileText className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+              <span>تحميل PDF</span>
             </button>
             <button
               onClick={handlePrint}
@@ -422,11 +529,39 @@ export const TournamentCertificateModal: React.FC<TournamentCertificateModalProp
           </div>
         </div>
 
-        {/* Modal Body: Split Layout (Always Unified) */}
-        <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 overflow-y-auto lg:overflow-hidden">
+        {/* Mobile Tabs Switcher - Visible only on small screens */}
+        <div className="md:hidden flex border-b border-slate-200 bg-white sticky top-0 z-[60] shrink-0">
+          <button
+            onClick={() => setActiveMobileTab('controls')}
+            className={`flex-1 py-3 px-2 text-xs font-bold flex items-center justify-center gap-1.5 transition-colors ${
+              activeMobileTab === 'controls' 
+                ? 'text-amber-600 border-b-2 border-amber-600 bg-amber-50/30' 
+                : 'text-slate-500 hover:bg-slate-50'
+            }`}
+          >
+            <Settings className="h-3.5 w-3.5" />
+            تعديل البيانات والتصميم
+          </button>
+          <button
+            onClick={() => setActiveMobileTab('preview')}
+            className={`flex-1 py-3 px-2 text-xs font-bold flex items-center justify-center gap-1.5 transition-colors ${
+              activeMobileTab === 'preview' 
+                ? 'text-amber-600 border-b-2 border-amber-600 bg-amber-50/30' 
+                : 'text-slate-500 hover:bg-slate-50'
+            }`}
+          >
+            <Eye className="h-3.5 w-3.5" />
+            معاينة الشهادة
+          </button>
+        </div>
+
+        {/* Modal Body: Split Layout */}
+        <div className="flex-1 grid grid-cols-1 md:grid-cols-12 overflow-y-auto md:overflow-hidden bg-white">
           
           {/* Controls Panel */}
-          <div className="col-span-1 lg:col-span-5 border-l border-slate-200 overflow-y-auto p-4 sm:p-5 space-y-4 bg-slate-50/70 order-2 lg:order-1 block">
+          <div className={`col-span-1 md:col-span-5 border-l border-slate-200 overflow-y-auto p-4 sm:p-5 space-y-4 bg-white order-1 block ${
+            activeMobileTab === 'controls' ? 'block' : 'hidden md:block'
+          }`}>
             
             {/* Live Synchronized Banner */}
             <div className="bg-amber-50 border border-amber-200/80 rounded-xl p-2.5 flex items-center justify-between text-xs text-amber-950 font-bold gap-2">
@@ -631,12 +766,12 @@ export const TournamentCertificateModal: React.FC<TournamentCertificateModalProp
               )}
             </div>
 
-            {/* Editable Font Selector */}
+            {/* Editable Font Selector - Dropdown List with Arabic Letters */}
             <div className="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-3xs space-y-2">
               <div className="flex items-center justify-between gap-2">
                 <label className="text-xs font-bold text-slate-800 flex items-center gap-1.5 min-w-0">
                   <Type className="h-3.5 w-3.5 text-amber-600 shrink-0" />
-                  <span className="truncate">نوع خط الشهادة التقديرية (Font)</span>
+                  <span className="truncate">خط الشهادة التقديرية (قائمة منسدلة)</span>
                 </label>
                 <button
                   type="button"
@@ -648,25 +783,114 @@ export const TournamentCertificateModal: React.FC<TournamentCertificateModalProp
                 </button>
               </div>
               {!collapsedSections['font'] && (
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5 pt-0.5">
-                  {CERTIFICATE_FONTS.map(f => (
-                    <button
-                      key={f.id}
-                      type="button"
-                      onClick={() => setSelectedFont(f.id)}
-                      className={`p-2 rounded-xl text-xs border transition-all cursor-pointer text-center flex flex-col items-center justify-center ${
-                        selectedFont === f.id
-                          ? 'bg-amber-50 text-amber-950 border-amber-500 ring-2 ring-amber-500/20 shadow-3xs font-black'
-                          : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50 font-medium'
-                      }`}
-                      style={{ fontFamily: f.css }}
-                    >
-                      <span className="text-sm font-bold">أ ب جـ</span>
-                      <span className="text-[10px] text-slate-600 truncate max-w-full">{f.id}</span>
-                    </button>
-                  ))}
+                <div className="space-y-2 pt-0.5">
+                  <select
+                    value={selectedFont}
+                    onChange={(e) => setSelectedFont(e.target.value)}
+                    className="w-full text-xs font-bold px-3 py-2.5 border border-slate-300 rounded-xl bg-white focus:ring-2 focus:ring-amber-500 focus:outline-hidden cursor-pointer shadow-3xs text-slate-800"
+                  >
+                    {CERTIFICATE_FONTS.map(f => (
+                      <option key={f.id} value={f.id} style={{ fontFamily: f.css }}>
+                        {f.sampleText}
+                      </option>
+                    ))}
+                  </select>
+
+                  {/* Live Font Sample */}
+                  <div
+                    className="p-2.5 bg-amber-50/50 rounded-xl border border-amber-200 text-center text-slate-900 text-sm font-bold transition-all shadow-3xs"
+                    style={{ fontFamily: CERTIFICATE_FONTS.find(f => f.id === selectedFont)?.css || "'Amiri', serif" }}
+                  >
+                    أ ب جـ د هـ و ز — (معاينة الخط: {selectedFont})
+                  </div>
                 </div>
               )}
+            </div>
+
+            {/* Font Size Controls (التحكم في أحجام خطوط الشهادة) */}
+            <div className="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-3xs space-y-3">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <SlidersHorizontal className="h-3.5 w-3.5 text-amber-600 shrink-0" />
+                  <span className="text-xs font-bold text-slate-800 truncate">التحكم في أحجام خطوط الشهادة</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTitleFontSize(36);
+                    setRecipientFontSize(28);
+                    setBodyFontSize(15);
+                  }}
+                  className="text-[10px] text-amber-700 hover:underline font-bold cursor-pointer shrink-0"
+                >
+                  إعادة الضبط
+                </button>
+              </div>
+
+              <div className="space-y-2.5 pt-0.5">
+                {/* Title Size */}
+                <div className="space-y-1.5 bg-slate-50 p-2.5 rounded-xl border border-slate-100">
+                  <div className="flex items-center justify-between text-[11px] font-bold text-slate-700">
+                    <span>حجم عنوان "شهادة تقديرية":</span>
+                    <span className="font-mono text-amber-700 bg-white px-2 py-0.5 rounded border border-slate-200 text-[10px]">{titleFontSize}px</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] text-slate-400 font-bold">صغير</span>
+                    <input
+                      type="range"
+                      min="20"
+                      max="60"
+                      step="1"
+                      value={titleFontSize}
+                      onChange={(e) => setTitleFontSize(Number(e.target.value))}
+                      className="flex-1 accent-amber-600 h-1.5 bg-slate-200 rounded-lg cursor-pointer"
+                    />
+                    <span className="text-[10px] text-slate-400 font-bold">كبير</span>
+                  </div>
+                </div>
+
+                {/* Recipient / Student Name Size */}
+                <div className="space-y-1.5 bg-slate-50 p-2.5 rounded-xl border border-slate-100">
+                  <div className="flex items-center justify-between text-[11px] font-bold text-slate-700">
+                    <span>حجم اسم التلميذ / المكرم:</span>
+                    <span className="font-mono text-amber-700 bg-white px-2 py-0.5 rounded border border-slate-200 text-[10px]">{recipientFontSize}px</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] text-slate-400 font-bold">صغير</span>
+                    <input
+                      type="range"
+                      min="16"
+                      max="48"
+                      step="1"
+                      value={recipientFontSize}
+                      onChange={(e) => setRecipientFontSize(Number(e.target.value))}
+                      className="flex-1 accent-amber-600 h-1.5 bg-slate-200 rounded-lg cursor-pointer"
+                    />
+                    <span className="text-[10px] text-slate-400 font-bold">كبير</span>
+                  </div>
+                </div>
+
+                {/* Body Text Size */}
+                <div className="space-y-1.5 bg-slate-50 p-2.5 rounded-xl border border-slate-100">
+                  <div className="flex items-center justify-between text-[11px] font-bold text-slate-700">
+                    <span>حجم نص الديباجة والتفاصيل:</span>
+                    <span className="font-mono text-amber-700 bg-white px-2 py-0.5 rounded border border-slate-200 text-[10px]">{bodyFontSize}px</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] text-slate-400 font-bold">صغير</span>
+                    <input
+                      type="range"
+                      min="10"
+                      max="36"
+                      step="1"
+                      value={bodyFontSize}
+                      onChange={(e) => setBodyFontSize(Number(e.target.value))}
+                      className="flex-1 accent-amber-600 h-1.5 bg-slate-200 rounded-lg cursor-pointer"
+                    />
+                    <span className="text-[10px] text-slate-400 font-bold">كبير</span>
+                  </div>
+                </div>
+              </div>
             </div>
 
             {/* Editable Honorific / Introductory text */}
@@ -790,12 +1014,12 @@ export const TournamentCertificateModal: React.FC<TournamentCertificateModalProp
               )}
             </div>
 
-            {/* Quick Themes */}
+            {/* Quick Themes - Color dots without names */}
             <div className="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-3xs space-y-2">
               <div className="flex items-center justify-between gap-2">
                 <label className="text-xs font-bold text-slate-800 flex items-center gap-1.5 min-w-0">
                   <Palette className="h-3.5 w-3.5 text-red-600 shrink-0" />
-                  <span className="truncate">السمة اللونية والخلفية</span>
+                  <span className="truncate">ألوان الشهادة (نقط ألوان دائرية)</span>
                 </label>
                 <button
                   type="button"
@@ -807,57 +1031,34 @@ export const TournamentCertificateModal: React.FC<TournamentCertificateModalProp
                 </button>
               </div>
               {!collapsedSections['theme'] && (
-                <div className="grid grid-cols-5 gap-1.5 pt-0.5">
-                  <button
-                    type="button"
-                    onClick={() => setTheme('crimson_gold')}
-                    className={`h-9 rounded-xl flex items-center justify-center text-xs font-bold border transition-all cursor-pointer ${
-                      theme === 'crimson_gold' ? 'ring-2 ring-red-500 border-red-500 bg-red-50 text-red-950 font-black' : 'border-slate-200 bg-white text-slate-700'
-                    }`}
-                    title="قرمزي ذهبي (مثل النموذج المرفق)"
-                  >
-                    🔴 قرمزي
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setTheme('orange_vibrant')}
-                    className={`h-9 rounded-xl flex items-center justify-center text-xs font-bold border transition-all cursor-pointer ${
-                      theme === 'orange_vibrant' ? 'ring-2 ring-orange-500 border-orange-500 bg-orange-50 text-orange-950 font-black' : 'border-slate-200 bg-white text-slate-700'
-                    }`}
-                    title="برتقالي رياضي"
-                  >
-                    🟠 برتقالي
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setTheme('royal_blue')}
-                    className={`h-9 rounded-xl flex items-center justify-center text-xs font-bold border transition-all cursor-pointer ${
-                      theme === 'royal_blue' ? 'ring-2 ring-blue-500 border-blue-500 bg-blue-50 text-blue-950 font-black' : 'border-slate-200 bg-white text-slate-700'
-                    }`}
-                    title="أزرق ملكي"
-                  >
-                    🔵 أزرق
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setTheme('morocco_emerald')}
-                    className={`h-9 rounded-xl flex items-center justify-center text-xs font-bold border transition-all cursor-pointer ${
-                      theme === 'morocco_emerald' ? 'ring-2 ring-emerald-500 border-emerald-500 bg-emerald-50 text-emerald-950 font-black' : 'border-slate-200 bg-white text-slate-700'
-                    }`}
-                    title="أخضر مغربي"
-                  >
-                    🟢 أخضر
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setTheme('clean_slate')}
-                    className={`h-9 rounded-xl flex items-center justify-center text-xs font-bold border transition-all cursor-pointer ${
-                      theme === 'clean_slate' ? 'ring-2 ring-slate-600 border-slate-600 bg-slate-100 text-slate-950 font-black' : 'border-slate-200 bg-white text-slate-700'
-                    }`}
-                    title="رمادي أنيق"
-                  >
-                    ⚪ رمادي
-                  </button>
+                <div className="flex flex-wrap items-center gap-2.5 p-2.5 bg-slate-50/80 rounded-2xl border border-slate-200/80 justify-start">
+                  {[
+                    { id: 'crimson_gold', label: 'قرمزي ملكي', color: '#dc2626', ring: 'ring-red-500' },
+                    { id: 'orange_vibrant', label: 'برتقالي رياضي', color: '#f97316', ring: 'ring-orange-500' },
+                    { id: 'royal_blue', label: 'أزرق ملكي', color: '#2563eb', ring: 'ring-blue-500' },
+                    { id: 'morocco_emerald', label: 'أخضر زمردي', color: '#10b981', ring: 'ring-emerald-500' },
+                    { id: 'clean_slate', label: 'رمادي عصري', color: '#475569', ring: 'ring-slate-600' },
+                  ].map(t => {
+                    const isActive = theme === t.id;
+                    return (
+                      <button
+                        key={t.id}
+                        type="button"
+                        onClick={() => setTheme(t.id as CertificateTheme)}
+                        className={`w-8 h-8 rounded-full transition-all transform cursor-pointer relative flex items-center justify-center shrink-0 border-2 border-white shadow-xs hover:scale-115 ${
+                          isActive
+                            ? `ring-3 ${t.ring} scale-110 shadow-md`
+                            : 'hover:ring-2 hover:ring-slate-300'
+                        }`}
+                        style={{ backgroundColor: t.color }}
+                        title={t.label}
+                      >
+                        {isActive && (
+                          <span className="w-2.5 h-2.5 rounded-full bg-white shadow-xs" />
+                        )}
+                      </button>
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -1107,33 +1308,195 @@ export const TournamentCertificateModal: React.FC<TournamentCertificateModalProp
                     </button>
                   </div>
 
-                  {/* Upload custom background */}
-                  <div className="pt-2 border-t border-slate-100 flex items-center justify-between gap-2">
-                    <input
-                      type="file"
-                      ref={fileInputRef}
-                      onChange={handleImageUpload}
-                      accept="image/*"
-                      className="hidden"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => fileInputRef.current?.click()}
-                      className="flex-1 py-1.5 px-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-[10px] font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer border border-slate-200"
-                    >
-                      <Upload className="h-3.5 w-3.5" />
-                      <span>رفع خلفية مخصصة للشهادة</span>
-                    </button>
-                    {customBgImage && (
+                  {/* Upload custom silhouette image & size control */}
+                  <div className="pt-2.5 border-t border-slate-100 space-y-2.5">
+                    <div className="bg-indigo-50/60 p-2.5 rounded-xl border border-indigo-100 space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[11px] font-bold text-indigo-900 flex items-center gap-1">
+                          <FileImage className="h-3.5 w-3.5 text-indigo-600" />
+                          <span>رفع صورة رسم ظلي مخصص للشهادة:</span>
+                        </span>
+                        {customSilhouette && (
+                          <button
+                            type="button"
+                            onClick={() => setCustomSilhouette(null)}
+                            className="text-[10px] text-red-600 hover:text-red-800 font-bold hover:underline flex items-center gap-0.5 cursor-pointer"
+                          >
+                            <RotateCcw className="h-3 w-3" />
+                            <span>افتراضي</span>
+                          </button>
+                        )}
+                      </div>
+
+                      <input
+                        type="file"
+                        ref={silhouetteFileInputRef}
+                        onChange={handleSilhouetteUpload}
+                        accept="image/*"
+                        className="hidden"
+                      />
+
                       <button
                         type="button"
-                        onClick={() => setCustomBgImage(null)}
-                        className="p-1.5 text-red-600 hover:bg-red-50 rounded-lg text-[10px] font-bold border border-red-200 cursor-pointer"
-                        title="الرجوع للتصميم الأصلي"
+                        onClick={() => silhouetteFileInputRef.current?.click()}
+                        className={`w-full py-2 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer border ${
+                          customSilhouette 
+                            ? 'bg-indigo-600 text-white border-indigo-700 shadow-xs' 
+                            : 'bg-white hover:bg-indigo-50 text-indigo-800 border-indigo-200 shadow-2xs'
+                        }`}
                       >
-                        <RotateCcw className="h-3.5 w-3.5" />
+                        <Upload className="h-3.5 w-3.5" />
+                        <span>{customSilhouette ? 'تغيير صورة الرسم الظلي المرفوعة' : 'رفع رسم ظلي للشهادة (PNG/صورة)'}</span>
                       </button>
-                    )}
+
+                      {customSilhouette && (
+                        <p className="text-[10px] font-medium text-emerald-700 bg-emerald-50 p-1.5 rounded-lg border border-emerald-200 text-center">
+                          ✓ تم تفعيل صورة الرسم الظلي المخصصة
+                        </p>
+                      )}
+                    </div>
+
+                    {/* Silhouette Size / Scale Control Slider */}
+                    <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-200 space-y-1.5">
+                      <div className="flex items-center justify-between text-[11px] font-bold text-slate-700">
+                        <span className="flex items-center gap-1">
+                          <SlidersHorizontal className="h-3.5 w-3.5 text-slate-500" />
+                          <span>حجم الرسم الظلي بالشهادة:</span>
+                        </span>
+                        <span className="text-indigo-700 font-mono font-extrabold bg-white px-2 py-0.5 rounded border border-slate-200 text-[10px]">
+                          {silhouetteScale}%
+                        </span>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] text-slate-400 font-bold">صغير</span>
+                        <input
+                          type="range"
+                          min="20"
+                          max="200"
+                          step="5"
+                          value={silhouetteScale}
+                          onChange={(e) => setSilhouetteScale(Number(e.target.value))}
+                          className="flex-1 h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
+                        />
+                        <span className="text-[10px] text-slate-400 font-bold">كبير جداً</span>
+                      </div>
+
+                      <div className="grid grid-cols-4 gap-1 pt-1">
+                        {[35, 50, 70, 85].map((sc, idx) => (
+                          <button
+                            key={sc}
+                            type="button"
+                            onClick={() => setSilhouetteScale(sc)}
+                            className={`py-1 text-[10px] font-bold rounded-md border transition-all cursor-pointer ${
+                              silhouetteScale === sc ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
+                            }`}
+                          >
+                            {idx === 0 ? 'صغير' : idx === 1 ? 'عادي' : idx === 2 ? 'كبير' : 'ضخم'}
+                          </button>
+                        ))}
+                      </div>
+
+                      {/* Silhouette Opacity Control */}
+                      <div className="pt-2 border-t border-slate-200/80 space-y-1">
+                        <div className="flex items-center justify-between text-[11px] font-bold text-slate-700">
+                          <span>شفافية الرسم الظلي بالشهادة:</span>
+                          <span className="text-indigo-700 font-mono font-extrabold bg-white px-2 py-0.5 rounded border border-slate-200 text-[10px]">
+                            {silhouetteOpacity}%
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] text-slate-400 font-bold">خفيف</span>
+                          <input
+                            type="range"
+                            min="10"
+                            max="100"
+                            step="5"
+                            value={silhouetteOpacity}
+                            onChange={(e) => setSilhouetteOpacity(Number(e.target.value))}
+                            className="flex-1 h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
+                          />
+                          <span className="text-[10px] text-slate-400 font-bold">واضح</span>
+                        </div>
+                      </div>
+
+                      {/* Silhouette Position Controls */}
+                      <div className="pt-2 border-t border-slate-200/80 space-y-2">
+                        <div className="flex items-center justify-between text-[11px] font-bold text-slate-700">
+                          <span className="flex items-center gap-1">
+                            <Move className="h-3.5 w-3.5 text-slate-500" />
+                            <span>موقع الرسم الظلي:</span>
+                          </span>
+                          <button 
+                            onClick={() => setSilhouettePosition({ x: 0, y: 0 })}
+                            className="text-[10px] text-indigo-600 hover:text-indigo-800 underline"
+                          >
+                            توسيط
+                          </button>
+                        </div>
+                        
+                        <div className="space-y-2">
+                          {/* X Position */}
+                          <div className="flex items-center gap-2">
+                            <span className="text-[9px] text-slate-500 font-bold w-6">أفقي:</span>
+                            <input
+                              type="range"
+                              min="-100"
+                              max="100"
+                              step="1"
+                              value={silhouettePosition.x}
+                              onChange={(e) => setSilhouettePosition(prev => ({ ...prev, x: Number(e.target.value) }))}
+                              className="flex-1 h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-indigo-500"
+                            />
+                            <span className="text-[10px] text-slate-600 font-mono w-8 text-left">{silhouettePosition.x}%</span>
+                          </div>
+                          
+                          {/* Y Position */}
+                          <div className="flex items-center gap-2">
+                            <span className="text-[9px] text-slate-500 font-bold w-6">عمودي:</span>
+                            <input
+                              type="range"
+                              min="-100"
+                              max="100"
+                              step="1"
+                              value={silhouettePosition.y}
+                              onChange={(e) => setSilhouettePosition(prev => ({ ...prev, y: Number(e.target.value) }))}
+                              className="flex-1 h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-indigo-500"
+                            />
+                            <span className="text-[10px] text-slate-600 font-mono w-8 text-left">{silhouettePosition.y}%</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Upload custom background */}
+                    <div className="pt-2 border-t border-slate-100 flex items-center justify-between gap-2">
+                      <input
+                        type="file"
+                        ref={fileInputRef}
+                        onChange={handleImageUpload}
+                        accept="image/*"
+                        className="hidden"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => fileInputRef.current?.click()}
+                        className="flex-1 py-1.5 px-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-[10px] font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer border border-slate-200"
+                      >
+                        <Upload className="h-3.5 w-3.5" />
+                        <span>رفع خلفية مخصصة للشهادة</span>
+                      </button>
+                      {customBgImage && (
+                        <button
+                          type="button"
+                          onClick={() => setCustomBgImage(null)}
+                          className="p-1.5 text-red-600 hover:bg-red-50 rounded-lg text-[10px] font-bold border border-red-200 cursor-pointer"
+                          title="الرجوع للتصميم الأصلي"
+                        >
+                          <RotateCcw className="h-3.5 w-3.5" />
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </div>
               )}
@@ -1141,8 +1504,10 @@ export const TournamentCertificateModal: React.FC<TournamentCertificateModalProp
 
           </div>
 
-          {/* Certificate Preview Panel (Always Unified) */}
-          <div className="col-span-1 lg:col-span-7 bg-slate-200/90 p-3 sm:p-5 flex flex-col items-center justify-start lg:justify-center order-1 lg:order-2 shrink-0 lg:flex-1 lg:overflow-y-auto lg:overflow-x-hidden pb-6 sm:pb-8">
+          {/* Certificate Preview Panel */}
+          <div className={`col-span-1 md:col-span-7 bg-slate-100/50 p-3 sm:p-5 flex flex-col items-center justify-start md:justify-center order-2 shrink-0 md:flex-1 md:overflow-y-auto md:overflow-x-hidden pb-6 sm:pb-8 ${
+            activeMobileTab === 'preview' ? 'block' : 'hidden md:block'
+          }`}>
             
             {/* Action & Zoom Bar Above Preview */}
             <div className="w-full max-w-[700px] mb-2 sm:mb-3 flex items-center justify-between gap-1.5 text-xs shrink-0">
@@ -1213,10 +1578,21 @@ export const TournamentCertificateModal: React.FC<TournamentCertificateModalProp
                   type="button"
                   onClick={handleDownloadImage}
                   disabled={isExporting}
-                  className="text-[10px] sm:text-[11px] font-bold text-white bg-amber-600 px-2.5 py-1 rounded-lg hover:bg-amber-700 flex items-center gap-1 shadow-3xs cursor-pointer disabled:opacity-50"
+                  className="text-[10px] sm:text-[11px] font-bold text-white bg-amber-600 px-2 py-1 rounded-lg hover:bg-amber-700 flex items-center gap-1 shadow-3xs cursor-pointer disabled:opacity-50"
+                  title="تحميل كصورة PNG"
                 >
                   <Download className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
                   <span>PNG</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDownloadPdf}
+                  disabled={isExporting}
+                  className="text-[10px] sm:text-[11px] font-bold text-white bg-red-600 px-2 py-1 rounded-lg hover:bg-red-700 flex items-center gap-1 shadow-3xs cursor-pointer disabled:opacity-50"
+                  title="تحميل كملف PDF"
+                >
+                  <FileText className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
+                  <span>PDF</span>
                 </button>
               </div>
             </div>
@@ -1240,6 +1616,25 @@ export const TournamentCertificateModal: React.FC<TournamentCertificateModalProp
               {customBgImage && (
                 <div className="absolute inset-0 bg-white/88 backdrop-blur-[1px] pointer-events-none z-0" />
               )}
+
+              {/* Background Watermark Silhouette Layer (Behind Text, above bg) */}
+              <div 
+                className="absolute inset-0 pointer-events-none flex items-center justify-center z-[5]"
+                style={{ padding: '0px' }}
+              >
+                <div className="w-full h-full flex items-center justify-center max-w-full max-h-full">
+                  <SportSilhouette
+                    sportVisual={sportVisual}
+                    color={currentTheme.silhouetteColor}
+                    className="w-full h-full"
+                    isCertificate={true}
+                    customSilhouetteUrl={customSilhouette}
+                    silhouetteScale={silhouetteScale / 100}
+                    opacity={silhouetteOpacity}
+                    position={silhouettePosition}
+                  />
+                </div>
+              </div>
 
               {/* Inner Delicate Gold Border */}
               <div className={`absolute inset-1.5 sm:inset-3 border sm:border-2 ${currentTheme.borderInner} rounded-lg sm:rounded-xl pointer-events-none z-0`} />
@@ -1303,15 +1698,15 @@ export const TournamentCertificateModal: React.FC<TournamentCertificateModalProp
                       src={officialLogos.ministryLogo}
                       alt="شعار الوزارة"
                       style={{ height: `${Math.max(ministryLogoSize, 24)}px` }}
-                      className="mx-auto object-contain drop-shadow-xs transition-all max-h-6 sm:max-h-12"
+                      className="mx-auto object-contain drop-shadow-xs transition-all"
                     />
                   ) : (
                     <svg
                       style={{
-                        width: `${Math.round(ministryLogoSize * 0.5)}px`,
-                        height: `${Math.round(ministryLogoSize * 0.5)}px`
+                        width: `${Math.max(Math.round(ministryLogoSize * 0.5), 20)}px`,
+                        height: `${Math.max(Math.round(ministryLogoSize * 0.5), 20)}px`
                       }}
-                      className="transition-all max-w-[24px] sm:max-w-[42px]"
+                      className="transition-all"
                       viewBox="0 0 100 100"
                       fill="none"
                       xmlns="http://www.w3.org/2000/svg"
@@ -1333,14 +1728,14 @@ export const TournamentCertificateModal: React.FC<TournamentCertificateModalProp
                   {officialLogos?.frmssLogo ? (
                     <img
                       src={officialLogos.frmssLogo}
-                      alt="FRMSS"
+                      alt="Logo"
                       style={{ height: `${Math.max(frmssLogoSize, 24)}px` }}
-                      className="object-contain drop-shadow-xs transition-all max-h-6 sm:max-h-12"
+                      className="object-contain drop-shadow-xs transition-all"
                     />
                   ) : (
                     <div className="flex flex-col items-center">
                       <AppLogo size={Math.max(Math.round(frmssLogoSize * 0.65), 20)} />
-                      <span className="text-[5px] sm:text-[7px] font-black text-slate-700 tracking-tighter mt-0.5">FRMSS</span>
+                      <span className="text-[5px] sm:text-[7px] font-black text-slate-700 tracking-tighter mt-0.5">2026 / 2027</span>
                     </div>
                   )}
                 </div>
@@ -1349,7 +1744,10 @@ export const TournamentCertificateModal: React.FC<TournamentCertificateModalProp
               {/* --- 2. Title: « شــــهـــــادة تـــــقـــــديـــــريـــــة » --- */}
               <div className="relative z-10 text-center my-0.5 sm:my-1.5">
                 <div className="inline-block relative">
-                  <h1 className={`text-sm xs:text-base sm:text-3xl font-black ${currentTheme.titleColor} tracking-widest leading-tight font-serif drop-shadow-xs`}>
+                  <h1 
+                    className={`font-black ${currentTheme.titleColor} tracking-widest leading-tight drop-shadow-xs`}
+                    style={{ fontSize: `clamp(14px, calc(${titleFontSize}px * 0.75), ${titleFontSize}px)` }}
+                  >
                     شــهــادة تـقـديـريـة
                   </h1>
                   <div className="w-16 sm:w-40 h-0.5 bg-gradient-to-r from-transparent via-amber-500 to-transparent mx-auto mt-0.5" />
@@ -1359,26 +1757,38 @@ export const TournamentCertificateModal: React.FC<TournamentCertificateModalProp
               {/* --- 3. Body Text --- */}
               <div className="relative z-10 my-auto text-center px-1 sm:px-8 space-y-0.5 sm:space-y-3">
                 {/* Honorific Sentence */}
-                <div className="text-[7.5px] xs:text-[8.5px] sm:text-sm font-bold text-slate-800 leading-tight sm:leading-relaxed max-w-xl mx-auto truncate">
+                <div 
+                  className="font-bold text-slate-800 leading-tight sm:leading-relaxed max-w-xl mx-auto truncate"
+                  style={{ fontSize: `${bodyFontSize * 0.9}px` }}
+                >
                   {honorificText}
                 </div>
 
                 {/* Grant Sentence to Student */}
-                <div className="text-[8px] xs:text-[9.5px] sm:text-base font-extrabold text-slate-800 flex items-center justify-center flex-wrap gap-1 sm:gap-2 leading-tight">
+                <div 
+                  className="font-extrabold text-slate-800 flex items-center justify-center flex-wrap gap-1 sm:gap-2 leading-tight"
+                  style={{ fontSize: `${bodyFontSize * 0.9}px` }}
+                >
                   <span>بمنح هذه الشهادة للتلميذ(ة):</span>
                   {isFormBlank ? (
                     <span className="inline-block min-w-[90px] xs:min-w-[120px] sm:min-w-[280px] border-b sm:border-b-2 border-dotted border-slate-700 text-transparent select-none">
                       ..................................................................
                     </span>
                   ) : (
-                    <span className="font-black text-amber-950 font-serif text-[8.5px] xs:text-[10px] sm:text-lg border-b border-amber-900/40 px-1 sm:px-3 bg-white/60 rounded">
+                    <span 
+                      className="font-black text-amber-950 font-serif border-b border-amber-900/40 px-1 sm:px-3 bg-white/60 rounded"
+                      style={{ fontSize: `clamp(10px, calc(${recipientFontSize}px * 0.75), ${recipientFontSize}px)` }}
+                    >
                       {studentName || '................................................'}
                     </span>
                   )}
                 </div>
 
                 {/* Appreciation & Rank */}
-                <div className="text-[7.5px] xs:text-[9px] sm:text-sm font-bold text-slate-800 flex items-center justify-center flex-wrap gap-1 sm:gap-2 leading-tight">
+                <div 
+                  className="font-bold text-slate-800 flex items-center justify-center flex-wrap gap-1 sm:gap-2 leading-tight"
+                  style={{ fontSize: `${bodyFontSize * 0.85}px` }}
+                >
                   <span>تقديراً لمشاركتها الفعالة وفوزها بالرتبة:</span>
                   {isFormBlank ? (
                     <span className="inline-block min-w-[60px] xs:min-w-[80px] sm:min-w-[160px] border-b sm:border-b-2 border-dotted border-red-700 text-transparent select-none">
@@ -1392,9 +1802,15 @@ export const TournamentCertificateModal: React.FC<TournamentCertificateModalProp
                 </div>
 
                 {/* Championship Name & Category */}
-                <div className="text-[7.5px] xs:text-[8.5px] sm:text-sm font-bold text-slate-800 flex items-center justify-center flex-wrap gap-0.5 sm:gap-1.5 leading-tight">
+                <div 
+                  className="font-bold text-slate-800 flex items-center justify-center flex-wrap gap-0.5 sm:gap-1.5 leading-tight"
+                  style={{ fontSize: `${bodyFontSize * 0.85}px` }}
+                >
                   <span>في</span>
-                  <span className="font-black text-slate-900 bg-white/70 px-1 sm:px-2 py-0.5 rounded-md border border-slate-200/80 text-[7px] xs:text-[8px] sm:text-xs truncate max-w-[140px] sm:max-w-none">
+                  <span 
+                    className="font-black text-slate-900 bg-white/70 px-1 sm:px-2 py-0.5 rounded-md border border-slate-200/80 truncate max-w-[140px] sm:max-w-none"
+                    style={{ fontSize: `${bodyFontSize * 0.8}px` }}
+                  >
                     {championshipTitle}
                   </span>
                   <span>فئة:</span>
@@ -1403,14 +1819,20 @@ export const TournamentCertificateModal: React.FC<TournamentCertificateModalProp
                       ....................
                     </span>
                   ) : (
-                    <span className={`font-bold ${currentTheme.highlightText} text-[7.5px] xs:text-[8.5px] sm:text-sm`}>
+                    <span 
+                      className={`font-bold ${currentTheme.highlightText}`}
+                      style={{ fontSize: `${bodyFontSize * 0.85}px` }}
+                    >
                       {categoryGenderText || '....................'}
                     </span>
                   )}
                 </div>
 
                 {/* Academic Season */}
-                <div className="text-[7px] xs:text-[8px] sm:text-xs font-bold text-slate-600">
+                <div 
+                  className="font-bold text-slate-600"
+                  style={{ fontSize: `${bodyFontSize * 0.8}px` }}
+                >
                   <span>خلال الموسم الدراسي: </span>
                   <span className="font-extrabold text-slate-800 font-mono">{seasonText}</span>
                 </div>
@@ -1420,53 +1842,23 @@ export const TournamentCertificateModal: React.FC<TournamentCertificateModalProp
               <div className="relative z-10 w-full flex items-end justify-between pt-0.5 sm:pt-1">
                 
                 {/* Bottom-Left: Sport Visual Graphics */}
-                <div className="w-14 sm:w-32 h-8 sm:h-20 flex items-center justify-start">
-                  {sportVisual === 'chess' ? (
-                    <div className="flex items-center">
-                      <svg viewBox="0 0 100 80" className="w-10 sm:w-20 h-8 sm:h-16" fill="none" xmlns="http://www.w3.org/2000/svg">
-                        <polygon points="10,65 50,50 90,65 50,78" fill="#e2e8f0" stroke="#cbd5e1" strokeWidth="1" />
-                        <polygon points="10,65 30,57 50,65 30,72" fill="#b91c1c" opacity="0.8" />
-                        <polygon points="50,65 70,57 90,65 70,72" fill="#b91c1c" opacity="0.8" />
-                        
-                        <path d="M45,22 Q50,15 55,22 L53,35 L47,35 Z" fill="#ca8a04" stroke="#854d0e" strokeWidth="1" />
-                        <path d="M42,35 Q50,32 58,35 L56,56 Q50,58 44,56 Z" fill="#eab308" stroke="#a16207" strokeWidth="1" />
-                        <rect x="40" y="56" width="20" height="4" rx="1" fill="#ca8a04" />
-                        <circle cx="50" cy="16" r="3.5" fill="#facc15" stroke="#a16207" />
-                        <line x1="50" y1="9" x2="50" y2="15" stroke="#a16207" strokeWidth="1.5" />
-                        <line x1="47" y1="12" x2="53" y2="12" stroke="#a16207" strokeWidth="1.5" />
-                      </svg>
-                    </div>
-                  ) : sportVisual === 'athletics' ? (
-                    <svg viewBox="0 0 100 60" className="w-10 sm:w-20 h-7 sm:h-14" fill="none" xmlns="http://www.w3.org/2000/svg">
-                      <g fill={currentTheme.silhouetteColor}>
-                        <circle cx="50" cy="15" r="4" />
-                        <path d="M50 20 L47 32 L40 48 M50 20 L54 34 L62 50" stroke={currentTheme.silhouetteColor} strokeWidth="2.5" strokeLinecap="round" />
-                        <path d="M50 22 L40 14 M50 22 L60 14" stroke={currentTheme.silhouetteColor} strokeWidth="2.5" strokeLinecap="round" />
-                        <path d="M30 26 Q50 32 70 26" stroke="#ef4444" strokeWidth="2" />
-                      </g>
-                    </svg>
-                  ) : sportVisual === 'football' ? (
-                    <svg viewBox="0 0 100 60" className="w-10 sm:w-20 h-7 sm:h-14" fill="none" xmlns="http://www.w3.org/2000/svg">
-                      <g fill={currentTheme.silhouetteColor}>
-                        <circle cx="40" cy="15" r="4" />
-                        <path d="M40 20 L35 32 L25 48 M40 20 L52 30 L65 32" stroke={currentTheme.silhouetteColor} strokeWidth="2.5" strokeLinecap="round" />
-                        <circle cx="75" cy="30" r="5" fill="#ffffff" stroke="#0f172a" strokeWidth="1" />
-                      </g>
-                    </svg>
-                  ) : (
-                    <div className="flex items-center text-amber-500">
-                      <Trophy className="h-5 w-5 sm:h-9 sm:w-9 text-amber-500" />
-                    </div>
-                  )}
+                <div className="w-14 sm:w-32 h-8 sm:h-20 flex items-center justify-start overflow-hidden">
+                  {/* Note: Silhouette was moved to background layer z-[5] for better readability */}
                 </div>
 
                 {/* Center: Official Signature Box */}
                 <div className="text-center flex flex-col items-center min-w-[100px] sm:min-w-[150px]">
-                  <div className="text-[7.5px] xs:text-[8.5px] sm:text-[11px] font-extrabold text-slate-800">
+                  <div 
+                    className="font-extrabold text-slate-800"
+                    style={{ fontSize: `${bodyFontSize * 0.8}px` }}
+                  >
                     توقيع {signatoryRole}
                   </div>
                   {signatorySubRole && (
-                    <div className="text-[6.5px] xs:text-[7.5px] sm:text-[9px] font-bold text-slate-600 mb-0.5">
+                    <div 
+                      className="font-bold text-slate-600 mb-0.5"
+                      style={{ fontSize: `${bodyFontSize * 0.7}px` }}
+                    >
                       {signatorySubRole}
                     </div>
                   )}
@@ -1475,7 +1867,6 @@ export const TournamentCertificateModal: React.FC<TournamentCertificateModalProp
 
                 {/* Right Placeholder for symmetry with Map */}
                 <div className="w-14 sm:w-32 text-left">
-                  <span className="text-[6px] sm:text-[8px] text-slate-400 block font-mono">FRMSS • {activeSeason}</span>
                 </div>
               </div>
 

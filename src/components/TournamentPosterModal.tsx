@@ -15,16 +15,22 @@ import {
   Trophy,
   Share2,
   FileImage,
+  FileText,
   Layers,
   Building,
   Users,
   SlidersHorizontal,
+  Settings,
+  Eye,
+  Move,
   Type,
   ChevronDown
 } from 'lucide-react';
 import { toPng, toBlob } from 'html-to-image';
+import jsPDF from 'jspdf';
 import toast from 'react-hot-toast';
 import { AppLogo } from './AppLogo';
+import { SportSilhouette } from './SportSilhouettes';
 import { Tournament, Directorate, Sport } from '../types';
 import { SPORTS_MAP, OfficialLogos } from '../lib/dataService';
 
@@ -174,13 +180,22 @@ export const POSTER_THEME_OPTIONS: {
 ];
 
 export const POSTER_FONTS = [
-  { id: 'Cairo', name: 'خط القاهرة (Cairo) - عصري وإعلاني بارز', css: "'Cairo', sans-serif" },
-  { id: 'Tajawal', name: 'خط تجوال (Tajawal) - أنيق ومقروء', css: "'Tajawal', sans-serif" },
-  { id: 'Amiri', name: 'خط أميري (Amiri) - كلاسيكي ورسمي', css: "'Amiri', serif" },
-  { id: 'Changa', name: 'خط تشانغا (Changa) - رياضي قوي وعريض', css: "'Changa', sans-serif" },
-  { id: 'Readex Pro', name: 'خط ريديكس برو (Readex Pro) - دقيق ومتوازن', css: "'Readex Pro', sans-serif" },
-  { id: 'Noto Kufi Arabic', name: 'خط كوفي عربي (Noto Kufi) - هندسي ملفت', css: "'Noto Kufi Arabic', sans-serif" },
-  { id: 'Aref Ruqaa', name: 'خط الرقعة (Aref Ruqaa) - تقليدي فني', css: "'Aref Ruqaa', serif" }
+  { id: 'Arabswell', name: 'Arabswell (خط عربسويل الرقعي)', sampleText: 'أ ب جـ د — Arabswell (خط عربسويل الرقعي)', css: "'Arabswell', 'Aref Ruqaa Ink', 'Aref Ruqaa', cursive, serif" },
+  { id: 'Cairo', name: 'Cairo (خط القاهرة العصري)', sampleText: 'أ ب جـ د — Cairo (خط القاهرة العصري)', css: "'Cairo', sans-serif" },
+  { id: 'Tajawal', name: 'Tajawal (خط تجوال الأنيق)', sampleText: 'أ ب جـ د — Tajawal (خط تجوال الأنيق)', css: "'Tajawal', sans-serif" },
+  { id: 'Amiri', name: 'Amiri (خط أميري الكلاسيكي)', sampleText: 'أ ب جـ د — Amiri (خط أميري الكلاسيكي)', css: "'Amiri', serif" },
+  { id: 'Aref Ruqaa Ink', name: 'Aref Ruqaa Ink (خط حبر الرقعة)', sampleText: 'أ ب جـ د — Aref Ruqaa Ink (خط حبر الرقعة)', css: "'Aref Ruqaa Ink', 'Aref Ruqaa', serif" },
+  { id: 'Aref Ruqaa', name: 'Aref Ruqaa (خط الرقعة التقليدي)', sampleText: 'أ ب جـ د — Aref Ruqaa (خط الرقعة التقليدي)', css: "'Aref Ruqaa', serif" },
+  { id: 'Changa', name: 'Changa (خط تشانغا الرياضي العريض)', sampleText: 'أ ب جـ د — Changa (خط تشانغا الرياضي)', css: "'Changa', sans-serif" },
+  { id: 'Reem Kufi', name: 'Reem Kufi (خط ريم الكوفي)', sampleText: 'أ ب جـ د — Reem Kufi (خط ريم الكوفي)', css: "'Reem Kufi', sans-serif" },
+  { id: 'El Messiri', name: 'El Messiri (خط المسيري الفني)', sampleText: 'أ ب جـ د — El Messiri (خط المسيري الفني)', css: "'El Messiri', sans-serif" },
+  { id: 'Lalezar', name: 'Lalezar (خط لاليزار البارز)', sampleText: 'أ ب جـ د — Lalezar (خط لاليزار البارز)', css: "'Lalezar', cursive" },
+  { id: 'Marhey', name: 'Marhey (خط مرحي الانسيابي)', sampleText: 'أ ب جـ د — Marhey (خط مرحي الانسيابي)', css: "'Marhey', cursive" },
+  { id: 'Rakkas', name: 'Rakkas (خط رقاص المزخرف)', sampleText: 'أ ب جـ د — Rakkas (خط رقاص المزخرف)', css: "'Rakkas', cursive" },
+  { id: 'Alexandria', name: 'Alexandria (خط الإسكندرية)', sampleText: 'أ ب جـ د — Alexandria (خط الإسكندرية)', css: "'Alexandria', sans-serif" },
+  { id: 'Almarai', name: 'Almarai (خط المراعي الواضح)', sampleText: 'أ ب جـ د — Almarai (خط المراعي الواضح)', css: "'Almarai', sans-serif" },
+  { id: 'Readex Pro', name: 'Readex Pro (خط ريديكس برو)', sampleText: 'أ ب جـ د — Readex Pro (خط ريديكس برو)', css: "'Readex Pro', sans-serif" },
+  { id: 'Noto Kufi Arabic', name: 'Noto Kufi (خط كوفي عربي)', sampleText: 'أ ب جـ د — Noto Kufi (خط كوفي عربي)', css: "'Noto Kufi Arabic', sans-serif" }
 ];
 
 const QUICK_SLOGANS = [
@@ -246,6 +261,8 @@ export const TournamentPosterModal: React.FC<TournamentPosterModalProps> = ({
   // Visual Theme & Styling
   const [theme, setTheme] = useState<PosterTheme>('orange_vibrant');
   const [selectedFont, setSelectedFont] = useState<string>('Cairo');
+  const [titleFontSize, setTitleFontSize] = useState<number>(32);
+  const [bodyFontSize, setBodyFontSize] = useState<number>(14);
   // Logo Sizes (in px)
   const [ministryLogoSize, setMinistryLogoSize] = useState<number>(60);
   const [frmssLogoSize, setFrmssLogoSize] = useState<number>(60);
@@ -262,9 +279,31 @@ export const TournamentPosterModal: React.FC<TournamentPosterModalProps> = ({
 
   const [customBgImage, setCustomBgImage] = useState<string | null>(null);
   const [bgOverlayOpacity, setBgOverlayOpacity] = useState<number>(75);
+  const [customSilhouette, setCustomSilhouette] = useState<string | null>(null);
+  const [silhouetteScale, setSilhouetteScale] = useState<number>(50);
+  const [silhouetteOpacity, setSilhouetteOpacity] = useState<number>(40);
+  const [silhouettePosition, setSilhouettePosition] = useState<{ x: number, y: number }>({ x: 0, y: 0 });
+  const silhouetteFileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleSilhouetteUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      if (file.size > 5 * 1024 * 1024) {
+        toast.error('حجم صورة الرسم الظلي كبير، يرجى اختيار صورة أصلية أقل من 5 ميغابايت');
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = () => {
+        setCustomSilhouette(reader.result as string);
+        toast.success('تم رفع صورة الرسم الظلي المخصصة بنجاح!');
+      };
+      reader.readAsDataURL(file);
+    }
+  };
   const [isExporting, setIsExporting] = useState(false);
   const [viewMode, setViewMode] = useState<'split' | 'preview' | 'settings'>('split');
   const [previewZoom, setPreviewZoom] = useState<number>(1);
+  const [activeMobileTab, setActiveMobileTab] = useState<'controls' | 'preview'>('controls');
   const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>({});
 
   const toggleSection = (key: string) => {
@@ -319,18 +358,23 @@ export const TournamentPosterModal: React.FC<TournamentPosterModalProps> = ({
     }
   };
 
-  // Export as PNG
+  // Export as PNG (Pure Poster Card Only - No Preview Canvas or Shadow)
   const handleDownloadImage = async () => {
     if (!posterRef.current) return;
     setIsExporting(true);
-    const toastId = toast.loading('جاري توليد وتحميل الملصق بدقة عالية...');
+    const toastId = toast.loading('جاري توليد وتحميل الملصق بدقة عالية (PNG)...');
     try {
-      // Small pause to ensure rendering
       await new Promise(resolve => setTimeout(resolve, 150));
       const dataUrl = await toPng(posterRef.current, {
-        pixelRatio: 2.5,
+        pixelRatio: 3,
         cacheBust: true,
-        quality: 0.98
+        quality: 1.0,
+        style: {
+          transform: 'none',
+          boxShadow: 'none',
+          borderRadius: '0px',
+          margin: '0px'
+        }
       });
 
       const link = document.createElement('a');
@@ -338,10 +382,48 @@ export const TournamentPosterModal: React.FC<TournamentPosterModalProps> = ({
       link.href = dataUrl;
       link.click();
 
-      toast.success('تم تحميل ملصق البطولة بنجاح!', { id: toastId });
+      toast.success('تم تحميل ملصق البطولة كصورة PNG بنجاح!', { id: toastId });
     } catch (error) {
       console.error('Error exporting poster image:', error);
       toast.error('تعذر تصدير الملصق، يرجى المحاولة مرة أخرى', { id: toastId });
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  // Export as PDF (A4 Portrait - Poster Only)
+  const handleDownloadPdf = async () => {
+    if (!posterRef.current) return;
+    setIsExporting(true);
+    const toastId = toast.loading('جاري توليد وتحميل ملف PDF للملصق...');
+    try {
+      await new Promise(resolve => setTimeout(resolve, 150));
+      const dataUrl = await toPng(posterRef.current, {
+        pixelRatio: 3,
+        cacheBust: true,
+        quality: 1.0,
+        style: {
+          transform: 'none',
+          boxShadow: 'none',
+          borderRadius: '0px',
+          margin: '0px'
+        }
+      });
+
+      const pdf = new jsPDF({
+        orientation: 'portrait',
+        unit: 'mm',
+        format: 'a4'
+      });
+
+      // Fill A4 Portrait (210mm x 297mm) completely
+      pdf.addImage(dataUrl, 'PNG', 0, 0, 210, 297, undefined, 'FAST');
+      pdf.save(`ملصق-${sportName.replace(/\s+/g, '_')}-${Date.now()}.pdf`);
+
+      toast.success('تم تحميل ملف PDF للملصق بنجاح!', { id: toastId });
+    } catch (error) {
+      console.error('Error exporting poster PDF:', error);
+      toast.error('تعذر تصدير ملف PDF، يرجى المحاولة مرة أخرى', { id: toastId });
     } finally {
       setIsExporting(false);
     }
@@ -353,7 +435,17 @@ export const TournamentPosterModal: React.FC<TournamentPosterModalProps> = ({
     setIsExporting(true);
     const toastId = toast.loading('جاري نسخ صورة الملصق إلى الحافظة...');
     try {
-      const blob = await toBlob(posterRef.current, { pixelRatio: 2, cacheBust: true });
+      const blob = await toBlob(posterRef.current, {
+        pixelRatio: 2.5,
+        cacheBust: true,
+        quality: 1.0,
+        style: {
+          transform: 'none',
+          boxShadow: 'none',
+          borderRadius: '0px',
+          margin: '0px'
+        }
+      });
       if (blob && navigator.clipboard && (window as any).ClipboardItem) {
         await navigator.clipboard.write([
           new (window as any).ClipboardItem({ 'image/png': blob })
@@ -379,9 +471,15 @@ export const TournamentPosterModal: React.FC<TournamentPosterModalProps> = ({
     try {
       await new Promise(resolve => setTimeout(resolve, 150));
       const dataUrl = await toPng(posterRef.current, {
-        pixelRatio: 2.5,
+        pixelRatio: 3,
         cacheBust: true,
-        quality: 0.98
+        quality: 1.0,
+        style: {
+          transform: 'none',
+          boxShadow: 'none',
+          borderRadius: '0px',
+          margin: '0px'
+        }
       });
 
       const printWindow = window.open('', '_blank', 'width=800,height=1000');
@@ -689,15 +787,25 @@ export const TournamentPosterModal: React.FC<TournamentPosterModalProps> = ({
             <button
               onClick={handleDownloadImage}
               disabled={isExporting}
-              className="inline-flex items-center gap-1 px-2.5 py-1.5 sm:px-3.5 sm:py-2 rounded-lg sm:rounded-xl bg-orange-500 hover:bg-orange-600 text-white text-[11px] sm:text-xs font-bold transition-all shadow-xs cursor-pointer disabled:opacity-50"
+              className="inline-flex items-center gap-1 px-2 py-1.5 sm:px-3 sm:py-2 rounded-lg sm:rounded-xl bg-orange-500 hover:bg-orange-600 text-white text-[11px] sm:text-xs font-bold transition-all shadow-xs cursor-pointer disabled:opacity-50"
+              title="تحميل الملصق كصورة PNG عالية الدقة بدون إطار المعاينة"
             >
               <Download className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
               <span>تحميل PNG</span>
             </button>
             <button
+              onClick={handleDownloadPdf}
+              disabled={isExporting}
+              className="inline-flex items-center gap-1 px-2 py-1.5 sm:px-3 sm:py-2 rounded-lg sm:rounded-xl bg-red-600 hover:bg-red-700 text-white text-[11px] sm:text-xs font-bold transition-all shadow-xs cursor-pointer disabled:opacity-50"
+              title="تحميل الملصق كملف PDF قياس A4 للملصق فقط"
+            >
+              <FileText className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+              <span>تحميل PDF</span>
+            </button>
+            <button
               onClick={handlePrint}
               disabled={isExporting}
-              className="hidden sm:inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-700 hover:bg-slate-600 text-white text-xs font-bold transition-all cursor-pointer"
+              className="hidden sm:inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-700 hover:bg-slate-600 text-white text-xs font-bold transition-all cursor-pointer"
             >
               <Printer className="h-4 w-4" />
               <span>طباعة</span>
@@ -711,11 +819,39 @@ export const TournamentPosterModal: React.FC<TournamentPosterModalProps> = ({
           </div>
         </div>
 
-        {/* Modal Body: Split Layout (Always Unified) */}
-        <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 overflow-visible lg:overflow-hidden">
+        {/* Mobile Tabs Switcher - Visible only on small screens */}
+        <div className="md:hidden flex border-b border-slate-200 bg-white sticky top-0 z-[60] shrink-0">
+          <button
+            onClick={() => setActiveMobileTab('controls')}
+            className={`flex-1 py-3 px-2 text-xs font-bold flex items-center justify-center gap-1.5 transition-colors ${
+              activeMobileTab === 'controls' 
+                ? 'text-indigo-600 border-b-2 border-indigo-600 bg-indigo-50/30' 
+                : 'text-slate-500 hover:bg-slate-50'
+            }`}
+          >
+            <Settings className="h-3.5 w-3.5" />
+            تعديل البيانات والتصميم
+          </button>
+          <button
+            onClick={() => setActiveMobileTab('preview')}
+            className={`flex-1 py-3 px-2 text-xs font-bold flex items-center justify-center gap-1.5 transition-colors ${
+              activeMobileTab === 'preview' 
+                ? 'text-indigo-600 border-b-2 border-indigo-600 bg-indigo-50/30' 
+                : 'text-slate-500 hover:bg-slate-50'
+            }`}
+          >
+            <Eye className="h-3.5 w-3.5" />
+            معاينة الملصق
+          </button>
+        </div>
+
+        {/* Modal Body: Split Layout */}
+        <div className="flex-1 grid grid-cols-1 md:grid-cols-12 overflow-visible md:overflow-hidden bg-white">
           
           {/* Controls Panel */}
-          <div className="col-span-1 lg:col-span-5 border-l border-slate-200 shrink-0 lg:flex-1 lg:overflow-y-auto p-3.5 sm:p-5 space-y-3.5 sm:space-y-4 bg-slate-50 order-2 lg:order-1 block pb-12 sm:pb-8">
+          <div className={`col-span-1 md:col-span-5 border-l border-slate-200 shrink-0 md:flex-1 md:overflow-y-auto p-3.5 sm:p-5 space-y-3.5 sm:space-y-4 bg-white order-1 pb-12 sm:pb-8 ${
+            activeMobileTab === 'controls' ? 'block' : 'hidden md:block'
+          }`}>
             
             {/* Live Synchronized Banner */}
             <div className="bg-orange-50 border border-orange-200/80 rounded-xl p-2.5 flex items-center justify-between text-xs text-orange-950 font-bold gap-2">
@@ -743,14 +879,14 @@ export const TournamentPosterModal: React.FC<TournamentPosterModalProps> = ({
               </div>
             </div>
             
-            {/* Quick Themes */}
+            {/* Quick Themes - Circular Color Dots without Names */}
             <div className="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-3xs space-y-2.5">
               <div className="flex items-center justify-between gap-2">
                 <label className="text-xs font-bold text-slate-800 flex items-center gap-1.5 min-w-0">
                   <Palette className="h-4 w-4 text-orange-600 shrink-0" />
-                  <span className="truncate">السمة اللونية وتصميم الملصق</span>
-                  <span className="text-[10px] font-extrabold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-full shrink-0 hidden xs:inline-block">
-                    {POSTER_THEME_OPTIONS.length} ألوان
+                  <span className="truncate">الوان الملصق (نقط ألوان دائرية)</span>
+                  <span className="text-[10px] font-extrabold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-full shrink-0">
+                    {POSTER_THEME_OPTIONS.length}
                   </span>
                 </label>
                 <button
@@ -763,7 +899,7 @@ export const TournamentPosterModal: React.FC<TournamentPosterModalProps> = ({
                 </button>
               </div>
               {!collapsedSections['theme'] && (
-                <div className="grid grid-cols-2 xs:grid-cols-3 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-3 gap-1.5 pt-0.5">
+                <div className="flex flex-wrap items-center gap-2.5 p-2.5 bg-slate-50/80 rounded-2xl border border-slate-200/80 justify-start">
                   {POSTER_THEME_OPTIONS.map(t => {
                     const isActive = theme === t.id;
                     return (
@@ -771,18 +907,17 @@ export const TournamentPosterModal: React.FC<TournamentPosterModalProps> = ({
                         key={t.id}
                         type="button"
                         onClick={() => setTheme(t.id)}
-                        className={`h-9 px-2 rounded-xl flex items-center justify-start gap-2 text-xs font-bold border transition-all cursor-pointer ${
+                        className={`w-8 h-8 rounded-full transition-all transform cursor-pointer relative flex items-center justify-center shrink-0 border-2 border-white shadow-xs hover:scale-115 ${
                           isActive
-                            ? `ring-2 ${t.ringColor} ${t.activeBorder} ${t.activeBg} ${t.activeText} font-black shadow-xs`
-                            : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                            ? `ring-3 ${t.ringColor} scale-110 shadow-md`
+                            : 'hover:ring-2 hover:ring-slate-300'
                         }`}
-                        title={t.desc}
+                        style={{ backgroundColor: t.previewColor }}
+                        title={t.label}
                       >
-                        <span
-                          className="w-3.5 h-3.5 rounded-full shrink-0 border border-black/10 shadow-2xs"
-                          style={{ backgroundColor: t.previewColor }}
-                        />
-                        <span className="truncate text-[11px]">{t.label}</span>
+                        {isActive && (
+                          <span className="w-2.5 h-2.5 rounded-full bg-white shadow-xs" />
+                        )}
                       </button>
                     );
                   })}
@@ -790,12 +925,12 @@ export const TournamentPosterModal: React.FC<TournamentPosterModalProps> = ({
               )}
             </div>
 
-            {/* Font Selection Control */}
+            {/* Font Selection Control - Dropdown List with Arabic Letters */}
             <div className="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-3xs space-y-2">
               <div className="flex items-center justify-between gap-2">
                 <label className="text-xs font-bold text-slate-800 flex items-center gap-1.5 min-w-0">
                   <Type className="h-3.5 w-3.5 text-blue-600 shrink-0" />
-                  <span className="truncate">نوع خط الملصق الإعلاني (Font)</span>
+                  <span className="truncate">خط الملصق (قائمة منسدلة)</span>
                 </label>
                 <button
                   type="button"
@@ -807,25 +942,106 @@ export const TournamentPosterModal: React.FC<TournamentPosterModalProps> = ({
                 </button>
               </div>
               {!collapsedSections['font'] && (
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5 pt-0.5">
-                  {POSTER_FONTS.map(f => (
-                    <button
-                      key={f.id}
-                      type="button"
-                      onClick={() => setSelectedFont(f.id)}
-                      className={`p-2 rounded-xl text-xs border transition-all cursor-pointer text-center flex flex-col items-center justify-center ${
-                        selectedFont === f.id
-                          ? 'bg-blue-50 text-blue-950 border-blue-500 ring-2 ring-blue-500/20 shadow-3xs font-black'
-                          : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50 font-medium'
-                      }`}
-                      style={{ fontFamily: f.css }}
-                    >
-                      <span className="text-sm font-bold">أ ب جـ</span>
-                      <span className="text-[10px] text-slate-600 truncate max-w-full">{f.id}</span>
-                    </button>
-                  ))}
+                <div className="space-y-2 pt-0.5">
+                  <select
+                    value={selectedFont}
+                    onChange={(e) => setSelectedFont(e.target.value)}
+                    className="w-full text-xs font-bold px-3 py-2.5 border border-slate-300 rounded-xl bg-white focus:ring-2 focus:ring-blue-500 focus:outline-hidden cursor-pointer shadow-3xs text-slate-800"
+                  >
+                    {POSTER_FONTS.map(f => (
+                      <option key={f.id} value={f.id} style={{ fontFamily: f.css }}>
+                        {f.sampleText}
+                      </option>
+                    ))}
+                  </select>
+
+                  {/* Live Font Sample */}
+                  <div
+                    className="p-2.5 bg-slate-50 rounded-xl border border-slate-200 text-center text-slate-900 text-sm font-bold transition-all shadow-3xs"
+                    style={{ fontFamily: POSTER_FONTS.find(f => f.id === selectedFont)?.css || "'Cairo', sans-serif" }}
+                  >
+                    أ ب جـ د هـ و ز — (معاينة الخط: {selectedFont})
+                  </div>
                 </div>
               )}
+            </div>
+
+            {/* Font Size Controls (التحكم في حجم الخط) */}
+            <div className="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-3xs space-y-3">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <SlidersHorizontal className="h-3.5 w-3.5 text-indigo-600 shrink-0" />
+                  <span className="text-xs font-bold text-slate-800 truncate">التحكم في أحجام خطوط الملصق</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTitleFontSize(32);
+                    setBodyFontSize(14);
+                  }}
+                  className="text-[10px] text-indigo-600 hover:underline font-bold cursor-pointer shrink-0"
+                >
+                  إعادة الضبط
+                </button>
+              </div>
+
+              <div className="space-y-2.5 pt-0.5">
+                {/* Title Size */}
+                <div className="space-y-1.5 bg-slate-50 p-2.5 rounded-xl border border-slate-100">
+                  <div className="flex items-center justify-between text-[11px] font-bold text-slate-700">
+                    <span>حجم عنوان البطولة:</span>
+                    <span className="font-mono text-indigo-700 bg-white px-2 py-0.5 rounded border border-slate-200 text-[10px]">{titleFontSize}px</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] text-slate-400 font-bold">صغير</span>
+                    <input
+                      type="range"
+                      min="18"
+                      max="52"
+                      step="1"
+                      value={titleFontSize}
+                      onChange={(e) => setTitleFontSize(Number(e.target.value))}
+                      className="flex-1 accent-indigo-600 h-1.5 bg-slate-200 rounded-lg cursor-pointer"
+                    />
+                    <span className="text-[10px] text-slate-400 font-bold">كبير</span>
+                  </div>
+                  <div className="grid grid-cols-4 gap-1 pt-1">
+                    {[24, 32, 40, 48].map((sz, idx) => (
+                      <button
+                        key={sz}
+                        type="button"
+                        onClick={() => setTitleFontSize(sz)}
+                        className={`py-1 text-[10px] font-bold rounded-md border transition-all cursor-pointer ${
+                          titleFontSize === sz ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
+                        }`}
+                      >
+                        {idx === 0 ? 'صغير' : idx === 1 ? 'عادي' : idx === 2 ? 'كبير' : 'ضخم'}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Body/Info Size */}
+                <div className="space-y-1.5 bg-slate-50 p-2.5 rounded-xl border border-slate-100">
+                  <div className="flex items-center justify-between text-[11px] font-bold text-slate-700">
+                    <span>حجم خط التفاصيل والتاريخ:</span>
+                    <span className="font-mono text-indigo-700 bg-white px-2 py-0.5 rounded border border-slate-200 text-[10px]">{bodyFontSize}px</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] text-slate-400 font-bold">صغير</span>
+                    <input
+                      type="range"
+                      min="10"
+                      max="36"
+                      step="1"
+                      value={bodyFontSize}
+                      onChange={(e) => setBodyFontSize(Number(e.target.value))}
+                      className="flex-1 accent-indigo-600 h-1.5 bg-slate-200 rounded-lg cursor-pointer"
+                    />
+                    <span className="text-[10px] text-slate-400 font-bold">كبير</span>
+                  </div>
+                </div>
+              </div>
             </div>
 
             {/* Logo Sizes Controls */}
@@ -1190,53 +1406,215 @@ export const TournamentPosterModal: React.FC<TournamentPosterModalProps> = ({
                     </button>
                   </div>
 
-                  {/* Upload custom background optional */}
-                  <div className="pt-2 border-t border-slate-100 space-y-2">
-                    <div className="flex items-center justify-between gap-2">
+                  {/* Upload custom silhouette image & size control */}
+                  <div className="pt-2.5 border-t border-slate-100 space-y-2.5">
+                    <div className="bg-indigo-50/60 p-2.5 rounded-xl border border-indigo-100 space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[11px] font-bold text-indigo-900 flex items-center gap-1">
+                          <FileImage className="h-3.5 w-3.5 text-indigo-600" />
+                          <span>رفع صورة رسم ظلي مخصص:</span>
+                        </span>
+                        {customSilhouette && (
+                          <button
+                            type="button"
+                            onClick={() => setCustomSilhouette(null)}
+                            className="text-[10px] text-red-600 hover:text-red-800 font-bold hover:underline flex items-center gap-0.5 cursor-pointer"
+                          >
+                            <RotateCcw className="h-3 w-3" />
+                            <span>استعادة الافتراضي</span>
+                          </button>
+                        )}
+                      </div>
+
                       <input
                         type="file"
-                        ref={fileInputRef}
-                        onChange={handleImageUpload}
+                        ref={silhouetteFileInputRef}
+                        onChange={handleSilhouetteUpload}
                         accept="image/*"
                         className="hidden"
                       />
+
                       <button
                         type="button"
-                        onClick={() => fileInputRef.current?.click()}
-                        className="flex-1 py-1.5 px-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-[10px] font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer border border-slate-200"
+                        onClick={() => silhouetteFileInputRef.current?.click()}
+                        className={`w-full py-2 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer border ${
+                          customSilhouette 
+                            ? 'bg-indigo-600 text-white border-indigo-700 shadow-xs' 
+                            : 'bg-white hover:bg-indigo-50 text-indigo-800 border-indigo-200 shadow-2xs'
+                        }`}
                       >
                         <Upload className="h-3.5 w-3.5" />
-                        <span>{customBgImage ? 'تغيير صورة الخلفية المخصصة' : 'رفع صورة مخصصة للخلفية'}</span>
+                        <span>{customSilhouette ? 'تغيير صورة الرسم الظلي المرفوعة' : 'رفع رسم ظلي من الجهاز (PNG شفاف أو صورة)'}</span>
                       </button>
-                      {customBgImage && (
-                        <button
-                          type="button"
-                          onClick={() => setCustomBgImage(null)}
-                          className="p-1.5 text-red-600 hover:bg-red-50 rounded-lg text-[10px] font-bold border border-red-200 cursor-pointer"
-                          title="إلغاء الصورة المخصصة"
-                        >
-                          <RotateCcw className="h-3.5 w-3.5" />
-                        </button>
+
+                      {customSilhouette && (
+                        <p className="text-[10px] font-medium text-emerald-700 bg-emerald-50 p-1.5 rounded-lg border border-emerald-200 text-center">
+                          ✓ تم تفعيل صورة الرسم الظلي المخصصة
+                        </p>
                       )}
                     </div>
 
-                    {customBgImage && (
-                      <div className="bg-slate-100/80 p-2 rounded-xl border border-slate-200 space-y-1">
-                        <div className="flex items-center justify-between text-[10px] font-bold text-slate-700">
-                          <span>وضوح نصوص الملصق فوق الصورة:</span>
-                          <span className="text-orange-600 font-mono">{bgOverlayOpacity}%</span>
-                        </div>
+                    {/* Silhouette Size / Scale Control Slider */}
+                    <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-200 space-y-1.5">
+                      <div className="flex items-center justify-between text-[11px] font-bold text-slate-700">
+                        <span className="flex items-center gap-1">
+                          <SlidersHorizontal className="h-3.5 w-3.5 text-slate-500" />
+                          <span>حجم الرسم الظلي (كخلفية):</span>
+                        </span>
+                        <span className="text-indigo-700 font-mono font-extrabold bg-white px-2 py-0.5 rounded border border-slate-200 text-[10px]">
+                          {silhouetteScale}%
+                        </span>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] text-slate-400 font-bold">صغير</span>
                         <input
                           type="range"
-                          min="30"
-                          max="95"
+                          min="20"
+                          max="200"
                           step="5"
-                          value={bgOverlayOpacity}
-                          onChange={(e) => setBgOverlayOpacity(Number(e.target.value))}
-                          className="w-full h-1.5 bg-slate-300 rounded-lg appearance-none cursor-pointer accent-orange-600"
+                          value={silhouetteScale}
+                          onChange={(e) => setSilhouetteScale(Number(e.target.value))}
+                          className="flex-1 h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
                         />
+                        <span className="text-[10px] text-slate-400 font-bold">كبير جداً</span>
                       </div>
-                    )}
+
+                      <div className="grid grid-cols-4 gap-1 pt-1">
+                        {[35, 50, 70, 85].map((sc, idx) => (
+                          <button
+                            key={sc}
+                            type="button"
+                            onClick={() => setSilhouetteScale(sc)}
+                            className={`py-1 text-[10px] font-bold rounded-md border transition-all cursor-pointer ${
+                              silhouetteScale === sc ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
+                            }`}
+                          >
+                            {idx === 0 ? 'صغير' : idx === 1 ? 'عادي' : idx === 2 ? 'كبير' : 'ضخم'}
+                          </button>
+                        ))}
+                      </div>
+
+                      {/* Silhouette Opacity Control */}
+                      <div className="pt-2 border-t border-slate-200/80 space-y-1">
+                        <div className="flex items-center justify-between text-[11px] font-bold text-slate-700">
+                          <span>شفافية الرسم الظلي (خلف النصوص):</span>
+                          <span className="text-indigo-700 font-mono font-extrabold bg-white px-2 py-0.5 rounded border border-slate-200 text-[10px]">
+                            {silhouetteOpacity}%
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] text-slate-400 font-bold">خفيف</span>
+                          <input
+                            type="range"
+                            min="10"
+                            max="100"
+                            step="5"
+                            value={silhouetteOpacity}
+                            onChange={(e) => setSilhouetteOpacity(Number(e.target.value))}
+                            className="flex-1 h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
+                          />
+                          <span className="text-[10px] text-slate-400 font-bold">واضح</span>
+                        </div>
+                      </div>
+
+                      {/* Silhouette Position Controls */}
+                      <div className="pt-2 border-t border-slate-200/80 space-y-2">
+                        <div className="flex items-center justify-between text-[11px] font-bold text-slate-700">
+                          <span className="flex items-center gap-1">
+                            <Move className="h-3.5 w-3.5 text-slate-500" />
+                            <span>موقع الرسم الظلي:</span>
+                          </span>
+                          <button 
+                            onClick={() => setSilhouettePosition({ x: 0, y: 0 })}
+                            className="text-[10px] text-indigo-600 hover:text-indigo-800 underline"
+                          >
+                            توسيط
+                          </button>
+                        </div>
+                        
+                        <div className="space-y-2">
+                          {/* X Position */}
+                          <div className="flex items-center gap-2">
+                            <span className="text-[9px] text-slate-500 font-bold w-6">أفقي:</span>
+                            <input
+                              type="range"
+                              min="-100"
+                              max="100"
+                              step="1"
+                              value={silhouettePosition.x}
+                              onChange={(e) => setSilhouettePosition(prev => ({ ...prev, x: Number(e.target.value) }))}
+                              className="flex-1 h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-indigo-500"
+                            />
+                            <span className="text-[10px] text-slate-600 font-mono w-8 text-left">{silhouettePosition.x}%</span>
+                          </div>
+                          
+                          {/* Y Position */}
+                          <div className="flex items-center gap-2">
+                            <span className="text-[9px] text-slate-500 font-bold w-6">عمودي:</span>
+                            <input
+                              type="range"
+                              min="-100"
+                              max="100"
+                              step="1"
+                              value={silhouettePosition.y}
+                              onChange={(e) => setSilhouettePosition(prev => ({ ...prev, y: Number(e.target.value) }))}
+                              className="flex-1 h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-indigo-500"
+                            />
+                            <span className="text-[10px] text-slate-600 font-mono w-8 text-left">{silhouettePosition.y}%</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Upload custom background optional */}
+                    <div className="pt-2 border-t border-slate-100 space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <input
+                          type="file"
+                          ref={fileInputRef}
+                          onChange={handleImageUpload}
+                          accept="image/*"
+                          className="hidden"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => fileInputRef.current?.click()}
+                          className="flex-1 py-1.5 px-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-[10px] font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer border border-slate-200"
+                        >
+                          <Upload className="h-3.5 w-3.5" />
+                          <span>{customBgImage ? 'تغيير صورة الخلفية المخصصة' : 'رفع صورة مخصصة للخلفية'}</span>
+                        </button>
+                        {customBgImage && (
+                          <button
+                            type="button"
+                            onClick={() => setCustomBgImage(null)}
+                            className="p-1.5 text-red-600 hover:bg-red-50 rounded-lg text-[10px] font-bold border border-red-200 cursor-pointer"
+                            title="إلغاء الصورة المخصصة"
+                          >
+                            <RotateCcw className="h-3.5 w-3.5" />
+                          </button>
+                        )}
+                      </div>
+
+                      {customBgImage && (
+                        <div className="bg-slate-100/80 p-2 rounded-xl border border-slate-200 space-y-1">
+                          <div className="flex items-center justify-between text-[10px] font-bold text-slate-700">
+                            <span>وضوح نصوص الملصق فوق الصورة:</span>
+                            <span className="text-orange-600 font-mono">{bgOverlayOpacity}%</span>
+                          </div>
+                          <input
+                            type="range"
+                            min="30"
+                            max="95"
+                            step="5"
+                            value={bgOverlayOpacity}
+                            onChange={(e) => setBgOverlayOpacity(Number(e.target.value))}
+                            className="w-full h-1.5 bg-slate-300 rounded-lg appearance-none cursor-pointer accent-orange-600"
+                          />
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
               )}
@@ -1244,8 +1622,10 @@ export const TournamentPosterModal: React.FC<TournamentPosterModalProps> = ({
 
           </div>
 
-          {/* Poster Preview Panel (Always Unified) */}
-          <div className="col-span-1 lg:col-span-7 bg-slate-200/90 p-3 sm:p-5 flex flex-col items-center justify-start lg:justify-center order-1 lg:order-2 shrink-0 lg:flex-1 lg:overflow-y-auto lg:overflow-x-hidden pb-6 sm:pb-8">
+          {/* Poster Preview Panel */}
+          <div className={`col-span-1 md:col-span-7 bg-slate-100/50 p-3 sm:p-5 flex flex-col items-center justify-start md:justify-center order-2 shrink-0 md:flex-1 md:overflow-y-auto md:overflow-x-hidden pb-6 sm:pb-8 ${
+            activeMobileTab === 'preview' ? 'block' : 'hidden md:block'
+          }`}>
             
             {/* Action & Zoom Bar Above Preview */}
             <div className="w-full max-w-[480px] mb-2 sm:mb-3 flex items-center justify-between gap-1.5 text-xs shrink-0">
@@ -1310,10 +1690,21 @@ export const TournamentPosterModal: React.FC<TournamentPosterModalProps> = ({
                   type="button"
                   onClick={handleDownloadImage}
                   disabled={isExporting}
-                  className="text-[10px] sm:text-[11px] font-bold text-white bg-orange-600 px-2.5 py-1 rounded-lg hover:bg-orange-700 flex items-center gap-1 shadow-3xs cursor-pointer disabled:opacity-50"
+                  className="text-[10px] sm:text-[11px] font-bold text-white bg-orange-600 px-2 py-1 rounded-lg hover:bg-orange-700 flex items-center gap-1 shadow-3xs cursor-pointer disabled:opacity-50"
+                  title="تحميل كصورة PNG"
                 >
                   <Download className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
                   <span>PNG</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDownloadPdf}
+                  disabled={isExporting}
+                  className="text-[10px] sm:text-[11px] font-bold text-white bg-red-600 px-2 py-1 rounded-lg hover:bg-red-700 flex items-center gap-1 shadow-3xs cursor-pointer disabled:opacity-50"
+                  title="تحميل كملف PDF"
+                >
+                  <FileText className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
+                  <span>PDF</span>
                 </button>
               </div>
             </div>
@@ -1340,6 +1731,24 @@ export const TournamentPosterModal: React.FC<TournamentPosterModalProps> = ({
                   style={{ backgroundColor: `rgba(255, 255, 255, ${bgOverlayOpacity / 100})` }}
                 />
               )}
+
+              {/* Background Watermark Silhouette Layer (Behind Text, above bg) */}
+              <div 
+                className="absolute inset-0 pointer-events-none flex items-center justify-center z-[5]"
+                style={{ padding: '0px' }}
+              >
+                <div className="w-full h-full flex items-center justify-center max-w-full max-h-full">
+                  <SportSilhouette
+                    sportVisual={sportVisual}
+                    color={currentTheme.silhouetteColor}
+                    className="w-full h-full"
+                    customSilhouetteUrl={customSilhouette}
+                    silhouetteScale={silhouetteScale / 100}
+                    opacity={silhouetteOpacity}
+                    position={silhouettePosition}
+                  />
+                </div>
+              </div>
 
               {/* Decorative Subtle Corner Ribbons / Geometric Accents */}
               <div className="absolute top-0 right-0 w-16 sm:w-32 h-16 sm:h-32 bg-gradient-to-bl from-orange-400/10 to-transparent rounded-bl-full pointer-events-none z-0" />
@@ -1436,13 +1845,19 @@ export const TournamentPosterModal: React.FC<TournamentPosterModalProps> = ({
                 <div className={`text-[7.5px] xs:text-[8.5px] sm:text-sm font-black ${currentTheme.sloganPrefix}`}>
                   {organizerPrefix}
                 </div>
-                <div className={`text-[8.5px] xs:text-[10.5px] sm:text-base font-extrabold ${currentTheme.subHeaderColor} tracking-tight leading-snug`}>
+                <div 
+                  className={`font-extrabold ${currentTheme.subHeaderColor} tracking-tight leading-snug`}
+                  style={{ fontSize: `${bodyFontSize * 1.1}px` }}
+                >
                   {organizer}
                 </div>
                 <div className="text-[6.5px] xs:text-[7.5px] sm:text-xs font-black text-slate-600">
                   {partnerPrefix}
                 </div>
-                <div className={`text-[7.5px] xs:text-[9px] sm:text-sm font-extrabold ${currentTheme.partnerColor} leading-tight`}>
+                <div 
+                  className={`font-extrabold ${currentTheme.partnerColor} leading-tight`}
+                  style={{ fontSize: `${bodyFontSize * 0.9}px` }}
+                >
                   {partner}
                 </div>
               </div>
@@ -1455,7 +1870,10 @@ export const TournamentPosterModal: React.FC<TournamentPosterModalProps> = ({
                     <div className="text-[6.5px] xs:text-[8px] sm:text-xs font-extrabold tracking-wider opacity-90 mb-0.5 sm:mb-1">
                       منافسات الرياضة المدرسية
                     </div>
-                    <div className="text-[9.5px] xs:text-[12px] sm:text-2xl font-black tracking-tight leading-tight drop-shadow-xs">
+                    <div 
+                      className="font-black tracking-tight leading-tight drop-shadow-xs"
+                      style={{ fontSize: `${titleFontSize}px` }}
+                    >
                       {championshipTitle}
                     </div>
                   </div>
@@ -1468,7 +1886,10 @@ export const TournamentPosterModal: React.FC<TournamentPosterModalProps> = ({
                   تحت شعار
                 </span>
                 <div className="inline-block bg-white/95 backdrop-blur-xs px-2 xs:px-3 sm:px-5 py-0.5 sm:py-1.5 rounded-full border border-slate-300/80 shadow-2xs">
-                  <span className="text-[7.5px] xs:text-[9.5px] sm:text-sm font-extrabold text-slate-800 tracking-tight">
+                  <span 
+                    className="font-extrabold text-slate-800 tracking-tight"
+                    style={{ fontSize: `${bodyFontSize}px` }}
+                  >
                     "{slogan}"
                   </span>
                 </div>
@@ -1481,9 +1902,19 @@ export const TournamentPosterModal: React.FC<TournamentPosterModalProps> = ({
                   <div className={`w-5 h-5 xs:w-6 xs:h-6 sm:w-10 sm:h-10 rounded-md sm:rounded-xl bg-orange-100 flex items-center justify-center ${currentTheme.iconColor} shrink-0`}>
                     <Calendar className="h-2.5 w-2.5 xs:h-3 xs:w-3 sm:h-5 sm:w-5" />
                   </div>
-                  <div className="min-w-0">
-                    <div className="text-[7px] xs:text-[8px] sm:text-xs font-black text-slate-900 leading-tight truncate">{dateText}</div>
-                    <div className="text-[6px] xs:text-[7px] sm:text-[10px] font-extrabold text-orange-600 truncate mt-0.5">{timeText}</div>
+                  <div className="min-w-0 flex-1">
+                    <div 
+                      className="font-black text-slate-900 leading-tight break-words"
+                      style={{ fontSize: `${bodyFontSize}px` }}
+                    >
+                      {dateText}
+                    </div>
+                    <div 
+                      className="font-extrabold text-orange-600 break-words mt-0.5"
+                      style={{ fontSize: `${bodyFontSize * 0.8}px` }}
+                    >
+                      {timeText}
+                    </div>
                   </div>
                 </div>
 
@@ -1492,151 +1923,32 @@ export const TournamentPosterModal: React.FC<TournamentPosterModalProps> = ({
                   <div className={`w-5 h-5 xs:w-6 xs:h-6 sm:w-10 sm:h-10 rounded-md sm:rounded-xl bg-red-100 flex items-center justify-center text-red-600 shrink-0`}>
                     <MapPin className="h-2.5 w-2.5 xs:h-3 xs:w-3 sm:h-5 sm:w-5" />
                   </div>
-                  <div className="min-w-0">
-                    <div className="text-[7px] xs:text-[8px] sm:text-xs font-black text-slate-900 leading-tight truncate">{venueText}</div>
-                    <div className="text-[6px] xs:text-[7px] sm:text-[10px] font-extrabold text-slate-600 truncate mt-0.5">{resolvedDirName}</div>
+                  <div className="min-w-0 flex-1">
+                    <div 
+                      className="font-black text-slate-900 leading-tight break-words"
+                      style={{ fontSize: `${bodyFontSize}px` }}
+                    >
+                      {venueText}
+                    </div>
+                    <div 
+                      className="font-extrabold text-slate-600 break-words mt-0.5"
+                      style={{ fontSize: `${bodyFontSize * 0.8}px` }}
+                    >
+                      {resolvedDirName}
+                    </div>
                   </div>
                 </div>
               </div>
 
               {/* --- 6. Dynamic Sport Silhouette & Track Graphic --- */}
-              <div className="relative z-10 mt-auto pt-1 sm:pt-1.5 flex items-end justify-center min-h-[48px] xs:min-h-[60px] sm:min-h-[110px] overflow-hidden">
-                {/* Athletic Finish line / Running Silhouette */}
-                {sportVisual === 'athletics' && (
-                  <div className="w-full relative flex flex-col items-center">
-                    <svg viewBox="0 0 500 160" className="w-full h-12 xs:h-16 sm:h-28" fill="none" xmlns="http://www.w3.org/2000/svg">
-                      {/* Running Track Lanes */}
-                      <path d="M0 150 Q250 120 500 150" stroke="#f97316" strokeWidth="6" opacity="0.6" />
-                      <path d="M0 135 Q250 108 500 135" stroke="#ea580c" strokeWidth="4" opacity="0.4" />
-                      <path d="M0 120 Q250 96 500 120" stroke="#c2410c" strokeWidth="3" opacity="0.2" />
-
-                      {/* Center Runner Silhouettes crossing finish tape */}
-                      <g fill={currentTheme.silhouetteColor}>
-                        {/* Winner runner with hands raised */}
-                        <circle cx="250" cy="40" r="10" />
-                        <path d="M250 52 L242 78 L230 115 M250 52 L260 82 L275 118" stroke={currentTheme.silhouetteColor} strokeWidth="6" strokeLinecap="round" />
-                        {/* Raised arms */}
-                        <path d="M250 55 L225 35 L215 20 M250 55 L275 35 L285 20" stroke={currentTheme.silhouetteColor} strokeWidth="6" strokeLinecap="round" />
-                        {/* Torso */}
-                        <path d="M246 50 L254 50 L252 82 L244 82 Z" />
-
-                        {/* Finish Ribbon */}
-                        <path d="M160 65 Q250 78 340 65" stroke="#ef4444" strokeWidth="5" strokeLinecap="round" opacity="0.9" />
-
-                        {/* Left Runner */}
-                        <circle cx="150" cy="60" r="8" />
-                        <path d="M150 70 L144 92 L132 120 M150 70 L158 96 L168 122 M150 74 L135 84 M150 74 L165 78" stroke={currentTheme.silhouetteColor} strokeWidth="5" strokeLinecap="round" opacity="0.75" />
-
-                        {/* Right Runner */}
-                        <circle cx="350" cy="62" r="8" />
-                        <path d="M350 72 L342 94 L330 122 M350 72 L360 98 L370 124 M350 76 L335 86 M350 76 L365 80" stroke={currentTheme.silhouetteColor} strokeWidth="5" strokeLinecap="round" opacity="0.75" />
-                      </g>
-                    </svg>
-                  </div>
-                )}
-
-                {/* Football Silhouette */}
-                {sportVisual === 'football' && (
-                  <div className="w-full relative flex items-center justify-between px-3 sm:px-6">
-                    <svg viewBox="0 0 400 130" className="w-full h-12 xs:h-16 sm:h-28" fill="none" xmlns="http://www.w3.org/2000/svg">
-                      {/* Football Striker Kicking */}
-                      <g fill={currentTheme.silhouetteColor}>
-                        <circle cx="160" cy="35" r="10" />
-                        <path d="M160 48 L145 74 L125 105 M160 48 L185 68 L220 72" stroke={currentTheme.silhouetteColor} strokeWidth="7" strokeLinecap="round" />
-                        <path d="M160 52 L135 48 M160 52 L175 42" stroke={currentTheme.silhouetteColor} strokeWidth="6" strokeLinecap="round" />
-                        <path d="M155 46 L165 46 L155 76 L145 76 Z" />
-                      </g>
-
-                      {/* Speed lines */}
-                      <path d="M220 70 L260 55" stroke="#f97316" strokeWidth="4" strokeDasharray="6 4" />
-                      <path d="M210 80 L250 65" stroke="#ea580c" strokeWidth="3" strokeDasharray="4 4" />
-
-                      {/* Soccer Ball */}
-                      <g transform="translate(265, 40)">
-                        <circle cx="20" cy="20" r="18" fill="#ffffff" stroke="#0f172a" strokeWidth="2.5" />
-                        <polygon points="20,10 28,16 25,25 15,25 12,16" fill="#0f172a" />
-                        <polygon points="20,10 12,16 8,14 13,8 20,8" fill="#0f172a" opacity="0.6" />
-                        <polygon points="28,16 25,25 32,30 36,22 30,16" fill="#0f172a" opacity="0.6" />
-                      </g>
-                    </svg>
-                  </div>
-                )}
-
-                {/* Basketball Silhouette */}
-                {sportVisual === 'basketball' && (
-                  <div className="w-full flex items-center justify-center">
-                    <svg viewBox="0 0 350 130" className="w-full h-12 xs:h-16 sm:h-28" fill="none" xmlns="http://www.w3.org/2000/svg">
-                      {/* Hoop */}
-                      <rect x="260" y="20" width="8" height="50" fill="#334155" />
-                      <line x1="260" y1="35" x2="225" y2="35" stroke="#ef4444" strokeWidth="4" />
-                      <path d="M225 35 L230 65 L255 65 L260 35 Z" fill="none" stroke="#e2e8f0" strokeWidth="2" strokeDasharray="4 3" />
-
-                      {/* Dunker */}
-                      <g fill={currentTheme.silhouetteColor}>
-                        <circle cx="160" cy="30" r="9" />
-                        <path d="M160 40 L165 70 L150 105 M160 40 L180 75 L195 110" stroke={currentTheme.silhouetteColor} strokeWidth="6" strokeLinecap="round" />
-                        <path d="M160 45 L195 28 L220 28" stroke={currentTheme.silhouetteColor} strokeWidth="6" strokeLinecap="round" />
-                        <circle cx="218" cy="24" r="12" fill="#ea580c" stroke="#fff" strokeWidth="1.5" />
-                      </g>
-                    </svg>
-                  </div>
-                )}
-
-                {/* Handball Silhouette */}
-                {sportVisual === 'handball' && (
-                  <div className="w-full flex items-center justify-center">
-                    <svg viewBox="0 0 350 130" className="w-full h-12 xs:h-16 sm:h-28" fill="none" xmlns="http://www.w3.org/2000/svg">
-                      <g fill={currentTheme.silhouetteColor}>
-                        <circle cx="160" cy="35" r="9" />
-                        <path d="M160 46 L150 75 L135 110 M160 46 L175 75 L200 100" stroke={currentTheme.silhouetteColor} strokeWidth="6" strokeLinecap="round" />
-                        <path d="M160 50 L135 55 M160 50 L195 35 L210 25" stroke={currentTheme.silhouetteColor} strokeWidth="6" strokeLinecap="round" />
-                        <circle cx="215" cy="22" r="7" fill="#f59e0b" stroke="#fff" strokeWidth="1" />
-                      </g>
-                    </svg>
-                  </div>
-                )}
-
-                {/* Volleyball Silhouette */}
-                {sportVisual === 'volleyball' && (
-                  <div className="w-full flex items-center justify-center">
-                    <svg viewBox="0 0 350 130" className="w-full h-12 xs:h-16 sm:h-28" fill="none" xmlns="http://www.w3.org/2000/svg">
-                      {/* Net */}
-                      <line x1="200" y1="30" x2="200" y2="120" stroke="#64748b" strokeWidth="4" />
-                      <rect x="195" y="30" width="10" height="40" fill="#cbd5e1" stroke="#94a3b8" strokeWidth="1" strokeDasharray="3 3" />
-
-                      {/* Spiker */}
-                      <g fill={currentTheme.silhouetteColor}>
-                        <circle cx="150" cy="32" r="9" />
-                        <path d="M150 42 L145 72 L130 105 M150 42 L165 72 L180 105" stroke={currentTheme.silhouetteColor} strokeWidth="6" strokeLinecap="round" />
-                        <path d="M150 46 L130 50 M150 46 L175 25 L190 15" stroke={currentTheme.silhouetteColor} strokeWidth="6" strokeLinecap="round" />
-                        <circle cx="196" cy="12" r="10" fill="#0284c7" stroke="#fff" strokeWidth="1.5" />
-                      </g>
-                    </svg>
-                  </div>
-                )}
-
-                {/* Table Tennis / Chess / Trophy Fallback */}
-                {(sportVisual === 'table_tennis' || sportVisual === 'chess' || sportVisual === 'trophy') && (
-                  <div className="w-full flex items-center justify-center py-0.5">
-                    <div className="flex items-center gap-2 sm:gap-6">
-                      <div className="w-6 h-6 sm:w-14 sm:h-14 rounded-lg bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-xs sm:text-3xl shadow-xs">
-                        🏆
-                      </div>
-                      <div className="text-center">
-                        <div className="text-[8.5px] sm:text-sm font-black text-slate-800">تنافس رياضي شريف</div>
-                        <div className="text-[7px] sm:text-[10px] font-extrabold text-amber-700">قيم التعاون والتميز المدرسي</div>
-                      </div>
-                      <div className="w-6 h-6 sm:w-14 sm:h-14 rounded-lg bg-orange-500/15 border border-orange-500/30 flex items-center justify-center text-xs sm:text-3xl shadow-xs">
-                        🥇
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
+              {/* Note: Silhouette was moved to background layer z-[5] for better readability */}
 
               {/* --- Bottom Footer Strip --- */}
               <div className="relative z-10 pt-0.5 sm:pt-2 border-t border-slate-300/60 text-center space-y-0.5">
-                <div className="text-[6.5px] xs:text-[7.5px] sm:text-[10px] font-bold text-slate-700 leading-tight">
+                <div 
+                  className="font-bold text-slate-700 leading-tight"
+                  style={{ fontSize: `${bodyFontSize * 0.75}px` }}
+                >
                   البوابة الرقمية لتدبير البطولات المدرسية الاقليمية والجهوية والوطنية
                 </div>
                 <div className="text-[5.5px] xs:text-[6.5px] sm:text-[9px] font-medium text-slate-500">

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Sport, Tournament } from '../types';
 import { DataService, SPORTS_MAP } from '../lib/dataService';
-import { X, Calendar, Clock, ShieldCheck, Check, MapPin, FileText, Activity } from 'lucide-react';
+import { X, Calendar, Clock, ShieldCheck, Check, MapPin, FileText, Activity, GraduationCap } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 interface EditTournamentScheduleModalProps {
@@ -22,6 +22,7 @@ export const EditTournamentScheduleModal: React.FC<EditTournamentScheduleModalPr
   const [startDate, setStartDate] = useState('2026-03-01');
   const [endDate, setEndDate] = useState('2026-03-30');
   const [deadlineDate, setDeadlineDate] = useState('2026-02-28T23:59');
+  const [selectedLevels, setSelectedLevels] = useState<('Primary' | 'Middle' | 'High')[]>(['High']);
   const [status, setStatus] = useState<Tournament['status']>('Scheduled');
   const [description, setDescription] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -77,6 +78,12 @@ export const EditTournamentScheduleModal: React.FC<EditTournamentScheduleModalPr
         if (first.description) {
           setDescription(first.description);
         }
+        if (first.level) {
+          const lvls = first.level.split(',').map((l: string) => l.trim()).filter(Boolean) as ('Primary' | 'Middle' | 'High')[];
+          if (lvls.length > 0) setSelectedLevels(lvls);
+        } else {
+          setSelectedLevels(['High']);
+        }
       }
     }
   }, [sport, tournaments, isOpen]);
@@ -98,6 +105,11 @@ export const EditTournamentScheduleModal: React.FC<EditTournamentScheduleModalPr
       return;
     }
 
+    if (selectedLevels.length === 0) {
+      toast.error('يرجى تحديد سلك تعليمي مسموح له بالمشاركة واحد على الأقل');
+      return;
+    }
+
     setIsSubmitting(true);
     try {
       await DataService.updateSportDates(sport.id, {
@@ -105,10 +117,11 @@ export const EditTournamentScheduleModal: React.FC<EditTournamentScheduleModalPr
         endDate: new Date(endDate),
         registrationDeadline: deadlineDate ? new Date(deadlineDate) : null,
         status: status,
-        description: description.trim()
+        description: description.trim(),
+        level: selectedLevels.join(',')
       });
 
-      toast.success(`تم تحديث تواريخ وبرمجة بطولة ${sportName} بنجاح!`);
+      toast.success(`تم تحديث تواريخ وضوابط بطولة ${sportName} بنجاح!`);
       onUpdated();
       onClose();
     } catch (err) {
@@ -229,6 +242,49 @@ export const EditTournamentScheduleModal: React.FC<EditTournamentScheduleModalPr
               <p className="text-[10px] text-slate-400 mt-1">
                 عند انقضاء هذا التوقيت، يتعذر على الأساتذة المؤطرين إضافة تلاميذ جدد تلقائياً.
               </p>
+            </div>
+          </div>
+
+          {/* Allowed Educational Cycles */}
+          <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-3xs space-y-3">
+            <h4 className="text-xs font-black text-slate-800 flex items-center gap-2">
+              <GraduationCap className="h-4 w-4 text-indigo-600" />
+              <span>الأسلاك التعليمية المسموح لها بالمشاركة:</span>
+            </h4>
+
+            <div className="space-y-1">
+              <label className="block text-[11px] text-slate-500 mb-1.5">
+                حدد السلك أو الأسلاك التعليمية المعنية بالتسجيل في هذه البطولة:
+              </label>
+              <div className="flex flex-wrap gap-2 pt-1">
+                {[
+                  { id: 'Primary', label: 'التعليم الابتدائي' },
+                  { id: 'Middle', label: 'التعليم الإعدادي' },
+                  { id: 'High', label: 'التعليم التأهيلي' }
+                ].map((item) => {
+                  const isSelected = selectedLevels.includes(item.id as any);
+                  return (
+                    <button
+                      type="button"
+                      key={item.id}
+                      onClick={() => {
+                        setSelectedLevels(prev =>
+                          prev.includes(item.id as any)
+                            ? (prev.length > 1 ? prev.filter(x => x !== item.id) : prev)
+                            : [...prev, item.id as any]
+                        );
+                      }}
+                      className={`flex-1 min-w-[120px] px-3 py-2.5 rounded-xl text-xs font-black text-center border transition-all cursor-pointer ${
+                        isSelected
+                          ? 'bg-indigo-600 border-indigo-600 text-white shadow-3xs hover:bg-indigo-700'
+                          : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                      }`}
+                    >
+                      {item.label}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           </div>
 

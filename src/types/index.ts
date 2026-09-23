@@ -66,6 +66,12 @@ export interface User {
   pendingTransfer?: DirectorateTransferRequest | null; // طلب انتقال معلق إلى مديرية أخرى بانتظار موافقة مسيرها
 }
 
+export interface CustomAgeCategory {
+  id: string;
+  name: string;
+  yearsExpression: string; // e.g. "2015 وما بعد" or "2012/2013/2014"
+}
+
 export interface Sport {
   id: string;
   name: string;
@@ -73,6 +79,7 @@ export interface Sport {
   icon?: string;
   managerId?: string;
   ageCategories?: string[]; // الفئات المعنية بالتخصص الرياضي التي حددها المسير الرئيسي
+  customAgeCategories?: CustomAgeCategory[]; // الفئات العمرية المخصصة ديناميكياً مع مسمياتها وسنواتها
   studentLimit?: number; // السقف الأقصى لعدد التلاميذ المسموح بمشاركتهم من كل مؤسسة في هذا التخصص
   athleticsSpecialties?: string[]; // تخصصات ألعاب القوى المتاحة (القفز الطولي، القفز العلوي، جري 80 متر...)
   isCustom?: boolean; // رياضة مضافة من طرف المسير المركزي
@@ -80,13 +87,14 @@ export interface Sport {
   createdAt?: any;
 }
 
-export type RoleKey = 'TEACHER' | 'TECH_COMMITTEE_HEAD' | 'SPORT_MANAGER' | 'CENTRAL_ADMIN';
+export type RoleKey = 'TEACHER' | 'TECH_COMMITTEE_HEAD' | 'SPORT_MANAGER' | 'CENTRAL_ADMIN' | 'REFEREE';
 
 export interface RoleSidebarPermissions {
   TEACHER: string[];
   TECH_COMMITTEE_HEAD: string[];
   SPORT_MANAGER: string[];
   CENTRAL_ADMIN: string[];
+  REFEREE: string[];
 }
 
 export type AffiliationType = 'non_club' | 'club_affiliated' | 'open';
@@ -106,11 +114,14 @@ export interface Tournament {
   registrationDeadline?: any; // آخر أجل للتسجيل في البطولة
   status: 'Draft' | 'Scheduled' | 'Ongoing' | 'Completed' | 'Archived';
   description?: string;
+  circuitLocation?: string; // مكان المطاف / الحلبة (خاص بالعدو الريفي)
   managerName?: string;
   managerPhone?: string;
   managerEmail?: string;
   accessCode?: string; // القن السري المخصص لمسؤول البطولة
   directorateId?: string;
+  createdAt?: any;
+  updatedAt?: any;
 }
 
 export interface School {
@@ -219,6 +230,10 @@ export interface Student {
   createdAt: any;
   updatedAt: any;
   directorateId?: string;
+  directorateName?: string;
+  academyName?: string;
+  bibNumber?: string | number;
+  crossCountryBibNumber?: string | number;
 }
 
 export interface AppNotification {
@@ -234,13 +249,20 @@ export interface AppNotification {
 }
 
 export interface PodiumWinner {
-  rank: number; // 1, 2, 3, 4, 5...
+  rank: number; // 1, 2, 3, 4, 5... (رتبة الفئة الرسمية)
   fullName: string;
   schoolName: string;
   studentId?: string;
   time?: string;
   bibNumber?: string;
   notes?: string;
+  directorateName?: string;
+  academyName?: string;
+  supervisorName?: string;
+  participationType?: string;
+  categoryId?: string; // معرف الفئة، مثل: 'u12_male' أو 'u12_female'
+  categoryTitle?: string; // التسمية العربية للفئة، مثل: 'سباق البراعم ذكور'
+  overallRank?: number; // الترتيب العام في السباق المشترك
 }
 
 export interface CrossCountryCategoryResult {

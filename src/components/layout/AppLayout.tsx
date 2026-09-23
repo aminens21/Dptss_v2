@@ -36,7 +36,9 @@ import {
   RotateCw,
   RefreshCw,
   Wifi,
-  Award
+  Award,
+  Wrench,
+  Boxes
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import toast from 'react-hot-toast';
@@ -147,10 +149,11 @@ export const AppLayout: React.FC = () => {
   }, []);
 
   const [rolePermissions, setRolePermissions] = useState<RoleSidebarPermissions>({
-    CENTRAL_ADMIN: ['/dashboard', '/tournaments', '/schools', '/teachers', '/tech-committee', '/referees', '/matches', '/posters-certificates', '/statistics', '/directorates', '/sports-config'],
-    TECH_COMMITTEE_HEAD: ['/dashboard', '/tournaments', '/schools', '/teachers', '/tech-committee', '/referees', '/matches', '/posters-certificates', '/statistics', '/sports-config'],
-    SPORT_MANAGER: ['/dashboard', '/tournaments', '/schools', '/teachers', '/referees', '/matches', '/posters-certificates', '/statistics'],
-    TEACHER: ['/dashboard', '/tournaments', '/schools', '/matches', '/posters-certificates', '/statistics']
+    CENTRAL_ADMIN: ['/dashboard', '/tournaments', '/schools', '/teachers', '/tech-committee', '/referees', '/matches', '/helper-apps', '/posters-certificates', '/statistics', '/directorates', '/sports-config'],
+    TECH_COMMITTEE_HEAD: ['/dashboard', '/tournaments', '/schools', '/teachers', '/tech-committee', '/referees', '/matches', '/helper-apps', '/posters-certificates', '/statistics', '/sports-config'],
+    SPORT_MANAGER: ['/dashboard', '/tournaments', '/schools', '/teachers', '/referees', '/matches', '/helper-apps', '/posters-certificates', '/statistics'],
+    TEACHER: ['/dashboard', '/tournaments', '/schools', '/matches', '/posters-certificates', '/statistics'],
+    REFEREE: ['/dashboard', '/matches', '/statistics']
   });
   
   useEffect(() => {
@@ -320,26 +323,40 @@ export const AppLayout: React.FC = () => {
     : (userProfile?.role as RoleKey) || 'TEACHER';
 
   const defaultRoleHrefs: Record<RoleKey, string[]> = {
-    CENTRAL_ADMIN: ['/dashboard', '/schools', '/tournaments', '/posters-certificates', '/teachers', '/tech-committee', '/referees', '/matches', '/statistics', '/sports-config'],
-    TECH_COMMITTEE_HEAD: ['/dashboard', '/schools', '/tournaments', '/posters-certificates', '/teachers', '/tech-committee', '/referees', '/matches', '/statistics', '/sports-config'],
-    SPORT_MANAGER: ['/dashboard', '/schools', '/tournaments', '/posters-certificates', '/teachers', '/referees', '/matches', '/statistics'],
-    TEACHER: ['/dashboard', '/schools', '/tournaments', '/posters-certificates', '/matches', '/statistics']
+    CENTRAL_ADMIN: ['/dashboard', '/schools', '/tournaments', '/teachers', '/tech-committee', '/referees', '/matches', '/helper-apps', '/posters-certificates', '/statistics', '/sports-config', '/permissions'],
+    TECH_COMMITTEE_HEAD: ['/dashboard', '/schools', '/tournaments', '/teachers', '/tech-committee', '/referees', '/matches', '/helper-apps', '/posters-certificates', '/statistics', '/sports-config'],
+    SPORT_MANAGER: ['/dashboard', '/schools', '/tournaments', '/teachers', '/referees', '/matches', '/helper-apps', '/posters-certificates', '/statistics'],
+    TEACHER: ['/dashboard', '/schools', '/tournaments', '/matches', '/posters-certificates', '/statistics'],
+    REFEREE: ['/dashboard', '/matches', '/statistics']
   };
 
-  const allowedHrefs = Array.isArray(rolePermissions?.[userRoleKey])
+  const rawHrefs = Array.isArray(rolePermissions?.[userRoleKey])
     ? rolePermissions[userRoleKey]
     : (defaultRoleHrefs[userRoleKey] || defaultRoleHrefs.TEACHER);
 
+  const allowedHrefs = [...rawHrefs];
+  // Ensure /helper-apps is visible for admin and committee roles if not yet in stored permissions
+  if ((userProfile?.isSuperAdmin || userRoleKey === 'CENTRAL_ADMIN' || userRoleKey === 'TECH_COMMITTEE_HEAD' || userRoleKey === 'SPORT_MANAGER') && !allowedHrefs.includes('/helper-apps')) {
+    const matchIdx = allowedHrefs.indexOf('/matches');
+    if (matchIdx !== -1) {
+      allowedHrefs.splice(matchIdx + 1, 0, '/helper-apps');
+    } else {
+      allowedHrefs.push('/helper-apps');
+    }
+  }
+
   const allNavItems = [
-    { name: canSendNotifications ? 'الرئيسية والإشعارات' : 'الرئيسية', href: '/dashboard', icon: LayoutDashboard },
+    { name: 'الرئيسية', href: '/dashboard', icon: LayoutDashboard },
     { name: 'المؤسسات التعليمية', href: '/schools', icon: Users },
     { name: 'البطولات الرياضية المدرسية', href: '/tournaments', icon: Trophy },
-    { name: 'الملصقات والشواهد التقديرية', href: '/posters-certificates', icon: Award },
     { name: 'الأطر التربوية', href: '/teachers', icon: UserIcon },
     { name: 'رؤساء اللجن التقنية', href: '/tech-committee', icon: ShieldCheck },
     { name: 'الحكام', href: '/referees', icon: UserCheck },
     { name: 'المباريات والنتائج', href: '/matches', icon: CalendarDays },
+    { name: 'تطبيقات مساعدة', href: '/helper-apps', icon: Boxes },
+    { name: 'الملصقات والشواهد التقديرية', href: '/posters-certificates', icon: Award },
     { name: 'إحصائيات عامة', href: '/statistics', icon: BarChart3 },
+    { name: 'صلاحيات المستخدمين', href: '/permissions', icon: KeyRound },
     { name: 'الإعدادات والضوابط', href: '/sports-config', icon: Settings }
   ];
 
@@ -848,6 +865,94 @@ export const AppLayout: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-2 sm:gap-3 md:gap-4">
+            {/* Notifications Center Bell with Dropdown */}
+            <div className="relative" ref={notificationsRef}>
+              <button
+                type="button"
+                onClick={() => setIsNotificationsOpen(!isNotificationsOpen)}
+                className={`p-2 rounded-full transition-all cursor-pointer shadow-2xs hover:shadow-xs flex items-center justify-center shrink-0 relative ${
+                  isNotificationsOpen
+                    ? 'bg-blue-100 text-blue-800 border border-blue-300'
+                    : 'bg-slate-50 hover:bg-slate-100 text-slate-600 border border-slate-200'
+                }`}
+                title="مركز الإشعارات والتنبيهات"
+              >
+                <Bell className="w-4 h-4" />
+                {unreadCount > 0 && (
+                  <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[9px] font-extrabold w-4.5 h-4.5 rounded-full flex items-center justify-center animate-pulse border border-white">
+                    {unreadCount}
+                  </span>
+                )}
+              </button>
+
+              {/* Dropdown Panel */}
+              {isNotificationsOpen && (
+                <div className="absolute left-0 mt-2 w-80 bg-white rounded-2xl shadow-2xl border border-slate-200 p-3 z-50 animate-in fade-in zoom-in-95 duration-100 text-right" dir="rtl">
+                  <div className="flex items-center justify-between border-b border-slate-100 pb-2 mb-2">
+                    <div className="flex items-center gap-1.5 font-black text-slate-800 text-xs">
+                      <Bell className="w-4 h-4 text-blue-600" />
+                      <span>الإشعارات والتنبيهات</span>
+                    </div>
+                    {unreadCount > 0 && (
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          await markAllAsRead();
+                          toast.success('تم تحديد جميع الإشعارات كمقروءة');
+                        }}
+                        className="text-[10px] font-bold text-blue-600 hover:text-blue-800 hover:underline cursor-pointer"
+                      >
+                        قراءة الكل
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="max-h-72 overflow-y-auto space-y-1.5 pr-1">
+                    {notifications.length === 0 ? (
+                      <div className="py-8 text-center text-slate-400 space-y-2">
+                        <div className="text-2xl">🔔</div>
+                        <p className="text-[10px] font-bold">لا توجد أي إشعارات أو تنبيهات حالياً</p>
+                      </div>
+                    ) : (
+                      notifications.map((n) => {
+                        const isUnread = !n.readBy?.includes(userProfile?.id || '');
+                        return (
+                          <div
+                            key={n.id}
+                            onClick={async () => {
+                              if (isUnread) {
+                                await markAsRead(n.id);
+                              }
+                            }}
+                            className={`p-2.5 rounded-xl border text-right transition-all cursor-pointer flex flex-col gap-1 ${
+                              isUnread
+                                ? 'bg-blue-50/50 border-blue-100 hover:bg-blue-50'
+                                : 'bg-slate-50/40 border-slate-100 hover:bg-slate-50'
+                            }`}
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <h4 className={`text-xs leading-snug font-black ${isUnread ? 'text-blue-950' : 'text-slate-700'}`}>
+                                {n.title}
+                              </h4>
+                              {isUnread && (
+                                <span className="w-2 h-2 rounded-full bg-blue-600 shrink-0 mt-1 animate-ping" />
+                              )}
+                            </div>
+                            <p className="text-[10px] text-slate-500 leading-relaxed font-semibold">
+                              {n.body}
+                            </p>
+                            <span className="text-[8px] text-slate-400 self-start font-medium mt-0.5">
+                              {formatNotificationTime(n.createdAt)}
+                            </span>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
             {/* Sync Button (مزامنة البيانات صامتاً بين الأجهزة) - Small Green circular arrows with rotation on sync */}
             <button
               type="button"
@@ -896,106 +1001,6 @@ export const AppLayout: React.FC = () => {
               </div>
               <Edit3 className="h-3 w-3 text-slate-400 hidden sm:block" />
             </button>
-
-            {/* Notification Bell with Badge */}
-            <div className="relative" ref={notificationsRef}>
-              {unreadCount > 0 && (
-                <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-600 text-white text-[10px] flex items-center justify-center rounded-full border-2 border-white font-black z-10 shadow-xs animate-bounce">
-                  {unreadCount}
-                </span>
-              )}
-              <button 
-                onClick={() => setIsNotificationsOpen(!isNotificationsOpen)}
-                title="الإشعارات والتنبيهات"
-                className={cn(
-                  "p-2 text-slate-600 hover:text-slate-900 rounded-xl transition-all cursor-pointer relative flex items-center justify-center border border-slate-200/80 bg-slate-50 hover:bg-slate-100",
-                  isNotificationsOpen ? "bg-blue-50 border-blue-300 text-blue-700 shadow-xs" : ""
-                )}
-              >
-                <Bell className="h-5 w-5 text-slate-700" />
-              </button>
-              
-              {/* Notifications Dropdown - Responsive positioning */}
-              {isNotificationsOpen && (
-                <div className="fixed inset-x-3 top-16 sm:absolute sm:inset-auto sm:left-0 sm:top-full sm:mt-2 w-auto sm:w-80 bg-white rounded-2xl shadow-2xl border-2 border-blue-100 sm:border-slate-200 overflow-hidden z-50 animate-in fade-in zoom-in-95 duration-150">
-                  <div className="flex items-center justify-between p-3 border-b border-slate-100 bg-slate-50/50">
-                    <h3 className="text-sm font-bold text-slate-800">الإشعارات</h3>
-                    {unreadCount > 0 && (
-                      <button 
-                        onClick={markAllAsRead}
-                        className="text-[10px] font-bold text-blue-600 hover:text-blue-700 flex items-center gap-1 cursor-pointer"
-                      >
-                        <Check className="h-3 w-3" />
-                        تحديد الكل كمقروء
-                      </button>
-                    )}
-                  </div>
-
-                  {/* Web Push Prompt inside dropdown */}
-                  {permission !== 'granted' && (
-                    <div className="p-3 bg-gradient-to-r from-blue-50 to-indigo-50 border-b border-blue-100 flex flex-col gap-1.5 text-right">
-                      <p className="text-[10px] font-bold text-slate-700">تلقي مواعيد وتحديثات مباريات تخصصك فوراً؟</p>
-                      <button
-                        onClick={requestPermission}
-                        className="w-full bg-blue-600 text-white text-[10px] font-bold py-1.5 px-2 rounded hover:bg-blue-700 transition-colors flex items-center justify-center gap-1 cursor-pointer"
-                      >
-                        <Bell className="h-3.5 w-3.5 shrink-0" />
-                        تفعيل إشعارات الهاتف والويب
-                      </button>
-                    </div>
-                  )}
-
-                  <div className="max-h-80 overflow-y-auto">
-                    {notifications.length > 0 ? (
-                      <div className="divide-y divide-slate-100">
-                        {notifications.map((notification) => {
-                          const isUnread = !notification.readBy?.includes(userProfile?.id || '');
-                          return (
-                            <div 
-                              key={notification.id} 
-                              className={cn(
-                                "p-3 transition-colors hover:bg-slate-50 cursor-pointer text-right",
-                                isUnread ? "bg-blue-50/30" : ""
-                              )}
-                              onClick={() => {
-                                if (isUnread) {
-                                  markAsRead(notification.id);
-                                }
-                              }}
-                            >
-                              <div className="flex items-start gap-3">
-                                <div className={cn(
-                                  "mt-1.5 w-2 h-2 rounded-full shrink-0",
-                                  isUnread ? "bg-blue-500" : "bg-transparent"
-                                )} />
-                                <div className="flex-1 min-w-0">
-                                  <p className={cn(
-                                    "text-xs leading-relaxed font-bold",
-                                    isUnread ? "text-slate-900 font-extrabold" : "text-slate-500 font-semibold"
-                                  )}>
-                                    {notification.title}
-                                  </p>
-                                  <p className="text-[11px] text-slate-600 mt-0.5 leading-normal">
-                                    {notification.body}
-                                  </p>
-                                  <p className="text-[9px] text-slate-400 mt-1 font-medium">
-                                    {formatNotificationTime(notification.createdAt)}
-                                  </p>
-                                </div>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    ) : (
-                      <div className="p-6 text-center text-slate-400 text-xs font-medium">
-                        لا توجد إشعارات حالياً
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
 
             <div className="h-6 w-px bg-slate-200 hidden sm:block"></div>
 

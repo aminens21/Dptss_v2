@@ -1,7 +1,7 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { DataService, SPORTS_MAP } from '../lib/dataService';
-import { User } from '../types';
+import { User, Sport } from '../types';
 import {
   ShieldCheck,
   Search,
@@ -34,6 +34,18 @@ export const TechCommitteeHeads: React.FC = () => {
   const [editingHeadId, setEditingHeadId] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  // States for confirmation modal
+  const [deleteConfirm, setDeleteConfirm] = useState<{
+    isOpen: boolean;
+    type: 'head' | 'member';
+    id: string;
+    sportKey?: string;
+    name: string;
+    title: string;
+    message: string;
+  } | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+
   // States for Members
   const [addingMemberSport, setAddingMemberSport] = useState<string | null>(null);
   const [selectedMemberTeacherId, setSelectedMemberTeacherId] = useState('');
@@ -44,6 +56,17 @@ export const TechCommitteeHeads: React.FC = () => {
   const [selectedMemberSport, setSelectedMemberSport] = useState('');
   const [selectedMemberIdForModal, setSelectedMemberIdForModal] = useState('');
   const [isSubmittingMemberModal, setIsSubmittingMemberModal] = useState(false);
+  const [sportsConfig, setSportsConfig] = useState<Sport[]>([]);
+
+  const effectiveSportsMap = useMemo(() => {
+    const map: Record<string, { name: string; icon: string }> = { ...SPORTS_MAP };
+    sportsConfig.forEach((s: Sport) => {
+      if (s.id) {
+        map[s.id] = { name: s.name, icon: s.icon };
+      }
+    });
+    return map;
+  }, [sportsConfig, SPORTS_MAP]);
 
   const isCentralAdmin = userProfile?.role === 'CENTRAL_ADMIN' || userProfile?.isSuperAdmin || userProfile?.role === 'SPORT_MANAGER';
   const canManageTechCommittee = isCentralAdmin;
@@ -63,9 +86,13 @@ export const TechCommitteeHeads: React.FC = () => {
     setLoading(true);
     try {
       const activeDirId = DataService.getActiveDirectorateId();
-      const allTeachers = await DataService.getTeachers();
+      const [allTeachers, allSports] = await Promise.all([
+        DataService.getTeachers(),
+        DataService.getSportsConfig()
+      ]);
       const dirTeachers = allTeachers.filter(t => (t.directorateId || 'taourirt') === activeDirId);
       setTeachers(dirTeachers);
+      setSportsConfig(allSports);
     } catch (error) {
       console.error('Error loading teachers data:', error);
       toast.error('حدث خطأ أثناء تحميل البيانات');
@@ -97,8 +124,8 @@ export const TechCommitteeHeads: React.FC = () => {
           techCommitteeSportsMemberOf: updatedSports
         });
 
-        const sportName = SPORTS_MAP[selectedMemberSport]?.name || '';
-        toast.success(`تمت إضافة الأستاذ ${teacherToUpdate.fullName} كعضو في لجنة ${sportName} بنجاح`);
+        const sportInfo = effectiveSportsMap[selectedMemberSport]?.name || '';
+        toast.success(`تمت إضافة الأستاذ ${teacherToUpdate.fullName} كعضو في لجنة ${sportInfo} بنجاح`);
         setIsMemberModalOpen(false);
         setSelectedMemberSport('');
         setSelectedMemberIdForModal('');
@@ -122,7 +149,7 @@ export const TechCommitteeHeads: React.FC = () => {
       h.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
       (h.workLocation && h.workLocation.toLowerCase().includes(searchTerm.toLowerCase())) ||
       (h.techCommitteeSports && h.techCommitteeSports.some(s => {
-        const sportInfo = SPORTS_MAP[s];
+        const sportInfo = effectiveSportsMap[s];
         return sportInfo && sportInfo.name.toLowerCase().includes(searchTerm.toLowerCase());
       }));
     return matchesSearch;
@@ -179,21 +206,15 @@ export const TechCommitteeHeads: React.FC = () => {
     }
   };
 
-  const handleRevoke = async (headId: string, headName: string) => {
-    const confirmed = window.confirm(`هل أنت متأكد من إلغاء تعيين الأستاذ "${headName}" كرئيس للجنة التقنية؟`);
-    if (!confirmed) return;
-
-    try {
-      await DataService.updateUserProfile(headId, {
-        isTechCommitteeHead: false,
-        techCommitteeSports: []
-      });
-      toast.success('تم إلغاء التعيين بنجاح');
-      loadData();
-    } catch (err) {
-      console.error(err);
-      toast.error('حدث خطأ أثناء إلغاء التعيين');
-    }
+  const handleRevoke = (headId: string, headName: string) => {
+    setDeleteConfirm({
+      isOpen: true,
+      type: 'head',
+      id: headId,
+      name: headName,
+      title: 'تأكيد إلغاء تعيين رئيس اللجنة التقنية',
+      message: `هل أنت متأكد من رغبتك في إلغاء تعيين الأستاذ "${headName}" كرئيس للجنة التقنية وحذف صلاحياته الإشرافية؟`
+    });
   };
 
   // Member Operations
@@ -228,26 +249,46 @@ export const TechCommitteeHeads: React.FC = () => {
     }
   };
 
-  const handleRemoveMember = async (teacherId: string, sportKey: string, teacherName: string) => {
-    const confirmed = window.confirm(`هل أنت متأكد من إزالة الأستاذ "${teacherName}" من عضوية اللجنة التقنية لهذا الصنف الرياضي؟`);
-    if (!confirmed) return;
+  const handleRemoveMember = (teacherId: string, sportKey: string, teacherName: string) => {
+    const sportName = effectiveSportsMap[sportKey]?.name || 'هذا الصنف الرياضي';
+    setDeleteConfirm({
+      isOpen: true,
+      type: 'member',
+      id: teacherId,
+      sportKey,
+      name: teacherName,
+      title: 'تأكيد إزالة عضو من اللجنة التقنية',
+      message: `هل أنت متأكد من رغبتك في إزالة الأستاذ "${teacherName}" من عضوية اللجنة التقنية لرياضة (${sportName})؟`
+    });
+  };
 
+  const handleExecuteDeleteConfirm = async () => {
+    if (!deleteConfirm) return;
+    setIsDeleting(true);
     try {
-      const teacherToUpdate = teachers.find(t => t.id === teacherId);
-      if (teacherToUpdate) {
-        const updatedSports = (teacherToUpdate.techCommitteeSportsMemberOf || []).filter(s => s !== sportKey);
-        
-        await DataService.updateUserProfile(teacherId, {
+      if (deleteConfirm.type === 'head') {
+        await DataService.updateUserProfile(deleteConfirm.id, {
+          isTechCommitteeHead: false,
+          techCommitteeSports: []
+        });
+        toast.success(`تم إلغاء تعيين الأستاذ "${deleteConfirm.name}" بنجاح`);
+      } else if (deleteConfirm.type === 'member' && deleteConfirm.sportKey) {
+        const teacherToUpdate = teachers.find(t => t.id === deleteConfirm.id);
+        const currentSports = teacherToUpdate?.techCommitteeSportsMemberOf || [];
+        const updatedSports = currentSports.filter(s => s !== deleteConfirm.sportKey);
+        await DataService.updateUserProfile(deleteConfirm.id, {
           isTechCommitteeMember: updatedSports.length > 0,
           techCommitteeSportsMemberOf: updatedSports
         });
-
-        toast.success('تمت إزالة العضو من اللجنة التقنية بنجاح');
-        loadData();
+        toast.success(`تمت إزالة الأستاذ "${deleteConfirm.name}" من عضوية اللجنة التقنية بنجاح`);
       }
+      setDeleteConfirm(null);
+      await loadData();
     } catch (err) {
-      console.error('Error removing tech committee member:', err);
-      toast.error('حدث خطأ أثناء إزالة العضو');
+      console.error('Error during deletion execution:', err);
+      toast.error('حدث خطأ أثناء تنفيذ الحذف، يرجى المحاولة مرة أخرى');
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -321,7 +362,7 @@ export const TechCommitteeHeads: React.FC = () => {
         <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs flex items-center justify-between">
           <div>
             <p className="text-[10px] text-slate-400 font-bold uppercase mb-1">تخصصات رياضية مغطاة برئيس لجنة</p>
-            <h3 className="text-2xl font-black text-emerald-600">{uniqueSportsCount} / {Object.keys(SPORTS_MAP).length}</h3>
+            <h3 className="text-2xl font-black text-emerald-600">{uniqueSportsCount} / {Object.keys(effectiveSportsMap).length}</h3>
           </div>
           <span className="p-2.5 bg-emerald-50 text-emerald-600 rounded-lg">
             <Trophy className="h-5.5 w-5.5" />
@@ -445,7 +486,7 @@ export const TechCommitteeHeads: React.FC = () => {
                   <div className="flex flex-wrap gap-1">
                     {head.techCommitteeSports && head.techCommitteeSports.length > 0 ? (
                       head.techCommitteeSports.map(s => {
-                        const sportInfo = SPORTS_MAP[s];
+                        const sportInfo = effectiveSportsMap[s];
                         if (!sportInfo) return null;
                         return (
                           <span
@@ -482,7 +523,8 @@ export const TechCommitteeHeads: React.FC = () => {
 
         <div className="p-4 md:p-6 space-y-6">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {Object.entries(SPORTS_MAP).map(([sportKey, sportInfo]) => {
+            {Object.entries(effectiveSportsMap).map(([sportKey, sportInfo]) => {
+              const info = sportInfo as { name: string; icon: string };
               // Members of this specific sport committee
               const committeeMembers = teachers.filter(t => 
                 t.isTechCommitteeMember && t.techCommitteeSportsMemberOf?.includes(sportKey)
@@ -512,10 +554,10 @@ export const TechCommitteeHeads: React.FC = () => {
                   {/* Sport Header */}
                   <div className="flex items-center justify-between pb-3 border-b border-slate-100">
                     <div className="flex items-center gap-2">
-                      <span className="text-lg">{sportInfo.icon}</span>
+                      <span className="text-lg">{info.icon}</span>
                       <div>
-                        <h4 className="text-xs font-black text-slate-800">لجنة {sportInfo.name}</h4>
-                        <p className="text-[10px] text-slate-400">تنظيم وتدبير بطولات {sportInfo.name}</p>
+                        <h4 className="text-xs font-black text-slate-800">لجنة {info.name}</h4>
+                        <p className="text-[10px] text-slate-400">تنظيم وتدبير بطولات {info.name}</p>
                       </div>
                     </div>
                     <span className="px-2 py-0.5 bg-blue-50 text-blue-700 border border-blue-100 rounded-md text-[9px] font-bold">
@@ -588,7 +630,7 @@ export const TechCommitteeHeads: React.FC = () => {
                     <div className="pt-2 border-t border-slate-100">
                       {addingMemberSport === sportKey ? (
                         <div className="space-y-2 bg-white p-3 rounded-lg border border-slate-200 shadow-sm animate-in fade-in slide-in-from-top-2 duration-150">
-                          <label className="block text-[10px] font-bold text-slate-500">اختر أستاذاً لإضافته كعضو للجنة التقنية للـ {sportInfo.name}:</label>
+                          <label className="block text-[10px] font-bold text-slate-500">اختر أستاذاً لإضافته كعضو للجنة التقنية للـ {(sportInfo as any).name}:</label>
                           <select
                             value={selectedMemberTeacherId}
                             onChange={(e) => setSelectedMemberTeacherId(e.target.value)}
@@ -633,7 +675,7 @@ export const TechCommitteeHeads: React.FC = () => {
                           className="w-full py-1.5 bg-white border border-dashed border-slate-250 hover:border-blue-400 hover:text-blue-600 text-slate-500 text-[11px] font-bold rounded-lg flex items-center justify-center gap-1 cursor-pointer transition-colors"
                         >
                           <Plus className="h-3 w-3" />
-                          <span>تعيين أستاذ كعضو في لجنة {sportInfo.name}</span>
+                          <span>تعيين أستاذ كعضو في لجنة {(sportInfo as any).name}</span>
                         </button>
                       )}
                     </div>
@@ -701,8 +743,8 @@ export const TechCommitteeHeads: React.FC = () => {
                 <label className="block text-xs font-bold text-slate-700 mb-2">
                   تحديد الأنشطة واللجن الرياضية المشرف عليها <span className="text-red-500">*</span>
                 </label>
-                <div className="grid grid-cols-2 gap-2 bg-slate-50 p-3 rounded-xl border border-slate-150">
-                  {Object.entries(SPORTS_MAP).map(([key, sport]) => {
+                <div className="grid grid-cols-2 gap-2 bg-slate-50 p-3 rounded-xl border border-slate-150 overflow-y-auto max-h-60">
+                  {Object.entries(effectiveSportsMap).map(([key, sport]) => {
                     const isChecked = selectedSports.includes(key);
                     return (
                       <label
@@ -715,7 +757,7 @@ export const TechCommitteeHeads: React.FC = () => {
                           onChange={() => handleToggleSport(key)}
                           className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 w-4 h-4"
                         />
-                        <span>{sport.icon} {sport.name}</span>
+                        <span>{(sport as any).icon} {(sport as any).name}</span>
                       </label>
                     );
                   })}
@@ -785,9 +827,9 @@ export const TechCommitteeHeads: React.FC = () => {
                   className="w-full text-xs rounded-lg border border-slate-200 px-3 py-2.5 text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
                   <option value="">-- اختر الصنف الرياضي المعني --</option>
-                  {Object.entries(SPORTS_MAP).map(([key, sport]) => (
+                  {Object.entries(effectiveSportsMap).map(([key, sport]) => (
                     <option key={key} value={key}>
-                      {sport.icon} {sport.name}
+                      {(sport as any).icon} {(sport as any).name}
                     </option>
                   ))}
                 </select>
@@ -849,6 +891,55 @@ export const TechCommitteeHeads: React.FC = () => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+      {/* Interactive Delete / Revoke Confirmation Modal */}
+      {deleteConfirm && deleteConfirm.isOpen && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-in fade-in duration-150">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-100 text-right space-y-4 animate-in zoom-in-95 duration-200">
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 rounded-2xl bg-red-50 text-red-600 border border-red-100 flex items-center justify-center shrink-0">
+                <Trash2 className="h-6 w-6 text-red-600" />
+              </div>
+              <div>
+                <h3 className="text-sm font-black text-slate-900">{deleteConfirm.title}</h3>
+                <p className="text-[11px] text-slate-500 font-medium mt-0.5">يرجى تأكيد هذا الإجراء للمتابعة</p>
+              </div>
+            </div>
+
+            <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 text-xs text-slate-700 leading-relaxed font-medium">
+              {deleteConfirm.message}
+            </div>
+
+            <div className="flex items-center justify-end gap-2.5 pt-2">
+              <button
+                type="button"
+                disabled={isDeleting}
+                onClick={() => setDeleteConfirm(null)}
+                className="px-4 py-2.5 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer disabled:opacity-50"
+              >
+                إلغاء التراجع
+              </button>
+              <button
+                type="button"
+                disabled={isDeleting}
+                onClick={handleExecuteDeleteConfirm}
+                className="px-5 py-2.5 text-xs font-bold text-white bg-red-600 hover:bg-red-700 rounded-xl shadow-md transition-all cursor-pointer flex items-center gap-2 disabled:bg-red-300"
+              >
+                {isDeleting ? (
+                  <>
+                    <div className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                    <span>جاري الحذف...</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="h-4 w-4" />
+                    <span>نعم، تأكيد الحذف</span>
+                  </>
+                )}
+              </button>
+            </div>
           </div>
         </div>
       )}

@@ -88,6 +88,38 @@ export const SchoolParticipantsModal: React.FC<SchoolParticipantsModalProps> = (
 
   if (!isOpen || !school) return null;
 
+  // Strict Permission Check: Teachers cannot enter or view participants of other schools
+  if (isTeacher && !isUserBelongToSchool) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/80 backdrop-blur-xs p-4" dir="rtl">
+        <div className="bg-white rounded-3xl max-w-md w-full p-6 text-center space-y-4 shadow-2xl border border-slate-200">
+          <div className="w-16 h-16 rounded-2xl bg-amber-100 text-amber-600 flex items-center justify-center mx-auto text-3xl font-black">
+            🔒
+          </div>
+          <div className="space-y-2">
+            <h3 className="text-base font-black text-slate-900">غير مصرح بالولوج إلى هذه المؤسسة</h3>
+            <p className="text-xs text-slate-600 leading-relaxed">
+              بصفتك أستاذاً، يمكنك فقط الاطلاع على المؤسسات المشاركة في المنصة، ولا يحق لك الولوج إلى لوائح وتفاصيل مؤسسة
+              <strong className="text-slate-900 font-bold block mt-1">[{school.name}]</strong>
+            </p>
+            <p className="text-[11px] text-amber-900 bg-amber-50 p-3 rounded-xl border border-amber-200 mt-2 font-medium">
+              الولوج إلى لوائح وتدبير التلاميذ متاح حصرياً لمؤسستك المعتمدة:
+              <strong className="block font-bold mt-0.5 text-amber-950">{userProfile?.workLocation || 'مؤسستك المعتمدة'}</strong>
+            </p>
+          </div>
+          <div className="pt-2">
+            <button
+              onClick={onClose}
+              className="w-full py-2.5 bg-slate-800 hover:bg-slate-900 text-white rounded-xl text-xs font-bold transition-all cursor-pointer shadow-sm"
+            >
+              العودة لقائمة المؤسسات
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   // Filter students belonging to this school
   const schoolStudents = allStudents.filter(
     s => s.schoolId === school.id || s.schoolName === school.name

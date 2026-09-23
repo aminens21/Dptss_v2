@@ -22,7 +22,7 @@ export const EditTournamentModal: React.FC<EditTournamentModalProps> = ({
   const [ageCategory, setAgeCategory] = useState('U15');
   const [gender, setGender] = useState<'Male' | 'Female' | 'Mixed'>('Male');
   const [affiliationType, setAffiliationType] = useState<'non_club' | 'club_affiliated' | 'open'>('non_club');
-  const [level, setLevel] = useState('High');
+  const [selectedLevels, setSelectedLevels] = useState<('Primary' | 'Middle' | 'High')[]>(['High']);
   const [scope, setScope] = useState('Provincial');
   const [status, setStatus] = useState<Tournament['status']>('Scheduled');
   const [startDate, setStartDate] = useState('');
@@ -74,7 +74,14 @@ export const EditTournamentModal: React.FC<EditTournamentModalProps> = ({
       setAgeCategory(tournament.ageCategory || 'U15');
       setGender(tournament.gender || 'Male');
       setAffiliationType((tournament.affiliationType as any) || 'non_club');
-      setLevel(tournament.level || 'High');
+      
+      if (tournament.level) {
+        const lvls = tournament.level.split(',').map((l: string) => l.trim()).filter(Boolean) as ('Primary' | 'Middle' | 'High')[];
+        if (lvls.length > 0) setSelectedLevels(lvls);
+      } else {
+        setSelectedLevels(['High']);
+      }
+
       setScope(tournament.scope || 'Provincial');
       setStatus(tournament.status || 'Scheduled');
       setStartDate(formatDateToYMD(tournament.startDate));
@@ -103,7 +110,7 @@ export const EditTournamentModal: React.FC<EditTournamentModalProps> = ({
         ageCategory,
         gender,
         affiliationType,
-        level,
+        level: selectedLevels.join(','),
         scope,
         status,
         startDate: startDate ? new Date(startDate) : tournament.startDate,
@@ -178,6 +185,44 @@ export const EditTournamentModal: React.FC<EditTournamentModalProps> = ({
               </select>
             </div>
 
+            {/* Educational Cycles */}
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">
+                الأسلاك التعليمية المعنية *
+              </label>
+              <div className="flex flex-wrap gap-1.5 mt-1">
+                {[
+                  { id: 'Primary', label: 'ابتدائي' },
+                  { id: 'Middle', label: 'إعدادي' },
+                  { id: 'High', label: 'تأهيلي' }
+                ].map((item) => {
+                  const isSelected = selectedLevels.includes(item.id as any);
+                  return (
+                    <button
+                      type="button"
+                      key={item.id}
+                      onClick={() => {
+                        setSelectedLevels(prev =>
+                          prev.includes(item.id as any)
+                            ? (prev.length > 1 ? prev.filter(x => x !== item.id) : prev)
+                            : [...prev, item.id as any]
+                        );
+                      }}
+                      className={`px-2.5 py-1.5 rounded-lg text-[10px] font-bold border transition-all cursor-pointer ${
+                        isSelected
+                          ? 'bg-blue-600 border-blue-600 text-white shadow-3xs'
+                          : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                      }`}
+                    >
+                      {item.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {/* Affiliation Type */}
             <div>
               <label className="block text-xs font-bold text-slate-700 mb-1">نوع البطولة والانتساب</label>
@@ -189,6 +234,20 @@ export const EditTournamentModal: React.FC<EditTournamentModalProps> = ({
                 <option value="non_club">⚪ بطولة غير المنتمين للأندية (البطاقة البيضاء)</option>
                 <option value="club_affiliated">🟡 بطولة المنتمين للأندية والجمعيات (البطاقة الصفراء)</option>
                 <option value="open">🟢 بطولة مفتوحة (للجميع)</option>
+              </select>
+            </div>
+
+            {/* Scope selection */}
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">نطاق البطولة</label>
+              <select
+                value={scope}
+                onChange={(e) => setScope(e.target.value)}
+                className="w-full px-3 py-2 text-xs font-bold border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+              >
+                <option value="Provincial">إقليمية (المديرية)</option>
+                <option value="Regional">جهوية (الأكاديمية)</option>
+                <option value="National">وطنية (الوزارة)</option>
               </select>
             </div>
           </div>

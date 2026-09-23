@@ -1,4 +1,4 @@
-import { Tournament, Match, School, Venue, User, Referee, Student, Sport, AppNotification, RoleSidebarPermissions, Directorate, DirectorateTransferRequest, SUPER_ADMIN_EMAILS, CrossCountryCategoryResult } from '../types';
+import { Tournament, Match, School, Venue, User, Referee, Student, Sport, AppNotification, RoleSidebarPermissions, Directorate, DirectorateTransferRequest, SUPER_ADMIN_EMAILS, CrossCountryCategoryResult, PodiumWinner, CustomAgeCategory } from '../types';
 import { INITIAL_TOURNAMENTS, INITIAL_MATCHES, INITIAL_SCHOOLS, INITIAL_VENUES, INITIAL_DIRECTORATES } from './initialData';
 import { INITIAL_CROSS_COUNTRY_RESULTS } from './crossCountryConfig';
 import { db } from '../firebase/config';
@@ -124,41 +124,125 @@ export interface OfficialLogos {
   frmssLogoHeight?: number;
 }
 
-export const getAgeCategoriesForSeason = (season: string, gender?: 'Male' | 'Female') => {
+const isCc = (val?: string | boolean): boolean => {
+  if (typeof val === 'boolean') return val;
+  if (typeof val === 'string') {
+    const s = val.toLowerCase();
+    return s.includes('cross') || s.includes('عدو') || s.includes('athlet') || s.includes('ألعاب القوى') || s.includes('العاب القوى');
+  }
+  return false;
+};
+
+const parseYearsExpression = (expr: string): number[] => {
+  if (!expr) return [];
+  // Check for "وما بعد" or "و ما بعد" or "+"
+  const isPost = expr.includes('بعد') || expr.includes('>') || expr.includes('+');
+  const yearsMatched = Array.from(expr.matchAll(/(\d{4})/g)).map(m => parseInt(m[1], 10));
+  
+  if (isPost && yearsMatched.length > 0) {
+    const minYear = Math.min(...yearsMatched);
+    return Array.from({ length: 15 }, (_, i) => minYear + i);
+  }
+  
+  return yearsMatched;
+};
+
+export const getAgeCategoriesForSeason = (season: string, gender?: 'Male' | 'Female', sportIdOrIsCc?: string | boolean) => {
   const match = season.match(/(\d{4})/);
   const startYear = match ? parseInt(match[1], 10) : 2026;
+  const isCrossCountry = isCc(sportIdOrIsCc);
+
+  // Check if we have dynamic custom age categories configured for this sport
+  if (typeof sportIdOrIsCc === 'string') {
+    try {
+      const localSports = JSON.parse(localStorage.getItem('taourirt_sports_config') || '[]');
+      const foundSport = localSports.find((s: any) => s.id === sportIdOrIsCc);
+      if (foundSport && foundSport.customAgeCategories && foundSport.customAgeCategories.length > 0) {
+        return foundSport.customAgeCategories.map((cat: any) => {
+          const years = parseYearsExpression(cat.yearsExpression);
+          return {
+            id: cat.id,
+            name: `${cat.name} - ${cat.yearsExpression}`,
+            shortName: cat.name,
+            years
+          };
+        });
+      }
+    } catch (e) {
+      console.warn("Error loading custom age categories in getAgeCategoriesForSeason:", e);
+    }
+  }
 
   const u12Label = gender === 'Female' ? 'البرعمات (إناث)' : gender === 'Male' ? 'البراعم (ذكور)' : 'البراعم والبرعمات';
   const u15Label = gender === 'Female' ? 'الصغيرات (إناث)' : gender === 'Male' ? 'الصغار (ذكور)' : 'الصغار والصغيرات';
   const u18Label = gender === 'Female' ? 'الفتيات (إناث)' : gender === 'Male' ? 'الفتيان (ذكور)' : 'الفتيان والفتيات';
   const u20Label = gender === 'Female' ? 'الشابات (إناث)' : gender === 'Male' ? 'الشبان (ذكور)' : 'الشبان والشابات';
 
-  return [
-    { 
-      id: 'U12', 
-      name: `${u12Label} - مواليد ${startYear - 11} وما بعد`, 
-      shortName: u12Label, 
-      years: Array.from({ length: 15 }, (_, i) => startYear - 11 + i)
-    },
-    { 
-      id: 'U15', 
-      name: `${u15Label} - مواليد ${startYear - 14}/${startYear - 13}/${startYear - 12}`, 
-      shortName: u15Label, 
-      years: [startYear - 14, startYear - 13, startYear - 12] 
-    },
-    { 
-      id: 'U18', 
-      name: `${u18Label} - مواليد ${startYear - 17}/${startYear - 16}/${startYear - 15}`, 
-      shortName: u18Label, 
-      years: [startYear - 17, startYear - 16, startYear - 15] 
-    },
-    { 
-      id: 'U20', 
-      name: `${u20Label} - مواليد ${startYear - 17} وما بعد`, 
-      shortName: u20Label, 
-      years: Array.from({ length: 15 }, (_, i) => startYear - 17 + i)
-    }
-  ];
+  if (isCrossCountry) {
+    // Cross Country 2026/2027:
+    // U12: البراعم والبرعمات (مواليد 2014 وما بعد) -> startYear - 12
+    // U15: الصغار والصغيرات (مواليد 2013/2012) -> [startYear - 14, startYear - 13]
+    // U18: الفتيان والفتيات (مواليد 2011/2010) -> [startYear - 16, startYear - 15]
+    // U20: الشبان والشابات (مواليد 2009/2008) -> [startYear - 18, startYear - 17]
+    return [
+      { 
+        id: 'U12', 
+        name: `${u12Label} - مواليد ${startYear - 12} وما بعد`, 
+        shortName: u12Label, 
+        years: Array.from({ length: 15 }, (_, i) => startYear - 12 + i)
+      },
+      { 
+        id: 'U15', 
+        name: `${u15Label} - مواليد ${startYear - 13}/${startYear - 14}`, 
+        shortName: u15Label, 
+        years: [startYear - 14, startYear - 13] 
+      },
+      { 
+        id: 'U18', 
+        name: `${u18Label} - مواليد ${startYear - 15}/${startYear - 16}`, 
+        shortName: u18Label, 
+        years: [startYear - 16, startYear - 15] 
+      },
+      { 
+        id: 'U20', 
+        name: `${u20Label} - مواليد ${startYear - 17}/${startYear - 18}`, 
+        shortName: u20Label, 
+        years: [startYear - 18, startYear - 17] 
+      }
+    ];
+  } else {
+    // Other sports:
+    // U12: مواليد 2015 وما بعد
+    // U15: مواليد 2012/2013/2014
+    // U18: مواليد 2009/2010/2011
+    // U20: مواليد 2009 وما بعد
+    return [
+      { 
+        id: 'U12', 
+        name: `${u12Label} - مواليد ${startYear - 11} وما بعد`, 
+        shortName: u12Label, 
+        years: Array.from({ length: 15 }, (_, i) => startYear - 11 + i)
+      },
+      { 
+        id: 'U15', 
+        name: `${u15Label} - مواليد ${startYear - 14}/${startYear - 13}/${startYear - 12}`, 
+        shortName: u15Label, 
+        years: [startYear - 14, startYear - 13, startYear - 12] 
+      },
+      { 
+        id: 'U18', 
+        name: `${u18Label} - مواليد ${startYear - 17}/${startYear - 16}/${startYear - 15}`, 
+        shortName: u18Label, 
+        years: [startYear - 17, startYear - 16, startYear - 15] 
+      },
+      { 
+        id: 'U20', 
+        name: `${u20Label} - مواليد ${startYear - 17} وما بعد`, 
+        shortName: u20Label, 
+        years: Array.from({ length: 15 }, (_, i) => startYear - 17 + i)
+      }
+    ];
+  }
 };
 
 export function normalizeCategoryKey(catStr: any): string {
@@ -174,6 +258,19 @@ export function normalizeCategoryKey(catStr: any): string {
   if (s === 'U12' || s === 'U15' || s === 'U18' || s === 'U20') return s;
   
   return s;
+}
+
+export function getCategoryYearsLabel(catId: any, season: string = '2026/2027', sportIdOrIsCc?: string | boolean): string {
+  const normKey = normalizeCategoryKey(catId);
+  const cats = getAgeCategoriesForSeason(season, undefined, sportIdOrIsCc);
+  const matched = cats.find(c => normalizeCategoryKey(c.id) === normKey);
+  if (matched) {
+    const parts = matched.name.split(' - ');
+    if (parts.length > 1) {
+      return parts[1];
+    }
+  }
+  return normKey;
 }
 
 export function getCategoryShortName(category: any, gender?: string): string {
@@ -202,16 +299,51 @@ export function getCategoryShortName(category: any, gender?: string): string {
   return category;
 }
 
-export function getCategoryGenderLabel(category: any, gender?: string, season: string = '2026/2027'): string {
+export function isSchoolLevelAllowedForTournament(schoolType: string, tournamentLevel?: string): boolean {
+  if (!tournamentLevel) return true; // if no level specified, default to allowed
+  
+  // Normalize school type to english level keys
+  let schoolLevelKey = '';
+  const cleanType = String(schoolType || '').trim();
+  if (cleanType === 'ابتدائي' || cleanType.toLowerCase() === 'primary') {
+    schoolLevelKey = 'Primary';
+  } else if (cleanType === 'إعدادي' || cleanType.toLowerCase() === 'middle' || cleanType === 'أعدادي' || cleanType === 'اعدادي') {
+    schoolLevelKey = 'Middle';
+  } else if (cleanType === 'تأهيلي' || cleanType.toLowerCase() === 'high' || cleanType === 'ثانوي' || cleanType === 'تاهيلي') {
+    schoolLevelKey = 'High';
+  }
+  
+  if (!schoolLevelKey) return true; // If we can't determine the level, allow it
+  
+  const allowedLevels = tournamentLevel.split(',').map(l => l.trim());
+  return allowedLevels.includes(schoolLevelKey);
+}
+
+export function getTournamentLevelAr(level?: string): string {
+  if (!level) return 'جميع الأسلاك';
+  return level.split(',')
+    .map(l => {
+      const trimmed = l.trim();
+      if (trimmed === 'Primary') return 'الابتدائي';
+      if (trimmed === 'Middle') return 'الإعدادي';
+      if (trimmed === 'High') return 'التأهيلي';
+      return trimmed;
+    })
+    .join(' و ');
+}
+
+
+export function getCategoryGenderLabel(category: any, gender?: string, season: string = '2026/2027', sportIdOrIsCc?: string | boolean): string {
   if (!category || typeof category !== 'string') return category || '';
   const normKey = normalizeCategoryKey(category);
   const match = season.match(/(\d{4})/);
   const startYear = match ? parseInt(match[1], 10) : 2026;
+  const isCrossCountry = isCc(sportIdOrIsCc);
 
-  const u12Years = ` - مواليد ${startYear - 11} وما بعد`;
-  const u15Years = ` - مواليد ${startYear - 14}/${startYear - 13}/${startYear - 12}`;
-  const u18Years = ` - مواليد ${startYear - 17}/${startYear - 16}/${startYear - 15}`;
-  const u20Years = ` - مواليد ${startYear - 17} وما بعد`;
+  const u12Years = isCrossCountry ? ` - مواليد ${startYear - 12} وما بعد` : ` - مواليد ${startYear - 11} وما بعد`;
+  const u15Years = isCrossCountry ? ` - مواليد ${startYear - 13}/${startYear - 14}` : ` - مواليد ${startYear - 14}/${startYear - 13}/${startYear - 12}`;
+  const u18Years = isCrossCountry ? ` - مواليد ${startYear - 15}/${startYear - 16}` : ` - مواليد ${startYear - 17}/${startYear - 16}/${startYear - 15}`;
+  const u20Years = isCrossCountry ? ` - مواليد ${startYear - 17}/${startYear - 18}` : ` - مواليد ${startYear - 17} وما بعد`;
 
   if (normKey === 'U12') {
     if (gender === 'Female' || gender === 'إناث') return `البرعمات (إناث)${u12Years}`;
@@ -248,7 +380,8 @@ export function validateBirthDateForCategory(
   birthDate: string,
   category: any,
   season: string = '2026/2027',
-  gender?: string
+  gender?: string,
+  sportIdOrIsCc?: string | boolean
 ): BirthDateValidationResult {
   if (!birthDate || !category) {
     return { isValid: true };
@@ -260,59 +393,45 @@ export function validateBirthDateForCategory(
   }
 
   const normCat = normalizeCategoryKey(category);
-  const match = season.match(/(\d{4})/);
-  const startYear = match ? parseInt(match[1], 10) : 2026;
+  const isCrossCountry = isCc(sportIdOrIsCc);
+  const cats = getAgeCategoriesForSeason(season, gender as any, sportIdOrIsCc);
+  const catDef = cats.find(c => normalizeCategoryKey(c.id) === normCat);
   const catLabel = getCategoryShortName(normCat, gender) || normCat;
 
-  if (normCat === 'U12') {
-    const minYear = startYear - 11; // 2015 for 2026/2027
-    const expected = `مواليد سنة ${minYear} وما بعد`;
-    if (birthYear < minYear) {
-      return {
-        isValid: false,
-        birthYear,
-        expectedYearsText: expected,
-        categoryLabel: catLabel,
-        errorMessage: `خطأ في تاريخ الازدياد: تاريخ الازدياد (سنة ${birthYear}) لا يتناسب مع الفئة المعنية (${catLabel} - مخصصة لـ ${expected}). السن المدخل يتجاوز الفئة.`
-      };
+  if (catDef) {
+    if (normCat === 'U12') {
+      const minYear = catDef.years[0];
+      const expected = isCrossCountry ? `مواليد سنة 2014 وما بعد` : `مواليد سنة 2015 وما بعد`;
+      if (birthYear < minYear) {
+        return {
+          isValid: false,
+          birthYear,
+          expectedYearsText: expected,
+          categoryLabel: catLabel,
+          errorMessage: `خطأ في تاريخ الازدياد: تاريخ الازدياد (سنة ${birthYear}) لا يتناسب مع الفئة المعنية (${catLabel} - مخصصة لـ ${expected}).`
+        };
+      }
+      return { isValid: true, birthYear, expectedYearsText: expected, categoryLabel: catLabel };
     }
-    return { isValid: true, birthYear, expectedYearsText: expected, categoryLabel: catLabel };
-  }
 
-  if (normCat === 'U15') {
-    const allowed = [startYear - 14, startYear - 13, startYear - 12]; // 2012, 2013, 2014
+    if (normCat === 'U20' && !isCrossCountry) {
+      const minYear = catDef.years[0];
+      const expected = `مواليد سنة 2009 وما بعد`;
+      if (birthYear < minYear) {
+        return {
+          isValid: false,
+          birthYear,
+          expectedYearsText: expected,
+          categoryLabel: catLabel,
+          errorMessage: `خطأ في تاريخ الازدياد: تاريخ الازدياد (سنة ${birthYear}) لا يتناسب مع الفئة المعنية (${catLabel} - مخصصة لـ ${expected}).`
+        };
+      }
+      return { isValid: true, birthYear, expectedYearsText: expected, categoryLabel: catLabel };
+    }
+
+    const allowed = catDef.years;
     const expected = `مواليد السنوات التالية: ${allowed.join(' / ')}`;
     if (!allowed.includes(birthYear)) {
-      return {
-        isValid: false,
-        birthYear,
-        expectedYearsText: expected,
-        categoryLabel: catLabel,
-        errorMessage: `خطأ في تاريخ الازدياد: تاريخ الازدياد (سنة ${birthYear}) لا يتناسب مع الفئة المعنية (${catLabel} - مخصصة لـ ${expected}).`
-      };
-    }
-    return { isValid: true, birthYear, expectedYearsText: expected, categoryLabel: catLabel };
-  }
-
-  if (normCat === 'U18') {
-    const allowed = [startYear - 17, startYear - 16, startYear - 15]; // 2009, 2010, 2011
-    const expected = `مواليد السنوات التالية: ${allowed.join(' / ')}`;
-    if (!allowed.includes(birthYear)) {
-      return {
-        isValid: false,
-        birthYear,
-        expectedYearsText: expected,
-        categoryLabel: catLabel,
-        errorMessage: `خطأ في تاريخ الازدياد: تاريخ الازدياد (سنة ${birthYear}) لا يتناسب مع الفئة المعنية (${catLabel} - مخصصة لـ ${expected}).`
-      };
-    }
-    return { isValid: true, birthYear, expectedYearsText: expected, categoryLabel: catLabel };
-  }
-
-  if (normCat === 'U20') {
-    const minYear = startYear - 19;
-    const expected = `مواليد سنة ${minYear} وما بعد`;
-    if (birthYear < minYear) {
       return {
         isValid: false,
         birthYear,
@@ -387,24 +506,93 @@ export const DataService = {
 
   // TOURNAMENTS
   async getTournaments(): Promise<Tournament[]> {
+    const tournsMap = new Map<string, Tournament>();
+
+    // 1. Fetch from Firestore first (source of truth)
     try {
       const snap = await getDocs(collection(db, 'tournaments'));
       if (!snap.empty) {
-        const firestoreList = snap.docs.map(d => ({ id: d.id, ...d.data() } as Tournament));
-        return deduplicateById(firestoreList);
+        snap.docs.forEach(d => {
+          const data = d.data();
+          const firestoreTourn: Tournament = {
+            id: d.id,
+            name: data.name || '',
+            sportId: data.sportId || '',
+            seasonId: data.seasonId || '',
+            directorateId: data.directorateId || '',
+            ageCategory: data.ageCategory || '',
+            gender: data.gender || 'Mixed',
+            level: data.level || '',
+            scope: data.scope || 'Provincial',
+            status: data.status || 'Scheduled',
+            description: data.description || '',
+            affiliationType: data.affiliationType || 'non_club',
+            managerName: data.managerName || '',
+            managerPhone: data.managerPhone || '',
+            managerEmail: data.managerEmail || '',
+            accessCode: data.accessCode || '',
+            ...data,
+            startDate: data.startDate?.toDate ? data.startDate.toDate() : (data.startDate ? new Date(data.startDate) : undefined),
+            endDate: data.endDate?.toDate ? data.endDate.toDate() : (data.endDate ? new Date(data.endDate) : undefined),
+            registrationDeadline: data.registrationDeadline?.toDate ? data.registrationDeadline.toDate() : (data.registrationDeadline ? new Date(data.registrationDeadline) : undefined),
+            createdAt: data.createdAt?.toDate ? data.createdAt.toDate() : (data.createdAt ? new Date(data.createdAt) : undefined),
+            updatedAt: data.updatedAt?.toDate ? data.updatedAt.toDate() : (data.updatedAt ? new Date(data.updatedAt) : undefined),
+          } as Tournament;
+
+          tournsMap.set(d.id, firestoreTourn);
+        });
       }
     } catch (e) {
-      console.warn("Firestore fetch error, falling back to cached local storage:", e);
+      console.warn("Firestore fetch tournaments error, falling back to cached local storage:", e);
     }
-    const localList = getLocal<Tournament>(STORAGE_KEYS.TOURNAMENTS, INITIAL_TOURNAMENTS);
-    return deduplicateById(localList);
+
+    // 2. Merge local cache for any items not yet in Firestore or newer local edits
+    const localList = getLocal<Tournament>(STORAGE_KEYS.TOURNAMENTS, tournsMap.size > 0 ? [] : INITIAL_TOURNAMENTS);
+    localList.forEach(t => {
+      if (t && t.id) {
+        const existing = tournsMap.get(t.id);
+        if (!existing) {
+          // If Firestore is loaded, only merge local items that are unsynced pending creations
+          if (tournsMap.size === 0 || t.id.startsWith('tourn-')) {
+            tournsMap.set(t.id, {
+              ...t,
+              startDate: t.startDate ? (typeof t.startDate === 'object' && 'toDate' in t.startDate ? (t.startDate as any).toDate() : (t.startDate instanceof Date ? t.startDate : new Date(t.startDate))) : undefined,
+              endDate: t.endDate ? (typeof t.endDate === 'object' && 'toDate' in t.endDate ? (t.endDate as any).toDate() : (t.endDate instanceof Date ? t.endDate : new Date(t.endDate))) : undefined,
+              registrationDeadline: t.registrationDeadline ? (typeof t.registrationDeadline === 'object' && 'toDate' in t.registrationDeadline ? (t.registrationDeadline as any).toDate() : (t.registrationDeadline instanceof Date ? t.registrationDeadline : new Date(t.registrationDeadline))) : undefined
+            });
+          }
+        } else {
+          // If local item exists and has newer or equal updatedAt date than firestore, merge local updates into tournsMap
+          const localUpdated = t.updatedAt ? (typeof t.updatedAt === 'object' && 'toDate' in t.updatedAt ? (t.updatedAt as any).toDate().getTime() : new Date(t.updatedAt).getTime()) : 0;
+          const remoteUpdated = existing.updatedAt ? (typeof existing.updatedAt === 'object' && 'toDate' in existing.updatedAt ? (existing.updatedAt as any).toDate().getTime() : new Date(existing.updatedAt).getTime()) : 0;
+          
+          if (localUpdated >= remoteUpdated) {
+            tournsMap.set(t.id, {
+              ...existing,
+              ...t,
+              startDate: t.startDate ? (typeof t.startDate === 'object' && 'toDate' in t.startDate ? (t.startDate as any).toDate() : (t.startDate instanceof Date ? t.startDate : new Date(t.startDate))) : existing.startDate,
+              endDate: t.endDate ? (typeof t.endDate === 'object' && 'toDate' in t.endDate ? (t.endDate as any).toDate() : (t.endDate instanceof Date ? t.endDate : new Date(t.endDate))) : existing.endDate,
+              registrationDeadline: t.registrationDeadline !== undefined 
+                ? (t.registrationDeadline ? (typeof t.registrationDeadline === 'object' && 'toDate' in t.registrationDeadline ? (t.registrationDeadline as any).toDate() : (t.registrationDeadline instanceof Date ? t.registrationDeadline : new Date(t.registrationDeadline))) : undefined) 
+                : existing.registrationDeadline
+            });
+          }
+        }
+      }
+    });
+
+    const mergedList = Array.from(tournsMap.values());
+    setLocal(STORAGE_KEYS.TOURNAMENTS, mergedList);
+    return deduplicateById(mergedList);
   },
 
   async addTournament(tournament: Omit<Tournament, 'id'>): Promise<Tournament> {
     const activeDirId = this.getActiveDirectorateId();
     const tournamentWithDir = {
       ...tournament,
-      directorateId: tournament.directorateId || activeDirId
+      directorateId: tournament.directorateId || activeDirId,
+      createdAt: new Date(),
+      updatedAt: new Date()
     };
     const tempId = `tourn-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
     const newTournament: Tournament = {
@@ -413,7 +601,7 @@ export const DataService = {
     };
 
     // Always update local cache first for instant feedback
-    const localList = getLocal<Tournament>(STORAGE_KEYS.TOURNAMENTS, INITIAL_TOURNAMENTS);
+    const localList = getLocal<Tournament>(STORAGE_KEYS.TOURNAMENTS, []);
     const filtered = localList.filter(t => t.id !== tempId);
     const updated = [newTournament, ...filtered];
     setLocal(STORAGE_KEYS.TOURNAMENTS, updated);
@@ -422,27 +610,35 @@ export const DataService = {
     try {
       const docRef = await addDoc(collection(db, 'tournaments'), {
         ...tournamentWithDir,
-        createdAt: Timestamp.now()
+        startDate: tournamentWithDir.startDate instanceof Date ? Timestamp.fromDate(tournamentWithDir.startDate) : (tournamentWithDir.startDate ? Timestamp.fromDate(new Date(tournamentWithDir.startDate)) : null),
+        endDate: tournamentWithDir.endDate instanceof Date ? Timestamp.fromDate(tournamentWithDir.endDate) : (tournamentWithDir.endDate ? Timestamp.fromDate(new Date(tournamentWithDir.endDate)) : null),
+        registrationDeadline: tournamentWithDir.registrationDeadline instanceof Date ? Timestamp.fromDate(tournamentWithDir.registrationDeadline) : (tournamentWithDir.registrationDeadline ? Timestamp.fromDate(new Date(tournamentWithDir.registrationDeadline)) : null),
+        createdAt: Timestamp.now(),
+        updatedAt: Timestamp.now()
       });
       const realId = docRef.id;
       newTournament.id = realId;
 
       // Update local cache with the Firestore ID
-      const currentList = getLocal<Tournament>(STORAGE_KEYS.TOURNAMENTS, INITIAL_TOURNAMENTS);
+      const currentList = getLocal<Tournament>(STORAGE_KEYS.TOURNAMENTS, []);
       const synced = currentList.map(t => t.id === tempId ? { ...t, id: realId } : t);
       setLocal(STORAGE_KEYS.TOURNAMENTS, synced);
     } catch (e) {
       console.warn("Saved locally; Firestore sync pending:", e);
     }
 
-    // Automatically set sport isProgrammed to true and merge ageCategories in database & cache when a tournament is created
+    // Automatically set sport isProgrammed to true in database & cache when a tournament is created
     try {
       const sportId = tournament.sportId;
       const currentSports = getLocal<Sport>('taourirt_sports_config', []);
       const targetSport = currentSports.find(s => s.id === sportId);
-      const existingCats = (targetSport?.ageCategories || ['U12', 'U15', 'U18', 'U20']).map(normalizeCategoryKey);
       const normCat = normalizeCategoryKey(tournament.ageCategory);
-      const newCats = Array.from(new Set([...existingCats, normCat].filter(c => ['U12', 'U15', 'U18', 'U20'].includes(c))));
+      let newCats = (targetSport?.ageCategories && targetSport.ageCategories.length > 0)
+        ? targetSport.ageCategories.map(normalizeCategoryKey)
+        : [normCat];
+      if (!newCats.includes(normCat) && ['U12', 'U15', 'U18', 'U20'].includes(normCat)) {
+        newCats.push(normCat);
+      }
       
       const updatedSports = currentSports.map(s => s.id === sportId ? { ...s, isProgrammed: true, ageCategories: newCats } : s);
       setLocal('taourirt_sports_config', updatedSports);
@@ -454,6 +650,10 @@ export const DataService = {
       }, { merge: true });
     } catch (e) {
       console.warn("Could not update sport programmed status in Firestore:", e);
+    }
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('tournamentDataChanged'));
     }
 
     return newTournament;
@@ -512,7 +712,7 @@ export const DataService = {
       }
 
       // 5. Delete the tournament itself from local storage
-      const localList = getLocal<Tournament>(STORAGE_KEYS.TOURNAMENTS, INITIAL_TOURNAMENTS);
+      const localList = getLocal<Tournament>(STORAGE_KEYS.TOURNAMENTS, []);
       const updated = localList.filter(t => t.id !== id);
       setLocal(STORAGE_KEYS.TOURNAMENTS, updated);
 
@@ -521,7 +721,7 @@ export const DataService = {
     } catch (e) {
       console.warn("Error during cascade delete:", e);
       // Fallback: still delete the tournament locally even if cascade failed
-      const localList = getLocal<Tournament>(STORAGE_KEYS.TOURNAMENTS, INITIAL_TOURNAMENTS);
+      const localList = getLocal<Tournament>(STORAGE_KEYS.TOURNAMENTS, []);
       const updated = localList.filter(t => t.id !== id);
       setLocal(STORAGE_KEYS.TOURNAMENTS, updated);
       await deleteDoc(doc(db, 'tournaments', id)).catch(() => {});
@@ -529,7 +729,7 @@ export const DataService = {
   },
 
   async bulkDeleteTournamentsBySport(sportId: string): Promise<void> {
-    const localList = getLocal<Tournament>(STORAGE_KEYS.TOURNAMENTS, INITIAL_TOURNAMENTS);
+    const localList = getLocal<Tournament>(STORAGE_KEYS.TOURNAMENTS, []);
     const tournamentsToDelete = localList.filter(t => t.sportId === sportId);
     const updatedTournaments = localList.filter(t => t.sportId !== sportId);
     setLocal(STORAGE_KEYS.TOURNAMENTS, updatedTournaments);
@@ -558,11 +758,41 @@ export const DataService = {
   },
 
   async updateTournament(id: string, updates: Partial<Tournament>): Promise<void> {
-    const localList = getLocal<Tournament>(STORAGE_KEYS.TOURNAMENTS, INITIAL_TOURNAMENTS);
-    const targetTournament = localList.find(t => t.id === id);
-    const targetSportId = updates.sportId || targetTournament?.sportId || 'basketball';
+    const localList = getLocal<Tournament>(STORAGE_KEYS.TOURNAMENTS, []);
+    const existing = localList.find(t => t.id === id);
+    const targetSportId = updates.sportId || existing?.sportId || 'cross_country';
 
-    const updated = localList.map(t => t.id === id ? { ...t, ...updates } : t);
+    // Format updates and strip undefined
+    const cleanUpdates: Record<string, any> = {};
+    Object.entries(updates).forEach(([key, val]) => {
+      if (val !== undefined) {
+        cleanUpdates[key] = val;
+      }
+    });
+
+    const fullUpdatedTournament: Tournament = {
+      ...(existing || { 
+        id, 
+        sportId: targetSportId, 
+        name: 'البطولة الرياضية', 
+        seasonId: '2026/2027', 
+        directorateId: this.getActiveDirectorateId(), 
+        gender: 'Mixed', 
+        ageCategory: 'جميع الفئات', 
+        level: 'High', 
+        scope: 'Provincial', 
+        status: 'Scheduled',
+        affiliationType: 'non_club'
+      } as Tournament),
+      ...cleanUpdates,
+      id,
+      updatedAt: new Date()
+    };
+
+    const updated = localList.map(t => t.id === id ? fullUpdatedTournament : t);
+    if (!existing) {
+      updated.push(fullUpdatedTournament);
+    }
     setLocal(STORAGE_KEYS.TOURNAMENTS, updated);
 
     // If manager email was provided, sync user account to Firebase and local accounts
@@ -616,13 +846,37 @@ export const DataService = {
       }
     }
 
+    // Build clean Firestore payload with valid Timestamps for dates
+    const cleanFirestorePayload: Record<string, any> = {
+      ...fullUpdatedTournament,
+      updatedAt: serverTimestamp()
+    };
+    if (fullUpdatedTournament.startDate) {
+      cleanFirestorePayload.startDate = fullUpdatedTournament.startDate instanceof Date 
+        ? Timestamp.fromDate(fullUpdatedTournament.startDate) 
+        : Timestamp.fromDate(new Date(fullUpdatedTournament.startDate));
+    }
+    if (fullUpdatedTournament.endDate) {
+      cleanFirestorePayload.endDate = fullUpdatedTournament.endDate instanceof Date 
+        ? Timestamp.fromDate(fullUpdatedTournament.endDate) 
+        : Timestamp.fromDate(new Date(fullUpdatedTournament.endDate));
+    }
+    if (fullUpdatedTournament.registrationDeadline !== undefined) {
+      cleanFirestorePayload.registrationDeadline = fullUpdatedTournament.registrationDeadline 
+        ? (fullUpdatedTournament.registrationDeadline instanceof Date 
+            ? Timestamp.fromDate(fullUpdatedTournament.registrationDeadline) 
+            : Timestamp.fromDate(new Date(fullUpdatedTournament.registrationDeadline))) 
+        : null;
+    }
+
     try {
-      await updateDoc(doc(db, 'tournaments', id), {
-        ...updates,
-        updatedAt: Timestamp.now()
-      });
+      await setDoc(doc(db, 'tournaments', id), cleanFirestorePayload, { merge: true });
     } catch (e) {
-      console.warn("Updated locally:", e);
+      console.warn("Firestore tournament update error:", e);
+    }
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('tournamentDataChanged'));
     }
   },
 
@@ -634,18 +888,20 @@ export const DataService = {
       registrationDeadline?: any;
       status?: Tournament['status'];
       description?: string;
+      level?: string;
     }
   ): Promise<void> {
-    const localList = getLocal<Tournament>(STORAGE_KEYS.TOURNAMENTS, INITIAL_TOURNAMENTS);
+    const localList = getLocal<Tournament>(STORAGE_KEYS.TOURNAMENTS, []);
     const updated = localList.map(t => {
       if (t.sportId === sportId) {
         return {
           ...t,
-          ...(dates.startDate !== undefined ? { startDate: dates.startDate } : {}),
-          ...(dates.endDate !== undefined ? { endDate: dates.endDate } : {}),
-          ...(dates.registrationDeadline !== undefined ? { registrationDeadline: dates.registrationDeadline } : {}),
+          ...(dates.startDate !== undefined ? { startDate: dates.startDate instanceof Date ? dates.startDate : new Date(dates.startDate) } : {}),
+          ...(dates.endDate !== undefined ? { endDate: dates.endDate instanceof Date ? dates.endDate : new Date(dates.endDate) } : {}),
+          ...(dates.registrationDeadline !== undefined ? { registrationDeadline: dates.registrationDeadline instanceof Date ? dates.registrationDeadline : (dates.registrationDeadline ? new Date(dates.registrationDeadline) : null) } : {}),
           ...(dates.status !== undefined ? { status: dates.status } : {}),
           ...(dates.description !== undefined ? { description: dates.description } : {}),
+          ...(dates.level !== undefined ? { level: dates.level } : {}),
           updatedAt: new Date()
         };
       }
@@ -655,26 +911,46 @@ export const DataService = {
 
     try {
       const snap = await getDocs(query(collection(db, 'tournaments'), where('sportId', '==', sportId)));
-      const promises = snap.docs.map(d => {
-        const updatePayload: any = {
-          updatedAt: serverTimestamp()
-        };
-        if (dates.startDate !== undefined) {
-          updatePayload.startDate = dates.startDate instanceof Date ? Timestamp.fromDate(dates.startDate) : dates.startDate;
+      if (!snap.empty) {
+        const promises = snap.docs.map(d => {
+          const updatePayload: any = {
+            updatedAt: serverTimestamp()
+          };
+          if (dates.startDate !== undefined) {
+            updatePayload.startDate = dates.startDate instanceof Date ? Timestamp.fromDate(dates.startDate) : (dates.startDate ? Timestamp.fromDate(new Date(dates.startDate)) : null);
+          }
+          if (dates.endDate !== undefined) {
+            updatePayload.endDate = dates.endDate instanceof Date ? Timestamp.fromDate(dates.endDate) : (dates.endDate ? Timestamp.fromDate(new Date(dates.endDate)) : null);
+          }
+          if (dates.registrationDeadline !== undefined) {
+            updatePayload.registrationDeadline = dates.registrationDeadline instanceof Date ? Timestamp.fromDate(dates.registrationDeadline) : (dates.registrationDeadline ? Timestamp.fromDate(new Date(dates.registrationDeadline)) : null);
+          }
+          if (dates.status !== undefined) updatePayload.status = dates.status;
+          if (dates.description !== undefined) updatePayload.description = dates.description;
+          if (dates.level !== undefined) updatePayload.level = dates.level;
+          return setDoc(doc(db, 'tournaments', d.id), updatePayload, { merge: true });
+        });
+        await Promise.all(promises);
+      } else {
+        // No docs in Firestore yet for this sport, persist local items of this sport to Firestore
+        const sportItems = updated.filter(t => t.sportId === sportId);
+        for (const item of sportItems) {
+          const payload: any = {
+            ...item,
+            startDate: item.startDate instanceof Date ? Timestamp.fromDate(item.startDate) : (item.startDate ? Timestamp.fromDate(new Date(item.startDate)) : null),
+            endDate: item.endDate instanceof Date ? Timestamp.fromDate(item.endDate) : (item.endDate ? Timestamp.fromDate(new Date(item.endDate)) : null),
+            registrationDeadline: item.registrationDeadline instanceof Date ? Timestamp.fromDate(item.registrationDeadline) : (item.registrationDeadline ? Timestamp.fromDate(new Date(item.registrationDeadline)) : null),
+            updatedAt: serverTimestamp()
+          };
+          await setDoc(doc(db, 'tournaments', item.id), payload, { merge: true });
         }
-        if (dates.endDate !== undefined) {
-          updatePayload.endDate = dates.endDate instanceof Date ? Timestamp.fromDate(dates.endDate) : dates.endDate;
-        }
-        if (dates.registrationDeadline !== undefined) {
-          updatePayload.registrationDeadline = dates.registrationDeadline instanceof Date ? Timestamp.fromDate(dates.registrationDeadline) : dates.registrationDeadline;
-        }
-        if (dates.status !== undefined) updatePayload.status = dates.status;
-        if (dates.description !== undefined) updatePayload.description = dates.description;
-        return updateDoc(doc(db, 'tournaments', d.id), updatePayload);
-      });
-      await Promise.all(promises);
+      }
     } catch (e) {
-      console.warn("Updated sport dates locally:", e);
+      console.warn("Updated sport dates in Firestore:", e);
+    }
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('tournamentDataChanged'));
     }
   },
 
@@ -1307,29 +1583,126 @@ export const DataService = {
 
   // USERS / TEACHERS
   async getUsers(): Promise<User[]> {
+    const activeDirId = this.getActiveDirectorateId();
+    const usersMap = new Map<string, User>();
+
+    // 1. Load from local cache first
+    try {
+      const localUsersRaw = localStorage.getItem('local_registered_users');
+      if (localUsersRaw) {
+        const localUsers = JSON.parse(localUsersRaw) as any[];
+        localUsers.forEach(u => {
+          if (u && (u.id || u.email || u.leaseNumber)) {
+            const key = u.id || u.email || u.leaseNumber;
+            usersMap.set(key, {
+              id: u.id || key,
+              fullName: u.fullName || u.name || 'أستاذ',
+              email: u.email || '',
+              role: u.role || 'TEACHER',
+              directorateId: u.directorateId || activeDirId,
+              workLocation: u.workLocation || '',
+              leaseNumber: u.leaseNumber || '',
+              phone: u.phone || '',
+              isTechCommitteeHead: !!u.isTechCommitteeHead,
+              techCommitteeSports: Array.isArray(u.techCommitteeSports) ? u.techCommitteeSports : [],
+              isTechCommitteeMember: !!u.isTechCommitteeMember,
+              techCommitteeSportsMemberOf: Array.isArray(u.techCommitteeSportsMemberOf) ? u.techCommitteeSportsMemberOf : [],
+              ...u
+            });
+          }
+        });
+      }
+    } catch {}
+
+    // 2. Also check demo user profile
+    try {
+      const demoRaw = localStorage.getItem('demo_user_profile');
+      if (demoRaw) {
+        const demo = JSON.parse(demoRaw);
+        if (demo && demo.id) {
+          const existing = usersMap.get(demo.id);
+          usersMap.set(demo.id, {
+            ...existing,
+            ...demo,
+            id: demo.id,
+            role: demo.role || existing?.role || 'TEACHER'
+          });
+        }
+      }
+    } catch {}
+
+    // 3. Load from Firestore and merge
     try {
       const snap = await getDocs(collection(db, 'users'));
       if (!snap.empty) {
-        const firestoreList = snap.docs.map(d => ({ id: d.id, ...d.data() } as User));
-        return deduplicateById(firestoreList);
+        snap.docs.forEach(d => {
+          const data = d.data() as any;
+          const docId = d.id;
+          // Find existing record by docId or email or leaseNumber
+          let matchedKey: string | null = null;
+          for (const [k, u] of usersMap.entries()) {
+            if (k === docId || u.id === docId || (data.email && u.email?.toLowerCase() === data.email.toLowerCase()) || (data.leaseNumber && u.leaseNumber === data.leaseNumber)) {
+              matchedKey = k;
+              break;
+            }
+          }
+
+          if (matchedKey) {
+            const existing = usersMap.get(matchedKey)!;
+            const merged: User = {
+              ...existing,
+              ...data,
+              id: docId || existing.id,
+              role: data.role || existing.role || 'TEACHER',
+              fullName: data.fullName || data.name || existing.fullName || 'أستاذ',
+              directorateId: data.directorateId || existing.directorateId || activeDirId,
+              workLocation: data.workLocation || existing.workLocation || '',
+              leaseNumber: data.leaseNumber || existing.leaseNumber || '',
+              phone: data.phone || existing.phone || '',
+              isTechCommitteeHead: data.isTechCommitteeHead !== undefined ? !!data.isTechCommitteeHead : !!existing.isTechCommitteeHead,
+              techCommitteeSports: data.techCommitteeSports !== undefined ? data.techCommitteeSports : (existing.techCommitteeSports || []),
+              isTechCommitteeMember: data.isTechCommitteeMember !== undefined ? !!data.isTechCommitteeMember : !!existing.isTechCommitteeMember,
+              techCommitteeSportsMemberOf: data.techCommitteeSportsMemberOf !== undefined ? data.techCommitteeSportsMemberOf : (existing.techCommitteeSportsMemberOf || [])
+            };
+            usersMap.set(docId, merged);
+            if (matchedKey !== docId) {
+              usersMap.delete(matchedKey);
+            }
+          } else {
+            usersMap.set(docId, {
+              id: docId,
+              fullName: data.fullName || data.name || 'أستاذ',
+              email: data.email || '',
+              role: data.role || 'TEACHER',
+              directorateId: data.directorateId || activeDirId,
+              workLocation: data.workLocation || '',
+              leaseNumber: data.leaseNumber || '',
+              phone: data.phone || '',
+              isTechCommitteeHead: !!data.isTechCommitteeHead,
+              techCommitteeSports: Array.isArray(data.techCommitteeSports) ? data.techCommitteeSports : [],
+              isTechCommitteeMember: !!data.isTechCommitteeMember,
+              techCommitteeSportsMemberOf: Array.isArray(data.techCommitteeSportsMemberOf) ? data.techCommitteeSportsMemberOf : [],
+              ...data
+            });
+          }
+        });
       }
     } catch (e) {
       console.warn("Firestore fetch users error, falling back to cached list:", e);
     }
+
+    const mergedUsers = Array.from(usersMap.values());
     try {
-      const localUsersRaw = localStorage.getItem('local_registered_users');
-      if (localUsersRaw) {
-        const users = JSON.parse(localUsersRaw) as User[];
-        return deduplicateById(users);
-      }
+      localStorage.setItem('local_registered_users', JSON.stringify(mergedUsers));
     } catch {}
-    return [];
+
+    return deduplicateById(mergedUsers);
   },
 
   async getTeachers(): Promise<User[]> {
     try {
       const allUsers = await this.getUsers();
-      return allUsers.filter(u => u.role === 'TEACHER');
+      return allUsers.filter(u => !u.role || u.role === 'TEACHER');
     } catch (e) {
       console.warn("Firestore fetch teachers error:", e);
       return [];
@@ -1337,6 +1710,8 @@ export const DataService = {
   },
 
   async updateUserProfile(userId: string, profileData: Partial<User>): Promise<void> {
+    const activeDirId = this.getActiveDirectorateId();
+
     // Strip undefined values to prevent Firestore unsupported field value crashes
     const cleanProfileData: Record<string, any> = {};
     Object.entries(profileData).forEach(([key, val]) => {
@@ -1345,11 +1720,71 @@ export const DataService = {
       }
     });
 
+    // 1. Update in local_registered_users list
+    let users: User[] = [];
     try {
-      // Sync to Firestore if userId is valid
+      const localUsersRaw = localStorage.getItem('local_registered_users');
+      users = localUsersRaw ? JSON.parse(localUsersRaw) : [];
+    } catch {}
+
+    const idx = users.findIndex((u: any) => 
+      (userId && u.id === userId) || 
+      (profileData.email && u.email?.toLowerCase() === profileData.email?.toLowerCase()) ||
+      (profileData.leaseNumber && u.leaseNumber === profileData.leaseNumber)
+    );
+
+    let fullUserRecord: User;
+    if (idx >= 0) {
+      fullUserRecord = {
+        ...users[idx],
+        ...cleanProfileData,
+        id: users[idx].id || userId,
+        role: cleanProfileData.role || users[idx].role || 'TEACHER',
+        directorateId: cleanProfileData.directorateId || users[idx].directorateId || activeDirId,
+        isActive: users[idx].isActive !== undefined ? users[idx].isActive : true,
+        updatedAt: new Date()
+      };
+      users[idx] = fullUserRecord;
+    } else {
+      fullUserRecord = {
+        id: userId,
+        fullName: cleanProfileData.fullName || (cleanProfileData as any).name || 'أستاذ',
+        email: cleanProfileData.email || '',
+        role: cleanProfileData.role || 'TEACHER',
+        directorateId: cleanProfileData.directorateId || activeDirId,
+        workLocation: cleanProfileData.workLocation || '',
+        leaseNumber: cleanProfileData.leaseNumber || '',
+        phone: cleanProfileData.phone || '',
+        isActive: true,
+        isTechCommitteeHead: !!cleanProfileData.isTechCommitteeHead,
+        techCommitteeSports: cleanProfileData.techCommitteeSports || [],
+        isTechCommitteeMember: !!cleanProfileData.isTechCommitteeMember,
+        techCommitteeSportsMemberOf: cleanProfileData.techCommitteeSportsMemberOf || [],
+        ...cleanProfileData,
+        createdAt: new Date(),
+        updatedAt: new Date()
+      };
+      users.push(fullUserRecord);
+    }
+    localStorage.setItem('local_registered_users', JSON.stringify(users));
+
+    // 2. Also sync demo user profile if matching
+    try {
+      const savedDemo = localStorage.getItem('demo_user_profile');
+      if (savedDemo) {
+        const parsed = JSON.parse(savedDemo) as User;
+        if (parsed.id === userId || (profileData.email && parsed.email?.toLowerCase() === profileData.email?.toLowerCase()) || parsed.role === 'TEACHER') {
+          const updatedDemo = { ...parsed, ...fullUserRecord, updatedAt: new Date() };
+          localStorage.setItem('demo_user_profile', JSON.stringify(updatedDemo));
+        }
+      }
+    } catch {}
+
+    // 3. Sync full document to Firestore
+    try {
       if (userId) {
         await setDoc(doc(db, 'users', userId), {
-          ...cleanProfileData,
+          ...fullUserRecord,
           id: userId,
           updatedAt: serverTimestamp()
         }, { merge: true });
@@ -1358,36 +1793,11 @@ export const DataService = {
       console.warn("Firestore user profile update error:", e);
     }
 
-    // Also sync to local storage/localStorage
     try {
-      const savedDemo = localStorage.getItem('demo_user_profile');
-      if (savedDemo) {
-        const parsed = JSON.parse(savedDemo) as User;
-        if (parsed.id === userId || (profileData.email && parsed.email === profileData.email) || parsed.role === 'TEACHER') {
-          const updatedDemo = { ...parsed, ...cleanProfileData, updatedAt: new Date() };
-          localStorage.setItem('demo_user_profile', JSON.stringify(updatedDemo));
-        }
-      }
-
-      // Sync in local_registered_users list
-      const localUsersRaw = localStorage.getItem('local_registered_users');
-      let users = localUsersRaw ? JSON.parse(localUsersRaw) : [];
-      const idx = users.findIndex((u: any) => 
-        (userId && u.id === userId) || 
-        (profileData.email && u.email?.toLowerCase() === profileData.email?.toLowerCase()) ||
-        (profileData.leaseNumber && u.leaseNumber === profileData.leaseNumber)
-      );
-      if (idx >= 0) {
-        users[idx] = { ...users[idx], ...cleanProfileData, id: users[idx].id || userId, updatedAt: new Date() };
-      } else {
-        users.push({ ...cleanProfileData, id: userId, createdAt: new Date(), updatedAt: new Date() });
-      }
-      localStorage.setItem('local_registered_users', JSON.stringify(users));
-
       // Trigger event for listeners
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('userDataChanged'));
-        window.dispatchEvent(new CustomEvent('teacherProfileUpdated', { detail: cleanProfileData }));
+        window.dispatchEvent(new CustomEvent('teacherProfileUpdated', { detail: fullUserRecord }));
       }
 
       // Synchronize changes to Schools (teacherName & teacher phone)
@@ -1817,8 +2227,21 @@ export const DataService = {
       console.warn("Firestore fetch sports error, falling back to local cache:", e);
     }
 
+    const localSports = getLocal<Sport>('taourirt_sports_config', []);
     if (fetchedSports.length === 0) {
-      fetchedSports = getLocal<Sport>('taourirt_sports_config', []);
+      fetchedSports = localSports;
+    } else if (localSports.length > 0) {
+      fetchedSports = fetchedSports.map(f => {
+        const loc = localSports.find(l => l.id === f.id);
+        if (loc) {
+          return {
+            ...f,
+            ...loc,
+            ageCategories: (loc.ageCategories && loc.ageCategories.length > 0) ? loc.ageCategories : f.ageCategories
+          };
+        }
+        return f;
+      });
     }
 
     const allCategoryIds = getAgeCategoriesForSeason('2026/2027').map(c => c.id);
@@ -1859,13 +2282,21 @@ export const DataService = {
         isCustom: true
       }));
 
-    const allSports = deduplicateById<Sport>([...mergedBase, ...customSports]).map(s => {
-      const rawCats = s.ageCategories && s.ageCategories.length > 0 ? s.ageCategories : allCategoryIds;
-      const normalizedCats = Array.from(new Set(rawCats.map(normalizeCategoryKey))).filter(c => c !== 'OPEN');
+    const allSports: Sport[] = deduplicateById<Sport>([...mergedBase, ...customSports]).map(s => {
+      const rawCats = (Array.isArray(s.ageCategories) ? s.ageCategories : allCategoryIds) as string[];
+      
+      if (s.customAgeCategories && s.customAgeCategories.length > 0) {
+        return {
+          ...s,
+          ageCategories: rawCats
+        };
+      }
+
+      const normalizedCats = Array.from(new Set(rawCats.map(c => normalizeCategoryKey(c)))).filter(c => c !== 'OPEN');
       const validCats = normalizedCats.filter(c => ['U12', 'U15', 'U18', 'U20'].includes(c));
       return {
         ...s,
-        ageCategories: validCats.length > 0 ? validCats : allCategoryIds
+        ageCategories: validCats
       };
     });
 
@@ -1892,6 +2323,7 @@ export const DataService = {
     ageCategories: string[];
     studentLimit?: number;
     athleticsSpecialties?: string[];
+    customAgeCategories?: CustomAgeCategory[];
   }): Promise<Sport> {
     const cleanName = sport.name.trim();
     // Unique ID from latin characters or sport_timestamp
@@ -1906,6 +2338,7 @@ export const DataService = {
       icon: sport.icon || '🏆',
       description: sport.description?.trim() || `منافسات ${cleanName} المدرسية الإقليمية`,
       ageCategories: sport.ageCategories,
+      customAgeCategories: sport.customAgeCategories || [],
       studentLimit: sport.studentLimit !== undefined ? sport.studentLimit : 0,
       athleticsSpecialties: sport.athleticsSpecialties || [],
       isCustom: true,
@@ -1961,16 +2394,20 @@ export const DataService = {
     athleticsSpecialties?: string[],
     name?: string,
     icon?: string,
-    isProgrammed?: boolean
+    isProgrammed?: boolean,
+    customAgeCategories?: CustomAgeCategory[]
   ): Promise<void> {
     const list = await this.getSportsConfig();
+    const existingSport = list.find(s => s.id === sportId);
+
     const updated = list.map(s => {
       if (s.id !== sportId) return s;
       return {
         ...s,
         ageCategories,
-        studentLimit,
-        athleticsSpecialties,
+        customAgeCategories: customAgeCategories !== undefined ? customAgeCategories : s.customAgeCategories,
+        studentLimit: studentLimit !== undefined ? studentLimit : s.studentLimit,
+        athleticsSpecialties: athleticsSpecialties !== undefined ? athleticsSpecialties : s.athleticsSpecialties,
         name: name || s.name,
         icon: icon || s.icon,
         isProgrammed: isProgrammed !== undefined ? isProgrammed : s.isProgrammed
@@ -1988,8 +2425,9 @@ export const DataService = {
     try {
       await setDoc(doc(db, 'sports', sportId), {
         ageCategories,
-        studentLimit: studentLimit !== undefined ? studentLimit : null,
-        athleticsSpecialties: athleticsSpecialties !== undefined ? athleticsSpecialties : null,
+        customAgeCategories: customAgeCategories !== undefined ? customAgeCategories : (existingSport?.customAgeCategories || null),
+        studentLimit: studentLimit !== undefined ? studentLimit : (existingSport?.studentLimit || null),
+        athleticsSpecialties: athleticsSpecialties !== undefined ? athleticsSpecialties : (existingSport?.athleticsSpecialties || null),
         ...(isProgrammed !== undefined ? { isProgrammed } : {}),
         ...(name ? { name } : {}),
         ...(icon ? { icon } : {}),
@@ -2007,7 +2445,8 @@ export const DataService = {
       if (!snap.empty) {
         const firestoreList = snap.docs.map(d => ({ id: d.id, ...d.data() } as Student));
         const localList = getLocal<Student>('taourirt_students_data', []);
-        const merged = deduplicateById([...firestoreList, ...localList]);
+        // Prioritize localList first so newer local updates are not overwritten by stale Firestore fetches
+        const merged = deduplicateById([...localList, ...firestoreList]);
         setLocal('taourirt_students_data', merged);
         return merged;
       }
@@ -2024,7 +2463,8 @@ export const DataService = {
         if (!snap.empty) {
           const firestoreList = snap.docs.map(d => ({ id: d.id, ...d.data() } as Student));
           const localList = getLocal<Student>('taourirt_students_data', []);
-          const merged = deduplicateById([...firestoreList, ...localList]);
+          // Prioritize localList first so newer local updates are not overwritten by stale Firestore snapshots
+          const merged = deduplicateById([...localList, ...firestoreList]);
           setLocal('taourirt_students_data', merged);
           callback(merged);
         } else {
@@ -2057,8 +2497,17 @@ export const DataService = {
     setLocal('taourirt_students_data', [newStudent, ...localList]);
 
     try {
+      // Safely filter undefined fields so Firestore does not reject the payload
+      const firestorePayload: any = {};
+      Object.keys(studentWithDir).forEach(key => {
+        const val = (studentWithDir as any)[key];
+        if (val !== undefined) {
+          firestorePayload[key] = val;
+        }
+      });
+
       await setDoc(doc(db, 'students', newStudent.id), {
-        ...studentWithDir,
+        ...firestorePayload,
         id: newStudent.id,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp()
@@ -2068,6 +2517,57 @@ export const DataService = {
     }
 
     return newStudent;
+  },
+
+  async addStudentsBulk(studentsList: Array<Omit<Student, 'id' | 'createdAt' | 'updatedAt'>>): Promise<Student[]> {
+    const activeDirId = this.getActiveDirectorateId();
+    const createdStudents: Student[] = [];
+    const nowTime = Date.now();
+
+    for (let i = 0; i < studentsList.length; i++) {
+      const s = studentsList[i];
+      const studentWithDir = {
+        ...s,
+        directorateId: (s as any).directorateId || activeDirId
+      };
+      const newStudent: Student = {
+        ...studentWithDir,
+        id: `stud-${nowTime}-${i}-${Math.random().toString(36).substring(2, 6)}`,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      } as any;
+      createdStudents.push(newStudent);
+    }
+
+    const localList = getLocal<Student>('taourirt_students_data', []);
+    setLocal('taourirt_students_data', [...createdStudents, ...localList]);
+
+    try {
+      const batch = writeBatch(db);
+      for (const newStudent of createdStudents) {
+        const studentRef = doc(db, 'students', newStudent.id);
+        
+        // Clean undefined properties
+        const cleanPayload: any = {};
+        Object.keys(newStudent).forEach(key => {
+          const val = (newStudent as any)[key];
+          if (val !== undefined) {
+            cleanPayload[key] = val;
+          }
+        });
+
+        batch.set(studentRef, {
+          ...cleanPayload,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp()
+        });
+      }
+      await batch.commit();
+    } catch (e) {
+      console.warn("Bulk students saved locally; Firestore sync pending:", e);
+    }
+
+    return createdStudents;
   },
 
   async deleteStudent(id: string): Promise<void> {
@@ -2087,8 +2587,17 @@ export const DataService = {
     setLocal('taourirt_students_data', updated);
 
     try {
+      // Safely filter undefined fields so Firestore does not reject the update
+      const firestorePayload: any = {};
+      Object.keys(student).forEach(key => {
+        const val = (student as any)[key];
+        if (val !== undefined) {
+          firestorePayload[key] = val;
+        }
+      });
+
       await updateDoc(doc(db, 'students', id), {
-        ...student,
+        ...firestorePayload,
         updatedAt: serverTimestamp()
       });
     } catch (e) {
@@ -2197,10 +2706,44 @@ export const DataService = {
 
   async getRoleSidebarPermissions(): Promise<RoleSidebarPermissions> {
     const DEFAULT_PERMISSIONS: RoleSidebarPermissions = {
-      CENTRAL_ADMIN: ['/dashboard', '/schools', '/tournaments', '/posters-certificates', '/teachers', '/tech-committee', '/referees', '/matches', '/statistics', '/sports-config'],
-      TECH_COMMITTEE_HEAD: ['/dashboard', '/schools', '/tournaments', '/posters-certificates', '/teachers', '/tech-committee', '/referees', '/matches', '/statistics', '/sports-config'],
-      SPORT_MANAGER: ['/dashboard', '/schools', '/tournaments', '/posters-certificates', '/teachers', '/referees', '/matches', '/statistics'],
-      TEACHER: ['/dashboard', '/schools', '/tournaments', '/posters-certificates', '/matches', '/statistics']
+      CENTRAL_ADMIN: [
+        '/dashboard', '/schools', '/tournaments', '/teachers', '/tech-committee', '/referees', '/matches', '/helper-apps', '/posters-certificates', '/statistics', '/sports-config', '/permissions',
+        'action:export_data', 'action:import_data', 'action:edit_results', 'action:register_students', 'action:manage_schedule', 'action:delete_records'
+      ],
+      TECH_COMMITTEE_HEAD: [
+        '/dashboard', '/schools', '/tournaments', '/teachers', '/tech-committee', '/referees', '/matches', '/helper-apps', '/posters-certificates', '/statistics', '/sports-config',
+        'action:export_data', 'action:edit_results', 'action:register_students', 'action:manage_schedule'
+      ],
+      SPORT_MANAGER: [
+        '/dashboard', '/schools', '/tournaments', '/teachers', '/referees', '/matches', '/helper-apps', '/posters-certificates', '/statistics',
+        'action:export_data', 'action:edit_results', 'action:register_students', 'action:manage_schedule'
+      ],
+      TEACHER: [
+        '/dashboard', '/schools', '/tournaments', '/matches', '/posters-certificates', '/statistics',
+        'action:export_data', 'action:register_students'
+      ],
+      REFEREE: [
+        '/dashboard', '/matches', '/statistics',
+        'action:edit_results'
+      ]
+    };
+
+    const ensureNewRoutes = (perms: RoleSidebarPermissions): RoleSidebarPermissions => {
+      if (!perms || typeof perms !== 'object') return DEFAULT_PERMISSIONS;
+      const res = { ...perms };
+      (['CENTRAL_ADMIN', 'TECH_COMMITTEE_HEAD', 'SPORT_MANAGER'] as const).forEach(role => {
+        if (res[role] && Array.isArray(res[role]) && !res[role].includes('/helper-apps')) {
+          const list = [...res[role]];
+          const matchIdx = list.indexOf('/matches');
+          if (matchIdx !== -1) {
+            list.splice(matchIdx + 1, 0, '/helper-apps');
+          } else {
+            list.push('/helper-apps');
+          }
+          res[role] = list;
+        }
+      });
+      return res;
     };
 
     try {
@@ -2208,7 +2751,7 @@ export const DataService = {
       if (docSnap.exists()) {
         const firestoreData = docSnap.data() as RoleSidebarPermissions;
         if (firestoreData && typeof firestoreData === 'object') {
-          const merged = { ...DEFAULT_PERMISSIONS, ...firestoreData };
+          const merged = ensureNewRoutes({ ...DEFAULT_PERMISSIONS, ...firestoreData });
           localStorage.setItem('taourirt_role_sidebar_permissions', JSON.stringify(merged));
           return merged;
         }
@@ -2222,7 +2765,7 @@ export const DataService = {
       if (local) {
         const parsed = JSON.parse(local);
         if (parsed && typeof parsed === 'object') {
-          return { ...DEFAULT_PERMISSIONS, ...parsed };
+          return ensureNewRoutes({ ...DEFAULT_PERMISSIONS, ...parsed });
         }
       }
     } catch (e) {
@@ -2237,9 +2780,22 @@ export const DataService = {
       if (docSnap.exists()) {
         const data = docSnap.data() as RoleSidebarPermissions;
         if (data) {
-          localStorage.setItem('taourirt_role_sidebar_permissions', JSON.stringify(data));
-          callback(data);
-          window.dispatchEvent(new CustomEvent('sidebarPermissionsChanged', { detail: data }));
+          const res = { ...data };
+          (['CENTRAL_ADMIN', 'TECH_COMMITTEE_HEAD', 'SPORT_MANAGER'] as const).forEach(role => {
+            if (res[role] && Array.isArray(res[role]) && !res[role].includes('/helper-apps')) {
+              const list = [...res[role]];
+              const matchIdx = list.indexOf('/matches');
+              if (matchIdx !== -1) {
+                list.splice(matchIdx + 1, 0, '/helper-apps');
+              } else {
+                list.push('/helper-apps');
+              }
+              res[role] = list;
+            }
+          });
+          localStorage.setItem('taourirt_role_sidebar_permissions', JSON.stringify(res));
+          callback(res);
+          window.dispatchEvent(new CustomEvent('sidebarPermissionsChanged', { detail: res }));
         }
       }
     }, (err) => {
@@ -2368,24 +2924,216 @@ export const DataService = {
     return cleanDirCode === cleanInput;
   },
 
+  _normalizeCrossCountryDoc(docId: string, data: any, activeDirId: string): CrossCountryCategoryResult {
+    const rawCatId = (data.categoryId || data.category_id || data.id || docId || '').toLowerCase().trim();
+    let normalizedId = rawCatId;
+    
+    // Strip directorate prefix if present, e.g. taourirt_u13_male -> u13_male
+    if (activeDirId && normalizedId.startsWith(`${activeDirId.toLowerCase()}_`)) {
+      normalizedId = normalizedId.replace(`${activeDirId.toLowerCase()}_`, '');
+    } else if (normalizedId.includes('_')) {
+      const parts = normalizedId.split('_');
+      if (parts.length >= 2) {
+        const lastPart = parts[parts.length - 1];
+        const secondLast = parts[parts.length - 2];
+        if (['male', 'female', 'ذكور', 'إناث', 'اناث', 'm', 'f'].includes(lastPart)) {
+          const gNorm = (lastPart === 'ذكور' || lastPart === 'm') ? 'male' : (lastPart === 'إناث' || lastPart === 'اناث' || lastPart === 'f') ? 'female' : lastPart;
+          normalizedId = `${secondLast}_${gNorm}`;
+        }
+      }
+    }
+
+    // Gender normalization
+    let gender: 'Male' | 'Female' = 'Male';
+    const rawGender = String(data.gender || data.sexe || data.genre || '').trim().toLowerCase();
+    if (
+      rawGender === 'female' ||
+      rawGender === 'f' ||
+      rawGender === 'أنثى' ||
+      rawGender === 'انثى' ||
+      rawGender === 'إناث' ||
+      rawGender === 'فتيات' ||
+      rawGender === 'صغيرات' ||
+      rawGender === 'برعمات' ||
+      rawGender === 'شابات' ||
+      normalizedId.endsWith('female')
+    ) {
+      gender = 'Female';
+    }
+
+    // Category normalization
+    let category = data.category || data.categorie || 'U15';
+    const catStr = String(category).toLowerCase();
+    const catNameStr = String(data.categoryName || data.nom_categorie || '').toLowerCase();
+    if (
+      normalizedId.includes('u12') ||
+      normalizedId.includes('u13') ||
+      catStr.includes('u12') ||
+      catStr.includes('u13') ||
+      catStr.includes('براعم') ||
+      catNameStr.includes('براعم')
+    ) {
+      category = 'U12';
+    } else if (
+      normalizedId.includes('u15') ||
+      catStr.includes('u15') ||
+      catStr.includes('صغار') ||
+      catStr.includes('صغيرات') ||
+      catNameStr.includes('صغار') ||
+      catNameStr.includes('صغيرات')
+    ) {
+      category = 'U15';
+    } else if (
+      normalizedId.includes('u18') ||
+      catStr.includes('u18') ||
+      catStr.includes('فتيان') ||
+      catStr.includes('فتيات') ||
+      catNameStr.includes('فتيان') ||
+      catNameStr.includes('فتيات')
+    ) {
+      category = 'U18';
+    } else if (
+      normalizedId.includes('u20') ||
+      catStr.includes('u20') ||
+      catStr.includes('شبان') ||
+      catStr.includes('شابات') ||
+      catNameStr.includes('شبان') ||
+      catNameStr.includes('شابات')
+    ) {
+      category = 'U20';
+    }
+
+    // Standard title
+    let titleAr = data.titleAr || data.title || data.nom_course || (data as any).categoryName || '';
+    if (!titleAr) {
+      if (category === 'U12' && gender === 'Male') titleAr = 'سباق البراعم ذكور (U12)';
+      else if (category === 'U12' && gender === 'Female') titleAr = 'سباق البرعمات إناث (U12)';
+      else if (category === 'U15' && gender === 'Male') titleAr = 'سباق الصغار ذكور (U15)';
+      else if (category === 'U15' && gender === 'Female') titleAr = 'سباق الصغيرات إناث (U15)';
+      else if (category === 'U18' && gender === 'Male') titleAr = 'سباق الفتيان ذكور (U18)';
+      else if (category === 'U18' && gender === 'Female') titleAr = 'سباق الفتيات إناث (U18)';
+      else if (category === 'U20' && gender === 'Male') titleAr = 'سباق الشبان ذكور (U20)';
+      else if (category === 'U20' && gender === 'Female') titleAr = 'سباق الشابات إناث (U20)';
+    }
+
+    // Flexible extraction of podium/results/rankings array from external application
+    let rawList: any[] = [];
+    if (Array.isArray(data.podium)) rawList = data.podium;
+    else if (Array.isArray(data.results)) rawList = data.results;
+    else if (Array.isArray(data.rankings)) rawList = data.rankings;
+    else if (Array.isArray(data.ranking)) rawList = data.ranking;
+    else if (Array.isArray(data.winners)) rawList = data.winners;
+    else if (Array.isArray(data.runners)) rawList = data.runners;
+    else if (Array.isArray(data.participants)) rawList = data.participants;
+    else if (Array.isArray(data.athletes)) rawList = data.athletes;
+    else if (Array.isArray(data.classement)) rawList = data.classement;
+    else if (data.podium && typeof data.podium === 'object') rawList = Object.values(data.podium);
+    else if (data.results && typeof data.results === 'object') rawList = Object.values(data.results);
+
+    const podium: PodiumWinner[] = rawList
+      .filter(item => item && (item.fullName || item.name || item.nom || item.athleteName || item.studentName || item.runnerName || item.athlete_name))
+      .map((item, idx) => {
+        const rankVal = Number(item.rank ?? item.position ?? item.place ?? item.ordre ?? (idx + 1));
+        return {
+          rank: isNaN(rankVal) ? idx + 1 : rankVal,
+          fullName: String(item.fullName || item.name || item.nom || item.athleteName || item.studentName || item.runnerName || item.athlete_name || '').trim(),
+          schoolName: String(item.schoolName || item.school || item.etablissement || item.etab || item.school_name || item.institution || '').trim(),
+          time: item.time || item.timing || item.temps || item.chrono || item.duration || undefined,
+          bibNumber: item.bibNumber ? String(item.bibNumber) : (item.bib ? String(item.bib) : (item.dossard ? String(item.dossard) : (item.number ? String(item.number) : undefined))),
+          notes: item.notes || item.observation || item.remarks || item.remarques || item.qualif || item.status || undefined,
+          massarNumber: item.massarNumber || item.massar || item.cne || item.codeMassar || undefined
+        };
+      })
+      .sort((a, b) => a.rank - b.rank);
+
+    return {
+      categoryId: normalizedId,
+      category,
+      gender,
+      titleAr,
+      distance: data.distance || (category === 'U12' ? (gender === 'Male' ? '1500 م' : '1000 م') : category === 'U15' ? (gender === 'Male' ? '3000 م' : '2000 م') : category === 'U18' ? (gender === 'Male' ? '4000 م' : '3000 م') : (gender === 'Male' ? '5000 م' : '3000 م')),
+      venueName: data.venueName || data.venue || data.lieu || 'مضمار حلبة ألعاب القوى بتاوريرت',
+      directorateId: data.directorateId || activeDirId,
+      updatedAt: data.updatedAt ? (typeof data.updatedAt === 'string' ? data.updatedAt : (data.updatedAt.toDate ? data.updatedAt.toDate().toISOString() : new Date().toISOString())) : new Date().toISOString(),
+      podium
+    };
+  },
+
+  /**
+   * Subscribe to real-time Cross Country results from Firestore (onSnapshot)
+   */
+  subscribeCrossCountryResults(callback: (results: Record<string, CrossCountryCategoryResult>) => void): () => void {
+    const activeDirId = this.getActiveDirectorateId();
+    const cacheKey = `taourirt_cc_results_${activeDirId}`;
+
+    try {
+      const q = collection(db, 'cross_country_results');
+      const unsubscribe = onSnapshot(q, (snap) => {
+        const resultsMap: Record<string, CrossCountryCategoryResult> = { ...INITIAL_CROSS_COUNTRY_RESULTS };
+        
+        snap.docs.forEach(docSnap => {
+          const data = docSnap.data();
+          // Accept document for current directorate or global
+          if (!data.directorateId || data.directorateId === activeDirId || activeDirId === 'taourirt' || !activeDirId) {
+            const item = this._normalizeCrossCountryDoc(docSnap.id, data, activeDirId);
+            
+            // Register by exact doc ID, raw category ID, and normalized ID
+            resultsMap[docSnap.id] = item;
+            resultsMap[item.categoryId] = item;
+            if (data.categoryId) resultsMap[data.categoryId] = item;
+            
+            // Map u13 aliases to u12 and vice versa
+            if (item.categoryId === 'u13_male' || item.categoryId === 'u12_male') {
+              resultsMap['u12_male'] = item;
+              resultsMap['u13_male'] = item;
+            }
+            if (item.categoryId === 'u13_female' || item.categoryId === 'u12_female') {
+              resultsMap['u12_female'] = item;
+              resultsMap['u13_female'] = item;
+            }
+          }
+        });
+
+        localStorage.setItem(cacheKey, JSON.stringify(resultsMap));
+        callback(resultsMap);
+      }, (error) => {
+        console.warn("Firestore real-time subscription error for cross_country_results:", error);
+      });
+
+      return unsubscribe;
+    } catch (e) {
+      console.warn("Error setting up onSnapshot for cross_country_results:", e);
+      return () => {};
+    }
+  },
+
   async getCrossCountryResults(): Promise<Record<string, CrossCountryCategoryResult>> {
     const activeDirId = this.getActiveDirectorateId();
     const cacheKey = `taourirt_cc_results_${activeDirId}`;
     try {
       const snap = await getDocs(collection(db, 'cross_country_results'));
       if (!snap.empty) {
-        const resultsMap: Record<string, CrossCountryCategoryResult> = {};
+        const resultsMap: Record<string, CrossCountryCategoryResult> = { ...INITIAL_CROSS_COUNTRY_RESULTS };
         snap.docs.forEach(docSnap => {
-          const data = docSnap.data() as CrossCountryCategoryResult;
-          if (!data.directorateId || data.directorateId === activeDirId) {
-            resultsMap[data.categoryId || docSnap.id] = { ...data, categoryId: data.categoryId || docSnap.id };
+          const data = docSnap.data();
+          if (!data.directorateId || data.directorateId === activeDirId || activeDirId === 'taourirt' || !activeDirId) {
+            const item = this._normalizeCrossCountryDoc(docSnap.id, data, activeDirId);
+            resultsMap[docSnap.id] = item;
+            resultsMap[item.categoryId] = item;
+            if (data.categoryId) resultsMap[data.categoryId] = item;
+
+            if (item.categoryId === 'u13_male' || item.categoryId === 'u12_male') {
+              resultsMap['u12_male'] = item;
+              resultsMap['u13_male'] = item;
+            }
+            if (item.categoryId === 'u13_female' || item.categoryId === 'u12_female') {
+              resultsMap['u12_female'] = item;
+              resultsMap['u13_female'] = item;
+            }
           }
         });
-        if (Object.keys(resultsMap).length > 0) {
-          const merged = { ...INITIAL_CROSS_COUNTRY_RESULTS, ...resultsMap };
-          localStorage.setItem(cacheKey, JSON.stringify(merged));
-          return merged;
-        }
+        localStorage.setItem(cacheKey, JSON.stringify(resultsMap));
+        return resultsMap;
       }
     } catch (e) {
       console.warn("Firestore fetch cross_country_results error, using local storage:", e);
@@ -2417,6 +3165,14 @@ export const DataService = {
     try {
       const current = await this.getCrossCountryResults();
       current[result.categoryId] = resultWithDir;
+      if (result.categoryId === 'u12_male' || result.categoryId === 'u13_male') {
+        current['u12_male'] = resultWithDir;
+        current['u13_male'] = resultWithDir;
+      }
+      if (result.categoryId === 'u12_female' || result.categoryId === 'u13_female') {
+        current['u12_female'] = resultWithDir;
+        current['u13_female'] = resultWithDir;
+      }
       localStorage.setItem(cacheKey, JSON.stringify(current));
     } catch (e) {
       console.error("Error updating local CC results:", e);
@@ -2425,8 +3181,11 @@ export const DataService = {
     // Sync to Firestore
     try {
       const docId = `${activeDirId}_${result.categoryId}`;
+      // Clean undefined values to prevent Firestore rejection
+      const sanitized = JSON.parse(JSON.stringify(resultWithDir));
       await setDoc(doc(db, 'cross_country_results', docId), {
-        ...resultWithDir,
+        ...sanitized,
+        id: docId,
         updatedAt: serverTimestamp()
       }, { merge: true });
     } catch (e) {
@@ -2434,6 +3193,134 @@ export const DataService = {
     }
 
     window.dispatchEvent(new CustomEvent('crossCountryResultsUpdated', { detail: resultWithDir }));
+  },
+
+  /**
+   * Clear recorded arrivals / podium for a single Cross Country category
+   */
+  async clearCrossCountryCategoryResult(categoryId: string): Promise<void> {
+    const activeDirId = this.getActiveDirectorateId();
+    const cacheKey = `taourirt_cc_results_${activeDirId}`;
+
+    // 1. Update local cache
+    try {
+      const current = await this.getCrossCountryResults();
+      if (current[categoryId]) {
+        current[categoryId] = {
+          ...current[categoryId],
+          podium: [],
+          updatedAt: new Date().toISOString()
+        };
+      }
+      if (categoryId === 'u12_male' || categoryId === 'u13_male') {
+        if (current['u12_male']) current['u12_male'] = { ...current['u12_male'], podium: [], updatedAt: new Date().toISOString() };
+        if (current['u13_male']) current['u13_male'] = { ...current['u13_male'], podium: [], updatedAt: new Date().toISOString() };
+      }
+      if (categoryId === 'u12_female' || categoryId === 'u13_female') {
+        if (current['u12_female']) current['u12_female'] = { ...current['u12_female'], podium: [], updatedAt: new Date().toISOString() };
+        if (current['u13_female']) current['u13_female'] = { ...current['u13_female'], podium: [], updatedAt: new Date().toISOString() };
+      }
+      localStorage.setItem(cacheKey, JSON.stringify(current));
+    } catch (e) {
+      console.warn("Local clear CC category error:", e);
+    }
+
+    // 2. Sync to Firestore
+    try {
+      const docId = `${activeDirId}_${categoryId}`;
+      await setDoc(doc(db, 'cross_country_results', docId), {
+        podium: [],
+        updatedAt: serverTimestamp()
+      }, { merge: true });
+
+      // Also clean alias doc if applicable
+      if (categoryId === 'u12_male') {
+        await setDoc(doc(db, 'cross_country_results', `${activeDirId}_u13_male`), { podium: [], updatedAt: serverTimestamp() }, { merge: true }).catch(() => {});
+      } else if (categoryId === 'u12_female') {
+        await setDoc(doc(db, 'cross_country_results', `${activeDirId}_u13_female`), { podium: [], updatedAt: serverTimestamp() }, { merge: true }).catch(() => {});
+      }
+    } catch (e) {
+      console.warn("Firestore clear CC category error:", e);
+    }
+
+    window.dispatchEvent(new CustomEvent('crossCountryResultsUpdated'));
+  },
+
+  /**
+   * Clear recorded arrivals / podium across ALL 8 Cross Country categories
+   */
+  async clearAllCrossCountryResults(): Promise<void> {
+    const activeDirId = this.getActiveDirectorateId();
+    const cacheKey = `taourirt_cc_results_${activeDirId}`;
+
+    // 1. Reset local cache
+    const freshMap: Record<string, CrossCountryCategoryResult> = {};
+    Object.entries(INITIAL_CROSS_COUNTRY_RESULTS).forEach(([catId, def]) => {
+      freshMap[catId] = {
+        ...def,
+        podium: [],
+        directorateId: activeDirId,
+        updatedAt: new Date().toISOString()
+      };
+    });
+    localStorage.setItem(cacheKey, JSON.stringify(freshMap));
+
+    // 2. Clear all docs in Firestore
+    try {
+      const q = collection(db, 'cross_country_results');
+      const snap = await getDocs(q);
+      if (!snap.empty) {
+        const batch = writeBatch(db);
+        snap.docs.forEach((d) => {
+          const data = d.data();
+          if (!data.directorateId || data.directorateId === activeDirId || activeDirId === 'taourirt' || !activeDirId) {
+            batch.update(d.ref, {
+              podium: [],
+              updatedAt: serverTimestamp()
+            });
+          }
+        });
+        await batch.commit();
+      }
+    } catch (e) {
+      console.warn("Firestore clear all CC results error:", e);
+    }
+
+    window.dispatchEvent(new CustomEvent('crossCountryResultsUpdated'));
+  },
+
+  /**
+   * Clear all students/participants registered under sportId === 'cross_country'
+   */
+  async clearCrossCountryParticipants(): Promise<number> {
+    const activeDirId = this.getActiveDirectorateId();
+
+    // 1. Filter local cache
+    const localList = getLocal<Student>('taourirt_students_data', []);
+    const remaining = localList.filter(s => s.sportId !== 'cross_country');
+    const removedCount = localList.length - remaining.length;
+    setLocal('taourirt_students_data', remaining);
+
+    // 2. Delete matching docs from Firestore
+    try {
+      const q = query(
+        collection(db, 'students'),
+        where('sportId', '==', 'cross_country')
+      );
+      const snap = await getDocs(q);
+      if (!snap.empty) {
+        const batch = writeBatch(db);
+        snap.docs.forEach((d) => {
+          batch.delete(d.ref);
+        });
+        await batch.commit();
+      }
+    } catch (e) {
+      console.warn("Firestore clear CC participants error:", e);
+    }
+
+    window.dispatchEvent(new CustomEvent('studentsUpdated'));
+    return removedCount;
   },
 
   async syncAllDataFromCloud(): Promise<{
@@ -2496,12 +3383,12 @@ export const DataService = {
             registrationDeadline: data.registrationDeadline?.toDate ? data.registrationDeadline.toDate() : data.registrationDeadline,
           } as Tournament;
         });
-        const localList = getLocal<Tournament>(STORAGE_KEYS.TOURNAMENTS, INITIAL_TOURNAMENTS);
+        const localList = getLocal<Tournament>(STORAGE_KEYS.TOURNAMENTS, []);
         const merged = deduplicateById([...firestoreTournaments, ...localList]);
         setLocal(STORAGE_KEYS.TOURNAMENTS, merged);
         tournamentsCount = merged.length;
       } else {
-        const localList = getLocal<Tournament>(STORAGE_KEYS.TOURNAMENTS, INITIAL_TOURNAMENTS);
+        const localList = getLocal<Tournament>(STORAGE_KEYS.TOURNAMENTS, []);
         tournamentsCount = localList.length;
       }
 
@@ -2509,7 +3396,7 @@ export const DataService = {
       if (studentsSnap && !studentsSnap.empty) {
         const firestoreStudents = studentsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Student));
         const localList = getLocal<Student>('taourirt_students_data', []);
-        const merged = deduplicateById([...firestoreStudents, ...localList]);
+        const merged = deduplicateById([...localList, ...firestoreStudents]);
         setLocal('taourirt_students_data', merged);
         studentsCount = merged.length;
       } else {

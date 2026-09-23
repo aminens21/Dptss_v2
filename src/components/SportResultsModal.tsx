@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { Sport, Tournament, Match, School, Venue, Student, User } from '../types';
-import { DataService, isClubTournament, GENDER_MAP, getAgeCategoriesForSeason } from '../lib/dataService';
+import { DataService, isClubTournament, GENDER_MAP, getAgeCategoriesForSeason, normalizeCategoryKey } from '../lib/dataService';
 import { CrossCountryPodiumView } from './CrossCountryPodiumView';
 import { CrossCountryCategoryResult } from '../types';
 import {
@@ -26,6 +26,7 @@ import {
   ChevronLeft
 } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { useRolePermissions } from '../hooks/useRolePermissions';
 import { cn } from '../lib/utils';
 
 interface SportResultsModalProps {
@@ -77,10 +78,12 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [isFullScreen, setIsFullScreen] = useState(false);
 
+  const { canDo } = useRolePermissions();
+
   const isCentralAdmin = userProfile?.role === 'CENTRAL_ADMIN';
   const isSportManager = userProfile?.role === 'SPORT_MANAGER';
   const isTechHead = userProfile?.isTechCommitteeHead === true;
-  const canManage = isCentralAdmin || isSportManager || isTechHead;
+  const canManage = isCentralAdmin || isSportManager || isTechHead || canDo('action:edit_results');
 
   const seasonalCategories = useMemo(() => {
     return getAgeCategoriesForSeason(activeSeason);
@@ -89,9 +92,11 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
   // Sport categories list
   const sportCategories = useMemo(() => {
     if (!sport) return seasonalCategories.map(c => c.id);
-    if (sport.ageCategories && sport.ageCategories.length > 0) return sport.ageCategories;
+    const tournCats = Array.from(new Set(tournaments.filter(t => t.sportId === sport.id).map(t => normalizeCategoryKey(t.ageCategory)).filter(Boolean)));
+    if (tournCats.length > 0) return tournCats;
+    if (sport.ageCategories && sport.ageCategories.length > 0) return sport.ageCategories.map(normalizeCategoryKey);
     return seasonalCategories.map(c => c.id);
-  }, [sport, seasonalCategories]);
+  }, [sport, tournaments, seasonalCategories]);
 
   // Tournaments for this sport
   const sportTournaments = useMemo(() => {
@@ -261,15 +266,22 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
 
           <div className="flex items-center gap-1.5 justify-end w-full xs:w-auto shrink-0">
             {canManage && (
-              <button
-                type="button"
-                onClick={() => onCreateMatch(sport.id, selectedAffiliation)}
-                className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-[11px] font-black shadow-xs transition-all cursor-pointer flex items-center gap-1.5"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">برمجة مباراة جديدة</span>
-                <span className="sm:hidden">إضافة</span>
-              </button>
+              sport.id === 'cross_country' ? (
+                <span className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 bg-amber-500/20 text-amber-300 border border-amber-400/30 rounded-xl text-[11px] font-black">
+                  <Trophy className="w-3.5 h-3.5 text-amber-400" />
+                  <span>لوحة التتويج والبوديوم الإقليمي</span>
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => onCreateMatch(sport.id, selectedAffiliation)}
+                  className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-[11px] font-black shadow-xs transition-all cursor-pointer flex items-center gap-1.5"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">برمجة مباراة جديدة</span>
+                  <span className="sm:hidden">إضافة</span>
+                </button>
+              )
             )}
 
             <button

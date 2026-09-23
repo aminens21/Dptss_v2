@@ -1,10 +1,11 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { Tournament, Student, School, User, Sport, Match } from '../types';
-import { SPORTS_MAP, getAgeCategoriesForSeason, normalizeCategoryKey, DataService } from '../lib/dataService';
+import { SPORTS_MAP, getAgeCategoriesForSeason, normalizeCategoryKey, DataService, getCategoryYearsLabel } from '../lib/dataService';
 import { useAuth } from '../contexts/AuthContext';
 import { AppLogo } from './AppLogo';
 import { CountdownTimer } from './CountdownTimer';
 import { RegisterStudentModal } from './RegisterStudentModal';
+import { SportBulkRegisterModal } from './SportBulkRegisterModal';
 import { EditDeadlineModal } from './EditDeadlineModal';
 import { ParticipationFormPdfModal } from './ParticipationFormPdfModal';
 import * as XLSX from 'xlsx';
@@ -48,7 +49,6 @@ import {
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { compressImageToBase64 } from '../lib/imageUtils';
-import { TournamentPosterModal } from './TournamentPosterModal';
 
 export function getDistinctCategoryLabel(category: string, gender?: string): string {
   const normKey = normalizeCategoryKey(category);
@@ -135,12 +135,12 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
   const [activeBranchModal, setActiveBranchModal] = useState<'non_club' | 'club_affiliated' | null>(null);
   const [search, setSearch] = useState('');
   const [isRegisterModalOpen, setIsRegisterModalOpen] = useState(false);
+  const [isBulkRegisterOpen, setIsBulkRegisterOpen] = useState(false);
   const [preselectedSchoolForRegister, setPreselectedSchoolForRegister] = useState<string | undefined>(undefined);
   const [isEditDeadlineOpen, setIsEditDeadlineOpen] = useState(false);
   const [isHeaderCollapsed, setIsHeaderCollapsed] = useState(false);
   const [isFullScreen, setIsFullScreen] = useState(false);
   const [isPdfModalOpen, setIsPdfModalOpen] = useState(false);
-  const [isPosterModalOpen, setIsPosterModalOpen] = useState(false);
   const [selectedSchoolNameForView, setSelectedSchoolNameForView] = useState<string | null>(null);
   const [pdfSchoolName, setPdfSchoolName] = useState<string | null>(null);
   const [pdfPreselectedCat, setPdfPreselectedCat] = useState<string>('ALL');
@@ -234,30 +234,7 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
       return false;
     }
 
-    // 2. Cross-coach check within the same institution:
-    // Teachers CANNOT modify or delete participants belonging to another coach
-    const sLease = String(stud.coachLeaseNumber || '').trim();
-    const uLease = String(userProfile.leaseNumber || '').trim();
-    const sCoachName = String(stud.coachName || '').trim().toLowerCase();
-    const uFullName = String(userProfile.fullName || '').trim().toLowerCase();
-
-    // If student has a coach SOM lease number:
-    if (sLease) {
-      if (uLease && sLease === uLease) return true;
-      if (uLease && sLease !== uLease) return false;
-      if (sCoachName && uFullName && sCoachName === uFullName) return true;
-      return false;
-    }
-
-    // If student has a coach name (no SOM):
-    if (sCoachName) {
-      if (uFullName && (sCoachName === uFullName || sCoachName.includes(uFullName) || uFullName.includes(sCoachName))) {
-        return true;
-      }
-      return false;
-    }
-
-    // If no coach is registered yet for this student in the same school:
+    // Teacher can edit or delete any participant belonging to their institution
     return true;
   };
 
@@ -405,19 +382,30 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
     );
   }, [teachers, sport]);
 
-  // Categories list configured for this sport
-  const seasonalCategories = getAgeCategoriesForSeason(activeSeason);
-  const sportCategories = useMemo(() => {
-    return (sport?.ageCategories && sport.ageCategories.length > 0)
-      ? sport.ageCategories
-      : seasonalCategories.map(c => c.id);
-  }, [sport, activeSeason, seasonalCategories]);
-
   // Determine which branch cards to show based on programmed tournaments for this sport
   const sportTournaments = useMemo(() => {
     if (!sport) return [];
     return tournaments.filter(t => t.sportId === sport.id);
   }, [tournaments, sport]);
+
+  // Categories list configured for this sport
+  const seasonalCategories = getAgeCategoriesForSeason(activeSeason, undefined, sport?.id);
+  const sportCategories = useMemo(() => {
+    return (sport?.ageCategories && sport.ageCategories.length > 0)
+      ? sport.ageCategories.map(normalizeCategoryKey)
+      : seasonalCategories.map(c => c.id);
+  }, [sport, seasonalCategories]);
+
+  // Derive custom tournament title from programmed tournaments
+  const customTitle = useMemo(() => {
+    if (sportTournaments.length > 0 && sportTournaments[0].name) {
+      const raw = sportTournaments[0].name;
+      const clean = raw.split(/\s*-\s*(?:البرعمات|البراعم|الصغيرات|الصغار|الفتيات|الفتيان|الشابات|الشبان|ذكور|إناث|مختلط|U12|U15|U18|U20|جميع الفئات|فئة|صغار|فتيان|شبان|براعم|صغيرات|فتيات|شابات|برعمات|لا منتمين|للمنتمين للأندية|مفتوحة|مواليد|السلك|دوري)/i)[0].trim();
+      if (clean && clean.length >= 3) return clean;
+      return raw.split(/\s*-\s*/)[0].trim() || raw;
+    }
+    return `البطولة الإقليمية المدرسية لـ ${sport?.name || ''}`;
+  }, [sportTournaments, sport?.name]);
 
   const hasNonClubTournaments = useMemo(() => {
     return sportTournaments.some(t => (t.affiliationType || 'non_club') === 'non_club');
@@ -520,7 +508,11 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
 
   const getCategoryName = (catId: string) => {
     const found = seasonalCategories.find(c => c.id === catId);
-    return found ? found.shortName || found.name : catId;
+    if (found) {
+      const years = getCategoryYearsLabel(catId, activeSeason, sport?.id);
+      return `${found.shortName || found.name} (${years})`;
+    }
+    return getCategoryYearsLabel(catId, activeSeason, sport?.id);
   };
 
   // List of all participating schools with participant counts, gender counts, and category details
@@ -798,7 +790,7 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
               </div>
 
               <h2 className="text-base md:text-lg font-black text-white mt-1 leading-tight">
-                البطولة الإقليمية المدرسية لـ {sport.name}
+                {customTitle}
               </h2>
               {!isHeaderCollapsed && (
                 <p className="text-xs text-slate-300 mt-0.5 font-medium line-clamp-1">
@@ -1100,13 +1092,7 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
 
                   {canManage && (
                     <div className="flex flex-wrap items-center justify-end gap-2.5 shrink-0">
-                      <button
-                        onClick={() => setIsPosterModalOpen(true)}
-                        className="px-3 py-2 bg-purple-500/20 hover:bg-purple-500/30 text-purple-200 border border-purple-400/40 rounded-xl text-xs font-bold transition-colors cursor-pointer flex items-center gap-1.5"
-                      >
-                        <Palette className="w-3.5 h-3.5 text-purple-300" />
-                        <span>إعداد ملصق البطولة 🎨</span>
-                      </button>
+
 
                       <button
                         onClick={() => setIsEditDeadlineOpen(true)}
@@ -1292,7 +1278,20 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
                   className="px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs sm:text-sm font-black shadow-xs flex items-center gap-1.5 transition-all cursor-pointer hover:scale-102 flex-1 sm:flex-initial justify-center"
                 >
                   <Plus className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-                  <span>تسجيل مشاركين</span>
+                  <span>تسجيل واحد تلو الآخر</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPreselectedSchoolForRegister(selectedSchoolNameForView || undefined);
+                    setIsBulkRegisterOpen(true);
+                  }}
+                  className="px-3 py-2 bg-amber-500 hover:bg-amber-600 text-slate-950 rounded-xl text-xs sm:text-sm font-black shadow-xs flex items-center gap-1.5 transition-all cursor-pointer hover:scale-102 flex-1 sm:flex-initial justify-center"
+                  title="تسجيل عدة مشاركين دفعة واحدة لتوفير الوقت"
+                >
+                  <Sparkles className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                  <span>تسجيل دفعة واحدة ⚡</span>
                 </button>
 
                 {selectedSchoolNameForView && (
@@ -1964,10 +1963,32 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
         preselectedAffiliation={effectivePreselectedAffiliation}
         schools={schools}
         registrationDeadline={currentDeadline}
+        tournaments={tournaments}
         onRegistered={() => {
           if (onRefreshData) onRefreshData();
         }}
       />
+
+      {/* Sport Bulk Register Modal */}
+      {isBulkRegisterOpen && (
+        <SportBulkRegisterModal
+          isOpen={isBulkRegisterOpen}
+          onClose={() => {
+            setIsBulkRegisterOpen(false);
+            setPreselectedSchoolForRegister(undefined);
+          }}
+          sport={sport}
+          schools={schools}
+          preselectedSchoolName={preselectedSchoolForRegister}
+          preselectedCategory={effectivePreselectedCategory}
+          preselectedGender={effectivePreselectedGender}
+          allExistingStudents={localStudents}
+          tournaments={tournaments}
+          onRegistered={() => {
+            if (onRefreshData) onRefreshData();
+          }}
+        />
+      )}
 
       {/* Edit Deadline Modal */}
       <EditDeadlineModal
@@ -2363,15 +2384,7 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
         </div>
       )}
 
-      {/* Tournament Poster Generator Modal */}
-      {isPosterModalOpen && sport && (
-        <TournamentPosterModal
-          isOpen={isPosterModalOpen}
-          onClose={() => setIsPosterModalOpen(false)}
-          sport={sport}
-          tournaments={tournaments}
-        />
-      )}
+
     </div>
   );
 };

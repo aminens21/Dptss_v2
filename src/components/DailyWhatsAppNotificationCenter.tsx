@@ -147,6 +147,37 @@ export const DailyWhatsAppNotificationCenter: React.FC<DailyWhatsAppNotification
   const [isBroadcastingMatchId, setIsBroadcastingMatchId] = useState<string | null>(null);
   const [broadcastStatusMessage, setBroadcastStatusMessage] = useState<string | null>(null);
 
+  // Consecutive Broadcast Queue state
+  const [activeBroadcastQueue, setActiveBroadcastQueue] = useState<{
+    title: string;
+    items: {
+      id: string;
+      recipientName: string;
+      roleLabel: string;
+      phone: string;
+      text: string;
+      userId?: string;
+      roleType?: string;
+      schoolId?: string;
+      schoolName?: string;
+      refereeId?: string;
+    }[];
+    currentIndex: number;
+    matchSportId?: string;
+  } | null>(null);
+
+  const [inlinePhoneInput, setInlinePhoneInput] = useState('');
+
+  // Sync inline phone input with the current queue recipient
+  useEffect(() => {
+    if (activeBroadcastQueue && activeBroadcastQueue.currentIndex < activeBroadcastQueue.items.length) {
+      const currentItem = activeBroadcastQueue.items[activeBroadcastQueue.currentIndex];
+      setInlinePhoneInput(currentItem.phone || '');
+    } else {
+      setInlinePhoneInput('');
+    }
+  }, [activeBroadcastQueue, activeBroadcastQueue?.currentIndex]);
+
   // Helper date comparators (Local Moroccan Date)
   const todayStr = useMemo(() => new Date().toISOString().split('T')[0], []);
   const tomorrowStr = useMemo(() => {
@@ -555,6 +586,64 @@ export const DailyWhatsAppNotificationCenter: React.FC<DailyWhatsAppNotification
     }
   };
 
+  // Quick Inline Save inside consecutive broadcast assistant queue
+  const handleSaveInlinePhone = async () => {
+    if (!activeBroadcastQueue) return;
+    const currentItem = activeBroadcastQueue.items[activeBroadcastQueue.currentIndex];
+    const cleanPhone = inlinePhoneInput.trim();
+    if (!cleanPhone || cleanPhone.length < 8) {
+      toast.error('يرجى إدخال رقم هاتف صالح (8 أرقام على الأقل)');
+      return;
+    }
+
+    try {
+      if (currentItem.roleType === 'teacher1' || currentItem.roleType === 'teacher2') {
+        await DataService.updateContactPhone({
+          type: 'teacher',
+          id: currentItem.userId,
+          schoolId: currentItem.schoolId,
+          schoolName: currentItem.schoolName,
+          name: currentItem.recipientName,
+          phone: cleanPhone
+        });
+      } else if (currentItem.roleType === 'principal1' || currentItem.roleType === 'principal2') {
+        await DataService.updateContactPhone({
+          type: 'principal',
+          schoolId: currentItem.schoolId,
+          schoolName: currentItem.schoolName,
+          phone: cleanPhone
+        });
+      } else if (currentItem.roleType === 'referee') {
+        await DataService.updateContactPhone({
+          type: 'referee',
+          id: currentItem.refereeId,
+          name: currentItem.recipientName,
+          phone: cleanPhone
+        });
+      }
+
+      // Update the phone number in our active broadcast queue items list state
+      setActiveBroadcastQueue((prev) => {
+        if (!prev) return null;
+        const updatedItems = [...prev.items];
+        updatedItems[prev.currentIndex] = {
+          ...updatedItems[prev.currentIndex],
+          phone: cleanPhone
+        };
+        return {
+          ...prev,
+          items: updatedItems
+        };
+      });
+
+      toast.success(`تم حفظ هاتف ${currentItem.recipientName} بنجاح`);
+      if (onRefresh) onRefresh();
+    } catch (err) {
+      console.error(err);
+      toast.error('حدث خطأ أثناء حفظ رقم الهاتف');
+    }
+  };
+
   // =========================================================================
   // ONE-CLICK UNIFIED BROADCAST ENGINE (زر واحد يرسل الاشعار الموحد لجميع المعنيين)
   // =========================================================================
@@ -571,60 +660,54 @@ export const DailyWhatsAppNotificationCenter: React.FC<DailyWhatsAppNotification
       return;
     }
 
-    const validStakeholders = matchItem.stakeholders.filter(
-      (s) => s.phone && s.phone.trim().length >= 8
-    );
-
-    if (validStakeholders.length === 0) {
-      toast.error(`لا توجد أرقام هواتف مسجلة لهذه المباراة (${matchItem.team1Name} ضد ${matchItem.team2Name}). يمكنك تسجيلها بزر القلم ✏️`);
-      return;
-    }
-
     const unifiedText = getUnifiedNotificationText(matchItem);
-    setIsBroadcastingMatchId(matchItem.match.id);
-    setBroadcastStatusMessage(`جارٍ إرسال الإشعار الموحد لجميع المعنيين (${validStakeholders.length} أطراف)...`);
 
     try {
       // 2. Dispatch in-app system push notification
-      await DataService.addNotification({
-        title: `⚡ إشعار موحد للمباراة: ${matchItem.sportInfo.name}`,
-        body: unifiedText,
-        sportId: matchItem.sportId,
-        role: 'ALL',
-        userIds: validStakeholders.map((s) => s.userId).filter(Boolean) as string[]
-      });
-
-      // 3. Mark all stakeholders as dispatched in UI state immediately
-      setDispatchedIds((prev) => {
-        const next = new Set(prev);
-        validStakeholders.forEach((s) => next.add(s.id));
-        return next;
-      });
-
-      // 4. Automatically trigger WhatsApp dispatch for all stakeholders in rapid sequence
-      // We open WhatsApp directly for the recipients
-      validStakeholders.forEach((stk, index) => {
-        setTimeout(() => {
-          openWhatsApp(stk.phone, unifiedText);
-        }, index * 800);
-      });
-
-      // 5. Also copy the complete unified announcement to clipboard for easy pasting
-      navigator.clipboard.writeText(unifiedText);
-
-      toast.success(
-        `🎉 تم إرسال الإشعار الموحد بنجاح لجميع المعنيين باللقاء (${validStakeholders.length} أطراف بنقرة واحدة)!`,
-        { duration: 5000 }
-      );
+      const validUserIds = matchItem.stakeholders.map((s) => s.userId).filter(Boolean) as string[];
+      if (validUserIds.length > 0) {
+        await DataService.addNotification({
+          title: `⚡ إشعار موحد للمباراة: ${matchItem.sportInfo.name}`,
+          body: unifiedText,
+          sportId: matchItem.sportId,
+          role: 'ALL',
+          userIds: validUserIds
+        });
+      }
     } catch (err) {
-      console.error('Unified broadcast error:', err);
-      toast.error('حدث خطأ أثناء بث الإشعار الموحد');
-    } finally {
-      setTimeout(() => {
-        setIsBroadcastingMatchId(null);
-        setBroadcastStatusMessage(null);
-      }, 1500);
+      console.warn('System push notification error:', err);
     }
+
+    // 3. Populate consecutive broadcast queue with ALL stakeholders (even without phone, for on-the-spot completion)
+    const rawItems = matchItem.stakeholders.map((s) => ({
+      id: s.id,
+      recipientName: s.name,
+      roleLabel: s.roleLabel,
+      phone: s.phone || '',
+      text: unifiedText,
+      userId: s.userId,
+      roleType: s.roleType,
+      schoolId: s.schoolId,
+      schoolName: s.schoolName,
+      refereeId: s.refereeId
+    }));
+
+    // Deduplicate on non-empty phone numbers to prevent duplicate WhatsApp tabs for same user
+    const seenPhones = new Set<string>();
+    const queueItems = rawItems.filter((item) => {
+      if (!item.phone || item.phone.trim().length < 8) return true; // keep empty or short phones for user to fill in
+      const p = item.phone.trim();
+      if (seenPhones.has(p)) return false;
+      seenPhones.add(p);
+      return true;
+    });
+
+    setActiveBroadcastQueue({
+      title: `إرسال الإشعار الموحد للمباراة: ${matchItem.team1Name} ضد ${matchItem.team2Name}`,
+      items: queueItems,
+      currentIndex: 0,
+      matchSportId: matchItem.sportId
+    });
   };
 
   // ONE-CLICK GLOBAL BROADCAST FOR ALL TODAY'S MATCHES
@@ -640,46 +723,64 @@ export const DailyWhatsAppNotificationCenter: React.FC<DailyWhatsAppNotification
       return;
     }
 
-    let totalRecipientsCount = 0;
-    const allValidStakeholders: { phone: string; text: string; id: string }[] = [];
+    const rawItems: any[] = [];
 
-    todayMatches.forEach((item) => {
-      const text = getUnifiedNotificationText(item);
-      item.stakeholders.forEach((stk) => {
-        if (stk.phone && stk.phone.trim().length >= 8) {
-          totalRecipientsCount++;
-          allValidStakeholders.push({
-            phone: stk.phone,
-            text,
-            id: stk.id
-          });
-        }
+    todayMatches.forEach((matchItem) => {
+      const unifiedText = getUnifiedNotificationText(matchItem);
+      matchItem.stakeholders.forEach((s) => {
+        rawItems.push({
+          id: s.id,
+          recipientName: s.name,
+          roleLabel: `${s.roleLabel} (${matchItem.team1Name} ضد ${matchItem.team2Name})`,
+          phone: s.phone || '',
+          text: unifiedText,
+          userId: s.userId,
+          roleType: s.roleType,
+          schoolId: s.schoolId,
+          schoolName: s.schoolName,
+          refereeId: s.refereeId
+        });
       });
     });
 
-    if (allValidStakeholders.length === 0) {
-      toast.error('لم يتم العثور على أرقام هواتف مسجلة لمباريات اليوم.');
+    // Deduplicate non-empty phones
+    const seenPhones = new Set<string>();
+    const queueItems = rawItems.filter((item) => {
+      if (!item.phone || item.phone.trim().length < 8) return true;
+      const p = item.phone.trim();
+      if (seenPhones.has(p)) return false;
+      seenPhones.add(p);
+      return true;
+    });
+
+    if (queueItems.length === 0) {
+      toast.error('لم يتم العثور على أطراف معنية لمباريات اليوم.');
       return;
     }
 
-    setBroadcastStatusMessage(`جارٍ إرسال الإشعار الموحد لكافة مباريات اليوم (${totalRecipientsCount} معنيين)...`);
+    // Dispatch in-app system push notifications for each match
+    for (const matchItem of todayMatches) {
+      try {
+        const unifiedText = getUnifiedNotificationText(matchItem);
+        const validUserIds = matchItem.stakeholders.map((s) => s.userId).filter(Boolean) as string[];
+        if (validUserIds.length > 0) {
+          await DataService.addNotification({
+            title: `⚡ إشعار موحد للمباراة: ${matchItem.sportInfo.name}`,
+            body: unifiedText,
+            sportId: matchItem.sportId,
+            role: 'ALL',
+            userIds: validUserIds
+          });
+        }
+      } catch (err) {
+        console.warn('System push notification error:', err);
+      }
+    }
 
-    // Mark all as dispatched
-    setDispatchedIds((prev) => {
-      const next = new Set(prev);
-      allValidStakeholders.forEach((s) => next.add(s.id));
-      return next;
-    });
-
-    // Automated dispatch
-    allValidStakeholders.forEach((item, idx) => {
-      setTimeout(() => {
-        openWhatsApp(item.phone, item.text);
-      }, idx * 600);
-    });
-
-    toast.success(`🚀 تم إطلاق الإشعار الموحد لجميع مباريات اليوم بنقرة واحدة (${totalRecipientsCount} أطراف)!`, {
-      duration: 6000
+    setActiveBroadcastQueue({
+      title: `إرسال الإشعار الموحد لكافة مباريات اليوم (${todayMatches.length} مقابلة)`,
+      items: queueItems,
+      currentIndex: 0
     });
     setIsGlobalBroadcastOpen(false);
   };
@@ -1130,23 +1231,66 @@ export const DailyWhatsAppNotificationCenter: React.FC<DailyWhatsAppNotification
                         </p>
                       </div>
 
-                      <div className="pt-2 border-t border-emerald-200/50 flex items-center gap-1.5">
+                      <div className="pt-2 border-t border-emerald-200/50 flex flex-col gap-1.5">
                         {canSendNotifications ? (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              if (!item.teacher1.phone) {
-                                toast.error(`رقم هاتف أستاذ ${item.team1Name} غير مسجل`);
-                                return;
-                              }
-                              openWhatsApp(item.teacher1.phone, unifiedMsg);
-                              setDispatchedIds((prev) => new Set(prev).add(`t1-${m.id}`));
-                            }}
-                            className="flex-1 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white py-1.5 px-2.5 rounded-lg text-[11px] font-bold flex items-center justify-center gap-1.5 transition-all shadow-xs cursor-pointer"
-                          >
-                            <Send className="w-3 h-3" />
-                            <span>واتساب مؤطر 1</span>
-                          </button>
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (!item.teacher1.phone) {
+                                  toast.error(`رقم هاتف أستاذ ${item.team1Name} غير مسجل`);
+                                  return;
+                                }
+                                openWhatsApp(item.teacher1.phone, unifiedMsg);
+                                setDispatchedIds((prev) => new Set(prev).add(`t1-${m.id}`));
+                              }}
+                              className="w-full bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white py-1.5 px-2.5 rounded-lg text-[11px] font-bold flex items-center justify-center gap-1.5 transition-all shadow-xs cursor-pointer"
+                            >
+                              <Send className="w-3 h-3" />
+                              <span>واتساب مؤطر 1</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const teacherQueueItems = [
+                                  {
+                                    id: `t1-${m.id}`,
+                                    recipientName: item.teacher1.fullName,
+                                    roleLabel: `مؤطر ${item.team1Name}`,
+                                    phone: item.teacher1.phone || '',
+                                    text: unifiedMsg,
+                                    roleType: 'teacher1' as const,
+                                    schoolId: item.school1?.id,
+                                    schoolName: item.team1Name,
+                                    userId: item.teacher1.userId
+                                  },
+                                  {
+                                    id: `t2-${m.id}`,
+                                    recipientName: item.teacher2.fullName,
+                                    roleLabel: `مؤطر ${item.team2Name}`,
+                                    phone: item.teacher2.phone || '',
+                                    text: unifiedMsg,
+                                    roleType: 'teacher2' as const,
+                                    schoolId: item.school2?.id,
+                                    schoolName: item.team2Name,
+                                    userId: item.teacher2.userId
+                                  }
+                                ];
+
+                                setActiveBroadcastQueue({
+                                  title: `بث الإشعار الموحد للمؤطرين: ${item.team1Name} ضد ${item.team2Name}`,
+                                  items: teacherQueueItems,
+                                  currentIndex: 0,
+                                  matchSportId: item.sportId
+                                });
+                              }}
+                              className="w-full bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 active:scale-95 text-white py-1 px-2 rounded-lg text-[10px] font-black flex items-center justify-center gap-1 transition-all shadow-xs cursor-pointer"
+                            >
+                              <Zap className="w-2.5 h-2.5 fill-white shrink-0" />
+                              <span>بث للمؤطرين معاً ⚡</span>
+                            </button>
+                          </>
                         ) : (
                           <span className="text-[10px] text-slate-500 font-medium py-1">مؤطر معتمد للفريق الأول</span>
                         )}
@@ -1187,23 +1331,66 @@ export const DailyWhatsAppNotificationCenter: React.FC<DailyWhatsAppNotification
                         </p>
                       </div>
 
-                      <div className="pt-2 border-t border-emerald-200/50 flex items-center gap-1.5">
+                      <div className="pt-2 border-t border-emerald-200/50 flex flex-col gap-1.5">
                         {canSendNotifications ? (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              if (!item.teacher2.phone) {
-                                toast.error(`رقم هاتف أستاذ ${item.team2Name} غير مسجل`);
-                                return;
-                              }
-                              openWhatsApp(item.teacher2.phone, unifiedMsg);
-                              setDispatchedIds((prev) => new Set(prev).add(`t2-${m.id}`));
-                            }}
-                            className="flex-1 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white py-1.5 px-2.5 rounded-lg text-[11px] font-bold flex items-center justify-center gap-1.5 transition-all shadow-xs cursor-pointer"
-                          >
-                            <Send className="w-3 h-3" />
-                            <span>واتساب مؤطر 2</span>
-                          </button>
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (!item.teacher2.phone) {
+                                  toast.error(`رقم هاتف أستاذ ${item.team2Name} غير مسجل`);
+                                  return;
+                                }
+                                openWhatsApp(item.teacher2.phone, unifiedMsg);
+                                setDispatchedIds((prev) => new Set(prev).add(`t2-${m.id}`));
+                              }}
+                              className="w-full bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white py-1.5 px-2.5 rounded-lg text-[11px] font-bold flex items-center justify-center gap-1.5 transition-all shadow-xs cursor-pointer"
+                            >
+                              <Send className="w-3 h-3" />
+                              <span>واتساب مؤطر 2</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const teacherQueueItems = [
+                                  {
+                                    id: `t1-${m.id}`,
+                                    recipientName: item.teacher1.fullName,
+                                    roleLabel: `مؤطر ${item.team1Name}`,
+                                    phone: item.teacher1.phone || '',
+                                    text: unifiedMsg,
+                                    roleType: 'teacher1' as const,
+                                    schoolId: item.school1?.id,
+                                    schoolName: item.team1Name,
+                                    userId: item.teacher1.userId
+                                  },
+                                  {
+                                    id: `t2-${m.id}`,
+                                    recipientName: item.teacher2.fullName,
+                                    roleLabel: `مؤطر ${item.team2Name}`,
+                                    phone: item.teacher2.phone || '',
+                                    text: unifiedMsg,
+                                    roleType: 'teacher2' as const,
+                                    schoolId: item.school2?.id,
+                                    schoolName: item.team2Name,
+                                    userId: item.teacher2.userId
+                                  }
+                                ];
+
+                                setActiveBroadcastQueue({
+                                  title: `بث الإشعار الموحد للمؤطرين: ${item.team1Name} ضد ${item.team2Name}`,
+                                  items: teacherQueueItems,
+                                  currentIndex: 0,
+                                  matchSportId: item.sportId
+                                });
+                              }}
+                              className="w-full bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 active:scale-95 text-white py-1 px-2 rounded-lg text-[10px] font-black flex items-center justify-center gap-1 transition-all shadow-xs cursor-pointer"
+                            >
+                              <Zap className="w-2.5 h-2.5 fill-white shrink-0" />
+                              <span>بث للمؤطرين معاً ⚡</span>
+                            </button>
+                          </>
                         ) : (
                           <span className="text-[10px] text-slate-500 font-medium py-1">مؤطر معتمد للفريق الثاني</span>
                         )}
@@ -1239,27 +1426,62 @@ export const DailyWhatsAppNotificationCenter: React.FC<DailyWhatsAppNotification
                       </div>
 
                       <div className="pt-2 border-t border-amber-200/50 flex flex-col gap-1.5">
-                        {item.assignedReferees.length > 0 && (
+                        {item.assignedReferees.length > 0 ? (
                           canSendNotifications ? (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                const ref = item.assignedReferees[0];
-                                if (!ref?.phone) {
-                                  toast.error(`رقم هاتف الحكم غير مسجل`);
-                                  return;
-                                }
-                                openWhatsApp(ref.phone, unifiedMsg);
-                              }}
-                              className="w-full bg-amber-600 hover:bg-amber-700 active:scale-95 text-white py-1.5 px-2 rounded-lg text-[10px] font-bold flex items-center justify-center gap-1 transition-all shadow-xs cursor-pointer truncate"
-                            >
-                              <Send className="w-2.5 h-2.5 shrink-0" />
-                              <span className="truncate">توجيه للحكم: {item.assignedReferees[0].name.split(' ')[0]}</span>
-                            </button>
+                            <div className="space-y-1.5">
+                              {/* Send to each individual referee */}
+                              {item.assignedReferees.map((ref, idx) => (
+                                <button
+                                  key={idx}
+                                  type="button"
+                                  onClick={() => {
+                                    if (!ref.phone) {
+                                      toast.error(`رقم هاتف الحكم ${ref.name} غير مسجل`);
+                                      return;
+                                    }
+                                    openWhatsApp(ref.phone, unifiedMsg);
+                                    setDispatchedIds((prev) => new Set(prev).add(`ref-${m.id}-${idx}`));
+                                  }}
+                                  className="w-full bg-amber-600 hover:bg-amber-700 active:scale-95 text-white py-1.5 px-2 rounded-lg text-[10px] font-bold flex items-center justify-center gap-1 transition-all shadow-xs cursor-pointer truncate"
+                                >
+                                  <Send className="w-2.5 h-2.5 shrink-0" />
+                                  <span className="truncate">توجيه للحكم {idx + 1}: {ref.name.split(' ')[0]}</span>
+                                </button>
+                              ))}
+
+                              {/* Multi-referee Broadcast button */}
+                              {item.assignedReferees.length > 1 && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const refQueueItems = item.assignedReferees.map((ref, idx) => ({
+                                      id: `ref-${m.id}-${idx}`,
+                                      recipientName: ref.name,
+                                      roleLabel: ref.role || `حكم ${idx + 1}`,
+                                      phone: ref.phone || '',
+                                      text: unifiedMsg,
+                                      roleType: 'referee' as const,
+                                      refereeId: ref.id
+                                    }));
+
+                                    setActiveBroadcastQueue({
+                                      title: `إرسال الإشعار الموحد لطاقم التحكيم: ${item.team1Name} ضد ${item.team2Name}`,
+                                      items: refQueueItems,
+                                      currentIndex: 0,
+                                      matchSportId: item.sportId
+                                    });
+                                  }}
+                                  className="w-full bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 active:scale-95 text-slate-950 py-1.5 px-2 rounded-lg text-[10px] font-black flex items-center justify-center gap-1 transition-all shadow-xs cursor-pointer truncate"
+                                >
+                                  <Zap className="w-2.5 h-2.5 shrink-0 fill-slate-950" />
+                                  <span className="truncate">بث لطاقم التحكيم معاً (متتالي) ⚡</span>
+                                </button>
+                              )}
+                            </div>
                           ) : (
                             <span className="text-[10px] text-slate-500 font-medium py-1">طاقم التحكيم الرسمي</span>
                           )
-                        )}
+                        ) : null}
                       </div>
                     </div>
 
@@ -1754,6 +1976,286 @@ export const DailyWhatsAppNotificationCenter: React.FC<DailyWhatsAppNotification
                   إغلاق نافذة الإشعارات
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Step-by-Step Consecutive Broadcast Assistant Modal Overlay */}
+      {activeBroadcastQueue && (
+        <div className="fixed inset-0 z-[100] bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-3 select-none animate-in fade-in duration-200" dir="rtl">
+          <div className="bg-white rounded-3xl border border-slate-200 shadow-2xl w-full max-w-lg overflow-hidden flex flex-col animate-in zoom-in-95 duration-200">
+            {/* Header */}
+            <div className="bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 p-4 text-white">
+              <div className="flex items-center justify-between">
+                <h4 className="text-sm font-black flex items-center gap-1.5">
+                  <span>⚡ مساعد البث المتتالي للواتساب</span>
+                </h4>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveBroadcastQueue(null);
+                    toast.error('تم إلغاء مساعد البث المتتابع');
+                  }}
+                  className="text-white/80 hover:text-white p-1 hover:bg-white/10 rounded-lg transition-colors cursor-pointer"
+                  title="إلغاء الإرسال"
+                >
+                  <XCircle className="w-5 h-5" />
+                </button>
+              </div>
+              <p className="text-[11px] text-emerald-100 font-bold mt-1.5 line-clamp-1">
+                {activeBroadcastQueue.title}
+              </p>
+            </div>
+
+            {/* Progress Bar */}
+            <div className="bg-slate-100 h-1.5 w-full relative">
+              <div
+                className="bg-emerald-500 h-full transition-all duration-300"
+                style={{
+                  width: `${(activeBroadcastQueue.currentIndex / activeBroadcastQueue.items.length) * 100}%`
+                }}
+              />
+            </div>
+
+            {/* Content Area */}
+            {activeBroadcastQueue.currentIndex < activeBroadcastQueue.items.length ? (() => {
+              const currentItem = activeBroadcastQueue.items[activeBroadcastQueue.currentIndex];
+              const isPhoneMissing = !currentItem.phone || currentItem.phone.trim().length < 8;
+              return (
+                <div className="p-5 flex-1 overflow-y-auto space-y-4 text-right">
+                  {/* Status Indicator */}
+                  <div className="flex items-center justify-between bg-slate-50 border border-slate-200 rounded-xl p-2.5">
+                    <span className="text-xs text-slate-500 font-bold">الطرف الحالي في الطابور:</span>
+                    <span className="text-xs bg-emerald-100 text-emerald-900 border border-emerald-300 px-2.5 py-0.5 rounded-full font-black">
+                      {activeBroadcastQueue.currentIndex + 1} / {activeBroadcastQueue.items.length}
+                    </span>
+                  </div>
+
+                  {/* Recipient Card */}
+                  <div className="bg-emerald-50/40 border border-emerald-200/80 rounded-2xl p-4 space-y-3 relative overflow-hidden">
+                    <div className="absolute top-0 left-0 right-0 h-1 bg-emerald-500" />
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <p className="text-xs text-slate-400 font-bold">الاسم المعني:</p>
+                        <h4 className="text-sm font-black text-emerald-950 mt-0.5">{currentItem.recipientName}</h4>
+                      </div>
+                      <span className="bg-emerald-600 text-white text-[10px] font-black px-2 py-0.5 rounded-md shadow-3xs">
+                        {currentItem.roleLabel}
+                      </span>
+                    </div>
+
+                    {isPhoneMissing ? (
+                      <div className="pt-2.5 border-t border-amber-200 space-y-2">
+                        <div className="bg-amber-50 border border-amber-200 text-amber-900 p-2.5 rounded-xl text-xs flex items-start gap-2">
+                          <span className="text-sm">⚠️</span>
+                          <span className="font-bold">رقم الهاتف غير مسجل! يرجى إدخال الهاتف للمتابعة:</span>
+                        </div>
+                        <div className="flex gap-2">
+                          <input
+                            type="tel"
+                            placeholder="مثال: 0661234567"
+                            value={inlinePhoneInput}
+                            onChange={(e) => setInlinePhoneInput(e.target.value)}
+                            className="flex-1 px-3 py-2 border border-amber-300 rounded-xl text-xs font-bold text-center font-mono focus:outline-none focus:ring-2 focus:ring-amber-500 bg-white"
+                          />
+                          <button
+                            type="button"
+                            onClick={handleSaveInlinePhone}
+                            className="px-3 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-black transition-colors shrink-0"
+                          >
+                            حفظ الرقم 💾
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex items-center justify-between pt-2.5 border-t border-emerald-100">
+                        <div className="flex items-center gap-2">
+                          <Phone className="w-3.5 h-3.5 text-emerald-600" />
+                          <span className="text-xs font-black text-slate-800 font-mono">{currentItem.phone}</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setActiveBroadcastQueue((prev) => {
+                              if (!prev) return null;
+                              const updatedItems = [...prev.items];
+                              updatedItems[prev.currentIndex] = {
+                                ...updatedItems[prev.currentIndex],
+                                phone: '' // trigger inline edit
+                              };
+                              return { ...prev, items: updatedItems };
+                            });
+                          }}
+                          className="text-[10px] text-blue-600 hover:text-blue-800 underline font-bold"
+                        >
+                          تعديل الرقم ✏️
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Message Bubble Preview */}
+                  <div className="space-y-1">
+                    <p className="text-[10px] text-slate-500 font-black">معاينة نص الرسالة للواتساب:</p>
+                    <div className="bg-slate-100 border border-slate-200/80 rounded-2xl p-3.5 text-[11px] text-slate-700 font-bold leading-relaxed whitespace-pre-wrap max-h-36 overflow-y-auto">
+                      {currentItem.text}
+                    </div>
+                  </div>
+
+                  {/* Complete Recipient Queue List (All Stakeholders Breakdown) */}
+                  <div className="space-y-1.5 pt-2 border-t border-slate-100">
+                    <p className="text-[10px] text-slate-500 font-black">تفاصيل طابور الأطراف المعنية بالإرسال:</p>
+                    <div className="grid grid-cols-1 gap-1.5 max-h-36 overflow-y-auto">
+                      {activeBroadcastQueue.items.map((item, idx) => {
+                        const isCurrent = idx === activeBroadcastQueue.currentIndex;
+                        const isSent = idx < activeBroadcastQueue.currentIndex;
+                        const hasNoPhone = !item.phone || item.phone.trim().length < 8;
+
+                        return (
+                          <button
+                            key={item.id}
+                            type="button"
+                            onClick={() => {
+                              setActiveBroadcastQueue((prev) => prev ? { ...prev, currentIndex: idx } : null);
+                            }}
+                            className={`p-2 rounded-xl border text-right flex items-center justify-between gap-2 transition-all cursor-pointer ${
+                              isCurrent
+                                ? 'bg-emerald-50 border-emerald-400 ring-2 ring-emerald-200 shadow-xs'
+                                : isSent
+                                ? 'bg-slate-50/50 border-slate-200 opacity-60'
+                                : 'bg-white border-slate-150 hover:bg-slate-50'
+                            }`}
+                          >
+                            <div className="flex items-center gap-2 overflow-hidden">
+                              <span className="text-[10px] font-black w-4 text-slate-400 font-mono">
+                                #{idx + 1}
+                              </span>
+                              <div className="truncate">
+                                <p className="text-[11px] font-black text-slate-800 leading-tight">
+                                  {item.recipientName}
+                                </p>
+                                <p className="text-[9px] text-slate-400 mt-0.5 font-bold truncate">
+                                  {item.roleLabel}
+                                </p>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              {isSent ? (
+                                <span className="bg-emerald-100 text-emerald-800 border border-emerald-300 text-[9px] font-black px-1.5 py-0.5 rounded-full flex items-center gap-0.5">
+                                  <span>✓ تم التوجيه</span>
+                                </span>
+                              ) : isCurrent ? (
+                                <span className="bg-amber-100 text-amber-900 border border-amber-300 text-[9px] font-black px-1.5 py-0.5 rounded-full animate-pulse">
+                                  <span>جاري الإرسال...</span>
+                                </span>
+                              ) : hasNoPhone ? (
+                                <span className="bg-red-50 text-red-700 border border-red-200 text-[9px] font-black px-1.5 py-0.5 rounded-full">
+                                  <span>⚠️ هاتف ناقص</span>
+                                </span>
+                              ) : (
+                                <span className="bg-slate-100 text-slate-700 border border-slate-300 text-[9px] font-black px-1.5 py-0.5 rounded-full">
+                                  <span>جاهز ⏳</span>
+                                </span>
+                              )}
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              );
+            })() : (
+              <div className="p-8 text-center space-y-3 flex-1 flex flex-col items-center justify-center">
+                <span className="text-4xl animate-bounce">🎉</span>
+                <h4 className="text-sm font-black text-slate-900">تم الانتهاء بنجاح!</h4>
+                <p className="text-xs text-slate-500 max-w-xs leading-relaxed font-bold">
+                  لقد قمت بإرسال الإشعار الموحد لجميع الأطراف المعنية بنجاح تام وبأكثر الطرق أماناً واعتمادية.
+                </p>
+              </div>
+            )}
+
+            {/* Actions Footer */}
+            <div className="p-4 bg-slate-50 border-t border-slate-200 flex gap-2 justify-end">
+              {activeBroadcastQueue.currentIndex < activeBroadcastQueue.items.length ? (() => {
+                const currentItem = activeBroadcastQueue.items[activeBroadcastQueue.currentIndex];
+                const isPhoneMissing = !currentItem.phone || currentItem.phone.trim().length < 8;
+
+                return (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDispatchedIds((prev) => {
+                          const next = new Set(prev);
+                          next.add(currentItem.id);
+                          return next;
+                        });
+                        setActiveBroadcastQueue((prev) => prev ? { ...prev, currentIndex: prev.currentIndex + 1 } : null);
+                        toast.success(`تم تخطي ${currentItem.recipientName}`);
+                      }}
+                      className="px-3.5 py-2.5 bg-slate-100 hover:bg-slate-200 border border-slate-300 text-slate-700 font-bold rounded-xl text-xs transition-colors cursor-pointer"
+                    >
+                      تخطي الطرف ⏭️
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (isPhoneMissing) {
+                          toast.error('يرجى حفظ رقم الهاتف أولاً للمتابعة');
+                          return;
+                        }
+
+                        // 1. Mark as dispatched
+                        setDispatchedIds((prev) => {
+                          const next = new Set(prev);
+                          next.add(currentItem.id);
+                          return next;
+                        });
+
+                        // 2. Open WhatsApp for this number
+                        openWhatsApp(currentItem.phone, currentItem.text);
+
+                        // 3. Increment index
+                        setActiveBroadcastQueue((prev) => {
+                          if (!prev) return null;
+                          const nextIndex = prev.currentIndex + 1;
+                          if (nextIndex >= prev.items.length) {
+                            setTimeout(() => {
+                              toast.success('🎉 تم بث الإشعارات لجميع المعنيين بالكامل بنجاح!');
+                              setActiveBroadcastQueue(null);
+                            }, 500);
+                          }
+                          return { ...prev, currentIndex: nextIndex };
+                        });
+                      }}
+                      disabled={isPhoneMissing}
+                      className={`flex-1 py-2.5 font-black rounded-xl text-xs flex items-center justify-center gap-1.5 shadow-md active:scale-98 transition-all cursor-pointer ${
+                        isPhoneMissing
+                          ? 'bg-slate-300 text-slate-500 cursor-not-allowed shadow-none'
+                          : 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                      }`}
+                    >
+                      <Send className="w-4 h-4" />
+                      <span>فتح محادثة وإرسال 💬</span>
+                    </button>
+                  </>
+                );
+              })() : (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveBroadcastQueue(null);
+                    toast.success('تمت العملية بنجاح');
+                  }}
+                  className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-black rounded-xl text-xs cursor-pointer text-center shadow-xs"
+                >
+                  إغلاق المساعد ✅
+                </button>
+              )}
             </div>
           </div>
         </div>

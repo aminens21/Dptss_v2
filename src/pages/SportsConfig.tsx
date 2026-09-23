@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { DataService, SPORTS_MAP, getAgeCategoriesForSeason } from '../lib/dataService';
-import { Sport, Tournament, RoleKey, RoleSidebarPermissions } from '../types';
+import { Sport, Tournament, RoleKey, RoleSidebarPermissions, CustomAgeCategory } from '../types';
 import { useAuth } from '../contexts/AuthContext';
 import {
   Settings,
@@ -28,7 +28,9 @@ import {
   Building2,
   KeyRound,
   Upload,
-  Image
+  Image,
+  Edit2,
+  Edit3
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -90,6 +92,318 @@ const CustomCategoryForm: React.FC<{ onAdd: (name: string) => void }> = ({ onAdd
   );
 };
 
+const SportAgeCategoriesManager: React.FC<{
+  sportId: string;
+  customCategories: CustomAgeCategory[];
+  onChange: (updated: CustomAgeCategory[]) => void;
+}> = ({ sportId, customCategories, onChange }) => {
+  const [editingCatId, setEditingCatId] = useState<string | null>(null);
+  const [nameInput, setNameInput] = useState('');
+  const [yearsInput, setYearsInput] = useState('');
+  const [isAdding, setIsAdding] = useState(false);
+  
+  // Year Picker state
+  const [isYearPickerOpen, setIsYearPickerOpen] = useState(false);
+  const [selectedYears, setSelectedYears] = useState<number[]>([]);
+  const [isAndAfter, setIsAndAfter] = useState(false);
+
+  // Generate lists of birth years (from 2005 to 2021)
+  const availableYears = Array.from({ length: 17 }, (_, i) => 2005 + i);
+
+  const handleOpenYearPicker = (currentExpr: string) => {
+    // Try to pre-fill from current expression
+    const isPost = currentExpr.includes('بعد') || currentExpr.includes('>') || currentExpr.includes('+');
+    const matched = Array.from(currentExpr.matchAll(/(\d{4})/g)).map(m => parseInt(m[1], 10));
+    setSelectedYears(matched);
+    setIsAndAfter(isPost);
+    setIsYearPickerOpen(true);
+  };
+
+  const handleApplyYearPicker = () => {
+    if (selectedYears.length === 0) {
+      toast.error('يرجى اختيار سنة واحدة على الأقل');
+      return;
+    }
+    let expr = '';
+    const sorted = [...selectedYears].sort((a, b) => a - b);
+    if (isAndAfter) {
+      expr = `${sorted[0]} وما بعد`;
+    } else {
+      expr = sorted.join('/');
+    }
+    setYearsInput(expr);
+    setIsYearPickerOpen(false);
+  };
+
+  const handleStartAdd = () => {
+    setNameInput('');
+    setYearsInput('');
+    setEditingCatId(null);
+    setIsAdding(true);
+  };
+
+  const handleStartEdit = (cat: CustomAgeCategory) => {
+    setEditingCatId(cat.id);
+    setNameInput(cat.name);
+    setYearsInput(cat.yearsExpression);
+    setIsAdding(false);
+  };
+
+  const handleSave = () => {
+    if (!nameInput.trim()) {
+      toast.error('اسم الفئة إجباري');
+      return;
+    }
+    if (!yearsInput.trim()) {
+      toast.error('سنوات المشاركة المسموح بها إجبارية');
+      return;
+    }
+
+    if (isAdding) {
+      const newCat: CustomAgeCategory = {
+        id: `cat_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+        name: nameInput.trim(),
+        yearsExpression: yearsInput.trim()
+      };
+      onChange([...customCategories, newCat]);
+      toast.success(`تمت إضافة الفئة "${newCat.name}"`);
+      setIsAdding(false);
+    } else if (editingCatId) {
+      const updated = customCategories.map(cat => {
+        if (cat.id === editingCatId) {
+          return {
+            ...cat,
+            name: nameInput.trim(),
+            yearsExpression: yearsInput.trim()
+          };
+        }
+        return cat;
+      });
+      onChange(updated);
+      toast.success(`تم تعديل الفئة بنجاح`);
+      setEditingCatId(null);
+    }
+  };
+
+  const handleDelete = (id: string) => {
+    const updated = customCategories.filter(cat => cat.id !== id);
+    onChange(updated);
+    toast.success('تم حذف الفئة');
+  };
+
+  return (
+    <div className="space-y-4 bg-slate-50/70 p-4 rounded-2xl border border-slate-200/80">
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+          <Layers className="h-4 w-4 text-blue-600" />
+          <span>الفئات العمرية المخصصة ديناميكياً:</span>
+        </span>
+        {!isAdding && !editingCatId && (
+          <button
+            type="button"
+            onClick={handleStartAdd}
+            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-bold bg-blue-600 text-white hover:bg-blue-700 transition-colors shadow-2xs cursor-pointer"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            <span>إضافة فئة جديدة ➕</span>
+          </button>
+        )}
+      </div>
+
+      {/* Categories List */}
+      {customCategories.length === 0 && !isAdding && !editingCatId ? (
+        <div className="text-center py-5">
+          <p className="text-xs text-slate-400 font-medium mb-2">لا توجد فئات مخصصة مضافة حالياً لهذا التخصص.</p>
+          <button
+            type="button"
+            onClick={() => {
+              // Prepopulate with defaults
+              const defaultCats = [
+                { id: 'U12', name: 'البراعم والبرعمات', yearsExpression: '2015 وما بعد' },
+                { id: 'U15', name: 'الصغار والصغيرات', yearsExpression: '2012/2013/2014' },
+                { id: 'U18', name: 'الفتيان والفتيات', yearsExpression: '2009/2010/2011' },
+                { id: 'U20', name: 'الشبان والشابات', yearsExpression: '2009 وما بعد' }
+              ];
+              onChange(defaultCats);
+              toast.success('تم توليد الفئات الافتراضية بنجاح للتعديل عليها');
+            }}
+            className="text-[11px] font-bold text-blue-600 hover:underline cursor-pointer bg-blue-50/50 hover:bg-blue-50 px-3 py-1.5 rounded-xl border border-blue-100"
+          >
+            ⚡ توليد الفئات الافتراضية للتخصيص
+          </button>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          {customCategories.map(cat => (
+            <div key={cat.id} className="flex items-center justify-between p-2.5 bg-white rounded-xl border border-slate-200/60 shadow-3xs">
+              <div className="space-y-0.5">
+                <p className="text-xs font-bold text-slate-800">{cat.name}</p>
+                <p className="text-[10px] text-slate-500 font-bold bg-slate-50 px-2 py-0.5 rounded-md inline-block">
+                  مواليد {cat.yearsExpression}
+                </p>
+              </div>
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => handleStartEdit(cat)}
+                  className="p-1 hover:bg-slate-100 rounded-lg text-blue-600 cursor-pointer"
+                  title="تعديل"
+                >
+                  <Edit3 className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleDelete(cat.id)}
+                  className="p-1 hover:bg-red-50 rounded-lg text-red-500 cursor-pointer"
+                  title="حذف"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Add / Edit Form */}
+      {(isAdding || editingCatId) && (
+        <div className="p-3.5 bg-white rounded-2xl border border-blue-200/80 space-y-3 shadow-xs animate-in fade-in slide-in-from-top-1 duration-150">
+          <h4 className="text-xs font-black text-blue-900">
+            {isAdding ? '✨ إضافة فئة عمرية مخصصة جديدة' : '⚙️ تعديل الفئة العمرية المخصصة'}
+          </h4>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-[10px] font-black text-slate-700 mb-1">اسم الفئة (مثال: البراعم والبرعمات)</label>
+              <input
+                type="text"
+                value={nameInput}
+                onChange={e => setNameInput(e.target.value)}
+                placeholder="البراعم والبرعمات"
+                className="w-full text-xs rounded-lg border border-slate-200 px-3 py-2 text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 font-bold"
+              />
+            </div>
+            <div>
+              <label className="block text-[10px] font-black text-slate-700 mb-1">سنوات الازدياد المسموح بها</label>
+              <div className="flex gap-1">
+                <input
+                  type="text"
+                  value={yearsInput}
+                  onChange={e => setYearsInput(e.target.value)}
+                  placeholder="2015 وما بعد أو 2012/2013/2014"
+                  className="w-full text-xs rounded-lg border border-slate-200 px-3 py-2 text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 font-bold"
+                />
+                <button
+                  type="button"
+                  onClick={() => handleOpenYearPicker(yearsInput)}
+                  className="px-2.5 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-lg text-xs font-bold cursor-pointer transition-colors"
+                  title="اختيار من نافذة مخصصة"
+                >
+                  🗓️ اختر من القائمة
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex justify-end gap-2 pt-1">
+            <button
+              type="button"
+              onClick={() => {
+                setIsAdding(false);
+                setEditingCatId(null);
+              }}
+              className="px-3 py-1.5 rounded-lg text-[10px] font-bold bg-slate-100 text-slate-600 hover:bg-slate-200 cursor-pointer"
+            >
+              إلغاء
+            </button>
+            <button
+              type="button"
+              onClick={handleSave}
+              className="px-3 py-1.5 rounded-lg text-[10px] font-bold bg-blue-600 text-white hover:bg-blue-700 cursor-pointer"
+            >
+              حفظ الفئة
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Beautiful Year Picker Dialog */}
+      {isYearPickerOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
+          <div className="bg-white rounded-3xl border border-slate-200 shadow-2xl max-w-sm w-full overflow-hidden animate-in fade-in zoom-in-95 duration-150" dir="rtl">
+            <div className="p-4 border-b border-slate-100 bg-slate-50/80 flex items-center justify-between">
+              <span className="text-xs font-black text-slate-800 flex items-center gap-1.5">
+                🗓️ نافذة اختيار سنوات الازدياد
+              </span>
+              <button
+                type="button"
+                onClick={() => setIsYearPickerOpen(false)}
+                className="text-slate-400 hover:text-slate-600 cursor-pointer"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="p-4 space-y-4">
+              <p className="text-[11px] text-slate-500 font-semibold">اضغط على سنوات الازدياد المطلوبة لتحديدها للبطولة:</p>
+              <div className="grid grid-cols-4 gap-1.5">
+                {availableYears.map(year => {
+                  const isChecked = selectedYears.includes(year);
+                  return (
+                    <button
+                      key={year}
+                      type="button"
+                      onClick={() => {
+                        if (isChecked) {
+                          setSelectedYears(prev => prev.filter(y => y !== year));
+                        } else {
+                          setSelectedYears(prev => [...prev, year]);
+                        }
+                      }}
+                      className={`py-1.5 px-2 rounded-lg text-[11px] font-bold border transition-colors cursor-pointer text-center ${
+                        isChecked
+                          ? 'bg-blue-600 border-blue-600 text-white shadow-xs'
+                          : 'bg-slate-50 border-slate-200 hover:bg-slate-100 text-slate-700'
+                      }`}
+                    >
+                      {year}
+                    </button>
+                  );
+                })}
+              </div>
+
+              <label className="flex items-center gap-2 px-3 py-2.5 bg-blue-50/50 border border-blue-100 rounded-xl text-xs font-bold text-blue-955 cursor-pointer hover:bg-blue-50 transition-colors">
+                <input
+                  type="checkbox"
+                  checked={isAndAfter}
+                  onChange={e => setIsAndAfter(e.target.checked)}
+                  className="rounded border-blue-300 text-blue-600 focus:ring-blue-500 w-4 h-4 cursor-pointer accent-blue-600"
+                />
+                <span>وما بعد (للأعمار الأصغر فما فوق) ➕</span>
+              </label>
+
+              <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setIsYearPickerOpen(false)}
+                  className="px-3.5 py-2 rounded-xl text-xs font-bold bg-slate-100 text-slate-600 hover:bg-slate-200 cursor-pointer"
+                >
+                  إلغاء
+                </button>
+                <button
+                  type="button"
+                  onClick={handleApplyYearPicker}
+                  className="px-3.5 py-2 rounded-xl text-xs font-bold bg-blue-600 text-white hover:bg-blue-700 cursor-pointer"
+                >
+                  تثبيت واختيار ✔️
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
 export const SportsConfig: React.FC = () => {
   const navigate = useNavigate();
   const { userProfile } = useAuth();
@@ -97,6 +411,7 @@ export const SportsConfig: React.FC = () => {
   const [tournaments, setTournaments] = useState<Tournament[]>([]);
   const [loading, setLoading] = useState(true);
   const [savingId, setSavingId] = useState<string | null>(null);
+  const [editingInfoId, setEditingInfoId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [currentSeason, setCurrentSeason] = useState('2026/2027');
   const [savingSeason, setSavingSeason] = useState(false);
@@ -117,10 +432,11 @@ export const SportsConfig: React.FC = () => {
 
   // Role Permissions State
   const [rolePermissions, setRolePermissions] = useState<RoleSidebarPermissions>({
-    CENTRAL_ADMIN: ['/dashboard', '/schools', '/tournaments', '/posters-certificates', '/teachers', '/tech-committee', '/referees', '/matches', '/statistics', '/sports-config'],
-    TECH_COMMITTEE_HEAD: ['/dashboard', '/schools', '/tournaments', '/posters-certificates', '/teachers', '/tech-committee', '/referees', '/matches', '/statistics', '/sports-config'],
-    SPORT_MANAGER: ['/dashboard', '/schools', '/tournaments', '/posters-certificates', '/teachers', '/referees', '/matches', '/statistics'],
-    TEACHER: ['/dashboard', '/schools', '/tournaments', '/posters-certificates', '/matches', '/statistics']
+    CENTRAL_ADMIN: ['/dashboard', '/schools', '/tournaments', '/teachers', '/tech-committee', '/referees', '/matches', '/helper-apps', '/posters-certificates', '/statistics', '/sports-config', '/permissions'],
+    TECH_COMMITTEE_HEAD: ['/dashboard', '/schools', '/tournaments', '/teachers', '/tech-committee', '/referees', '/matches', '/helper-apps', '/posters-certificates', '/statistics', '/sports-config'],
+    SPORT_MANAGER: ['/dashboard', '/schools', '/tournaments', '/teachers', '/referees', '/matches', '/helper-apps', '/posters-certificates', '/statistics'],
+    TEACHER: ['/dashboard', '/schools', '/tournaments', '/matches', '/posters-certificates', '/statistics'],
+    REFEREE: ['/dashboard', '/matches', '/statistics']
   });
   const [savingPermissions, setSavingPermissions] = useState(false);
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'PROGRAMMED' | 'UNPROGRAMMED'>('ALL');
@@ -133,6 +449,7 @@ export const SportsConfig: React.FC = () => {
   const [newSportIcon, setNewSportIcon] = useState('🏸');
   const [newSportDescription, setNewSportDescription] = useState('');
   const [newSportCategories, setNewSportCategories] = useState<string[]>([]);
+  const [newSportCustomCategories, setNewSportCustomCategories] = useState<CustomAgeCategory[]>([]);
   const [newSportStudentLimit, setNewSportStudentLimit] = useState<string>('');
   const [newSportIsProgrammed, setNewSportIsProgrammed] = useState<boolean>(true);
   const [isSubmittingSport, setIsSubmittingSport] = useState(false);
@@ -198,8 +515,14 @@ export const SportsConfig: React.FC = () => {
   // Initialize categories for new sport modal when season loads
   useEffect(() => {
     if (currentSeason && newSportCategories.length === 0) {
-      const defaultCats = getAgeCategoriesForSeason(currentSeason).map(c => c.id);
-      setNewSportCategories(defaultCats);
+      const defaultCats = [
+        { id: 'U12', name: 'البراعم والبرعمات', yearsExpression: '2015 وما بعد' },
+        { id: 'U15', name: 'الصغار والصغيرات', yearsExpression: '2012/2013/2014' },
+        { id: 'U18', name: 'الفتيان والفتيات', yearsExpression: '2009/2010/2011' },
+        { id: 'U20', name: 'الشبان والشابات', yearsExpression: '2009 وما بعد' }
+      ];
+      setNewSportCustomCategories(defaultCats);
+      setNewSportCategories(defaultCats.map(c => c.id));
     }
   }, [currentSeason]);
 
@@ -299,10 +622,11 @@ export const SportsConfig: React.FC = () => {
 
   const handleResetRolePermissions = () => {
     const DEFAULT_PERMISSIONS: RoleSidebarPermissions = {
-      CENTRAL_ADMIN: ['/dashboard', '/tournaments', '/schools', '/teachers', '/tech-committee', '/referees', '/matches', '/statistics', '/sports-config'],
-      TECH_COMMITTEE_HEAD: ['/dashboard', '/tournaments', '/schools', '/teachers', '/tech-committee', '/referees', '/matches', '/statistics', '/sports-config'],
-      SPORT_MANAGER: ['/dashboard', '/tournaments', '/schools', '/teachers', '/referees', '/matches', '/statistics'],
-      TEACHER: ['/dashboard', '/tournaments', '/schools', '/matches', '/statistics']
+      CENTRAL_ADMIN: ['/dashboard', '/tournaments', '/schools', '/teachers', '/tech-committee', '/referees', '/matches', '/helper-apps', '/statistics', '/sports-config', '/permissions'],
+      TECH_COMMITTEE_HEAD: ['/dashboard', '/tournaments', '/schools', '/teachers', '/tech-committee', '/referees', '/matches', '/helper-apps', '/statistics', '/sports-config'],
+      SPORT_MANAGER: ['/dashboard', '/tournaments', '/schools', '/teachers', '/referees', '/matches', '/helper-apps', '/statistics'],
+      TEACHER: ['/dashboard', '/tournaments', '/schools', '/matches', '/statistics'],
+      REFEREE: ['/dashboard', '/matches', '/statistics']
     };
     setRolePermissions(DEFAULT_PERMISSIONS);
     toast.success('تمت إعادة ضبط الصلاحيات إلى القيم الافتراضية. لا تنس الضغط على حفظ.');
@@ -374,7 +698,7 @@ export const SportsConfig: React.FC = () => {
   const handleSelectAllCategories = (sportId: string) => {
     setSportsList(prev => prev.map(s => {
       if (s.id !== sportId) return s;
-      const allCategoryIds = getAgeCategoriesForSeason(currentSeason).map(c => c.id);
+      const allCategoryIds = getAgeCategoriesForSeason(currentSeason, undefined, sportId).map(c => c.id);
       return { ...s, ageCategories: allCategoryIds };
     }));
   };
@@ -399,7 +723,10 @@ export const SportsConfig: React.FC = () => {
     ageCategories: string[],
     studentLimit?: number,
     athleticsSpecialties?: string[],
-    isProgrammed?: boolean
+    isProgrammed?: boolean,
+    name?: string,
+    icon?: string,
+    customAgeCategories?: CustomAgeCategory[]
   ) => {
     setSavingId(sportId);
     try {
@@ -408,10 +735,12 @@ export const SportsConfig: React.FC = () => {
         ageCategories,
         studentLimit,
         athleticsSpecialties,
-        undefined,
-        undefined,
-        isProgrammed
+        name,
+        icon,
+        isProgrammed,
+        customAgeCategories
       );
+      setEditingInfoId(null);
       toast.success('تم حفظ وتعديل إعدادات وضوابط التخصص الرياضي بنجاح');
     } catch (error) {
       console.error('Error updating sport categories:', error);
@@ -455,8 +784,8 @@ export const SportsConfig: React.FC = () => {
       return;
     }
 
-    if (newSportCategories.length === 0) {
-      toast.error('يرجى اختيار فئة عمرية واحدة على الأقل للمشاركة');
+    if (newSportCustomCategories.length === 0) {
+      toast.error('يرجى إضافة فئة عمرية واحدة على الأقل للمشاركة');
       return;
     }
 
@@ -466,6 +795,8 @@ export const SportsConfig: React.FC = () => {
       return;
     }
 
+    const catIds = newSportCustomCategories.map(c => c.id);
+
     setIsSubmittingSport(true);
     try {
       const addedSport = await DataService.addSport({
@@ -473,19 +804,21 @@ export const SportsConfig: React.FC = () => {
         id: newSportId.trim() || undefined,
         icon: newSportIcon.trim() || '🏆',
         description: newSportDescription.trim() || undefined,
-        ageCategories: newSportCategories,
-        studentLimit: limitVal
+        ageCategories: catIds,
+        studentLimit: limitVal,
+        customAgeCategories: newSportCustomCategories
       });
 
       // Update programmed status
       await DataService.updateSportCategories(
         addedSport.id,
-        newSportCategories,
+        catIds,
         limitVal,
         [],
         undefined,
         undefined,
-        newSportIsProgrammed
+        newSportIsProgrammed,
+        newSportCustomCategories
       );
 
       toast.success(`تمت إضافة الرياضة الجديدة "${cleanName}" بنجاح وتحديد حالتها وسقف مشاركيها.`);
@@ -715,11 +1048,12 @@ export const SportsConfig: React.FC = () => {
                 { href: '/dashboard', label: 'الرئيسية والإشعارات', icon: '🏠', desc: 'لوحة التحكم الرئيسية والتنبيهات العامة' },
                 { href: '/schools', label: 'المؤسسات التعليمية', icon: '🏫', desc: 'دليل ورعاة وممثلي المؤسسات التعليمية بمديرية تاوريرت' },
                 { href: '/tournaments', label: 'البطولات الرياضية المدرسية', icon: '🏆', desc: 'استعراض وإدارة البطولات الإقليمية والجهوية والوطنية وتفرعاتها وتسجيل الفرق' },
-                { href: '/posters-certificates', label: 'الملصقات والشواهد التقديرية', icon: '🎨', desc: 'توليد ملصقات البطولات المبرمجة والشواهد التقديرية للمشاركين' },
                 { href: '/teachers', label: 'الأطر التربوية', icon: '👨‍🏫', desc: 'قائمة أساتذة التربية البدنية ومؤطري الرياضة المدرسية' },
                 { href: '/tech-committee', label: 'رؤساء اللجن التقنية', icon: '🛡️', desc: 'إدارة وتعيين مسؤولي اللجان التقنية حسب الرياضات' },
                 { href: '/referees', label: 'الحكام', icon: '🏁', desc: 'سجل وتنظيم الحكام المعتمدين وتعيينات المباريات' },
                 { href: '/matches', label: 'المباريات والنتائج', icon: '⚽', desc: 'برمجة وتدقيق وتسجيل نتائج المباريات المدرسية' },
+                { href: '/helper-apps', label: 'تطبيقات مساعدة', icon: '🛠️', desc: 'مجموعة من التطبيقات المساعدة من بينها ماسح الصدريات لخط النهاية' },
+                { href: '/posters-certificates', label: 'الملصقات والشواهد التقديرية', icon: '🎨', desc: 'توليد ملصقات البطولات المبرمجة والشواهد التقديرية للمشاركين' },
                 { href: '/statistics', label: 'إحصائيات عامة', icon: '📊', desc: 'مؤشرات الأداء، ونسب المشاركة، والتحليلات البيانية' },
                 { href: '/sports-config', label: 'الإعدادات والضوابط', icon: '⚙️', desc: 'ضوابط الرياضات والمواسم وصلاحيات الوصول والقائمة الجانبية' },
               ];
@@ -1179,7 +1513,7 @@ export const SportsConfig: React.FC = () => {
             filteredSports.map((sport) => {
               const mappedSport = SPORTS_MAP[sport.id] || { name: sport.name, icon: sport.icon || '🏆' };
               const activeCategories = sport.ageCategories || [];
-              const seasonalCategories = getAgeCategoriesForSeason(currentSeason);
+              const seasonalCategories = getAgeCategoriesForSeason(currentSeason, undefined, sport.id);
               const isProgrammed = isSportProgrammed(sport);
 
               return (
@@ -1193,30 +1527,68 @@ export const SportsConfig: React.FC = () => {
                 >
                   {/* Top Bar: Icon, Name, Badge, & Programmed Status Selector */}
                   <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-slate-100">
-                    <div className="flex items-center gap-3">
-                      <span className="text-2xl w-12 h-12 rounded-2xl bg-slate-50 border border-slate-100 flex items-center justify-center shrink-0 shadow-3xs">
-                        {sport.icon || mappedSport.icon}
-                      </span>
-                      <div>
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <h3 className="text-base font-bold text-slate-800">{sport.name || mappedSport.name}</h3>
-                          {sport.isCustom && (
-                            <span className="text-[9px] bg-purple-50 text-purple-700 font-bold px-2 py-0.5 rounded-full border border-purple-200">
-                              صنف مضاف
-                            </span>
-                          )}
-                          <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full border flex items-center gap-1 ${
-                            isProgrammed 
-                              ? 'bg-emerald-50 text-emerald-700 border-emerald-200' 
-                              : 'bg-amber-50 text-amber-700 border-amber-200'
-                          }`}>
-                            <span className={`w-1.5 h-1.5 rounded-full ${isProgrammed ? 'bg-emerald-500' : 'bg-amber-500'}`} />
-                            <span>{isProgrammed ? '🟢 مبرمجة ومفتوحة' : '⚪ في طور الإعداد'}</span>
-                          </span>
-                        </div>
-                        <span className="text-[10px] text-slate-400 font-medium">رمز الرياضة: {sport.id}</span>
+                    {editingInfoId === sport.id ? (
+                      <div className="flex items-center gap-2 bg-slate-50 p-2 rounded-xl border border-slate-200">
+                        <input
+                          type="text"
+                          value={sport.icon || ''}
+                          placeholder="🏆"
+                          title="رمز الرياضة التعبيري"
+                          onChange={(e) => setSportsList(prev => prev.map(s => s.id === sport.id ? { ...s, icon: e.target.value } : s))}
+                          className="w-12 px-2 py-1.5 text-base text-center border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 font-bold bg-white"
+                        />
+                        <input
+                          type="text"
+                          value={sport.name || ''}
+                          placeholder="اسم الرياضة"
+                          title="اسم الرياضة"
+                          onChange={(e) => setSportsList(prev => prev.map(s => s.id === sport.id ? { ...s, name: e.target.value } : s))}
+                          className="px-3 py-1.5 text-xs font-bold border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-800 bg-white min-w-[150px]"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setEditingInfoId(null)}
+                          className="text-xs bg-slate-200 hover:bg-slate-300 text-slate-700 px-2.5 py-1.5 rounded-lg font-bold cursor-pointer"
+                        >
+                          إلغاء
+                        </button>
                       </div>
-                    </div>
+                    ) : (
+                      <div className="flex items-center gap-3">
+                        <span className="text-2xl w-12 h-12 rounded-2xl bg-slate-50 border border-slate-100 flex items-center justify-center shrink-0 shadow-3xs">
+                          {sport.icon || mappedSport.icon}
+                        </span>
+                        <div>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <h3 className="text-base font-bold text-slate-800">{sport.name || mappedSport.name}</h3>
+                            {isCentralAdmin && (
+                              <button
+                                type="button"
+                                onClick={() => setEditingInfoId(sport.id)}
+                                className="p-1 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer inline-flex items-center"
+                                title="تعديل الاسم أو الأيقونة"
+                              >
+                                <Edit2 className="h-3.5 w-3.5" />
+                              </button>
+                            )}
+                            {sport.isCustom && (
+                              <span className="text-[9px] bg-purple-50 text-purple-700 font-bold px-2 py-0.5 rounded-full border border-purple-200">
+                                صنف مضاف
+                              </span>
+                            )}
+                            <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full border flex items-center gap-1 ${
+                              isProgrammed 
+                                ? 'bg-emerald-50 text-emerald-700 border-emerald-200' 
+                                : 'bg-amber-50 text-amber-700 border-amber-200'
+                            }`}>
+                              <span className={`w-1.5 h-1.5 rounded-full ${isProgrammed ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+                              <span>{isProgrammed ? '🟢 مبرمجة ومفتوحة' : '⚪ في طور الإعداد'}</span>
+                            </span>
+                          </div>
+                          <span className="text-[10px] text-slate-400 font-medium">رمز الرياضة: {sport.id}</span>
+                        </div>
+                      </div>
+                    )}
 
                     {/* STATUS SWITCHER TOGGLE BUTTONS */}
                     <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2 bg-slate-50 p-1.5 rounded-2xl border border-slate-200">
@@ -1265,87 +1637,22 @@ export const SportsConfig: React.FC = () => {
                   </p>
 
                   {/* Categories Selector */}
-                  <div className="space-y-2.5">
-                    <div className="flex items-center justify-between gap-4">
-                      <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
-                        <Layers className="h-4 w-4 text-blue-600" />
-                        <span>الفئات العمرية المعنية بالتخصص:</span>
-                      </span>
-                      <div className="flex items-center gap-3">
-                        <label className="flex items-center gap-1.5 px-2.5 py-1 bg-emerald-50 border border-emerald-300 rounded-lg text-xs font-black text-emerald-900 cursor-pointer hover:bg-emerald-100 transition-colors shadow-2xs">
-                          <input
-                            type="checkbox"
-                            checked={seasonalCategories.length > 0 && seasonalCategories.every(c => activeCategories.includes(c.id))}
-                            onChange={(e) => {
-                              if (e.target.checked) {
-                                handleSelectAllCategories(sport.id);
-                              } else {
-                                handleClearAllCategories(sport.id);
-                              }
-                            }}
-                            className="rounded border-emerald-400 text-emerald-600 focus:ring-emerald-500 w-4 h-4 cursor-pointer accent-emerald-600"
-                          />
-                          <span>المشاركة في جميع الفئات (تحديد الكل) 🏆</span>
-                        </label>
-                      </div>
-                    </div>
-
-                    <div className="flex flex-wrap gap-2 items-center">
-                      {seasonalCategories.map((cat) => {
-                        const isSelected = activeCategories.includes(cat.id);
-                        return (
-                          <button
-                            key={cat.id}
-                            type="button"
-                            onClick={() => handleToggleCategory(sport.id, cat.id)}
-                            className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition-all border cursor-pointer ${
-                              isSelected
-                                ? 'bg-blue-600 border-blue-600 text-white shadow-xs'
-                                : 'bg-slate-50 border-slate-200/80 text-slate-600 hover:bg-white hover:border-slate-300'
-                            }`}
-                          >
-                            {isSelected && <Check className="h-3.5 w-3.5" />}
-                            <span>{cat.name}</span>
-                          </button>
-                        );
-                      })}
-
-                      {/* Display custom categories */}
-                      {activeCategories.filter(catId => !seasonalCategories.some(c => c.id === catId)).map((customCatName) => (
-                        <span
-                          key={customCatName}
-                          className="flex items-center gap-1.5 bg-blue-600 border border-blue-600 text-white px-3 py-2 rounded-xl text-xs font-bold shadow-xs"
-                        >
-                          <Check className="h-3.5 w-3.5" />
-                          <span>{customCatName}</span>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const updatedCats = activeCategories.filter(c => c !== customCatName);
-                              setSportsList(prev => prev.map(s => s.id === sport.id ? { ...s, ageCategories: updatedCats } : s));
-                            }}
-                            className="p-0.5 hover:bg-blue-700 rounded-full transition-colors cursor-pointer mr-1 inline-flex items-center justify-center"
-                            title="حذف الفئة المخصصة"
-                          >
-                            <X className="h-3 w-3 text-white" />
-                          </button>
-                        </span>
-                      ))}
-
-                      {/* Add Custom Category Button and Form */}
-                      <CustomCategoryForm
-                        onAdd={(customName) => {
-                          if (activeCategories.includes(customName)) {
-                            toast.error('هذه الفئة مضافة بالفعل');
-                            return;
-                          }
-                          const updatedCats = [...activeCategories, customName];
-                          setSportsList(prev => prev.map(s => s.id === sport.id ? { ...s, ageCategories: updatedCats } : s));
-                          toast.success(`تمت إضافة الفئة "${customName}" للمعاينة (تذكر الضغط على حفظ التغييرات)`);
-                        }}
-                      />
-                    </div>
-                  </div>
+                  <SportAgeCategoriesManager
+                    sportId={sport.id}
+                    customCategories={sport.customAgeCategories || []}
+                    onChange={(updated) => {
+                      setSportsList(prev => prev.map(s => {
+                        if (s.id === sport.id) {
+                          return {
+                            ...s,
+                            customAgeCategories: updated,
+                            ageCategories: updated.map(c => c.id)
+                          };
+                        }
+                        return s;
+                      }));
+                    }}
+                  />
 
                   {/* Student Limit Setup */}
                   <div className="pt-3 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-50/70 p-3 rounded-xl border border-slate-100">
@@ -1449,26 +1756,26 @@ export const SportsConfig: React.FC = () => {
 
                   {/* Save & Delete Action Buttons */}
                   <div className="shrink-0 pt-3 border-t border-slate-100 flex flex-col sm:flex-row items-center gap-2 justify-end">
-                    {/* Delete button for custom sports (Central Admin only) */}
-                    {isCentralAdmin && sport.isCustom && (
+                    {/* Delete button (Central Admin only) */}
+                    {isCentralAdmin && (
                       <button
                         type="button"
                         onClick={() => handleDeleteSport(sport.id, sport.name || mappedSport.name)}
                         disabled={deletingId === sport.id}
                         className="w-full sm:w-auto inline-flex items-center justify-center gap-1.5 bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 font-bold text-xs px-3 py-2.5 rounded-xl transition-all cursor-pointer disabled:opacity-50"
-                        title="حذف هذا الصنف المضاف"
+                        title="حذف هذا التخصص الرياضي"
                       >
                         {deletingId === sport.id ? (
                           <div className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-red-600 border-t-transparent" />
                         ) : (
                           <Trash2 className="h-3.5 w-3.5" />
                         )}
-                        <span>حذف الصنف المضاف</span>
+                        <span>حذف التخصص الرياضي 🗑️</span>
                       </button>
                     )}
 
                     <button
-                      onClick={() => handleSaveSportConfig(sport.id, activeCategories, sport.studentLimit, sport.athleticsSpecialties, isProgrammed)}
+                      onClick={() => handleSaveSportConfig(sport.id, activeCategories, sport.studentLimit, sport.athleticsSpecialties, isProgrammed, sport.name, sport.icon, sport.customAgeCategories)}
                       disabled={savingId !== null}
                       className="w-full sm:w-auto inline-flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs px-5 py-2.5 rounded-xl shadow-xs transition-all cursor-pointer disabled:opacity-50"
                     >
@@ -1637,58 +1944,14 @@ export const SportsConfig: React.FC = () => {
               </div>
 
               {/* Age Categories Configuration */}
-              <div className="space-y-2 bg-slate-50 p-4 rounded-2xl border border-slate-200">
-                <div className="flex items-center justify-between">
-                  <label className="text-xs font-bold text-slate-800">
-                    تحديد الفئات العمرية المشاركة المعنية <span className="text-red-500">*</span>
-                  </label>
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const allCatIds = getAgeCategoriesForSeason(currentSeason).map(c => c.id);
-                        setNewSportCategories(allCatIds);
-                      }}
-                      className="text-[11px] font-bold text-blue-600 hover:underline cursor-pointer"
-                    >
-                      تحديد الكل
-                    </button>
-                    <span className="text-slate-300 text-xs">|</span>
-                    <button
-                      type="button"
-                      onClick={() => setNewSportCategories([])}
-                      className="text-[11px] font-bold text-slate-500 hover:underline cursor-pointer"
-                    >
-                      إلغاء الكل
-                    </button>
-                  </div>
-                </div>
-
-                <div className="flex flex-wrap gap-2 pt-1">
-                  {getAgeCategoriesForSeason(currentSeason).map((cat) => {
-                    const isSelected = newSportCategories.includes(cat.id);
-                    return (
-                      <button
-                        key={cat.id}
-                        type="button"
-                        onClick={() => {
-                          setNewSportCategories(prev =>
-                            prev.includes(cat.id) ? prev.filter(c => c !== cat.id) : [...prev, cat.id]
-                          );
-                        }}
-                        className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition-all border cursor-pointer ${
-                          isSelected
-                            ? 'bg-blue-600 border-blue-600 text-white shadow-xs'
-                            : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-100'
-                        }`}
-                      >
-                        {isSelected && <Check className="h-3.5 w-3.5" />}
-                        <span>{cat.name}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
+              <SportAgeCategoriesManager
+                sportId="new_sport"
+                customCategories={newSportCustomCategories}
+                onChange={(updated) => {
+                  setNewSportCustomCategories(updated);
+                  setNewSportCategories(updated.map(c => c.id));
+                }}
+              />
 
               {/* Student Limit (سقف المشاركين لكل مؤسسة) */}
               <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-1.5">

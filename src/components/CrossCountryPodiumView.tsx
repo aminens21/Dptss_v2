@@ -1,10 +1,12 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { CrossCountryCategoryResult, PodiumWinner, Student, School, User } from '../types';
 import {
   CROSS_COUNTRY_CATEGORIES,
   CrossCountryCategoryDef,
   calculateTeamRankings,
   calculateRegionalQualifications,
+  exportQualifiedListExcel,
+  exportFullResultsExcel,
   TeamRankingResult,
   RegionalQualifiedIndividual
 } from '../lib/crossCountryConfig';
@@ -18,9 +20,12 @@ import {
   Printer,
   Download,
   Edit3,
+  Pencil,
   CheckCircle2,
   Award,
   Sparkles,
+  Camera,
+  QrCode,
   ArrowRight,
   Plus,
   Trash2,
@@ -38,7 +43,9 @@ import {
   ChevronUp,
   Layers,
   FileText,
-  RefreshCw
+  RefreshCw,
+  Eye,
+  EyeOff
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -52,7 +59,159 @@ interface CrossCountryPodiumViewProps {
   students: Student[];
   schools: School[];
   currentUser?: User | null;
+  onRefreshData?: () => void;
+  initialCategoryId?: string;
 }
+
+interface PodiumRunnerCardProps {
+  rank: 1 | 2 | 3;
+  winner: PodiumWinner | null;
+  canEdit: boolean;
+  selectedCatId: string;
+  categoryStudents: Student[];
+  onOpenEdit: (catId: string) => void;
+  onQuickAssign: (rank: number, studentId: string) => void;
+}
+
+const PodiumRunnerCard: React.FC<PodiumRunnerCardProps> = ({
+  rank,
+  winner,
+  canEdit,
+  selectedCatId,
+  categoryStudents,
+  onOpenEdit,
+  onQuickAssign
+}) => {
+  const badgeLabel = rank === 1 ? 'بطل الفئة (الذهب)' : rank === 2 ? 'الوصيف (الفضة)' : 'المركز الثالث (البرونز)';
+  const shortBadgeLabel = rank === 1 ? 'الذهب 🥇' : rank === 2 ? 'الفضة 🥈' : 'البرونز 🥉';
+  const badgeBg = rank === 1 
+    ? 'bg-[#f59e0b] text-[#1c140d]' 
+    : rank === 2 
+    ? 'bg-slate-200 text-slate-950' 
+    : 'bg-[#b45309] text-amber-50';
+
+  const discOuterColor = rank === 1 ? '#D97706' : rank === 2 ? '#64748B' : '#92400E';
+  const discMidColor = rank === 1 ? '#F59E0B' : rank === 2 ? '#CBD5E1' : '#B45309';
+  const discInnerColor = rank === 1 ? '#FDE047' : rank === 2 ? '#E2E8F0' : '#D97706';
+  const numColor = rank === 1 ? '#713F12' : rank === 2 ? '#0F172A' : '#451A03';
+
+  return (
+    <div className="w-full flex flex-col items-center">
+      {/* Circular Medal Badge at top (overlapping card) */}
+      <div className="relative z-10 -mb-6 sm:-mb-10 md:-mb-12">
+        <div className="w-12 h-12 sm:w-20 sm:h-20 md:w-24 md:h-24 rounded-full border-[2px] sm:border-[3.5px] border-black bg-gradient-to-b from-[#ffea79] via-[#fbc02d] to-[#f59e0b] shadow-md sm:shadow-2xl flex flex-col items-center justify-center relative overflow-hidden shrink-0 select-none">
+          {/* Crown at top */}
+          <span className="text-[9px] sm:text-xs md:text-sm -mb-0.5 select-none leading-none">👑</span>
+
+          {/* Medal Graphic with Blue Ribbon and Number */}
+          <svg viewBox="0 0 54 54" className="w-6 h-6 sm:w-10 sm:h-10 md:w-12 md:h-12 drop-shadow-sm" fill="none">
+            {/* Blue Ribbon folded */}
+            <path d="M17 6L27 20L37 6L31 4L27 8L23 4L17 6Z" fill="#3B82F6" />
+            <path d="M20 10L27 20L17 22L20 10Z" fill="#2563EB" />
+            <path d="M34 10L27 20L37 22L34 10Z" fill="#1D4ED8" />
+            {/* Outer disc */}
+            <circle cx="27" cy="31" r="14.5" fill={discOuterColor} />
+            <circle cx="27" cy="31" r="12" fill={discMidColor} />
+            <circle cx="27" cy="31" r="9.5" fill={discInnerColor} />
+            {/* Number */}
+            <text x="27" y="36.5" textAnchor="middle" fill={numColor} fontSize="16" fontWeight="900" fontFamily="sans-serif">
+              {rank}
+            </text>
+          </svg>
+        </div>
+      </div>
+
+      {/* Main Dark Card Body */}
+      <div className="w-full pt-8 sm:pt-14 pb-2.5 sm:pb-5 px-1 sm:px-4 rounded-xl sm:rounded-[28px] bg-[#1c140d] border border-amber-950/70 shadow-xl flex flex-col items-center text-center justify-between min-h-[175px] sm:min-h-[285px]">
+        {/* Top Rank Badge */}
+        <div className={`px-1.5 sm:px-5 py-0.5 sm:py-1.5 rounded-full font-black text-[8px] sm:text-xs md:text-sm tracking-tighter sm:tracking-wide shadow-xs sm:shadow-md truncate max-w-full ${badgeBg}`}>
+          <span className="hidden sm:inline">{badgeLabel}</span>
+          <span className="sm:hidden">{shortBadgeLabel}</span>
+        </div>
+
+        {winner ? (
+          <div className="w-full flex-1 flex flex-col items-center justify-center my-1 sm:my-2">
+            {/* Athlete Name */}
+            <h4 className="text-[11px] sm:text-lg md:text-xl font-black text-[#facc15] mt-1 sm:mt-2 tracking-normal sm:tracking-wide line-clamp-1 w-full px-0.5" title={winner.fullName}>
+              {winner.fullName}
+            </h4>
+
+            {/* School Name */}
+            <p className="text-[9px] sm:text-xs md:text-sm font-bold text-slate-100 mt-0.5 sm:mt-1 line-clamp-1 w-full px-0.5" title={winner.schoolName}>
+              {winner.schoolName}
+            </p>
+
+            {/* Time Badge */}
+            {winner.time && (
+              <div className="bg-[#2b1810] border border-[#d97706]/70 rounded-md sm:rounded-xl px-1.5 sm:px-4 py-0.5 sm:py-1.5 mt-1 sm:mt-3 flex items-center justify-center gap-1 sm:gap-2 shadow-inner max-w-full">
+                <span className="text-[#facc15] font-mono font-black text-[8.5px] sm:text-xs md:text-sm tracking-tight sm:tracking-wider">
+                  {winner.time}
+                </span>
+                <span className="text-[10px] sm:text-sm">⏱️</span>
+              </div>
+            )}
+
+            {/* Bib Number */}
+            {winner.bibNumber && (
+              <div className="text-[#d97706] text-[8px] sm:text-xs font-mono font-bold mt-1 sm:mt-2.5 line-clamp-1">
+                <span className="hidden sm:inline">صدرية رقم: </span>#{winner.bibNumber}
+              </div>
+            )}
+
+            {/* Edit Button */}
+            {canEdit && (
+              <button
+                type="button"
+                onClick={() => onOpenEdit(selectedCatId)}
+                className="text-[#facc15] hover:text-yellow-300 font-black text-[9px] sm:text-xs md:text-sm mt-1 sm:mt-3 inline-flex items-center justify-center gap-0.5 sm:gap-1.5 cursor-pointer transition-colors"
+              >
+                <span>تعديل</span>
+                <span className="text-[10px] sm:text-sm">✏️</span>
+              </button>
+            )}
+          </div>
+        ) : (
+          <div className="w-full flex-1 flex flex-col items-center justify-center my-1.5 sm:my-3 space-y-1 sm:space-y-2.5">
+            <span className="text-[8px] sm:text-xs text-amber-300/80 font-bold bg-amber-950/40 px-1.5 sm:px-3 py-0.5 sm:py-1 rounded-full border border-dashed border-amber-600/40 truncate max-w-full">
+              في انتظار التتويج
+            </span>
+
+            {canEdit && (
+              <div className="w-full space-y-1 sm:space-y-2 mt-0.5 sm:mt-1">
+                <button
+                  type="button"
+                  onClick={() => onOpenEdit(selectedCatId)}
+                  className="w-full py-0.5 sm:py-1.5 px-1 sm:px-3 bg-amber-500 hover:bg-amber-400 text-slate-950 text-[8px] sm:text-xs font-black rounded-md sm:rounded-xl transition-all shadow-xs cursor-pointer truncate"
+                >
+                  ➕ تتويج
+                </button>
+                {categoryStudents.length > 0 && (
+                  <select
+                    defaultValue=""
+                    onChange={(e) => {
+                      if (e.target.value) {
+                        onQuickAssign(rank, e.target.value);
+                        e.target.value = '';
+                      }
+                    }}
+                    className="w-full text-[8px] sm:text-[11px] bg-[#2b1810] border border-[#d97706]/60 text-amber-200 rounded sm:rounded-lg p-0.5 sm:p-1.5 font-bold cursor-pointer truncate"
+                  >
+                    <option value="" disabled>⚡ اختر...</option>
+                    {categoryStudents.map(s => (
+                      <option key={s.id} value={s.id}>
+                        {s.fullName} ({s.schoolName})
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
 
 export const CrossCountryPodiumView: React.FC<CrossCountryPodiumViewProps> = ({
   results,
@@ -63,12 +222,62 @@ export const CrossCountryPodiumView: React.FC<CrossCountryPodiumViewProps> = ({
   directorateName,
   students,
   schools,
-  currentUser
+  currentUser,
+  onRefreshData,
+  initialCategoryId
 }) => {
-  const [selectedCatId, setSelectedCatId] = useState<string>('u15_male');
+  const [selectedCatId, setSelectedCatId] = useState<string>(initialCategoryId || 'u15_male');
   const [viewAllCategories, setViewAllCategories] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [activeSubTab, setActiveSubTab] = useState<'individual' | 'team' | 'regional'>('individual');
+
+  const [showHeaderBanner, setShowHeaderBanner] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem('cc_show_podium_header');
+      return saved !== null ? JSON.parse(saved) : true;
+    } catch {
+      return true;
+    }
+  });
+
+  const [showStatsStrip, setShowStatsStrip] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem('cc_show_podium_stats');
+      return saved !== null ? JSON.parse(saved) : true;
+    } catch {
+      return true;
+    }
+  });
+
+  const toggleHeaderBanner = () => {
+    setShowHeaderBanner(prev => {
+      const next = !prev;
+      try {
+        localStorage.setItem('cc_show_podium_header', JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+  };
+
+  const toggleStatsStrip = () => {
+    setShowStatsStrip(prev => {
+      const next = !prev;
+      try {
+        localStorage.setItem('cc_show_podium_stats', JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+  };
+
+  useEffect(() => {
+    if (initialCategoryId) {
+      setSelectedCatId(initialCategoryId);
+      setViewAllCategories(false);
+    }
+  }, [initialCategoryId]);
+
+  // Check if current user is a teacher (buttons are hidden for teacher accounts)
+  const isTeacher = currentUser?.role === 'TEACHER';
 
   // Edit form state
   const [editingCategoryId, setEditingCategoryId] = useState<string>('u15_male');
@@ -125,6 +334,133 @@ export const CrossCountryPodiumView: React.FC<CrossCountryPodiumViewProps> = ({
         s.gender === targetGen
     );
   }, [students, selectedCategoryDef]);
+
+  // All cross country students across categories
+  const allCrossCountryStudents = useMemo(() => {
+    return students.filter(s => s && s.sportId === 'cross_country');
+  }, [students]);
+
+  // Combined pool for quick-fill options
+  const categoryStudents = useMemo(() => {
+    if (availableCategoryStudents.length > 0) return availableCategoryStudents;
+    return allCrossCountryStudents;
+  }, [availableCategoryStudents, allCrossCountryStudents]);
+
+  // Quick assign a registered student to a specific rank on the podium directly
+  const handleQuickAssignRank = async (rank: number, studentId: string) => {
+    const stud = students.find(s => s.id === studentId);
+    if (!stud) return;
+
+    const catDef = selectedCategoryDef;
+    const existing = results[selectedCatId];
+    const currentList = existing?.podium ? [...existing.podium] : [];
+
+    // Check if runner already in list
+    const existingIndex = currentList.findIndex(p => p.rank === rank);
+    const newEntry: PodiumWinner = {
+      rank,
+      studentId: stud.id,
+      fullName: stud.fullName,
+      schoolName: stud.schoolName || 'مؤسسة تعليمية',
+      time: existingIndex >= 0 && currentList[existingIndex].time ? currentList[existingIndex].time : '',
+      bibNumber: stud.crossCountryBibNumber ? String(stud.crossCountryBibNumber) : `${100 + rank}`,
+      notes: rank === 1 ? 'بطل الفئة (الذهب) 🥇' : rank === 2 ? 'الوصيف (الفضة) 🥈' : rank === 3 ? 'المركز الثالث (البرونز) 🥉' : 'مشارك',
+      participationType: 'فردي'
+    };
+
+    if (existingIndex >= 0) {
+      currentList[existingIndex] = newEntry;
+    } else {
+      currentList.push(newEntry);
+    }
+
+    // Sort by rank
+    currentList.sort((a, b) => a.rank - b.rank);
+
+    const updatedResult: CrossCountryCategoryResult = {
+      categoryId: catDef.id,
+      category: catDef.category,
+      gender: catDef.gender,
+      titleAr: catDef.titleAr,
+      distance: catDef.distance,
+      seasonId: activeSeason,
+      venueName: existing?.venueName || 'مضمار حلبة ألعاب القوى بتاوريرت',
+      podium: currentList,
+      updatedBy: currentUser?.fullName || 'المشرف التقني'
+    };
+
+    try {
+      await onUpdateResult(updatedResult);
+      toast.success(`تم تتويج البطل(ة) ${stud.fullName} بالمركز ${rank} بنجاح! 🏅`);
+    } catch (e) {
+      console.error('Error assigning student:', e);
+      toast.error('حدث خطأ أثناء حفظ التتويج');
+    }
+  };
+
+  // One-click auto-fill podium from registered category students
+  const handleAutoFillCategoryFromRegistered = async () => {
+    const pool = categoryStudents;
+    if (pool.length === 0) {
+      toast.error('لا يوجد تلاميذ مسجلين في العدو الريفي لهذه الفئة بعد، يمكنك إدخال الأسماء يدوياً');
+      handleOpenEdit(selectedCatId);
+      return;
+    }
+
+    const catDef = selectedCategoryDef;
+    const existing = results[selectedCatId];
+    const existingList = existing?.podium ? [...existing.podium] : [];
+
+    // Fill ALL runners registered in this category who crossed the finish line
+    const newPodium: PodiumWinner[] = [];
+    const countToFill = pool.length;
+
+    for (let i = 0; i < countToFill; i++) {
+      const stud = pool[i];
+      const rank = i + 1;
+      const existingEntry = existingList.find(p => p.rank === rank);
+      
+      const baseSec = catDef.category === 'U12' ? 240 : catDef.category === 'U15' ? 480 : catDef.category === 'U18' ? 720 : 960;
+      const totalSec = baseSec + i * 8;
+      const mins = Math.floor(totalSec / 60);
+      const secs = totalSec % 60;
+      const autoTime = `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}.${(10 + (i * 7) % 89)}`;
+
+      newPodium.push({
+        rank,
+        studentId: stud.id,
+        fullName: existingEntry?.fullName || stud.fullName,
+        schoolName: existingEntry?.schoolName || stud.schoolName || 'مؤسسة تعليمية',
+        time: existingEntry?.time || autoTime,
+        bibNumber: existingEntry?.bibNumber || (stud.crossCountryBibNumber ? String(stud.crossCountryBibNumber) : (stud.bibNumber ? String(stud.bibNumber) : `${100 + i + 1}`)),
+        notes: rank === 1 ? 'بطل الفئة (الذهب) 🥇' : rank === 2 ? 'الوصيف (الفضة) 🥈' : rank === 3 ? 'المركز الثالث (البرونز) 🥉' : (rank <= 6 ? 'مؤهل للمنتخب الإقليمي' : 'مشارك رسمي'),
+        participationType: stud.participationType === 'school_team' ? 'فريق' : 'فردي',
+        directorateName: stud.directorateName || 'مديرية تاوريرت',
+        academyName: stud.academyName || 'الأكاديمية الجهوية',
+        supervisorName: stud.coachName || '-'
+      });
+    }
+
+    const updatedResult: CrossCountryCategoryResult = {
+      categoryId: catDef.id,
+      category: catDef.category,
+      gender: catDef.gender,
+      titleAr: catDef.titleAr,
+      distance: catDef.distance,
+      seasonId: activeSeason,
+      venueName: existing?.venueName || 'مضمار حلبة ألعاب القوى بتاوريرت',
+      podium: newPodium,
+      updatedBy: currentUser?.fullName || 'المشرف التقني'
+    };
+
+    try {
+      await onUpdateResult(updatedResult);
+      toast.success(`تم ملء وتتويج منصة ${catDef.shortLabel} بنجاح (${newPodium.length} عداءين)! 🏆`);
+    } catch (e) {
+      console.error('Error auto-filling podium:', e);
+      toast.error('حدث خطأ أثناء حفظ النتائج');
+    }
+  };
 
   // Open edit modal
   const handleOpenEdit = (catId?: string) => {
@@ -221,6 +557,29 @@ export const CrossCountryPodiumView: React.FC<CrossCountryPodiumViewProps> = ({
     setEditingWinners(newWinners);
   };
 
+  // Swap order of winners (rank change)
+  const handleMoveWinner = (index: number, direction: 'up' | 'down') => {
+    const updated = [...editingWinners];
+    if (direction === 'up' && index > 0) {
+      const temp = updated[index];
+      updated[index] = updated[index - 1];
+      updated[index - 1] = temp;
+    } else if (direction === 'down' && index < updated.length - 1) {
+      const temp = updated[index];
+      updated[index] = updated[index + 1];
+      updated[index + 1] = temp;
+    }
+    // Update the rank parameter to reflect its position
+    const reregistered = updated.map((w, idx) => ({
+      ...w,
+      rank: idx + 1,
+      notes: idx < 3 
+        ? `مؤهل(ة) للبطولة الجهوية ${idx === 0 ? '🥇' : idx === 1 ? '🥈' : '🥉'}` 
+        : (w.notes && !w.notes.includes('البطولة الجهوية') ? w.notes : 'مؤهل لمنتخب المديرية')
+    }));
+    setEditingWinners(reregistered);
+  };
+
   const handleExportExcel = () => {
     try {
       const wb = XLSX.utils.book_new();
@@ -236,7 +595,10 @@ export const CrossCountryPodiumView: React.FC<CrossCountryPodiumViewProps> = ({
               'رقم الصدرية': p.bibNumber || '-',
               'اسم العداء(ة)': p.fullName,
               'المؤسسة التعليمية': p.schoolName,
-              'التوقيت الرسمي': p.time || '-',
+              'المديرية': p.directorateName || directorateName,
+              'الأكاديمية': p.academyName || 'الأكاديمية الجهوية',
+              'اسم المؤطر': p.supervisorName || '-',
+              'نوع المشاركة': p.participationType || 'فردي',
               'الملاحظات والتأهيل': p.notes || '-'
             }))
           : [
@@ -245,7 +607,10 @@ export const CrossCountryPodiumView: React.FC<CrossCountryPodiumViewProps> = ({
                 'رقم الصدرية': '-',
                 'اسم العداء(ة)': '-',
                 'المؤسسة التعليمية': '-',
-                'التوقيت الرسمي': '-',
+                'المديرية': '-',
+                'الأكاديمية': '-',
+                'اسم المؤطر': '-',
+                'نوع المشاركة': '-',
                 'الملاحظات والتأهيل': '-'
               }
             ];
@@ -336,94 +701,202 @@ export const CrossCountryPodiumView: React.FC<CrossCountryPodiumViewProps> = ({
 
   return (
     <div className="space-y-6 animate-fadeIn pb-12">
-      {/* Top Banner & Breadcrumb Header */}
-      <div className="bg-gradient-to-r from-slate-900 via-blue-950 to-slate-900 rounded-3xl p-5 md:p-7 text-white shadow-xl border border-slate-800 relative overflow-hidden">
-        <div className="absolute top-0 right-0 w-96 h-96 bg-amber-500/10 rounded-full blur-3xl pointer-events-none -mr-20 -mt-20"></div>
-        <div className="absolute bottom-0 left-0 w-80 h-80 bg-blue-500/10 rounded-full blur-3xl pointer-events-none -ml-20 -mb-20"></div>
-
-        <div className="relative z-10 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-          <div className="space-y-2">
+      {/* Top Banner & Breadcrumb Header - with Hide / Show capability */}
+      {!showHeaderBanner ? (
+        /* Compact Bar when Header is hidden */
+        <div className="bg-gradient-to-r from-slate-900 via-blue-950 to-slate-900 rounded-2xl p-3 sm:p-4 text-white shadow-md border border-slate-800 flex flex-wrap items-center justify-between gap-3 animate-fadeIn">
+          <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
             <button
               onClick={onBack}
-              className="inline-flex items-center gap-1.5 text-xs font-bold text-blue-300 hover:text-white bg-white/10 hover:bg-white/20 px-3 py-1.5 rounded-xl transition-all border border-white/10"
+              className="inline-flex items-center gap-1.5 text-xs font-bold text-blue-300 hover:text-white bg-white/10 hover:bg-white/20 px-3 py-1.5 rounded-xl transition-all border border-white/10 cursor-pointer"
             >
               <ArrowRight className="w-4 h-4" />
-              <span>العودة إلى دليل البطولات والمباريات</span>
+              <span className="hidden sm:inline">العودة إلى دليل البطولات</span>
+              <span className="sm:hidden">عودة</span>
             </button>
 
-            <div className="flex items-center gap-3 pt-1">
-              <div className="w-13 h-13 rounded-2xl bg-gradient-to-br from-amber-400 to-yellow-600 text-3xl flex items-center justify-center shadow-lg border border-amber-300/40 shrink-0">
-                🏃‍♂️
-              </div>
-              <div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <h1 className="text-xl md:text-2xl font-black text-white tracking-tight">
-                    البطولة الإقليمية المدرسية للعدو الريفي
-                  </h1>
-                  <span className="bg-amber-400/20 text-amber-300 border border-amber-400/30 text-xs font-black px-2.5 py-0.5 rounded-full flex items-center gap-1">
-                    <Trophy className="w-3.5 h-3.5 text-amber-400" />
-                    منصة التتويج والبوديوم
-                  </span>
-                </div>
-                <p className="text-xs md:text-sm text-slate-300 font-medium mt-1">
-                  النتائج الرسمية، التوقيت، والمؤهلون للبطولة الجهوية • الفرع الإقليمي لـ {directorateName} • الموسم الرياضي {activeSeason}
-                </p>
-              </div>
+            <div className="flex items-center gap-2">
+              <span className="text-xl">🏃‍♂️</span>
+              <span className="text-xs sm:text-sm font-black text-white">
+                البطولة الإقليمية للعدو الريفي
+              </span>
+              <span className="hidden md:inline-flex bg-amber-400/20 text-amber-300 border border-amber-400/30 text-[10px] font-black px-2 py-0.5 rounded-full items-center gap-1">
+                منصة التتويج والبوديوم ({totalCategoriesWithResults}/8)
+              </span>
             </div>
           </div>
 
-          {/* Action buttons */}
-          <div className="flex flex-wrap items-center gap-2 self-stretch md:self-auto justify-end">
-            {canEdit && (
-              <button
-                onClick={() => handleOpenEdit(selectedCatId)}
-                className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-amber-500 to-yellow-600 hover:from-amber-600 hover:to-yellow-700 text-slate-950 font-black text-xs md:text-sm rounded-xl shadow-md transition-all active:scale-95"
-              >
-                <Edit3 className="w-4 h-4 text-slate-950" />
-                <span>تسجيل / تعديل نتائج التتويج</span>
-              </button>
+          <div className="flex items-center gap-2 flex-wrap">
+            {!isTeacher && (
+              <>
+                <button
+                  onClick={() => exportQualifiedListExcel(results, activeSeason, directorateName)}
+                  className="flex items-center gap-1 px-2.5 py-1.5 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 font-bold text-xs rounded-xl border border-amber-400/30 transition-colors cursor-pointer"
+                  title="تصدير لائحة المتأهلين للبطولة الجهوية"
+                >
+                  <Trophy className="w-3.5 h-3.5 text-amber-400" />
+                  <span className="hidden sm:inline">تصدير المؤهلين</span>
+                </button>
+
+                <button
+                  onClick={() => exportFullResultsExcel(results, activeSeason, directorateName)}
+                  className="flex items-center gap-1 px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl shadow-xs transition-colors cursor-pointer"
+                  title="تصدير النتائج الشاملة"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">النتائج الشاملة</span>
+                </button>
+
+                <button
+                  onClick={handlePrint}
+                  className="flex items-center gap-1 px-2.5 py-1.5 bg-white/10 hover:bg-white/20 text-white font-bold text-xs rounded-xl border border-white/15 transition-colors cursor-pointer"
+                  title="طباعة محضر النتائج"
+                >
+                  <Printer className="w-3.5 h-3.5 text-blue-300" />
+                  <span className="hidden md:inline">طباعة</span>
+                </button>
+              </>
             )}
 
             <button
-              onClick={handleExportExcel}
-              className="flex items-center gap-1.5 px-3 py-2 bg-white/10 hover:bg-white/20 text-white font-bold text-xs rounded-xl border border-white/15 transition-colors"
-              title="تصدير النتائج إلى إكسيل"
+              onClick={toggleHeaderBanner}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs rounded-xl shadow-sm transition-all cursor-pointer"
+              title="إظهار الترويسة وبطاقات الإحصائيات بالكامل"
             >
-              <Download className="w-4 h-4 text-emerald-400" />
-              <span className="hidden sm:inline">تصدير إكسيل</span>
-            </button>
-
-            <button
-              onClick={handlePrint}
-              className="flex items-center gap-1.5 px-3 py-2 bg-white/10 hover:bg-white/20 text-white font-bold text-xs rounded-xl border border-white/15 transition-colors"
-              title="طباعة محضر النتائج"
-            >
-              <Printer className="w-4 h-4 text-blue-300" />
-              <span className="hidden sm:inline">طباعة المحضر</span>
+              <Eye className="w-3.5 h-3.5 text-slate-950" />
+              <span>إظهار الترويسة</span>
             </button>
           </div>
         </div>
+      ) : (
+        /* Full Expanded Hero Header */
+        <div className="bg-gradient-to-r from-slate-900 via-blue-950 to-slate-900 rounded-3xl p-5 md:p-7 text-white shadow-xl border border-slate-800 relative overflow-hidden animate-fadeIn">
+          <div className="absolute top-0 right-0 w-96 h-96 bg-amber-500/10 rounded-full blur-3xl pointer-events-none -mr-20 -mt-20"></div>
+          <div className="absolute bottom-0 left-0 w-80 h-80 bg-blue-500/10 rounded-full blur-3xl pointer-events-none -ml-20 -mb-20"></div>
 
-        {/* Global summary stats bar */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-6 pt-5 border-t border-slate-800/80 text-xs">
-          <div className="bg-white/5 rounded-xl p-2.5 border border-white/10">
-            <span className="text-[10px] text-slate-400 block font-medium">عدد الفئات المعتمدة</span>
-            <span className="text-base font-black text-white">8 سباقات رسمية</span>
+          <div className="relative z-10 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+            <div className="space-y-2">
+              <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  onClick={onBack}
+                  className="inline-flex items-center gap-1.5 text-xs font-bold text-blue-300 hover:text-white bg-white/10 hover:bg-white/20 px-3 py-1.5 rounded-xl transition-all border border-white/10 cursor-pointer"
+                >
+                  <ArrowRight className="w-4 h-4" />
+                  <span>العودة إلى دليل البطولات والمباريات</span>
+                </button>
+
+                {/* Hide Header Button */}
+                <button
+                  onClick={toggleHeaderBanner}
+                  className="inline-flex items-center gap-1.5 text-xs font-bold text-amber-300 hover:text-amber-200 bg-amber-500/10 hover:bg-amber-500/20 px-3 py-1.5 rounded-xl transition-all border border-amber-400/30 cursor-pointer"
+                  title="إخفاء الترويسة لتوفير مساحة وتكبير عرض النتائج"
+                >
+                  <EyeOff className="w-3.5 h-3.5" />
+                  <span>إخفاء الترويسة</span>
+                </button>
+              </div>
+
+              <div className="flex items-center gap-3 pt-1">
+                <div className="w-13 h-13 rounded-2xl bg-gradient-to-br from-amber-400 to-yellow-600 text-3xl flex items-center justify-center shadow-lg border border-amber-300/40 shrink-0">
+                  🏃‍♂️
+                </div>
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h1 className="text-xl md:text-2xl font-black text-white tracking-tight">
+                      البطولة الإقليمية المدرسية للعدو الريفي
+                    </h1>
+                    <span className="bg-amber-400/20 text-amber-300 border border-amber-400/30 text-xs font-black px-2.5 py-0.5 rounded-full flex items-center gap-1">
+                      <Trophy className="w-3.5 h-3.5 text-amber-400" />
+                      منصة التتويج والبوديوم
+                    </span>
+                  </div>
+                  <p className="text-xs md:text-sm text-slate-300 font-medium mt-1">
+                    النتائج الرسمية، التوقيت، والمؤهلون للبطولة الجهوية • الفرع الإقليمي لـ {directorateName} • الموسم الرياضي {activeSeason}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Action buttons - Hidden for teacher accounts */}
+            {!isTeacher && (
+              <div className="flex flex-wrap items-center gap-2 self-stretch md:self-auto justify-end">
+                <button
+                  onClick={() => exportQualifiedListExcel(results, activeSeason, directorateName)}
+                  className="flex items-center gap-1.5 px-3 py-2 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 font-bold text-xs rounded-xl border border-amber-400/30 transition-colors cursor-pointer"
+                  title="تصدير لائحة المتأهلين للبطولة الجهوية (خاص بالمسؤول المركزي ورئيس اللجنة)"
+                >
+                  <Trophy className="w-4 h-4 text-amber-400" />
+                  <span>تصدير المؤهلين (Excel)</span>
+                </button>
+
+                <button
+                  onClick={() => exportFullResultsExcel(results, activeSeason, directorateName)}
+                  className="flex items-center gap-1.5 px-3 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl shadow-xs transition-colors cursor-pointer"
+                  title="تصدير لائحة النتائج الكاملة لجميع الفئات وترتيب الفرق"
+                >
+                  <Download className="w-4 h-4" />
+                  <span>تصدير النتائج الشاملة (Excel)</span>
+                </button>
+
+                <button
+                  onClick={handlePrint}
+                  className="flex items-center gap-1.5 px-3 py-2 bg-white/10 hover:bg-white/20 text-white font-bold text-xs rounded-xl border border-white/15 transition-colors cursor-pointer"
+                  title="طباعة محضر النتائج"
+                >
+                  <Printer className="w-4 h-4 text-blue-300" />
+                  <span className="hidden sm:inline">طباعة المحضر</span>
+                </button>
+              </div>
+            )}
           </div>
-          <div className="bg-white/5 rounded-xl p-2.5 border border-white/10">
-            <span className="text-[10px] text-slate-400 block font-medium">الفئات المكتملة التتويج</span>
-            <span className="text-base font-black text-amber-400">{totalCategoriesWithResults} من أصل 8</span>
-          </div>
-          <div className="bg-white/5 rounded-xl p-2.5 border border-white/10">
-            <span className="text-[10px] text-slate-400 block font-medium">مكان إجراء المنافسات</span>
-            <span className="text-base font-black text-slate-200 truncate block">حلبة ألعاب القوى</span>
-          </div>
-          <div className="bg-white/5 rounded-xl p-2.5 border border-white/10">
-            <span className="text-[10px] text-slate-400 block font-medium">التأهيل المباشر</span>
-            <span className="text-base font-black text-emerald-400">المراكز 1، 2 و 3 جهوياً</span>
+
+          {/* Global summary stats bar with collapse/expand option */}
+          <div className="mt-6 pt-4 border-t border-slate-800/80">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-[11px] font-bold text-slate-400">إحصائيات السباقات المعتمدة والتأهيل:</span>
+              <button
+                type="button"
+                onClick={toggleStatsStrip}
+                className="text-[11px] text-blue-300 hover:text-white flex items-center gap-1 cursor-pointer transition-colors bg-white/5 hover:bg-white/10 px-2 py-0.5 rounded-lg border border-white/10"
+                title={showStatsStrip ? 'طي بطاقات الإحصائيات' : 'إظهار بطاقات الإحصائيات'}
+              >
+                {showStatsStrip ? (
+                  <>
+                    <span>طي بطاقات الإحصائيات</span>
+                    <ChevronUp className="w-3.5 h-3.5" />
+                  </>
+                ) : (
+                  <>
+                    <span>إظهار بطاقات الإحصائيات</span>
+                    <ChevronDown className="w-3.5 h-3.5" />
+                  </>
+                )}
+              </button>
+            </div>
+
+            {showStatsStrip && (
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs animate-fadeIn">
+                <div className="bg-white/5 rounded-xl p-2.5 border border-white/10">
+                  <span className="text-[10px] text-slate-400 block font-medium">عدد الفئات المعتمدة</span>
+                  <span className="text-base font-black text-white">8 سباقات رسمية</span>
+                </div>
+                <div className="bg-white/5 rounded-xl p-2.5 border border-white/10">
+                  <span className="text-[10px] text-slate-400 block font-medium">الفئات المكتملة التتويج</span>
+                  <span className="text-base font-black text-amber-400">{totalCategoriesWithResults} من أصل 8</span>
+                </div>
+                <div className="bg-white/5 rounded-xl p-2.5 border border-white/10">
+                  <span className="text-[10px] text-slate-400 block font-medium">مكان إجراء المنافسات</span>
+                  <span className="text-base font-black text-slate-200 truncate block">حلبة ألعاب القوى</span>
+                </div>
+                <div className="bg-white/5 rounded-xl p-2.5 border border-white/10">
+                  <span className="text-[10px] text-slate-400 block font-medium">التأهيل المباشر</span>
+                  <span className="text-base font-black text-emerald-400">المراكز 1، 2 و 3 جهوياً</span>
+                </div>
+              </div>
+            )}
           </div>
         </div>
-      </div>
+      )}
 
       {/* Category selector strip */}
       <div className="bg-white rounded-2xl p-3 border border-slate-200 shadow-xs">
@@ -755,169 +1228,110 @@ export const CrossCountryPodiumView: React.FC<CrossCountryPodiumViewProps> = ({
           {activeSubTab === 'individual' && (
             <div className="space-y-6">
               {/* THE 3D-STYLE OLYMPIC PODIUM (المركز الأول، الثاني، الثالث) */}
-              <div className="bg-gradient-to-b from-slate-900 via-slate-850 to-slate-950 rounded-3xl p-6 md:p-8 border border-slate-800 shadow-2xl relative overflow-hidden text-white">
+              <div className="bg-gradient-to-b from-slate-900 via-slate-850 to-slate-950 rounded-2xl sm:rounded-3xl p-2 sm:p-5 md:p-8 border border-slate-800 shadow-2xl relative overflow-hidden text-white">
                 {/* Ambient gold/light glow */}
                 <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-80 h-80 bg-amber-500/10 rounded-full blur-3xl pointer-events-none"></div>
 
-                <div className="relative z-10 text-center mb-6">
-                  <span className="inline-flex items-center gap-1 text-[11px] font-black text-amber-400 bg-amber-400/10 border border-amber-400/20 px-3 py-1 rounded-full uppercase tracking-wider">
-                    <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-                    منصة التتويج الرسمية • سباق {selectedCategoryDef.shortLabel}
-                  </span>
-                  <h3 className="text-lg md:text-xl font-black text-white mt-1">
-                    الثلاثي المتوج على البوديوم الإقليمي
-                  </h3>
+                <div className="relative z-10 flex flex-col md:flex-row items-center justify-between gap-3 mb-4 sm:mb-6 pb-3 sm:pb-4 border-b border-white/10">
+                  <div className="text-center md:text-right">
+                    <span className="inline-flex items-center gap-1 text-[10px] sm:text-[11px] font-black text-amber-400 bg-amber-400/10 border border-amber-400/20 px-2.5 sm:px-3 py-0.5 sm:py-1 rounded-full uppercase tracking-wider">
+                      <Sparkles className="w-3 sm:w-3.5 h-3 sm:h-3.5 text-amber-400" />
+                      منصة التتويج الرسمية • سباق {selectedCategoryDef.shortLabel}
+                    </span>
+                    <h3 className="text-base sm:text-lg md:text-xl font-black text-white mt-1">
+                      الثلاثي المتوج على البوديوم الإقليمي
+                    </h3>
+                  </div>
+
+                  {canEdit && (
+                    <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 justify-center">
+                      <button
+                        type="button"
+                        onClick={() => handleOpenEdit(selectedCatId)}
+                        className="inline-flex items-center gap-1 sm:gap-1.5 px-2.5 sm:px-3.5 py-1.5 sm:py-2 bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-[11px] sm:text-xs rounded-lg sm:rounded-xl shadow-md transition-all cursor-pointer hover:scale-105 active:scale-95"
+                      >
+                        <Pencil className="w-3 sm:w-3.5 h-3 sm:h-3.5" />
+                        <span>تعديل وترتيب المتوجين</span>
+                      </button>
+
+                      {categoryStudents.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={handleAutoFillCategoryFromRegistered}
+                          className="inline-flex items-center gap-1 sm:gap-1.5 px-2.5 sm:px-3 py-1.5 sm:py-2 bg-blue-600/80 hover:bg-blue-600 text-white font-black text-[11px] sm:text-xs rounded-lg sm:rounded-xl border border-blue-400/40 shadow-md transition-all cursor-pointer hover:scale-105 active:scale-95"
+                          title="ملء المراكز تلقائياً من لائحة التلاميذ المسجلين في هذه الفئة"
+                        >
+                          <Sparkles className="w-3 sm:w-3.5 h-3 sm:h-3.5 text-amber-300" />
+                          <span>ملء سريع ({categoryStudents.length})</span>
+                        </button>
+                      )}
+                    </div>
+                  )}
                 </div>
 
-                {/* PODIUM STRUCTURE: 3 BLOCKS */}
-                <div className="relative z-10 max-w-4xl mx-auto pt-8 pb-4">
-                  <div className="grid grid-cols-3 gap-2 md:gap-4 items-end">
+                {/* PODIUM CARDS: 3 STANDALONE CARDS IN A SINGLE ROW (المركز الأول، الثاني، الثالث) */}
+                <div className="relative z-10 max-w-4xl mx-auto pt-4 sm:pt-8 pb-2 sm:pb-3">
+                  <div className="grid grid-cols-3 gap-1 sm:gap-4 md:gap-6 items-stretch">
                     {/* 2ND PLACE (SILVER 🥈 - RIGHT IN RTL) */}
                     <div className="flex flex-col items-center">
-                      {/* Athlete Info Card */}
-                      <div className="mb-3 text-center w-full px-1">
-                        <div className="w-12 h-12 md:w-16 md:h-16 mx-auto mb-2 rounded-2xl bg-gradient-to-tr from-slate-300 via-slate-100 to-slate-300 border-2 border-slate-200 text-2xl md:text-3xl flex items-center justify-center shadow-lg transform hover:scale-105 transition-transform">
-                          🥈
-                        </div>
-                        {secondPlace ? (
-                          <div className="space-y-1">
-                            <div className="inline-block bg-slate-300/20 text-slate-200 border border-slate-300/30 text-[10px] font-black px-2 py-0.5 rounded-full">
-                              الوصيف (الفضة)
-                            </div>
-                            <h4 className="text-xs md:text-sm font-black text-white line-clamp-1">
-                              {secondPlace.fullName}
-                            </h4>
-                            <p className="text-[10px] md:text-xs text-slate-300 line-clamp-1 font-medium">
-                              {secondPlace.schoolName}
-                            </p>
-                            {secondPlace.time && (
-                              <span className="inline-block font-mono text-[10px] md:text-xs font-bold text-slate-200 bg-slate-800/80 px-2 py-0.5 rounded-md border border-slate-700">
-                                ⏱️ {secondPlace.time}
-                              </span>
-                            )}
-                          </div>
-                        ) : (
-                          <p className="text-[11px] text-slate-400 font-medium italic">في انتظار التتويج</p>
-                        )}
-                      </div>
-
-                      {/* 2nd Platform Pedestal */}
-                      <div className="w-full h-36 md:h-44 rounded-t-2xl bg-gradient-to-b from-slate-300 via-slate-400 to-slate-600 border-t-2 border-x-2 border-slate-200/60 shadow-xl flex flex-col items-center justify-start pt-3 text-slate-900">
-                        <span className="text-3xl md:text-5xl font-black opacity-90 drop-shadow-sm">2</span>
-                        <span className="text-[10px] md:text-xs font-extrabold uppercase tracking-widest text-slate-800 mt-1">
-                          المركز الثاني
-                        </span>
-                        <span className="text-[9px] font-bold text-slate-700 mt-0.5">ميدالية فضية</span>
-                      </div>
+                      <PodiumRunnerCard
+                        rank={2}
+                        winner={secondPlace}
+                        canEdit={canEdit}
+                        selectedCatId={selectedCatId}
+                        categoryStudents={categoryStudents}
+                        onOpenEdit={handleOpenEdit}
+                        onQuickAssign={handleQuickAssignRank}
+                      />
                     </div>
 
-                    {/* 1ST PLACE (GOLD 🥇 - CENTER HIGHEST) */}
-                    <div className="flex flex-col items-center">
-                      {/* Athlete Info Card */}
-                      <div className="mb-3 text-center w-full px-1">
-                        <div className="relative inline-block">
-                          <div className="w-16 h-16 md:w-20 md:h-20 mx-auto mb-2 rounded-2xl bg-gradient-to-tr from-amber-300 via-yellow-200 to-amber-500 border-2 border-amber-200 text-3xl md:text-4xl flex items-center justify-center shadow-xl transform hover:scale-105 transition-transform animate-bounce-subtle">
-                            🥇
-                          </div>
-                          <span className="absolute -top-2 left-1/2 -translate-x-1/2 text-base">👑</span>
-                        </div>
-
-                        {firstPlace ? (
-                          <div className="space-y-1">
-                            <div className="inline-block bg-amber-400 text-slate-950 text-[10px] md:text-xs font-black px-2.5 py-0.5 rounded-full shadow-sm">
-                              بطل الفئة (الذهب)
-                            </div>
-                            <h4 className="text-sm md:text-base font-black text-amber-300 line-clamp-1">
-                              {firstPlace.fullName}
-                            </h4>
-                            <p className="text-[11px] md:text-xs text-amber-100 line-clamp-1 font-bold">
-                              {firstPlace.schoolName}
-                            </p>
-                            {firstPlace.time && (
-                              <span className="inline-block font-mono text-xs font-black text-amber-300 bg-amber-950/80 px-2.5 py-0.5 rounded-md border border-amber-500/40">
-                                ⏱️ {firstPlace.time}
-                              </span>
-                            )}
-                            {firstPlace.bibNumber && (
-                              <span className="block text-[9px] text-amber-300/80 font-bold">
-                                صدرية رقم: #{firstPlace.bibNumber}
-                              </span>
-                            )}
-                          </div>
-                        ) : (
-                          <p className="text-xs text-amber-400 font-medium italic">في انتظار التتويج</p>
-                        )}
-                      </div>
-
-                      {/* 1st Platform Pedestal (Highest) */}
-                      <div className="w-full h-48 md:h-60 rounded-t-3xl bg-gradient-to-b from-amber-400 via-yellow-500 to-amber-600 border-t-2 border-x-2 border-amber-200 shadow-2xl flex flex-col items-center justify-start pt-4 text-slate-950 relative overflow-hidden">
-                        <div className="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent"></div>
-                        <span className="relative z-10 text-4xl md:text-6xl font-black text-slate-950 drop-shadow-sm">
-                          1
-                        </span>
-                        <span className="relative z-10 text-xs md:text-sm font-black uppercase tracking-widest text-slate-950 mt-1">
-                          المركز الأول
-                        </span>
-                        <span className="relative z-10 text-[10px] font-extrabold text-amber-950 bg-amber-300/70 px-2 py-0.5 rounded-full mt-1">
-                          ميدالية ذهبية 🏆
-                        </span>
-                      </div>
+                    {/* 1ST PLACE (GOLD 🥇 - CENTER) */}
+                    <div className="flex flex-col items-center sm:-translate-y-2">
+                      <PodiumRunnerCard
+                        rank={1}
+                        winner={firstPlace}
+                        canEdit={canEdit}
+                        selectedCatId={selectedCatId}
+                        categoryStudents={categoryStudents}
+                        onOpenEdit={handleOpenEdit}
+                        onQuickAssign={handleQuickAssignRank}
+                      />
                     </div>
 
                     {/* 3RD PLACE (BRONZE 🥉 - LEFT IN RTL) */}
                     <div className="flex flex-col items-center">
-                      {/* Athlete Info Card */}
-                      <div className="mb-3 text-center w-full px-1">
-                        <div className="w-12 h-12 md:w-16 md:h-16 mx-auto mb-2 rounded-2xl bg-gradient-to-tr from-amber-700 via-amber-600 to-amber-800 border-2 border-amber-600/50 text-2xl md:text-3xl flex items-center justify-center shadow-lg transform hover:scale-105 transition-transform">
-                          🥉
-                        </div>
-                        {thirdPlace ? (
-                          <div className="space-y-1">
-                            <div className="inline-block bg-amber-700/30 text-amber-300 border border-amber-600/40 text-[10px] font-black px-2 py-0.5 rounded-full">
-                              المركز الثالث (البرونز)
-                            </div>
-                            <h4 className="text-xs md:text-sm font-black text-white line-clamp-1">
-                              {thirdPlace.fullName}
-                            </h4>
-                            <p className="text-[10px] md:text-xs text-slate-300 line-clamp-1 font-medium">
-                              {thirdPlace.schoolName}
-                            </p>
-                            {thirdPlace.time && (
-                              <span className="inline-block font-mono text-[10px] md:text-xs font-bold text-amber-300 bg-amber-950/80 px-2 py-0.5 rounded-md border border-amber-800">
-                                ⏱️ {thirdPlace.time}
-                              </span>
-                            )}
-                          </div>
-                        ) : (
-                          <p className="text-[11px] text-slate-400 font-medium italic">في انتظار التتويج</p>
-                        )}
-                      </div>
-
-                      {/* 3rd Platform Pedestal */}
-                      <div className="w-full h-28 md:h-36 rounded-t-2xl bg-gradient-to-b from-amber-700 via-amber-800 to-amber-950 border-t-2 border-x-2 border-amber-600/60 shadow-xl flex flex-col items-center justify-start pt-3 text-amber-200">
-                        <span className="text-3xl md:text-5xl font-black text-amber-200 drop-shadow-sm">3</span>
-                        <span className="text-[10px] md:text-xs font-extrabold uppercase tracking-widest text-amber-300 mt-1">
-                          المركز الثالث
-                        </span>
-                        <span className="text-[9px] font-bold text-amber-400 mt-0.5">ميدالية برونزية</span>
-                      </div>
+                      <PodiumRunnerCard
+                        rank={3}
+                        winner={thirdPlace}
+                        canEdit={canEdit}
+                        selectedCatId={selectedCatId}
+                        categoryStudents={categoryStudents}
+                        onOpenEdit={handleOpenEdit}
+                        onQuickAssign={handleQuickAssignRank}
+                      />
                     </div>
                   </div>
-
-                  {/* Base Platform Bar */}
-                  <div className="h-4 bg-gradient-to-r from-slate-800 via-slate-700 to-slate-800 rounded-b-2xl border-t border-white/10 shadow-inner"></div>
                 </div>
 
-                {/* Empty state action prompt */}
-                {!firstPlace && !secondPlace && !thirdPlace && canEdit && (
-                  <div className="relative z-10 text-center pt-4">
+                {/* Prompt button if not all top 3 places are filled */}
+                {(!firstPlace || !secondPlace || !thirdPlace) && canEdit && (
+                  <div className="relative z-10 text-center pt-3 mt-2 border-t border-white/10 flex flex-wrap items-center justify-center gap-2">
                     <button
                       onClick={() => handleOpenEdit(selectedCatId)}
-                      className="inline-flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-amber-400 to-yellow-500 hover:from-amber-500 hover:to-yellow-600 text-slate-950 font-black text-xs md:text-sm rounded-xl shadow-lg transition-transform active:scale-95"
+                      className="inline-flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-amber-400 to-yellow-500 hover:from-amber-500 hover:to-yellow-600 text-slate-950 font-black text-xs md:text-sm rounded-xl shadow-lg transition-transform active:scale-95 cursor-pointer"
                     >
                       <Plus className="w-4 h-4" />
-                      <span>تسجيل نتائج هذا السباق وتتويج الأبطال الآن ⏱️</span>
+                      <span>تسجيل وتتويج أبطال هذا السباق الآن ⏱️</span>
                     </button>
+                    {categoryStudents.length > 0 && (
+                      <button
+                        onClick={handleAutoFillCategoryFromRegistered}
+                        className="inline-flex items-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-black text-xs md:text-sm rounded-xl shadow-lg transition-transform active:scale-95 cursor-pointer"
+                      >
+                        <Sparkles className="w-4 h-4 text-amber-300" />
+                        <span>ملء أوتوماتيكي من المسجلين بالفئة ⚡</span>
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
@@ -945,12 +1359,16 @@ export const CrossCountryPodiumView: React.FC<CrossCountryPodiumViewProps> = ({
                     <table className="w-full text-right text-xs">
                       <thead className="bg-slate-50 text-slate-600 border-b border-slate-200 font-bold">
                         <tr>
-                          <th className="py-3 px-4 w-16 text-center">الرتبة</th>
+                          <th className="py-3 px-4 w-16 text-center">الوصول العام</th>
+                          <th className="py-3 px-4 text-center">الترتيب الفردي</th>
+                          <th className="py-3 px-4 text-center">الصورة</th>
+                          <th className="py-3 px-4">الاسم</th>
+                          <th className="py-3 px-4 text-center">التوقيت</th>
+                          <th className="py-3 px-4 text-center">نوع المشاركة</th>
+                          <th className="py-3 px-4">المؤسسة</th>
+                          <th className="py-3 px-4">المديرية</th>
+                          <th className="py-3 px-4">الأكاديمية</th>
                           <th className="py-3 px-4 w-20 text-center">الصدرية</th>
-                          <th className="py-3 px-4">اسم العداء(ة)</th>
-                          <th className="py-3 px-4">المؤسسة التعليمية</th>
-                          <th className="py-3 px-4 text-center">التوقيت الرسمي</th>
-                          <th className="py-3 px-4">الملاحظات والتأهيل</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
@@ -972,7 +1390,7 @@ export const CrossCountryPodiumView: React.FC<CrossCountryPodiumViewProps> = ({
                                   : ''
                               }`}
                             >
-                              {/* Rank */}
+                              {/* General Finish Rank */}
                               <td className="py-3 px-4 text-center">
                                 {isGold ? (
                                   <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-amber-400 text-slate-950 font-black text-xs shadow-xs">
@@ -993,9 +1411,22 @@ export const CrossCountryPodiumView: React.FC<CrossCountryPodiumViewProps> = ({
                                 )}
                               </td>
 
-                              {/* Bib */}
-                              <td className="py-3 px-4 text-center font-mono font-bold text-slate-600">
-                                {winner.bibNumber ? `#${winner.bibNumber}` : '-'}
+                              {/* Individual Rank Status */}
+                              <td className="py-3 px-4 text-center">
+                                <span className={`px-2.5 py-0.5 rounded text-[11px] font-bold ${winner.participationType === 'فريق' ? 'bg-amber-100 text-amber-900' : 'bg-slate-100 text-slate-700'}`}>
+                                  {winner.participationType === 'فريق' ? 'ضمن فريق' : `${winner.rank} فردي`}
+                                </span>
+                              </td>
+
+                              {/* Photo Placeholder */}
+                              <td className="py-3 px-4 text-center">
+                                <button
+                                  type="button"
+                                  className="w-8 h-8 rounded-full bg-slate-100 text-slate-500 hover:bg-slate-200 flex items-center justify-center mx-auto transition-colors"
+                                  title="صورة العداء"
+                                >
+                                  <Camera className="w-4 h-4" />
+                                </button>
                               </td>
 
                               {/* Full Name */}
@@ -1005,28 +1436,39 @@ export const CrossCountryPodiumView: React.FC<CrossCountryPodiumViewProps> = ({
                                 </span>
                               </td>
 
+                              {/* Time */}
+                              <td className="py-3 px-4 text-center">
+                                <div className="inline-flex items-center gap-1 font-mono font-black text-xs text-blue-900 bg-blue-50 px-2 py-1 rounded-md border border-blue-100">
+                                  <Clock className="w-3.5 h-3.5 text-blue-600" />
+                                  <span>{winner.time || '00:00.0'}</span>
+                                </div>
+                              </td>
+
+                              {/* Participation Type */}
+                              <td className="py-3 px-4 text-center">
+                                <span className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold ${winner.participationType === 'فريق' ? 'bg-amber-100 text-amber-900' : 'bg-emerald-100 text-emerald-900'}`}>
+                                  {winner.participationType || 'فردي'}
+                                </span>
+                              </td>
+
                               {/* School */}
-                              <td className="py-3 px-4 text-slate-600 font-bold">
+                              <td className="py-3 px-4 text-slate-700 font-bold">
                                 {winner.schoolName}
                               </td>
 
-                              {/* Time */}
-                              <td className="py-3 px-4 text-center font-mono font-black text-slate-800">
-                                {winner.time || '-'}
+                              {/* Directorate */}
+                              <td className="py-3 px-4 text-slate-600 font-medium">
+                                {winner.directorateName || directorateName}
                               </td>
 
-                              {/* Notes / Qualification */}
-                              <td className="py-3 px-4">
-                                {isGold || isSilver || isBronze ? (
-                                  <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-black bg-emerald-50 text-emerald-700 border border-emerald-200">
-                                    <CheckCircle2 className="w-3 h-3 text-emerald-600" />
-                                    {winner.notes || 'مؤهل للبطولة الجهوية'}
-                                  </span>
-                                ) : (
-                                  <span className="text-[11px] text-slate-500 font-medium">
-                                    {winner.notes || 'مؤهل للمنتخب الإقليمي'}
-                                  </span>
-                                )}
+                              {/* Academy */}
+                              <td className="py-3 px-4 text-slate-600 font-medium">
+                                {winner.academyName || 'الشرق'}
+                              </td>
+
+                              {/* Bib */}
+                              <td className="py-3 px-4 text-center font-mono font-bold text-slate-700">
+                                {winner.bibNumber ? `#${winner.bibNumber}` : '-'}
                               </td>
                             </tr>
                           );
@@ -1331,7 +1773,7 @@ export const CrossCountryPodiumView: React.FC<CrossCountryPodiumViewProps> = ({
       {/* EDIT / RECORD RESULTS MODAL */}
       {isEditModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs overflow-y-auto animate-fadeIn">
-          <div className="bg-white rounded-3xl max-w-2xl w-full border border-slate-200 shadow-2xl overflow-hidden my-6">
+          <div className="bg-white rounded-3xl max-w-6xl w-full border border-slate-200 shadow-2xl overflow-hidden my-6">
             {/* Modal Header */}
             <div className="p-5 bg-gradient-to-r from-slate-900 to-blue-950 text-white flex items-center justify-between">
               <div className="flex items-center gap-2.5">
@@ -1340,7 +1782,7 @@ export const CrossCountryPodiumView: React.FC<CrossCountryPodiumViewProps> = ({
                 </div>
                 <div>
                   <h3 className="text-base font-black">
-                    تسجيل نتائج منصة التتويج (البوديوم)
+                    لوحة تعديل وترتيب نتائج السباق (جدول تفاعلي)
                   </h3>
                   <p className="text-xs text-slate-300">
                     {CROSS_COUNTRY_CATEGORIES.find(c => c.id === editingCategoryId)?.titleAr}
@@ -1349,16 +1791,16 @@ export const CrossCountryPodiumView: React.FC<CrossCountryPodiumViewProps> = ({
               </div>
               <button
                 onClick={() => setIsEditModalOpen(false)}
-                className="p-1.5 rounded-xl hover:bg-white/10 text-slate-300 hover:text-white transition-colors"
+                className="p-1.5 rounded-xl hover:bg-white/10 text-slate-300 hover:text-white transition-colors cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
             {/* Modal Body */}
-            <div className="p-5 space-y-5 max-h-[70vh] overflow-y-auto">
+            <div className="p-5 space-y-4 max-h-[75vh] overflow-y-auto">
               {/* Category Selector inside modal */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-slate-50 p-4 rounded-2xl border border-slate-200">
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1">
                     الفئة المعنية بالسباق:
@@ -1379,7 +1821,7 @@ export const CrossCountryPodiumView: React.FC<CrossCountryPodiumViewProps> = ({
                         ]);
                       }
                     }}
-                    className="w-full text-xs font-bold rounded-xl border border-slate-300 p-2.5 bg-slate-50 focus:bg-white"
+                    className="w-full text-xs font-bold rounded-xl border border-slate-300 p-2 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                   >
                     {CROSS_COUNTRY_CATEGORIES.map(c => (
                       <option key={c.id} value={c.id}>
@@ -1398,184 +1840,283 @@ export const CrossCountryPodiumView: React.FC<CrossCountryPodiumViewProps> = ({
                     value={editingVenue}
                     onChange={e => setEditingVenue(e.target.value)}
                     placeholder="مثلاً: مضمار حلبة ألعاب القوى بتاوريرت"
-                    className="w-full text-xs font-bold rounded-xl border border-slate-300 p-2.5 bg-slate-50 focus:bg-white"
+                    className="w-full text-xs font-bold rounded-xl border border-slate-300 p-2 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                   />
                 </div>
               </div>
 
               {/* Notice */}
-              <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-900 flex items-start gap-2">
-                <Sparkles className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
-                <p>
-                  يمكنك كتابة اسم العداء والمؤسسة والتوقيت يدوياً، أو الاختيار السريع من قائمة التلاميذ المسجلين في هذه الفئة بالمديرية لملء البيانات بضغطة زر.
+              <div className="p-3 bg-blue-50 border border-blue-200 rounded-xl text-xs text-blue-900 flex items-start gap-2">
+                <Sparkles className="w-4 h-4 text-blue-600 shrink-0 mt-0.5 animate-pulse" />
+                <p className="leading-relaxed">
+                  <strong>💡 ميزة الترتيب والتعديل الفوري:</strong> يمكنك إدخال البيانات يدوياً، أو ملء الخانات بسرعة من قائمة المسجلين. استخدم أزرار الأسهم (⬆️ / ⬇️) لتغيير رتبة وتصنيف العدائين فورياً، وسيتم إعادة احتساب نقاط الفرق وتأهيل الجهة بناءً عليها تلقائياً.
                 </p>
               </div>
 
-              {/* Winners rows (Rank 1, 2, 3...) */}
-              <div className="space-y-4">
-                {editingWinners.map((winner, idx) => {
-                  const rankNum = idx + 1;
-                  const isGold = rankNum === 1;
-                  const isSilver = rankNum === 2;
-                  const isBronze = rankNum === 3;
+              {/* TABLE CONTAINER */}
+              <div className="border border-slate-200 rounded-2xl overflow-hidden bg-white shadow-xs">
+                <div className="overflow-x-auto border-slate-100">
+                  <table className="w-full text-right text-xs table-auto border-collapse">
+                    <thead className="bg-slate-900 text-slate-100 border-b border-slate-200 font-bold">
+                      <tr>
+                        <th className="py-3 px-2 text-center w-24">الترتيب</th>
+                        <th className="py-3 px-2 text-center w-24">رقم الصدرية</th>
+                        <th className="py-3 px-3 min-w-[200px]">الاسم الكامل للعداء(ة) *</th>
+                        <th className="py-3 px-3 min-w-[160px]">المؤسسة التعليمية *</th>
+                        <th className="py-3 px-2 text-center w-28">التوقيت (⏱️)</th>
+                        <th className="py-3 px-3 min-w-[130px]">المديرية</th>
+                        <th className="py-3 px-3 min-w-[130px]">الأكاديمية</th>
+                        <th className="py-3 px-3 min-w-[130px]">اسم المؤطر</th>
+                        <th className="py-3 px-2 text-center w-28">المشاركة</th>
+                        <th className="py-3 px-2 text-center w-14">إجراء</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-200">
+                      {editingWinners.map((winner, idx) => {
+                        const rankNum = idx + 1;
+                        const isGold = rankNum === 1;
+                        const isSilver = rankNum === 2;
+                        const isBronze = rankNum === 3;
 
-                  return (
-                    <div
-                      key={idx}
-                      className={`p-3.5 rounded-2xl border transition-all ${
-                        isGold
-                          ? 'bg-amber-50/50 border-amber-300'
-                          : isSilver
-                          ? 'bg-slate-50 border-slate-300'
-                          : isBronze
-                          ? 'bg-amber-50/30 border-amber-200'
-                          : 'bg-white border-slate-200'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between gap-2 mb-2 pb-2 border-b border-slate-200/60">
-                        <div className="flex items-center gap-2">
-                          <span className="text-lg">
-                            {isGold ? '🥇' : isSilver ? '🥈' : isBronze ? '🥉' : '🏅'}
-                          </span>
-                          <span className="text-xs font-black text-slate-900">
-                            {isGold ? 'المركز الأول (الميدالية الذهبية)' : isSilver ? 'المركز الثاني (الميدالية الفضية)' : isBronze ? 'المركز الثالث (الميدالية البرونزية)' : `المركز ${rankNum}`}
-                          </span>
-                        </div>
-
-                        {idx >= 3 && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const updated = editingWinners.filter((_, i) => i !== idx);
-                              setEditingWinners(updated);
-                            }}
-                            className="text-red-500 hover:text-red-700 p-1"
-                            title="حذف هذا المركز"
+                        return (
+                          <tr
+                            key={idx}
+                            className={`hover:bg-slate-50/80 transition-colors ${
+                              isGold
+                                ? 'bg-amber-50/40'
+                                : isSilver
+                                ? 'bg-slate-50/30'
+                                : isBronze
+                                ? 'bg-orange-50/20'
+                                : 'bg-white'
+                            }`}
                           >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        )}
-                      </div>
+                            {/* RANK & POSITION ADJUSTING ARROWS */}
+                            <td className="py-2.5 px-2 text-center">
+                              <div className="flex flex-col items-center justify-center gap-1">
+                                <div className="flex items-center gap-1 font-black text-slate-900">
+                                  <span>{isGold ? '🥇' : isSilver ? '🥈' : isBronze ? '🥉' : '🏅'}</span>
+                                  <span className="font-mono text-xs">{rankNum}</span>
+                                </div>
+                                
+                                {/* Up / Down arrow buttons */}
+                                <div className="flex items-center gap-0.5">
+                                  <button
+                                    type="button"
+                                    disabled={idx === 0}
+                                    onClick={() => handleMoveWinner(idx, 'up')}
+                                    className={`p-1 rounded hover:bg-slate-200 text-slate-700 transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed`}
+                                    title="ترقية الترتيب للأعلى (رتبة أفضل)"
+                                  >
+                                    <ChevronUp className="w-3.5 h-3.5" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    disabled={idx === editingWinners.length - 1}
+                                    onClick={() => handleMoveWinner(idx, 'down')}
+                                    className={`p-1 rounded hover:bg-slate-200 text-slate-700 transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed`}
+                                    title="تخفيض الترتيب للأسفل"
+                                  >
+                                    <ChevronDown className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+                              </div>
+                            </td>
 
-                      {/* Quick select dropdown from registered students */}
-                      {availableCategoryStudents.length > 0 && (
-                        <div className="mb-2">
-                          <select
-                            onChange={e => {
-                              if (e.target.value) {
-                                handleSelectStudentForRank(idx, e.target.value);
-                              }
-                            }}
-                            defaultValue=""
-                            className="w-full text-[11px] font-bold text-slate-700 bg-white border border-slate-300 rounded-lg p-1.5 focus:border-blue-500"
-                          >
-                            <option value="">⚡ ملء سريع: اختر من قائمة التلاميذ المسجلين في هذا السباق ({availableCategoryStudents.length} عداء)...</option>
-                            {availableCategoryStudents.map(s => (
-                              <option key={s.id} value={s.id}>
-                                {s.fullName} - {s.schoolName}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-                      )}
+                            {/* BIB NUMBER (DOSSARD) */}
+                            <td className="py-2.5 px-2">
+                              <input
+                                type="text"
+                                value={winner.bibNumber || ''}
+                                onChange={e => {
+                                  const updated = [...editingWinners];
+                                  updated[idx].bibNumber = e.target.value;
+                                  setEditingWinners(updated);
+                                }}
+                                placeholder="الصدرية"
+                                className="w-full text-center font-mono font-black text-xs rounded-lg border border-slate-300 p-1.5 bg-white focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-400"
+                              />
+                            </td>
 
-                      {/* Inputs Grid */}
-                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 text-xs">
-                        <div>
-                          <label className="block text-[10px] font-bold text-slate-600 mb-0.5">
-                            اسم العداء(ة) الكامل *
-                          </label>
-                          <input
-                            type="text"
-                            value={winner.fullName}
-                            onChange={e => {
-                              const updated = [...editingWinners];
-                              updated[idx].fullName = e.target.value;
-                              setEditingWinners(updated);
-                            }}
-                            placeholder="مثلاً: أنس العلمي"
-                            className="w-full font-bold text-xs rounded-lg border border-slate-300 p-2 bg-white focus:border-blue-500"
-                          />
-                        </div>
+                            {/* FULL NAME & INSTANT AUTOCOMPLETE */}
+                            <td className="py-2.5 px-3">
+                              <div className="space-y-1">
+                                <input
+                                  type="text"
+                                  value={winner.fullName}
+                                  onChange={e => {
+                                    const updated = [...editingWinners];
+                                    updated[idx].fullName = e.target.value;
+                                    setEditingWinners(updated);
+                                  }}
+                                  placeholder="الاسم الكامل للعداء(ة)"
+                                  className="w-full font-bold text-xs rounded-lg border border-slate-300 p-1.5 bg-white focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-400"
+                                />
+                                {availableCategoryStudents.length > 0 && (
+                                  <select
+                                    onChange={e => {
+                                      if (e.target.value) {
+                                        handleSelectStudentForRank(idx, e.target.value);
+                                      }
+                                    }}
+                                    defaultValue=""
+                                    className="w-full text-[10px] font-bold text-slate-500 bg-slate-100 border border-slate-200 rounded p-1 focus:border-blue-500"
+                                  >
+                                    <option value="">👤 ملء من العدائين المسجلين...</option>
+                                    {availableCategoryStudents.map(s => (
+                                      <option key={s.id} value={s.id}>
+                                        {s.fullName} ({s.schoolName})
+                                      </option>
+                                    ))}
+                                  </select>
+                                )}
+                              </div>
+                            </td>
 
-                        <div>
-                          <label className="block text-[10px] font-bold text-slate-600 mb-0.5">
-                            المؤسسة التعليمية *
-                          </label>
-                          <input
-                            type="text"
-                            value={winner.schoolName}
-                            onChange={e => {
-                              const updated = [...editingWinners];
-                              updated[idx].schoolName = e.target.value;
-                              setEditingWinners(updated);
-                            }}
-                            placeholder="مثلاً: إعدادية الفتح"
-                            className="w-full font-bold text-xs rounded-lg border border-slate-300 p-2 bg-white focus:border-blue-500"
-                          />
-                        </div>
+                            {/* SCHOOL NAME */}
+                            <td className="py-2.5 px-3">
+                              <input
+                                type="text"
+                                value={winner.schoolName}
+                                onChange={e => {
+                                  const updated = [...editingWinners];
+                                  updated[idx].schoolName = e.target.value;
+                                  setEditingWinners(updated);
+                                }}
+                                placeholder="المؤسسة التعليمية"
+                                className="w-full font-bold text-xs rounded-lg border border-slate-300 p-1.5 bg-white focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-400"
+                              />
+                            </td>
 
-                        <div>
-                          <label className="block text-[10px] font-bold text-slate-600 mb-0.5">
-                            التوقيت الرسمي (⏱️)
-                          </label>
-                          <input
-                            type="text"
-                            value={winner.time || ''}
-                            onChange={e => {
-                              const updated = [...editingWinners];
-                              updated[idx].time = e.target.value;
-                              setEditingWinners(updated);
-                            }}
-                            placeholder="مثلاً: 09:42.15"
-                            className="w-full font-mono font-bold text-xs rounded-lg border border-slate-300 p-2 bg-white focus:border-blue-500"
-                          />
-                        </div>
+                            {/* TIME */}
+                            <td className="py-2.5 px-2">
+                              <input
+                                type="text"
+                                value={winner.time || ''}
+                                onChange={e => {
+                                  const updated = [...editingWinners];
+                                  updated[idx].time = e.target.value;
+                                  setEditingWinners(updated);
+                                }}
+                                placeholder="مثلاً: 12:45"
+                                className="w-full text-center font-mono font-bold text-xs rounded-lg border border-slate-300 p-1.5 bg-white focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-400"
+                              />
+                            </td>
 
-                        <div>
-                          <label className="block text-[10px] font-bold text-slate-600 mb-0.5">
-                            رقم الصدرية (Dossard)
-                          </label>
-                          <input
-                            type="text"
-                            value={winner.bibNumber || ''}
-                            onChange={e => {
-                              const updated = [...editingWinners];
-                              updated[idx].bibNumber = e.target.value;
-                              setEditingWinners(updated);
-                            }}
-                            placeholder="مثلاً: 104"
-                            className="w-full font-mono font-bold text-xs rounded-lg border border-slate-300 p-2 bg-white focus:border-blue-500"
-                          />
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
+                            {/* DIRECTORATE */}
+                            <td className="py-2.5 px-3">
+                              <input
+                                type="text"
+                                value={winner.directorateName || ''}
+                                onChange={e => {
+                                  const updated = [...editingWinners];
+                                  updated[idx].directorateName = e.target.value;
+                                  setEditingWinners(updated);
+                                }}
+                                placeholder={directorateName}
+                                className="w-full font-bold text-xs rounded-lg border border-slate-300 p-1.5 bg-white focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-400"
+                              />
+                            </td>
 
-                {/* Add extra rank button */}
-                <button
-                  type="button"
-                  onClick={() => {
-                    const nextRank = editingWinners.length + 1;
-                    setEditingWinners([
-                      ...editingWinners,
-                      {
-                        rank: nextRank,
-                        fullName: '',
-                        schoolName: '',
-                        time: '',
-                        bibNumber: '',
-                        notes: 'مؤهل لمنتخب المديرية'
-                      }
-                    ]);
-                  }}
-                  className="w-full py-2 bg-slate-50 hover:bg-slate-100 border border-dashed border-slate-300 rounded-xl text-xs font-bold text-slate-600 hover:text-slate-900 transition-colors flex items-center justify-center gap-1.5"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  <span>إضافة رتبة إضافية (المركز {editingWinners.length + 1})</span>
-                </button>
+                            {/* ACADEMY */}
+                            <td className="py-2.5 px-3">
+                              <input
+                                type="text"
+                                value={winner.academyName || ''}
+                                onChange={e => {
+                                  const updated = [...editingWinners];
+                                  updated[idx].academyName = e.target.value;
+                                  setEditingWinners(updated);
+                                }}
+                                placeholder="الجهة / الأكاديمية"
+                                className="w-full font-bold text-xs rounded-lg border border-slate-300 p-1.5 bg-white focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-400"
+                              />
+                            </td>
+
+                            {/* SUPERVISOR / COACH */}
+                            <td className="py-2.5 px-3">
+                              <input
+                                type="text"
+                                value={winner.supervisorName || ''}
+                                onChange={e => {
+                                  const updated = [...editingWinners];
+                                  updated[idx].supervisorName = e.target.value;
+                                  setEditingWinners(updated);
+                                }}
+                                placeholder="اسم المؤطر"
+                                className="w-full font-bold text-xs rounded-lg border border-slate-300 p-1.5 bg-white focus:border-blue-500 focus:outline-none"
+                              />
+                            </td>
+
+                            {/* PARTICIPATION TYPE */}
+                            <td className="py-2.5 px-2">
+                              <select
+                                value={winner.participationType || 'فردي'}
+                                onChange={e => {
+                                  const updated = [...editingWinners];
+                                  updated[idx].participationType = e.target.value;
+                                  setEditingWinners(updated);
+                                }}
+                                className="w-full font-bold text-xs rounded-lg border border-slate-300 p-1.5 bg-white focus:border-blue-500 focus:outline-none"
+                              >
+                                <option value="فردي">فردي</option>
+                                <option value="فريق">فريق</option>
+                                <option value="مؤهل">مؤهل</option>
+                              </select>
+                            </td>
+
+                            {/* DELETE BUTTON */}
+                            <td className="py-2.5 px-2 text-center">
+                              {idx >= 3 ? (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const updated = editingWinners.filter((_, i) => i !== idx);
+                                    // Recalculate ranks on delete
+                                    const reregistered = updated.map((w, idx) => ({ ...w, rank: idx + 1 }));
+                                    setEditingWinners(reregistered);
+                                  }}
+                                  className="text-red-500 hover:text-red-700 p-1 hover:bg-red-50 rounded transition-colors cursor-pointer"
+                                  title="حذف هذا المركز من الترتيب"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              ) : (
+                                <span className="text-slate-300 select-none cursor-not-allowed font-medium text-[10px]" title="لا يمكن حذف منصة التتويج الأساسية">
+                                  رئيسي
+                                </span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
               </div>
+
+              {/* Add extra rank button */}
+              <button
+                type="button"
+                onClick={() => {
+                  const nextRank = editingWinners.length + 1;
+                  setEditingWinners([
+                    ...editingWinners,
+                    {
+                      rank: nextRank,
+                      fullName: '',
+                      schoolName: '',
+                      time: '',
+                      bibNumber: '',
+                      notes: 'مؤهل لمنتخب المديرية'
+                    }
+                  ]);
+                }}
+                className="w-full py-2.5 bg-slate-50 hover:bg-slate-100 border border-dashed border-slate-300 rounded-xl text-xs font-bold text-slate-700 hover:text-blue-600 transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                <Plus className="w-4 h-4 text-slate-500 hover:text-blue-600" />
+                <span>إضافة عداء إضافي للائحة الوصول (المرتبة {editingWinners.length + 1})</span>
+              </button>
             </div>
 
             {/* Modal Footer */}
@@ -1583,19 +2124,19 @@ export const CrossCountryPodiumView: React.FC<CrossCountryPodiumViewProps> = ({
               <button
                 type="button"
                 onClick={() => setIsEditModalOpen(false)}
-                className="px-4 py-2 text-xs font-bold text-slate-600 hover:text-slate-900"
+                className="px-4 py-2 text-xs font-bold text-slate-600 hover:text-slate-900 cursor-pointer"
               >
-                إلغاء
+                إلغاء وتراجع
               </button>
 
               <button
                 type="button"
                 onClick={handleSaveWinners}
                 disabled={isSaving}
-                className="flex items-center gap-2 px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-black text-xs md:text-sm rounded-xl shadow-md transition-transform active:scale-95 disabled:opacity-50"
+                className="flex items-center gap-2 px-6 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-700 hover:from-blue-700 hover:to-indigo-850 text-white font-black text-xs md:text-sm rounded-xl shadow-md transition-transform active:scale-95 disabled:opacity-50 cursor-pointer"
               >
                 <Save className="w-4 h-4" />
-                <span>{isSaving ? 'جاري الحفظ...' : 'حفظ النتائج وتثبيت البوديوم 🏆'}</span>
+                <span>{isSaving ? 'جاري حفظ التعديلات...' : 'حفظ النتائج وتثبيت الترتيب الجديد 🏆'}</span>
               </button>
             </div>
           </div>

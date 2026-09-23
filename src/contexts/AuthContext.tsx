@@ -103,8 +103,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         };
         setUserProfile(resolvedProfile);
         setIsDemo(true);
-        setLoading(false);
-        return;
+        // We don't set loading to false yet, we let onAuthStateChanged decide
       } catch (e) {
         localStorage.removeItem('demo_user_profile');
       }
@@ -114,6 +113,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setCurrentUser(user);
       if (user) {
         setIsDemo(false);
+        localStorage.removeItem('demo_user_profile');
         const cleanUserEmail = (user.email || '').toLowerCase().trim();
         const isSuperAdmin = isSuperAdminEmail(cleanUserEmail);
 

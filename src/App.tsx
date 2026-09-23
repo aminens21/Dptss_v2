@@ -18,6 +18,8 @@ import { TechCommitteeHeads } from './pages/TechCommitteeHeads';
 import { Statistics } from './pages/Statistics';
 import { Directorates } from './pages/Directorates';
 import { PostersCertificates } from './pages/PostersCertificates';
+import { Permissions } from './pages/Permissions';
+import { HelperApps } from './pages/HelperApps';
 
 import { Toaster } from 'react-hot-toast';
 
@@ -40,11 +42,13 @@ export default function App() {
               <Route path="dashboard" element={<Dashboard />} />
               <Route path="tournaments" element={<Tournaments />} />
               <Route path="matches" element={<Matches />} />
+              <Route path="helper-apps" element={<HelperApps />} />
               <Route path="schools" element={<Schools />} />
               <Route path="venues" element={<Venues />} />
               <Route path="teachers" element={<Teachers />} />
               <Route path="referees" element={<Referees />} />
               <Route path="sports-config" element={<SportsConfig />} />
+              <Route path="permissions" element={<Permissions />} />
               <Route path="directorates" element={<Directorates />} />
               <Route path="teacher-teams" element={<TeacherTeams />} />
               <Route path="tech-committee" element={<TechCommitteeHeads />} />

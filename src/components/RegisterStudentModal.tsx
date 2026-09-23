@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Sport, Student, School } from '../types';
-import { DataService, getAgeCategoriesForSeason, SPORTS_MAP, getCategoryGenderLabel, validateBirthDateForCategory, normalizeCategoryKey } from '../lib/dataService';
+import { Sport, Student, School, Tournament } from '../types';
+import { DataService, getAgeCategoriesForSeason, SPORTS_MAP, getCategoryGenderLabel, validateBirthDateForCategory, normalizeCategoryKey, isSchoolLevelAllowedForTournament, getTournamentLevelAr } from '../lib/dataService';
 import { useAuth } from '../contexts/AuthContext';
 import { X, GraduationCap, User, Calendar, Upload, AlertCircle, Lock, ShieldCheck, CheckCircle2 } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -16,6 +16,7 @@ interface RegisterStudentModalProps {
   registrationDeadline?: any;
   onRegistered: () => void;
   preselectedSchoolName?: string;
+  tournaments?: Tournament[];
 }
 
 export const RegisterStudentModal: React.FC<RegisterStudentModalProps> = ({
@@ -28,7 +29,8 @@ export const RegisterStudentModal: React.FC<RegisterStudentModalProps> = ({
   schools,
   registrationDeadline,
   onRegistered,
-  preselectedSchoolName
+  preselectedSchoolName,
+  tournaments = []
 }) => {
   const { userProfile } = useAuth();
   
@@ -52,14 +54,13 @@ export const RegisterStudentModal: React.FC<RegisterStudentModalProps> = ({
     DataService.getActiveSeason().then(setCurrentSeason);
   }, []);
 
-  const isAffiliationRestrictedToNonClub = preselectedAffiliation === 'non_club' || (sport?.id === 'cross_country' && (!preselectedAffiliation || preselectedAffiliation === 'non_club'));
-  const effectiveLockedAffiliation = preselectedAffiliation || (sport?.id === 'cross_country' ? 'non_club' : undefined);
+  const effectiveLockedAffiliation = preselectedAffiliation === 'open' ? null : preselectedAffiliation;
 
   useEffect(() => {
     if (isOpen) {
       setCategory(preselectedCategory || 'U15');
       setGender(preselectedGender || 'Male');
-      setAffiliationType(isAffiliationRestrictedToNonClub ? 'non_club' : (preselectedAffiliation || 'non_club'));
+      setAffiliationType(preselectedAffiliation === 'club_affiliated' ? 'club_affiliated' : 'non_club');
 
       // Reset text inputs to prevent stale data between modal openings
       setFullName('');
@@ -71,7 +72,7 @@ export const RegisterStudentModal: React.FC<RegisterStudentModalProps> = ({
       setCoachLeaseNumber(userProfile?.leaseNumber || '');
       setCoachPhone(userProfile?.phone || '');
     }
-  }, [isOpen, preselectedCategory, preselectedGender, preselectedAffiliation, isAffiliationRestrictedToNonClub, userProfile]);
+  }, [isOpen, preselectedCategory, preselectedGender, preselectedAffiliation, userProfile]);
 
   // Synchronize school auto-selection based on preselectedSchoolName or userProfile and schools list
   useEffect(() => {
@@ -123,14 +124,14 @@ export const RegisterStudentModal: React.FC<RegisterStudentModalProps> = ({
 
   const birthDateValidation = useMemo(() => {
     if (!birthDate || !category) return { isValid: true };
-    return validateBirthDateForCategory(birthDate, category, currentSeason, gender);
-  }, [birthDate, category, currentSeason, gender]);
+    return validateBirthDateForCategory(birthDate, category, currentSeason, gender, sport?.id);
+  }, [birthDate, category, currentSeason, gender, sport?.id]);
 
   if (!isOpen || !sport) return null;
 
-  const seasonalCategories = getAgeCategoriesForSeason(currentSeason);
+  const seasonalCategories = getAgeCategoriesForSeason(currentSeason, undefined, sport?.id);
   const availableCategories = (sport.ageCategories && sport.ageCategories.length > 0)
-    ? sport.ageCategories
+    ? sport.ageCategories.map(normalizeCategoryKey)
     : seasonalCategories.map(c => c.id);
 
   const handleBirthDateChange = (newDate: string) => {
@@ -157,7 +158,7 @@ export const RegisterStudentModal: React.FC<RegisterStudentModalProps> = ({
 
     if (preselectedCategory) {
       // Keep category strictly locked to the preselected tournament category, but validate and warn if birth date is outside allowed range
-      const validation = validateBirthDateForCategory(newDate, preselectedCategory, currentSeason, gender);
+      const validation = validateBirthDateForCategory(newDate, preselectedCategory, currentSeason, gender, sport?.id);
       if (!validation.isValid && validation.errorMessage) {
         toast.error(validation.errorMessage, { duration: 4000 });
       }
@@ -219,7 +220,7 @@ export const RegisterStudentModal: React.FC<RegisterStudentModalProps> = ({
     }
 
     // Strict validation for birth date matching the category
-    const validation = validateBirthDateForCategory(birthDate, category, currentSeason, gender);
+    const validation = validateBirthDateForCategory(birthDate, category, currentSeason, gender, sport?.id);
     if (!validation.isValid) {
       toast.error(validation.errorMessage || 'خطأ في تاريخ الازدياد لا يتناسب مع الفئة المعنية');
       return;
@@ -256,10 +257,25 @@ export const RegisterStudentModal: React.FC<RegisterStudentModalProps> = ({
         }
       }
 
-      if (isAffiliationRestrictedToNonClub && affiliationType === 'club_affiliated') {
-        toast.error('خطأ: بطولة العدو الريفي مبرمجة لصنف غير المنتمين، ولا يمكن تسجيل مشاركين من صنف المنتمين.');
-        setIsSubmitting(false);
-        return;
+      const activeSchoolObj = userProfile?.role === 'TEACHER'
+        ? schools.find(s => s.name === userProfile.workLocation || s.name.includes(userProfile.workLocation!))
+        : schools.find(s => s.id === selectedSchoolId);
+
+      if (activeSchoolObj && tournaments && tournaments.length > 0) {
+        const normCategory = normalizeCategoryKey(category);
+        const relevantTournament = tournaments.find(t => 
+          t.sportId === sport.id && 
+          normalizeCategoryKey(t.ageCategory) === normCategory &&
+          (t.gender === gender || t.gender === 'Mixed')
+        );
+        if (relevantTournament && relevantTournament.level) {
+          const isAllowed = isSchoolLevelAllowedForTournament(activeSchoolObj.type, relevantTournament.level);
+          if (!isAllowed) {
+            toast.error(`عذراً، السلك التعليمي لمؤسسة "${activeSchoolObj.name}" (${activeSchoolObj.type}) غير مسموح له بالمشاركة في هذه البطولة المخصصة لـ (${getTournamentLevelAr(relevantTournament.level)})`);
+            setIsSubmitting(false);
+            return;
+          }
+        }
       }
 
       const studentData: Omit<Student, 'id' | 'createdAt' | 'updatedAt'> = {
@@ -583,7 +599,7 @@ export const RegisterStudentModal: React.FC<RegisterStudentModalProps> = ({
                           : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
                       }`}
                     >
-                      <span>{getCategoryGenderLabel(catId, gender, currentSeason)}</span>
+                      <span>{getCategoryGenderLabel(catId, gender, currentSeason, sport?.id)}</span>
                     </button>
                   );
                 })}

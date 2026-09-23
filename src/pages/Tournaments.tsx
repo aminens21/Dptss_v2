@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { DataService, SPORTS_MAP, getAgeCategoriesForSeason, deduplicateById, getCategoryGenderLabel, isClubTournament, normalizeCategoryKey } from '../lib/dataService';
+import { DataService, SPORTS_MAP, getAgeCategoriesForSeason, deduplicateById, getCategoryGenderLabel, isClubTournament, normalizeCategoryKey, getTournamentLevelAr } from '../lib/dataService';
 import { Tournament, User, Student, School, Sport, Match, Directorate } from '../types';
 import { CountdownTimer } from '../components/CountdownTimer';
 import * as XLSX from 'xlsx';
@@ -26,7 +26,8 @@ import {
   Award,
   Medal,
   Download,
-  Palette
+  Palette,
+  Shuffle
 } from 'lucide-react';
 import { CreateTournamentModal } from '../components/CreateTournamentModal';
 import { EditTournamentModal } from '../components/EditTournamentModal';
@@ -35,13 +36,16 @@ import { CrossCountryChampionshipModal } from '../components/CrossCountryChampio
 import { SportChampionshipModal } from '../components/SportChampionshipModal';
 import { EditTournamentScheduleModal } from '../components/EditTournamentScheduleModal';
 import { ProgramExportModal } from '../components/ProgramExportModal';
-import { TournamentPosterModal } from '../components/TournamentPosterModal';
+import { ElectronicDrawModal } from '../components/ElectronicDrawModal';
+import { DemoDataModal } from '../components/DemoDataModal';
 import { TeacherTeams } from './TeacherTeams';
 import { OfficialLogos } from '../lib/dataService';
 import toast from 'react-hot-toast';
+import { useRolePermissions } from '../hooks/useRolePermissions';
 
 export const Tournaments: React.FC = () => {
   const { userProfile } = useAuth();
+  const { canDo } = useRolePermissions();
   const [searchParams, setSearchParams] = useSearchParams();
   const urlTab = searchParams.get('tab') || searchParams.get('level');
 
@@ -50,6 +54,14 @@ export const Tournaments: React.FC = () => {
     urlTab === 'national' ? 'national' :
     urlTab === 'registration' || urlTab === 'teams' ? 'registration' : 'provincial'
   );
+
+  const urlModal = searchParams.get('modal');
+
+  useEffect(() => {
+    if (urlModal === 'cc' || urlModal === 'cross_country') {
+      setIsCcModalOpen(true);
+    }
+  }, [urlModal]);
 
   useEffect(() => {
     if (urlTab === 'regional') setActiveBranch('regional');
@@ -84,10 +96,9 @@ export const Tournaments: React.FC = () => {
   const [selectedSportForSchedule, setSelectedSportForSchedule] = useState<Sport | null>(null);
   const [isScheduleModalOpen, setIsScheduleModalOpen] = useState(false);
 
-  // Tournament Poster Modal State
-  const [selectedSportForPoster, setSelectedSportForPoster] = useState<Sport | null>(null);
-  const [isPosterModalOpen, setIsPosterModalOpen] = useState(false);
-  const [officialLogos, setOfficialLogos] = useState<OfficialLogos | undefined>(undefined);
+  // Electronic Draw and Demo Data Modal states
+  const [isDrawModalOpen, setIsDrawModalOpen] = useState(false);
+  const [isDemoDataModalOpen, setIsDemoDataModalOpen] = useState(false);
 
   // Program Export Modal State
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
@@ -117,6 +128,7 @@ export const Tournaments: React.FC = () => {
   const isCentralAdmin = effectiveRole === 'CENTRAL_ADMIN';
   const isSportManager = effectiveRole === 'SPORT_MANAGER';
   const isTechCommitteeHead = userProfile?.isTechCommitteeHead === true || currentTeacherProfile?.isTechCommitteeHead === true;
+  const isTeacherRole = effectiveRole === 'TEACHER';
 
   // Helper to format category for badges elegantly in Arabic
   const formatCategoryBadge = (catId: string, sportTournaments: Tournament[] = []) => {
@@ -214,7 +226,7 @@ export const Tournaments: React.FC = () => {
     setLoading(true);
     try {
       const activeDirId = DataService.getActiveDirectorateId();
-      const [tournList, sportsList, season, allTeachers, studentsList, schoolsList, matchList, activeDir, logos] = await Promise.all([
+      const [tournList, sportsList, season, allTeachers, studentsList, schoolsList, matchList, activeDir] = await Promise.all([
         DataService.getTournaments(),
         DataService.getSportsConfig(),
         DataService.getActiveSeason(),
@@ -222,8 +234,7 @@ export const Tournaments: React.FC = () => {
         DataService.getStudents(),
         DataService.getSchools(),
         DataService.getMatches(),
-        DataService.getActiveDirectorate(),
-        DataService.getOfficialLogos().catch(() => undefined)
+        DataService.getActiveDirectorate()
       ]);
 
       const dirTeachers = allTeachers.filter(t => (t.directorateId || 'taourirt') === activeDirId);
@@ -235,13 +246,16 @@ export const Tournaments: React.FC = () => {
       setActiveDirObj(activeDir);
       setTournaments(deduplicateById(dirTournaments));
       setSportsConfig(sportsList);
+      if (selectedSportForModal) {
+        const updatedSport = sportsList.find(s => s.id === selectedSportForModal.id);
+        if (updatedSport) {
+          setSelectedSportForModal(updatedSport);
+        }
+      }
       setTeachers(deduplicateById(dirTeachers));
       setAllStudents(deduplicateById(dirStudents));
       setSchools(deduplicateById(dirSchools));
       setMatches(deduplicateById(dirMatches));
-      if (logos) {
-        setOfficialLogos(logos);
-      }
       if (season) {
         setActiveSeason(season);
       }
@@ -265,11 +279,11 @@ export const Tournaments: React.FC = () => {
       // Get latest tournaments from local/Firestore to have full up to date list
       const latestTournaments = await DataService.getTournaments();
 
-      // Find all existing tournaments for this sport in this season & directorate
+      // Find all existing tournaments for this sport in this directorate
       const existingSportTournaments = latestTournaments.filter(t => 
         t.sportId === targetSportId && 
-        t.seasonId === targetSeasonId &&
-        (!targetDirId || !t.directorateId || t.directorateId === targetDirId)
+        (!t.seasonId || !targetSeasonId || t.seasonId === targetSeasonId) &&
+        (!targetDirId || !t.directorateId || (t.directorateId || 'taourirt') === (targetDirId || 'taourirt'))
       );
 
       const isEditMode = existingSportTournaments.length > 0;
@@ -282,25 +296,65 @@ export const Tournaments: React.FC = () => {
         }
 
         const newSelectedCats = Array.from(new Set(items.map(i => normalizeCategoryKey(i.ageCategory)).filter(Boolean)));
-        await DataService.updateSportCategories(targetSportId, newSelectedCats, undefined, undefined, undefined, undefined, true);
+        
+        const cleanBaseNameCreate = items[0]?.name
+          ? items[0].name.split(/\s*-\s*(?:البرعمات|البراعم|الصغيرات|الصغار|الفتيات|الفتيان|الشابات|الشبان|ذكور|إناث|مختلط|U12|U15|U18|U20|جميع الفئات|فئة|صغار|فتيان|شبان|براعم|صغيرات|فتيات|شابات|برعمات|لا منتمين|للمنتمين للأندية|مفتوحة|مواليد|السلك|دوري)/i)[0].trim()
+          : undefined;
+
+        await DataService.updateSportCategories(
+          targetSportId, 
+          newSelectedCats, 
+          undefined, 
+          undefined, 
+          cleanBaseNameCreate && cleanBaseNameCreate.length >= 3 ? cleanBaseNameCreate : undefined, 
+          undefined, 
+          true
+        );
 
         await loadData();
         toast.success(`تم إنشاء وبرمجة ${createdItems.length} ${createdItems.length > 1 ? 'بطولات' : 'بطولة'} بنجاح!`);
       } else {
         // Edit / Re-configuration mode:
-        // 1. Update matching tournaments or add newly introduced combinations
+        // Smartly map existing tournaments to items so edits (to category, gender, name, dates, affiliation) update existing records directly!
+        const matchedExistingIds = new Set<string>();
+        const itemToExistingIdMap = new Map<number, string>();
+
+        // Pass 1: Exact match on (ageCategory, gender, affiliationType)
+        items.forEach((item, idx) => {
+          const exact = existingSportTournaments.find(existing => {
+            if (matchedExistingIds.has(existing.id)) return false;
+            return (
+              normalizeCategoryKey(existing.ageCategory) === normalizeCategoryKey(item.ageCategory) &&
+              existing.gender === item.gender &&
+              (existing.affiliationType || 'non_club') === (item.affiliationType || 'non_club')
+            );
+          });
+          if (exact) {
+            matchedExistingIds.add(exact.id);
+            itemToExistingIdMap.set(idx, exact.id);
+          }
+        });
+
+        // Pass 2: For items without exact match, assign remaining unmatched existing tournaments
+        items.forEach((item, idx) => {
+          if (itemToExistingIdMap.has(idx)) return;
+          const remaining = existingSportTournaments.find(existing => !matchedExistingIds.has(existing.id));
+          if (remaining) {
+            matchedExistingIds.add(remaining.id);
+            itemToExistingIdMap.set(idx, remaining.id);
+          }
+        });
+
+        // Apply updates or additions
         let updatedCount = 0;
         let createdCount = 0;
 
-        for (const item of items) {
-          const matched = existingSportTournaments.find(existing =>
-            normalizeCategoryKey(existing.ageCategory) === normalizeCategoryKey(item.ageCategory) &&
-            existing.gender === item.gender &&
-            (existing.affiliationType || 'non_club') === (item.affiliationType || 'non_club')
-          );
+        for (let idx = 0; idx < items.length; idx++) {
+          const item = items[idx];
+          const existingId = itemToExistingIdMap.get(idx);
 
-          if (matched) {
-            await DataService.updateTournament(matched.id, {
+          if (existingId) {
+            await DataService.updateTournament(existingId, {
               name: item.name,
               startDate: item.startDate,
               endDate: item.endDate,
@@ -309,7 +363,12 @@ export const Tournaments: React.FC = () => {
               scope: item.scope,
               status: item.status,
               description: item.description,
-              affiliationType: item.affiliationType
+              affiliationType: item.affiliationType,
+              seasonId: item.seasonId,
+              gender: item.gender,
+              ageCategory: item.ageCategory,
+              sportId: item.sportId,
+              directorateId: item.directorateId
             });
             updatedCount++;
           } else {
@@ -318,24 +377,30 @@ export const Tournaments: React.FC = () => {
           }
         }
 
-        // 2. Delete tournaments that were unchecked/removed by the user in this re-configuration
-        const toDelete = existingSportTournaments.filter(existing =>
-          !items.some(item =>
-            normalizeCategoryKey(existing.ageCategory) === normalizeCategoryKey(item.ageCategory) &&
-            existing.gender === item.gender &&
-            (existing.affiliationType || 'non_club') === (item.affiliationType || 'non_club')
-          )
-        );
-
+        // Delete any existing tournaments that were NOT matched in this re-configuration
+        const toDelete = existingSportTournaments.filter(existing => !matchedExistingIds.has(existing.id));
         for (const rem of toDelete) {
           await DataService.deleteTournament(rem.id);
         }
 
-        // 3. Update the sport's configured categories in Firestore and local config
+        // Update the sport's configured categories in Firestore and local config
         const newSelectedCats = Array.from(new Set(items.map(i => normalizeCategoryKey(i.ageCategory)).filter(Boolean)));
-        await DataService.updateSportCategories(targetSportId, newSelectedCats, undefined, undefined, undefined, undefined, true);
 
-        // 4. Reload full state
+        const cleanBaseNameEdit = items[0]?.name
+          ? items[0].name.split(/\s*-\s*(?:البرعمات|البراعم|الصغيرات|الصغار|الفتيات|الفتيان|الشابات|الشبان|ذكور|إناث|مختلط|U12|U15|U18|U20|جميع الفئات|فئة|صغار|فتيان|شبان|براعم|صغيرات|فتيات|شابات|برعمات|لا منتمين|للمنتمين للأندية|مفتوحة|مواليد|السلك|دوري)/i)[0].trim()
+          : undefined;
+
+        await DataService.updateSportCategories(
+          targetSportId, 
+          newSelectedCats, 
+          undefined, 
+          undefined, 
+          cleanBaseNameEdit && cleanBaseNameEdit.length >= 3 ? cleanBaseNameEdit : undefined, 
+          undefined, 
+          true
+        );
+
+        // Reload full state
         await loadData();
 
         toast.success(`تم تحديث إعدادات البطولة بنجاح (${items.length} ${items.length > 1 ? 'فروع/أجناس مبرمجة' : 'فرع مبرمج'})`);
@@ -393,6 +458,111 @@ export const Tournaments: React.FC = () => {
       toast.error('تعذر مسح بطولات الرياضة');
     } finally {
       setIsDeletingAll(false);
+    }
+  };
+
+  const handleGenerateCcMockData = async () => {
+    const activeDirId = DataService.getActiveDirectorateId();
+    const loadToastId = toast.loading('جاري توليد 20 تلميذ وتلميذة لكل فئة من الفئات الثمانية للعدو الريفي... ⏳');
+    try {
+      // 1. Ensure we have schools to link the students to
+      let targetSchools = [...schools];
+      if (targetSchools.length === 0) {
+        const mockSchoolsData: Omit<School, 'id'>[] = [
+          { name: 'مدرسة المسيرة الابتدائية', type: 'primary', directorateId: activeDirId, commune: 'تاوريرت', teacherName: 'أنس البقالي' },
+          { name: 'إعدادية طارق بن زياد', type: 'middle', directorateId: activeDirId, commune: 'تاوريرت', teacherName: 'خالد العلوي' },
+          { name: 'ثانوية علال الفاسي التأهيلية', type: 'high', directorateId: activeDirId, commune: 'تاوريرت', teacherName: 'ياسين الداودي' }
+        ];
+        const added = await DataService.addSchoolsBulk(mockSchoolsData);
+        targetSchools = added;
+        setSchools(added);
+      }
+
+      // 2. Define the 8 categories with their exact gender, category ID, correct birth date ranges and school type preferences
+      const categoriesToGenerate = [
+        { category: 'U12', gender: 'Male' as const, schoolType: 'primary', minYear: 2014, maxYear: 2016 },
+        { category: 'U12', gender: 'Female' as const, schoolType: 'primary', minYear: 2014, maxYear: 2016 },
+        { category: 'U15', gender: 'Male' as const, schoolType: 'middle', minYear: 2012, maxYear: 2013 },
+        { category: 'U15', gender: 'Female' as const, schoolType: 'middle', minYear: 2012, maxYear: 2013 },
+        { category: 'U18', gender: 'Male' as const, schoolType: 'high', minYear: 2010, maxYear: 2011 },
+        { category: 'U18', gender: 'Female' as const, schoolType: 'high', minYear: 2010, maxYear: 2011 },
+        { category: 'U20', gender: 'Male' as const, schoolType: 'high', minYear: 2008, maxYear: 2009 },
+        { category: 'U20', gender: 'Female' as const, schoolType: 'high', minYear: 2008, maxYear: 2009 },
+      ];
+
+      // Sample first names and last names for realistic random name generation
+      const boysNames = ['محمد', 'أحمد', 'يوسف', 'حمزة', 'ياسين', 'أمين', 'سفيان', 'أيوب', 'سعد', 'عمر', 'عبد الرحمن', 'معاذ', 'عثمان', 'ريان', 'مهدي', 'أنس', 'وليد', 'إلياس', 'صلاح', 'حاتم'];
+      const girlsNames = ['آية', 'فاطمة الزهراء', 'مريم', 'إيمان', 'ياسمين', 'نهيلة', 'سلمى', 'هبة', 'زينب', 'خديجة', 'دعاء', 'سارة', 'شيماء', 'صفاء', 'وئام', 'حفصة', 'ندى', 'كوثر', 'عبير', 'غزلان'];
+      const lastNames = ['العلوي', 'الإدريسي', 'الداودي', 'التازي', 'العراقي', 'البقالي', 'الفاسي', 'بلمقدم', 'منصور', 'العمراني', 'اليوسفي', 'رحماني', 'الناصري', 'الصنهاجي', 'الوردي', 'مرابط', 'الخطابي', 'بوزيان', 'بناني', 'الحسني'];
+
+      const newStudentsToCreate: any[] = [];
+
+      for (const catConfig of categoriesToGenerate) {
+        // Generate exactly 20 students for this category
+        for (let i = 0; i < 20; i++) {
+          const isBoy = catConfig.gender === 'Male';
+          const randomFirst = isBoy 
+            ? boysNames[Math.floor(Math.random() * boysNames.length)] 
+            : girlsNames[Math.floor(Math.random() * girlsNames.length)];
+          const randomLast = lastNames[Math.floor(Math.random() * lastNames.length)];
+          const fullName = `${randomFirst} ${randomLast}`;
+
+          // Generate a valid year and a random birthdate
+          const birthYear = Math.floor(Math.random() * (catConfig.maxYear - catConfig.minYear + 1)) + catConfig.minYear;
+          const birthMonth = String(Math.floor(Math.random() * 12) + 1).padStart(2, '0');
+          const birthDay = String(Math.floor(Math.random() * 28) + 1).padStart(2, '0');
+          const birthDate = `${birthYear}-${birthMonth}-${birthDay}`;
+
+          // MASSAR number G130000000
+          const massarLetter = 'GHJKLM'.charAt(Math.floor(Math.random() * 6));
+          const massarNum = String(Math.floor(100000000 + Math.random() * 900000000));
+          const massarNumber = `${massarLetter}${massarNum}`;
+
+          // Select a school matching the level/type or a random fallback school
+          const matchingSchools = targetSchools.filter(s => s.type === catConfig.schoolType);
+          const selectedSchool = matchingSchools.length > 0 
+            ? matchingSchools[Math.floor(Math.random() * matchingSchools.length)]
+            : targetSchools[Math.floor(Math.random() * targetSchools.length)];
+
+          // Alternate affiliation and participation types for testing
+          const affiliationType = i % 10 === 0 ? 'club_affiliated' : 'non_club';
+          const participationType = i % 2 === 0 ? 'school_team' : 'individual';
+
+          newStudentsToCreate.push({
+            fullName,
+            massarNumber,
+            gender: catConfig.gender,
+            birthDate,
+            category: catConfig.category,
+            schoolId: selectedSchool.id,
+            schoolName: selectedSchool.name,
+            sportId: 'cross_country',
+            affiliationType,
+            participationType,
+            distance: catConfig.category === 'U12' ? '1500 م' : catConfig.category === 'U15' ? '2500 م' : catConfig.category === 'U18' ? '3500 م' : '5000 م',
+            coachName: isBoy ? 'أستاذ التربية البدنية ذكور' : 'أستاذة التربية البدنية إناث',
+            coachLeaseNumber: '9988' + String(10 + Math.floor(Math.random() * 90)),
+            coachPhone: '06' + String(10000000 + Math.floor(Math.random() * 90000000)),
+            directorateId: activeDirId
+          });
+        }
+      }
+
+      // Add all students bulk to Firestore & local storage
+      const addedStudents = await DataService.addStudentsBulk(newStudentsToCreate);
+      
+      // Update local state
+      setAllStudents(prev => [...addedStudents, ...prev]);
+
+      toast.dismiss(loadToastId);
+      toast.success(`🎉 تم توليد وإضافة ${addedStudents.length} تلميذاً وتلميذة بنجاح وتوزيعهم بالتساوي (20 في كل فئة) على الفئات الثمانية للعدو الريفي!`);
+      
+      // Trigger data reload to recalculate counts instantly
+      await loadData();
+    } catch (error) {
+      console.error('Error generating cc mock data:', error);
+      toast.dismiss(loadToastId);
+      toast.error('حدث خطأ غير متوقع أثناء توليد البيانات الافتراضية.');
     }
   };
 
@@ -474,7 +644,6 @@ export const Tournaments: React.FC = () => {
   // Group tournaments by sport & check programming status
   const sportsWithTournamentData = useMemo(() => {
     const seasonalCats = getAgeCategoriesForSeason(activeSeason);
-    const isTeacherRole = effectiveRole === 'TEACHER';
     const teacherSchoolName = userProfile?.workLocation;
 
     return sportsConfig.map(sport => {
@@ -493,11 +662,12 @@ export const Tournaments: React.FC = () => {
         (tch.techCommitteeSports?.includes(sport.id) || tch.sportId === sport.id)
       );
 
-      // Categories list configured
-      const categoriesList = (sport.ageCategories && sport.ageCategories.length > 0)
-        ? sport.ageCategories
-        : (sportTournaments.length > 0 
-          ? Array.from(new Set(sportTournaments.map(t => t.ageCategory).filter(Boolean)))
+      // Categories list configured: prefer actual active tournament categories if present
+      const tournCats = Array.from(new Set(sportTournaments.map(t => normalizeCategoryKey(t.ageCategory)).filter(Boolean)));
+      const categoriesList = (sportTournaments.length > 0 && tournCats.length > 0)
+        ? tournCats
+        : ((sport.ageCategories && sport.ageCategories.length > 0)
+          ? sport.ageCategories.map(normalizeCategoryKey)
           : seasonalCats.map(c => c.id));
 
       // Total students registered in this sport across all schools
@@ -593,6 +763,21 @@ export const Tournaments: React.FC = () => {
             </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          <button
+            onClick={() => setIsDemoDataModalOpen(true)}
+            className="inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 px-3.5 py-2 text-xs font-black text-white shadow-xs transition-all cursor-pointer hover:shadow-sm"
+            title="ملأ وتعبئة بيانات تجريبية لاختبار التطبيق"
+          >
+            <Sparkles className="h-4 w-4 text-emerald-200" />
+            <span>بيانات تجريبية للاختبار</span>
+          </button>
+          <button
+            onClick={() => setIsDrawModalOpen(true)}
+            className="inline-flex items-center justify-center gap-2 rounded-xl bg-amber-500 hover:bg-amber-600 px-3.5 py-2 text-xs font-bold text-white shadow-xs transition-colors cursor-pointer"
+          >
+            <Shuffle className="h-4 w-4" />
+            <span>القرعة وتحديد المواعيد</span>
+          </button>
           {canCreate && (
             <button
               onClick={() => handleOpenProgramModal()}
@@ -787,13 +972,18 @@ export const Tournaments: React.FC = () => {
                             🏃‍♂️
                           </div>
                           <div>
-                            <div className="flex items-center gap-1.5">
+                            <div className="flex items-center gap-1.5 flex-wrap">
                               <span className="text-[10px] font-black text-emerald-400 uppercase tracking-wider">
                                 بطولة العدو الريفي
                               </span>
                               <span className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[9px] font-extrabold px-2 py-0.5 rounded-full">
                                 8 فئات مدمجة
                               </span>
+                              {sportTournaments[0]?.level && (
+                                <span className="bg-blue-500/20 text-blue-200 border border-blue-500/30 text-[9px] font-extrabold px-2 py-0.5 rounded-full">
+                                  {getTournamentLevelAr(sportTournaments[0].level)}
+                                </span>
+                              )}
                             </div>
                             <span className="text-[10px] font-medium text-slate-300">الموسم {activeSeason}</span>
                           </div>
@@ -840,6 +1030,24 @@ export const Tournaments: React.FC = () => {
                           {techHead ? techHead.fullName : 'ذ. عبد الرحيم بلقاسم'}
                         </span>
                       </div>
+
+                      {/* Mock Data Generation Button for Central Admin */}
+                      {isCentralAdmin && (
+                        <div className="flex justify-end pt-1">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleGenerateCcMockData();
+                            }}
+                            title="توليد 20 مشارك ومشاركة افتراضيين في كل فئة لتسهيل الاختبار"
+                            className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 text-[10px] font-black rounded-lg transition-all shadow-xs cursor-pointer select-none"
+                            id="btn-generate-cc-mock"
+                          >
+                            <span>⚡ توليد بيانات افتراضية (20/فئة)</span>
+                          </button>
+                        </div>
+                      )}
                     </div>
 
                     <div className="p-3 bg-white/10 border-t border-white/10 flex items-center justify-between gap-2">
@@ -848,38 +1056,36 @@ export const Tournaments: React.FC = () => {
                           e.stopPropagation();
                           setIsCcModalOpen(true);
                         }}
+                        title="دخول البطولة واستعراض الفئات الـ8"
                         className="flex-1 py-2 px-3 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs rounded-xl flex items-center justify-center gap-2 transition-all shadow-xs cursor-pointer"
                       >
                         <Layers className="h-4 w-4" />
-                        <span>دخول البطولة واستعراض الفئات الـ8</span>
+                        <span>دخول البطولة</span>
                       </button>
 
                       {canManageThis && (
-                        <>
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setSelectedSportForPoster(sport);
-                              setIsPosterModalOpen(true);
-                            }}
-                            title="إعداد وتصميم ملصق إعلان البطولة"
-                            className="p-2 bg-purple-500/30 hover:bg-purple-500/50 text-purple-200 rounded-xl text-xs font-bold transition-colors cursor-pointer shrink-0 border border-purple-400/30 flex items-center gap-1"
-                          >
-                            <Palette className="h-4 w-4" />
-                            <span className="hidden sm:inline">إعداد الملصق</span>
-                          </button>
-
+                        <div className="flex items-center gap-1.5">
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
                               setSelectedSportForSchedule(sport);
                               setIsScheduleModalOpen(true);
                             }}
-                            title="تعديل وبرمجة تواريخ البطولة وآخر أجل للتسجيل"
-                            className="p-2 bg-amber-500/30 hover:bg-amber-500/50 text-amber-200 rounded-xl text-xs font-bold transition-colors cursor-pointer shrink-0 border border-amber-400/30 flex items-center gap-1"
+                            title="برمجة التواريخ وآخر أجل للتسجيل"
+                            className="p-2.5 bg-amber-500/30 hover:bg-amber-500/50 text-amber-200 rounded-xl transition-colors cursor-pointer shrink-0 border border-amber-400/30 flex items-center justify-center"
                           >
                             <Calendar className="h-4 w-4" />
-                            <span className="hidden sm:inline">برمجة التواريخ</span>
+                          </button>
+
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleOpenProgramModal(sport.id);
+                            }}
+                            title="تعديل فئات وإعدادات البطولة"
+                            className="p-2.5 bg-slate-500/30 hover:bg-slate-500/50 text-slate-200 rounded-xl transition-colors cursor-pointer shrink-0 border border-slate-400/30 flex items-center justify-center"
+                          >
+                            <Edit className="h-4 w-4" />
                           </button>
 
                           {isCentralAdmin && (
@@ -889,30 +1095,31 @@ export const Tournaments: React.FC = () => {
                                 setSportToDeleteAll({ id: sport.id, name: sport.name });
                               }}
                               title="مسح كافة بطولات هذه الرياضة"
-                              className="p-2 bg-red-500/30 hover:bg-red-500/50 text-red-200 rounded-xl text-xs font-bold transition-colors cursor-pointer shrink-0 border border-red-400/30 flex items-center gap-1"
+                              className="p-2.5 bg-red-500/30 hover:bg-red-500/50 text-red-200 rounded-xl transition-colors cursor-pointer shrink-0 border border-red-400/30 flex items-center justify-center"
                             >
                               <Trash2 className="h-4 w-4" />
-                              <span className="hidden sm:inline">مسح البطولات</span>
                             </button>
                           )}
-                        </>
+                        </div>
                       )}
 
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleExportAllCrossCountry();
-                        }}
-                        title="تصدير ملف العدو الريفي الموحد Excel"
-                        className="p-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition-colors cursor-pointer shrink-0"
-                      >
-                        <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                          <polyline points="14 2 14 8 20 8" />
-                          <line x1="16" y1="13" x2="8" y2="13" />
-                          <line x1="16" y1="17" x2="8" y2="17" />
-                        </svg>
-                      </button>
+                      {canDo('action:export_data') && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleExportAllCrossCountry();
+                          }}
+                          title="تصدير ملف العدو الريفي الموحد Excel"
+                          className="p-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl transition-colors cursor-pointer shrink-0 flex items-center justify-center"
+                        >
+                          <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                            <polyline points="14 2 14 8 20 8" />
+                            <line x1="16" y1="13" x2="8" y2="13" />
+                            <line x1="16" y1="17" x2="8" y2="17" />
+                          </svg>
+                        </button>
+                      )}
                     </div>
                   </div>
                 );
@@ -1047,6 +1254,11 @@ export const Tournaments: React.FC = () => {
                                 تخصصك
                               </span>
                             )}
+                            {mainTourn?.level && (
+                              <span className="text-[9px] font-extrabold bg-blue-50 text-blue-800 px-1.5 py-0.2 rounded border border-blue-200 shadow-3xs">
+                                🎓 {getTournamentLevelAr(mainTourn.level)}
+                              </span>
+                            )}
                           </div>
                           <span className="text-[10px] font-medium text-slate-400">الموسم {activeSeason}</span>
                         </div>
@@ -1158,17 +1370,7 @@ export const Tournaments: React.FC = () => {
                           </button>
                         )}
 
-                        <button
-                          onClick={() => {
-                            setSelectedSportForPoster(sport);
-                            setIsPosterModalOpen(true);
-                          }}
-                          title="إعداد وتصميم ملصق إعلان البطولة"
-                          className="py-2 px-2.5 text-purple-600 hover:text-purple-800 hover:bg-purple-50 rounded-xl transition-colors cursor-pointer border border-purple-200 bg-purple-50/60 flex items-center gap-1"
-                        >
-                          <Palette className="h-4 w-4" />
-                          <span className="text-[11px] font-bold">إعداد الملصق</span>
-                        </button>
+
 
                         <button
                           onClick={() => {
@@ -1176,10 +1378,9 @@ export const Tournaments: React.FC = () => {
                             setIsScheduleModalOpen(true);
                           }}
                           title="تعديل وبرمجة تواريخ البطولة وآخر أجل للتسجيل"
-                          className="py-2 px-2.5 text-amber-600 hover:text-amber-800 hover:bg-amber-50 rounded-xl transition-colors cursor-pointer border border-amber-200 bg-amber-50/60 flex items-center gap-1"
+                          className="p-2 text-amber-600 hover:text-amber-800 hover:bg-amber-50 rounded-xl transition-colors cursor-pointer border border-amber-200 bg-amber-50/60 flex items-center justify-center shrink-0"
                         >
                           <Calendar className="h-4 w-4" />
-                          <span className="text-[11px] font-bold">برمجة التواريخ</span>
                         </button>
 
                         <button
@@ -1261,6 +1462,10 @@ export const Tournaments: React.FC = () => {
         techHead={teachers.find(tch => tch.isTechCommitteeHead && (tch.techCommitteeSports?.includes('cross_country') || tch.sportId === 'cross_country'))}
         activeSeason={activeSeason}
         canManage={canManageSport('cross_country')}
+        onProgramTournament={(sId) => {
+          setIsCcModalOpen(false);
+          handleOpenProgramModal(sId);
+        }}
         onRefreshData={loadData}
         isTeacherRole={effectiveRole === 'TEACHER'}
         teacherSchoolName={effectiveRole === 'TEACHER' && userProfile ? userProfile.workLocation : undefined}
@@ -1302,21 +1507,24 @@ export const Tournaments: React.FC = () => {
         onUpdated={loadData}
       />
 
-      {/* Tournament Poster Generator Modal */}
-      {selectedSportForPoster && (
-        <TournamentPosterModal
-          isOpen={isPosterModalOpen}
-          onClose={() => {
-            setIsPosterModalOpen(false);
-            setSelectedSportForPoster(null);
-          }}
-          sport={selectedSportForPoster}
-          directorateName={activeDirObj?.name || userProfile?.directorateName || 'المديرية الإقليمية بتاوريرت'}
-          directorateObj={activeDirObj}
-          tournaments={tournaments}
-          officialLogos={officialLogos}
-        />
-      )}
+      {/* Electronic Draw and Schedule Wizard */}
+      <ElectronicDrawModal
+        isOpen={isDrawModalOpen}
+        onClose={() => setIsDrawModalOpen(false)}
+        currentUser={userProfile}
+        onMatchesCreated={loadData}
+      />
+
+      {/* Demo Data Seeder Modal for Testing */}
+      <DemoDataModal
+        isOpen={isDemoDataModalOpen}
+        onClose={() => setIsDemoDataModalOpen(false)}
+        activeDirectorateId={activeDirObj?.id || DataService.getActiveDirectorateId()}
+        activeDirectorateName={activeDirObj?.name || 'المديرية الإقليمية'}
+        activeSeason={activeSeason}
+        onDataLoaded={loadData}
+      />
+
     </div>
   );
 };

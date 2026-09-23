@@ -36,9 +36,11 @@ import { CreateSchoolModal } from '../components/CreateSchoolModal';
 import { ConfirmDeleteModal } from '../components/ConfirmDeleteModal';
 import { SchoolParticipantsModal } from '../components/SchoolParticipantsModal';
 import toast from 'react-hot-toast';
+import { useRolePermissions } from '../hooks/useRolePermissions';
 
 export const Schools: React.FC = () => {
   const { userProfile } = useAuth();
+  const { canDo } = useRolePermissions();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [schools, setSchools] = useState<School[]>([]);
   const [activeDirObj, setActiveDirObj] = useState<Directorate | null>(null);
@@ -66,6 +68,7 @@ export const Schools: React.FC = () => {
 
   // CENTRAL_ADMIN, SPORT_MANAGER, and Technical Committee Head can manage schools
   const isTechCommitteeHead = !!userProfile?.isTechCommitteeHead;
+  const isTeacher = userProfile?.role === 'TEACHER';
   const canManage = userProfile?.role === 'CENTRAL_ADMIN' || 
                     userProfile?.role === 'SPORT_MANAGER' || 
                     isTechCommitteeHead;
@@ -562,53 +565,65 @@ export const Schools: React.FC = () => {
         className="hidden"
       />
 
-      {/* Top Header */}
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 bg-white p-4 md:p-5 rounded-xl border border-slate-200 shadow-xs">
-        <div>
-          <div className="flex items-center gap-2">
-            <h2 className="text-base md:text-lg font-bold text-slate-800">دليل المؤسسات التعليمية</h2>
-            <span className="text-[10px] bg-blue-50 text-blue-700 font-bold px-2 py-0.5 rounded border border-blue-200">
+      {/* Top Header with Centered Headings and Specialized Icon Action Buttons */}
+      <div className="bg-white p-5 md:p-6 rounded-2xl border border-slate-200/90 shadow-xs flex flex-col items-center text-center gap-4">
+        {/* Centered Headings */}
+        <div className="flex flex-col items-center max-w-2xl">
+          <div className="flex items-center justify-center gap-2 flex-wrap">
+            <div className="w-8 h-8 rounded-xl bg-blue-50 text-blue-600 border border-blue-200 flex items-center justify-center shadow-2xs">
+              <SchoolIcon className="w-4 h-4" />
+            </div>
+            <h2 className="text-lg md:text-xl font-black text-slate-900 tracking-tight">دليل المؤسسات التعليمية</h2>
+            <span className="text-xs bg-blue-50 text-blue-700 font-extrabold px-2.5 py-1 rounded-lg border border-blue-200 shadow-2xs">
               {activeDirObj?.name || 'المديرية الإقليمية'}
             </span>
           </div>
-          <p className="text-xs text-slate-500 font-medium mt-0.5">
+          <p className="text-xs text-slate-500 font-medium mt-1.5 leading-relaxed">
             قائمة المؤسسات التعليمية والمنسقين والإدارة التربوية لـ {activeDirObj?.name || 'المديرية الإقليمية'}
           </p>
         </div>
 
-        {/* Action Buttons */}
-        <div className="flex flex-row flex-wrap w-full lg:w-auto items-center justify-end gap-2 shrink-0 pb-1 lg:pb-0">
+        {/* Specialized Icon Action Buttons Toolbar */}
+        <div className="flex flex-wrap items-center justify-center gap-2.5 w-full pt-1">
           {/* Download blank Excel template */}
           <button
             onClick={handleDownloadExcelTemplate}
             title="تحميل نموذج إكسيل فارغ لتعبئة مؤسسات الإقليم"
-            className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-emerald-300 bg-emerald-50 p-2 lg:px-3 lg:py-2 text-xs font-bold text-emerald-800 hover:bg-emerald-100 transition-colors shadow-2xs cursor-pointer whitespace-nowrap shrink-0"
+            className="inline-flex items-center justify-center gap-2 rounded-xl border border-emerald-300 bg-emerald-50/80 px-3.5 py-2.5 text-xs font-black text-emerald-800 hover:bg-emerald-100 hover:border-emerald-400 transition-all shadow-2xs hover:shadow-xs active:scale-97 cursor-pointer whitespace-nowrap"
           >
-            <Download className="h-4 w-4 lg:h-3.5 lg:w-3.5 text-emerald-700 shrink-0" />
-            <span className="hidden lg:inline">تحميل نموذج Excel فارغ</span>
+            <div className="w-6 h-6 rounded-lg bg-emerald-600 text-white flex items-center justify-center shadow-2xs shrink-0">
+              <Download className="h-3.5 w-3.5" />
+            </div>
+            <span>تحميل نموذج Excel فارغ</span>
           </button>
 
           {/* Import Excel */}
-          {canManage && (
+          {canManage && canDo('action:import_data') && (
             <button
               onClick={() => fileInputRef.current?.click()}
               title="استيراد وتعبئة المؤسسات التعليمية من ملف إكسيل"
-              className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-indigo-300 bg-indigo-50 p-2 lg:px-3 lg:py-2 text-xs font-bold text-indigo-800 hover:bg-indigo-100 transition-colors shadow-2xs cursor-pointer whitespace-nowrap shrink-0"
+              className="inline-flex items-center justify-center gap-2 rounded-xl border border-indigo-300 bg-indigo-50/80 px-3.5 py-2.5 text-xs font-black text-indigo-800 hover:bg-indigo-100 hover:border-indigo-400 transition-all shadow-2xs hover:shadow-xs active:scale-97 cursor-pointer whitespace-nowrap"
             >
-              <Upload className="h-4 w-4 lg:h-3.5 lg:w-3.5 text-indigo-700 shrink-0" />
-              <span className="hidden lg:inline">استيراد من Excel</span>
+              <div className="w-6 h-6 rounded-lg bg-indigo-600 text-white flex items-center justify-center shadow-2xs shrink-0">
+                <Upload className="h-3.5 w-3.5" />
+              </div>
+              <span>استيراد من Excel</span>
             </button>
           )}
 
           {/* Export current schools */}
-          <button
-            onClick={handleExportCurrentSchools}
-            title="تصدير القائمة الحالية للمؤسسات التعليمية إلى ملف إكسيل"
-            className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 p-2 lg:px-3 lg:py-2 text-xs font-bold text-slate-700 hover:bg-slate-100 transition-colors shadow-2xs cursor-pointer whitespace-nowrap shrink-0"
-          >
-            <FileSpreadsheet className="h-4 w-4 lg:h-3.5 lg:w-3.5 text-slate-600 shrink-0" />
-            <span className="hidden lg:inline">تصدير إلى Excel</span>
-          </button>
+          {canDo('action:export_data') && (
+            <button
+              onClick={handleExportCurrentSchools}
+              title="تصدير القائمة الحالية للمؤسسات التعليمية إلى ملف إكسيل"
+              className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-300 bg-slate-50 px-3.5 py-2.5 text-xs font-black text-slate-700 hover:bg-slate-100 hover:border-slate-400 transition-all shadow-2xs hover:shadow-xs active:scale-97 cursor-pointer whitespace-nowrap"
+            >
+              <div className="w-6 h-6 rounded-lg bg-slate-700 text-white flex items-center justify-center shadow-2xs shrink-0">
+                <FileSpreadsheet className="h-3.5 w-3.5" />
+              </div>
+              <span>تصدير إلى Excel</span>
+            </button>
+          )}
 
           {/* Manual Add School */}
           {canManage && (
@@ -617,40 +632,46 @@ export const Schools: React.FC = () => {
                 setEditingSchool(null);
                 setIsModalOpen(true);
               }}
-              title="إضافة مؤسسة تعليمية"
-              className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-blue-600 p-2 lg:px-3.5 lg:py-2 text-xs font-bold text-white shadow-xs hover:bg-blue-700 transition-colors cursor-pointer whitespace-nowrap shrink-0"
+              title="إضافة مؤسسة تعليمية جديدة"
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 px-4 py-2.5 text-xs font-black text-white shadow-sm hover:from-blue-700 hover:to-indigo-700 transition-all hover:shadow-md active:scale-97 cursor-pointer whitespace-nowrap border border-blue-500/30"
             >
-              <Plus className="h-4 w-4 shrink-0" />
-              <span className="hidden lg:inline">إضافة مؤسسة تعليمية</span>
+              <div className="w-6 h-6 rounded-lg bg-white/20 flex items-center justify-center shadow-2xs shrink-0">
+                <Plus className="h-4 w-4 text-white" />
+              </div>
+              <span>إضافة مؤسسة تعليمية</span>
             </button>
           )}
 
-          {/* Delete All - ONLY FOR CENTRAL ADMIN */}
+          {/* Central Admin Only Actions */}
           {userProfile?.role === 'CENTRAL_ADMIN' && schools.length > 0 && (
             <>
               <button
                 onClick={handleRegenerateCodes}
                 disabled={isLoading}
-                className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-orange-50 border border-orange-200 p-2 lg:px-3.5 lg:py-2 text-xs font-bold text-orange-700 shadow-3xs hover:bg-orange-100 transition-colors cursor-pointer whitespace-nowrap shrink-0 disabled:opacity-50"
+                className="inline-flex items-center justify-center gap-2 rounded-xl bg-orange-50 border border-orange-300 px-3.5 py-2.5 text-xs font-black text-orange-800 shadow-2xs hover:bg-orange-100 transition-all hover:shadow-xs active:scale-97 cursor-pointer whitespace-nowrap disabled:opacity-50"
                 title="تحديث جميع الرموز السرية القديمة إلى رموز أكثر أماناً"
               >
-                <Lock className="h-4 w-4 shrink-0" />
-                <span className="hidden lg:inline">تحديث الرموز القديمة</span>
+                <div className="w-6 h-6 rounded-lg bg-orange-500 text-white flex items-center justify-center shadow-2xs shrink-0">
+                  <Lock className="h-3.5 w-3.5" />
+                </div>
+                <span>تحديث الرموز القديمة</span>
               </button>
               <button
                 onClick={() => setShowDeleteAllModal(true)}
-                className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-red-50 border border-red-200 p-2 lg:px-3.5 lg:py-2 text-xs font-bold text-red-600 shadow-3xs hover:bg-red-100 transition-colors cursor-pointer whitespace-nowrap shrink-0"
+                className="inline-flex items-center justify-center gap-2 rounded-xl bg-red-50 border border-red-300 px-3.5 py-2.5 text-xs font-black text-red-700 shadow-2xs hover:bg-red-100 transition-all hover:shadow-xs active:scale-97 cursor-pointer whitespace-nowrap"
                 title="حذف جميع المؤسسات المسجلة في هذه المديرية"
               >
-                <Trash2 className="h-4 w-4 shrink-0" />
-                <span className="hidden lg:inline">حذف الكل</span>
+                <div className="w-6 h-6 rounded-lg bg-red-600 text-white flex items-center justify-center shadow-2xs shrink-0">
+                  <Trash2 className="h-3.5 w-3.5" />
+                </div>
+                <span>حذف الكل</span>
               </button>
             </>
           )}
         </div>
       </div>
 
-      {/* Teacher's School Highlight Notice */}
+      {/* Teacher's School Highlight Notice & Permissions Banner */}
       {userProfile?.workLocation && (
         <div className="p-3.5 bg-gradient-to-r from-amber-500/15 via-amber-50 to-white border border-amber-300/90 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-amber-950 font-bold shadow-xs">
           <div className="flex items-center gap-2.5">
@@ -659,10 +680,12 @@ export const Schools: React.FC = () => {
             </div>
             <div>
               <p className="font-extrabold text-amber-950">
-                مرحباً بك يا أستاذ! تم إبراز مؤسستك (<span className="text-amber-900 underline font-black">{userProfile.workLocation}</span>) في أول القائمة بلون مُميّز.
+                مرحباً بك يا أستاذ! تم إبراز مؤسستك (<span className="text-amber-900 underline font-black">{userProfile.workLocation}</span>) في أول القائمة لتيسير الولوج إليها.
               </p>
-              <p className="text-[11px] text-amber-800 font-normal">
-                تظهر مؤسستك دائماً في المرتبة الأولى لتسهيل الوصول المباشر إلى تلاميذك ومشاركاتك.
+              <p className="text-[11px] text-amber-800 font-normal mt-0.5">
+                {isTeacher
+                  ? 'بصفتك أستاذاً، يمكنك الاطلاع على بيانات المؤسسات المشاركة، بينما الولوج إلى لوائح وتدبير المشاركين متاح حصرياً لمؤسستك فقط.'
+                  : 'تظهر مؤسستك دائماً في المرتبة الأولى لتسهيل الوصول المباشر إلى تلاميذك ومشاركاتك.'}
               </p>
             </div>
           </div>
@@ -1020,13 +1043,28 @@ export const Schools: React.FC = () => {
                         </td>
                         <td className="p-3">
                           <div className="flex items-center justify-center gap-2">
-                            <button
-                              onClick={() => setSelectedSchoolForParticipants(s)}
-                              className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg text-[11px] transition-colors flex items-center gap-1 cursor-pointer shadow-2xs"
-                            >
-                              <span>عرض المشاركات واللائحة</span>
-                              <FileText className="w-3.5 h-3.5" />
-                            </button>
+                            {isTeacher && !isMine ? (
+                              <span 
+                                className="px-2.5 py-1.5 bg-slate-100 text-slate-500 font-bold rounded-lg text-[11px] border border-slate-200 inline-flex items-center gap-1.5 cursor-not-allowed select-none"
+                                title="الاطلاع فقط: بصفتك أستاذاً، لا يحق لك الولوج إلى لوائح وتفاصيل المؤسسات الأخرى"
+                              >
+                                <Lock className="w-3.5 h-3.5 text-slate-400" />
+                                <span>اطلاع فقط</span>
+                              </span>
+                            ) : (
+                              <button
+                                onClick={() => setSelectedSchoolForParticipants(s)}
+                                className={`px-3 py-1.5 font-bold rounded-lg text-[11px] transition-colors flex items-center gap-1 cursor-pointer shadow-2xs ${
+                                  isMine
+                                    ? 'bg-amber-600 hover:bg-amber-700 text-white ring-2 ring-amber-400/40'
+                                    : 'bg-blue-600 hover:bg-blue-700 text-white'
+                                }`}
+                                title={isMine ? 'الولوج وإدارة لوائح تلاميذ مؤسستك المعتمدة' : 'عرض المشاركات واللائحة'}
+                              >
+                                <span>{isMine ? 'عرض وإدارة لوائح مؤسستي' : 'عرض المشاركات واللائحة'}</span>
+                                <FileText className="w-3.5 h-3.5" />
+                              </button>
+                            )}
                             {canManage && (
                               <>
                                 <button
@@ -1076,11 +1114,22 @@ export const Schools: React.FC = () => {
               return (
                 <div
                   key={s.id}
-                  onClick={() => setSelectedSchoolForParticipants(s)}
-                  className={`flex flex-col justify-between rounded-2xl p-4 transition-all space-y-3 cursor-pointer group ${
+                  onClick={() => {
+                    if (isTeacher && !isMine) {
+                      toast('الاطلاع فقط: بصفتك أستاذاً، يحق لك الاطلاع على المؤسسات المشاركة دون إمكانية الولوج إلى لوائح وتفاصيل المؤسسات الأخرى.', {
+                        icon: '🔒',
+                        duration: 3500
+                      });
+                      return;
+                    }
+                    setSelectedSchoolForParticipants(s);
+                  }}
+                  className={`flex flex-col justify-between rounded-2xl p-4 transition-all space-y-3 ${
                     isMine
-                      ? 'bg-gradient-to-br from-indigo-50/95 via-sky-50/30 to-white border-2 border-indigo-500 shadow-md ring-2 ring-indigo-500/20'
-                      : 'bg-white border border-slate-200 shadow-xs hover:border-blue-400 hover:shadow-md'
+                      ? 'bg-gradient-to-br from-indigo-50/95 via-sky-50/30 to-white border-2 border-indigo-500 shadow-md ring-2 ring-indigo-500/20 cursor-pointer group'
+                      : isTeacher
+                        ? 'bg-white border border-slate-200 shadow-3xs cursor-default hover:border-slate-300'
+                        : 'bg-white border border-slate-200 shadow-xs hover:border-blue-400 hover:shadow-md cursor-pointer group'
                   }`}
                 >
                   <div>
@@ -1323,18 +1372,34 @@ export const Schools: React.FC = () => {
 
                     {/* Participant List Click Trigger Footer */}
                     <div className="pt-2 border-t border-slate-100 flex items-center justify-between">
-                      <div className="flex items-center gap-1.5 text-xs font-bold text-blue-600 group-hover:text-blue-700">
-                        <Users className="h-3.5 w-3.5 text-blue-600" />
+                      <div className={`flex items-center gap-1.5 text-xs font-bold ${
+                        isTeacher && !isMine ? 'text-slate-500' : isMine ? 'text-indigo-700' : 'text-blue-600 group-hover:text-blue-700'
+                      }`}>
+                        <Users className={`h-3.5 w-3.5 ${isTeacher && !isMine ? 'text-slate-400' : isMine ? 'text-indigo-600' : 'text-blue-600'}`} />
                         <span>
                           {selectedSport !== 'ALL'
-                            ? `لائحة المشاركين (${count} ${count === 1 ? 'تلميذ' : 'تلاميذ'})`
+                            ? `المشاركون (${count} ${count === 1 ? 'تلميذ' : 'تلاميذ'})`
                             : `المشاركون المسجلون (${count})`}
                         </span>
                       </div>
-                      <span className="text-[11px] font-bold text-blue-600 group-hover:text-blue-800 flex items-center gap-0.5 group-hover:translate-x-[-2px] transition-all">
-                        <span>عرض اللائحة</span>
-                        <span className="text-xs">←</span>
-                      </span>
+                      {isTeacher && !isMine ? (
+                        <span 
+                          className="text-[10px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded border border-slate-200 flex items-center gap-1 select-none"
+                          title="اطلاع فقط: لا يحق للأستاذ الولوج للوائح وتفاصيل المؤسسات الأخرى"
+                        >
+                          <Lock className="w-3 h-3 text-slate-400" />
+                          <span>اطلاع فقط</span>
+                        </span>
+                      ) : (
+                        <span className={`text-[11px] font-bold flex items-center gap-0.5 transition-all ${
+                          isMine
+                            ? 'text-indigo-700 hover:text-indigo-900 bg-indigo-50 px-2.5 py-1 rounded-lg border border-indigo-200'
+                            : 'text-blue-600 group-hover:text-blue-800 group-hover:translate-x-[-2px]'
+                        }`}>
+                          <span>{isMine ? 'عرض وإدارة لوائح مؤسستي' : 'عرض اللائحة'}</span>
+                          <span className="text-xs">←</span>
+                        </span>
+                      )}
                     </div>
                   </div>
                 </div>

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Tournament, Sport, Directorate } from '../types';
 import { AGE_CATEGORIES, DataService, getAgeCategoriesForSeason, SPORTS_MAP, getCategoryGenderLabel, normalizeCategoryKey } from '../lib/dataService';
-import { X, Trophy, Calendar, Users, Target, Award, Sparkles, ShieldCheck, RefreshCw, Check, Clock } from 'lucide-react';
+import { X, Trophy, Calendar, Users, Target, Award, Sparkles, ShieldCheck, RefreshCw, Check, Clock, GraduationCap } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 interface CreateTournamentModalProps {
@@ -76,7 +76,7 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
     }
   }, [availableSports, preselectedSportId]);
 
-  const seasonalCategories = getAgeCategoriesForSeason(currentSeason);
+  const seasonalCategories = getAgeCategoriesForSeason(currentSeason, undefined, sportId);
   const activeSportConfig = sportsConfig.find(s => s.id === sportId);
 
   // Offer the 4 official age categories so user can add, remove, or switch categories freely
@@ -100,13 +100,19 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
   useEffect(() => {
     if (isOpen && sportId) {
       DataService.getTournaments().then(allTourns => {
-        const sportTourns = allTourns.filter(t => t.sportId === sportId);
+        const activeDirId = activeDirObj?.id || DataService.getActiveDirectorateId();
+        const sportTourns = allTourns.filter(t => 
+          t.sportId === sportId && 
+          (!t.seasonId || !currentSeason || t.seasonId === currentSeason) &&
+          (!t.directorateId || (t.directorateId || 'taourirt') === (activeDirId || 'taourirt'))
+        );
+
         if (sportTourns.length > 0) {
           setIsEditing(true);
           const sample = sportTourns[0];
           if (sample.name) {
-            const cleanName = sample.name.replace(/\s*-\s*(البرعمات|البراعم|الصغيرات|الصغار|الفتيات|الفتيان|الشابات|الشبان|ذكور|إناث|مختلط|U12|U15|U18|U20|جميع الفئات).*/, '').trim();
-            setName(cleanName || sample.name);
+            const cleanName = sample.name.split(/\s*-\s*(?:البرعمات|البراعم|الصغيرات|الصغار|الفتيات|الفتيان|الشابات|الشبان|ذكور|إناث|مختلط|U12|U15|U18|U20|جميع الفئات|فئة|صغار|فتيان|شبان|براعم|صغيرات|فتيات|شابات|برعمات|لا منتمين|للمنتمين للأندية|مفتوحة|مواليد|السلك|دوري)/i)[0].trim();
+            setName(cleanName && cleanName.length >= 3 ? cleanName : sample.name);
           }
           if (sample.startDate) {
             let d: Date | null = null;
@@ -147,29 +153,41 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
           const existingCats = Array.from(new Set(sportTourns.map(t => normalizeCategoryKey(t.ageCategory)).filter(Boolean)));
           if (existingCats.length > 0) {
             setSelectedCategories(existingCats);
+          } else if (sportId === 'cross_country') {
+            setSelectedCategories(['U12', 'U15', 'U18', 'U20']);
           }
 
           const genders = new Set(sportTourns.map(t => t.gender));
           if (genders.has('Male') && genders.has('Female')) setGenderSelection('Both');
+          else if (genders.has('Mixed')) setGenderSelection('Mixed');
           else if (genders.has('Male')) setGenderSelection('Male');
           else if (genders.has('Female')) setGenderSelection('Female');
-          else if (genders.has('Mixed')) setGenderSelection('Mixed');
+          else if (sportId === 'cross_country') setGenderSelection('Both');
 
-          const affs = new Set(sportTourns.map(t => t.affiliationType));
+          const affs = new Set(sportTourns.map(t => t.affiliationType || 'non_club'));
           if (affs.has('non_club') && affs.has('club_affiliated')) setAffiliationSelection('both');
-          else if (affs.has('non_club')) setAffiliationSelection('non_club');
           else if (affs.has('club_affiliated')) setAffiliationSelection('club_affiliated');
           else if (affs.has('open')) setAffiliationSelection('open');
+          else setAffiliationSelection('non_club');
         } else {
           setIsEditing(false);
-          const sportName = SPORTS_MAP[sportId]?.name || sportsConfig.find(s => s.id === sportId)?.name || sportId;
+          const activeSportConfig = sportsConfig.find(s => s.id === sportId);
+          const sportName = SPORTS_MAP[sportId]?.name || activeSportConfig?.name || sportId;
           setName(`البطولة الإقليمية المدرسية لـ ${sportName}`);
+
+          if (activeSportConfig?.ageCategories && activeSportConfig.ageCategories.length > 0) {
+            setSelectedCategories(activeSportConfig.ageCategories.map(normalizeCategoryKey));
+          } else {
+            setSelectedCategories(['U12', 'U15', 'U18', 'U20']);
+          }
+          setGenderSelection('Both');
+          setAffiliationSelection('both');
         }
       });
     } else if (!isOpen) {
       setIsEditing(false);
     }
-  }, [isOpen, sportId]);
+  }, [isOpen, sportId, currentSeason, activeDirObj, sportsConfig]);
 
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -178,16 +196,6 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
       prev.includes(catId) ? prev.filter(id => id !== catId) : [...prev, catId]
     );
   };
-
-  // Transformation of genderSelection based on U12 selection
-  useEffect(() => {
-    // If only U12 is selected, force gender to Male as requested
-    if (selectedCategories.length === 1 && normalizeCategoryKey(selectedCategories[0]) === 'U12') {
-      if (genderSelection !== 'Male') {
-        setGenderSelection('Male');
-      }
-    }
-  }, [selectedCategories]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -238,57 +246,33 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
       const tournamentsBatch: Omit<Tournament, 'id'>[] = [];
       const activeDirId = activeDirObj?.id || DataService.getActiveDirectorateId();
 
-      if (sportId === 'cross_country') {
-        for (const aff of affiliationsToGenerate) {
-          const affSuffix = aff === 'non_club' ? ' - لا منتمين' : aff === 'open' ? ' - مفتوحة' : ' - للمنتمين للأندية';
-          const affLabel = aff === 'non_club' ? 'لا منتمين' : aff === 'open' ? 'مفتوحة' : 'للمنتمين للأندية';
+      for (const catId of selectedCategories) {
+        for (const gen of gendersToGenerate) {
+          const genderCatName = getCategoryGenderLabel(catId, gen);
 
-          tournamentsBatch.push({
-            name: `${name.trim() || `البطولة الإقليمية المدرسية للعدو الريفي - ${activeDirObj?.name || ''}`}${affSuffix}`,
-            seasonId: currentSeason,
-            sportId: 'cross_country',
-            ageCategory: 'جميع الفئات العمرية (8 فئات مدمجة)',
-            gender: 'Mixed',
-            level: selectedLevels.join(','),
-            scope,
-            affiliationType: aff,
-            startDate: new Date(startDate),
-            endDate: new Date(endDate),
-            registrationDeadline: registrationDeadline ? new Date(registrationDeadline) : new Date(endDate),
-            status,
-            description: description.trim() || `البطولة الإقليمية المدرسية للعدو الريفي (${affLabel}) بـ ${activeDirObj?.name || 'المديرية الإقليمية'} بمشاركة جميع الفئات والأجناس الثمانية المعتمدة (U12, U15, U18, U20 ذكور وإناث).`,
-            directorateId: activeDirId
-          });
-        }
-      } else {
-        for (const catId of selectedCategories) {
-          for (const gen of gendersToGenerate) {
-            const genderCatName = getCategoryGenderLabel(catId, gen);
+          for (const aff of affiliationsToGenerate) {
+            const affSuffix = aff === 'non_club' ? ' - لا منتمين' : aff === 'open' ? ' - مفتوحة' : ' - للمنتمين للأندية';
+            const affLabel = aff === 'non_club' ? 'لا منتمين' : aff === 'open' ? 'مفتوحة' : 'للمنتمين للأندية';
+            
+            // Formulate distinct tournament name with affiliation
+            const finalTournamentName = `${name.trim()} - ${genderCatName}${affSuffix}`;
 
-            for (const aff of affiliationsToGenerate) {
-              const affSuffix = aff === 'non_club' ? ' - لا منتمين' : aff === 'open' ? ' - مفتوحة' : ' - للمنتمين للأندية';
-              const affLabel = aff === 'non_club' ? 'لا منتمين' : aff === 'open' ? 'مفتوحة' : 'للمنتمين للأندية';
-              
-              // Formulate distinct tournament name with affiliation
-              const finalTournamentName = `${name.trim()} - ${genderCatName}${affSuffix}`;
-
-              tournamentsBatch.push({
-                name: finalTournamentName,
-                seasonId: currentSeason,
-                sportId,
-                ageCategory: catId,
-                gender: gen,
-                level: selectedLevels.join(','),
-                scope,
-                affiliationType: aff,
-                startDate: new Date(startDate),
-                endDate: new Date(endDate),
-                registrationDeadline: registrationDeadline ? new Date(registrationDeadline) : new Date(endDate),
-                status,
-                description: description.trim() || `بطولة مدرسية رسمية (${affLabel}) بـ ${activeDirObj?.name || 'المديرية الإقليمية'}`,
-                directorateId: activeDirId
-              });
-            }
+            tournamentsBatch.push({
+              name: finalTournamentName,
+              seasonId: currentSeason,
+              sportId,
+              ageCategory: catId,
+              gender: gen,
+              level: selectedLevels.join(','),
+              scope,
+              affiliationType: aff,
+              startDate: new Date(startDate),
+              endDate: new Date(endDate),
+              registrationDeadline: registrationDeadline ? new Date(registrationDeadline) : new Date(endDate),
+              status,
+              description: description.trim() || `بطولة مدرسية رسمية (${affLabel}) بـ ${activeDirObj?.name || 'المديرية الإقليمية'}`,
+              directorateId: activeDirId
+            });
           }
         }
       }
@@ -363,14 +347,14 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
           {/* Sport & Level */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">
-                النوع الرياضي
+              <label className="block text-xs font-bold text-slate-800 mb-1">
+                صنف الرياضة / التخصص الرياضي <span className="text-red-500">*</span>
               </label>
               <select
                 value={sportId}
                 onChange={(e) => setSportId(e.target.value)}
-                disabled={isEditing || (allowedSportIds !== null && allowedSportIds !== undefined && allowedSportIds.length > 0)}
-                className="w-full text-xs rounded-lg border border-slate-200 px-3 py-2 text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium disabled:bg-slate-100 disabled:text-slate-700 disabled:cursor-not-allowed"
+                disabled={allowedSportIds !== null && allowedSportIds !== undefined && allowedSportIds.length === 1}
+                className="w-full text-xs rounded-lg border border-slate-200 px-3 py-2 text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 font-bold disabled:bg-slate-100 disabled:text-slate-700 disabled:cursor-not-allowed cursor-pointer"
               >
                 {availableSports.length > 0
                   ? availableSports.map((s) => (
@@ -386,6 +370,9 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
                         </option>
                       ))}
               </select>
+              <span className="text-[10px] text-slate-500 font-medium block mt-1">
+                * تحديد صنف الرياضة يربط البطولات مباشرة بإشراف رئيس اللجنة التقنية الخاص بها (مثال: الكرة الطائرة تشمل كل بطولات الكرة الطائرة بالمديرية).
+              </span>
               {isEditing && (
                 <span className="text-[10px] text-blue-700 font-bold block mt-1 bg-blue-50 p-1.5 rounded border border-blue-200">
                   ✏️ تعديل إعدادات وتصنيفات هذه الرياضة المبرمجة.
@@ -708,6 +695,51 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
             <p className="text-[10px] text-amber-700 mt-1">
               بعد هذا الموعد، يقفل نظام التسجيل أوتوماتيكياً أمام الأساتذة ولا يمكن إضافة مشاركين جدد.
             </p>
+          </div>
+
+          {/* School Levels Selection */}
+          <div className="space-y-2 p-3.5 bg-indigo-50/50 border border-indigo-200/80 rounded-xl">
+            <div className="flex items-center justify-between">
+              <label className="block text-xs font-bold text-indigo-950 flex items-center gap-1.5">
+                <GraduationCap className="w-3.5 h-3.5 text-indigo-700" />
+                <span>الأسلاك التعليمية المسموح لها بالمشاركة *</span>
+              </label>
+              <span className="text-[10px] bg-indigo-100 text-indigo-900 font-bold px-2 py-0.5 rounded border border-indigo-300">
+                التحكم بالانتساب
+              </span>
+            </div>
+            <p className="text-[11px] text-indigo-800 leading-relaxed">
+              حدد سلك واحد أو أكثر ليتم فلترة ومنع تسجيل أي تلاميذ ينتمون لمؤسسات من خارج الأسلاك المحددة.
+            </p>
+            <div className="flex flex-wrap gap-1.5 pt-1">
+              {[
+                { id: 'Primary', label: 'ابتدائي' },
+                { id: 'Middle', label: 'إعدادي' },
+                { id: 'High', label: 'تأهيلي' }
+              ].map((item) => {
+                const isSelected = selectedLevels.includes(item.id as any);
+                return (
+                  <button
+                    type="button"
+                    key={item.id}
+                    onClick={() => {
+                      setSelectedLevels(prev =>
+                        prev.includes(item.id as any)
+                          ? (prev.length > 1 ? prev.filter(x => x !== item.id) : prev)
+                          : [...prev, item.id as any]
+                      );
+                    }}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-all cursor-pointer ${
+                      isSelected
+                        ? 'bg-indigo-600 border-indigo-600 text-white shadow-3xs'
+                        : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                    }`}
+                  >
+                    {item.label}
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
           {/* Scope & Status */}

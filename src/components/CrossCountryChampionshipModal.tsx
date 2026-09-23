@@ -1,56 +1,48 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { Tournament, Student, School, User, Sport, CrossCountryCategoryResult, PodiumWinner } from '../types';
-import { DataService, SPORTS_MAP, getAgeCategoriesForSeason } from '../lib/dataService';
+import { Tournament, Student, School, User, Sport } from '../types';
+import { DataService, SPORTS_MAP, getAgeCategoriesForSeason, validateBirthDateForCategory } from '../lib/dataService';
+import { useAuth } from '../contexts/AuthContext';
+import { useRolePermissions } from '../hooks/useRolePermissions';
 import {
   CROSS_COUNTRY_CATEGORIES,
-  CrossCountryCategoryDef,
-  calculateTeamRankings,
-  calculateRegionalQualifications,
-  TeamRankingResult,
-  RegionalQualifiedIndividual
+  CrossCountryCategoryDef
 } from '../lib/crossCountryConfig';
 import { AppLogo } from './AppLogo';
 import { CountdownTimer } from './CountdownTimer';
 import { RegisterStudentModal } from './RegisterStudentModal';
+import { CrossCountryBulkRegisterModal } from './CrossCountryBulkRegisterModal';
 import { EditDeadlineModal } from './EditDeadlineModal';
 import { ParticipationFormPdfModal } from './ParticipationFormPdfModal';
 import * as XLSX from 'xlsx';
 import {
   X,
-  Trophy,
-  Users,
   Search,
   Filter,
   Download,
-  Printer,
   FileText,
-  ShieldCheck,
-  Phone,
   CheckCircle2,
-  AlertCircle,
-  Calendar,
   Layers,
-  MapPin,
   Clock,
+  Settings,
   GraduationCap,
   Maximize2,
   Minimize2,
   ChevronUp,
   ChevronDown,
-  Medal,
-  Award,
   Sparkles,
-  Edit3,
-  Plus,
   Trash2,
   Save,
   Info,
   Grid,
   Table,
-  CreditCard
+  CreditCard,
+  Edit,
+  Upload,
+  Image as ImageIcon
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { downloadIndividualCardPdf } from '../lib/participationPdfService';
+import { compressImageToBase64 } from '../lib/imageUtils';
 
 interface CrossCountryChampionshipModalProps {
   isOpen: boolean;
@@ -62,6 +54,9 @@ interface CrossCountryChampionshipModalProps {
   activeSeason: string;
   canManage?: boolean;
   onRefreshData?: () => void;
+  onProgramTournament?: (sportId: string) => void;
+  isTeacherRole?: boolean;
+  teacherSchoolName?: string;
 }
 
 export const CrossCountryChampionshipModal: React.FC<CrossCountryChampionshipModalProps> = ({
@@ -73,30 +68,30 @@ export const CrossCountryChampionshipModal: React.FC<CrossCountryChampionshipMod
   techHead,
   activeSeason,
   canManage = false,
-  onRefreshData
+  onRefreshData,
+  onProgramTournament,
+  isTeacherRole: propIsTeacherRole,
+  teacherSchoolName: propTeacherSchoolName
 }) => {
+  const { userProfile } = useAuth();
+  const { canDo } = useRolePermissions();
+  const isTeacherRole = propIsTeacherRole !== undefined ? propIsTeacherRole : userProfile?.role === 'TEACHER';
+  const teacherSchoolName = propTeacherSchoolName !== undefined ? propTeacherSchoolName : (userProfile?.workLocation || '');
+
   const [selectedCatId, setSelectedCatId] = useState<string>('u15_male');
-  const [activeTab, setActiveTab] = useState<'participants' | 'results'>('results');
-  const [resultsSubTab, setResultsSubTab] = useState<'individual' | 'team' | 'regional'>('individual');
+  const activeCategory = useMemo(() => {
+    return CROSS_COUNTRY_CATEGORIES.find(c => c.id === selectedCatId) || CROSS_COUNTRY_CATEGORIES[0];
+  }, [selectedCatId]);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterType, setFilterType] = useState<'ALL' | 'school_team' | 'individual'>('ALL');
   const [filterSchool, setFilterSchool] = useState<string>('ALL');
   const [participantsViewMode, setParticipantsViewMode] = useState<'table' | 'cards'>('table');
   const [isRegisterModalOpen, setIsRegisterModalOpen] = useState(false);
+  const [isBulkRegisterModalOpen, setIsBulkRegisterModalOpen] = useState(false);
   const [isEditDeadlineOpen, setIsEditDeadlineOpen] = useState(false);
   const [isPdfModalOpen, setIsPdfModalOpen] = useState(false);
   const [isHeaderCollapsed, setIsHeaderCollapsed] = useState(false);
   const [isFullScreen, setIsFullScreen] = useState(false);
-
-  // Results State
-  const [results, setResults] = useState<Record<string, CrossCountryCategoryResult>>({});
-  const [loadingResults, setLoadingResults] = useState(false);
-
-  // Edit Result Modal State
-  const [isEditResultModalOpen, setIsEditResultModalOpen] = useState(false);
-  const [editingWinners, setEditingWinners] = useState<PodiumWinner[]>([]);
-  const [editingVenue, setEditingVenue] = useState('');
-  const [isSavingResults, setIsSavingResults] = useState(false);
 
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
@@ -115,24 +110,28 @@ export const CrossCountryChampionshipModal: React.FC<CrossCountryChampionshipMod
     }
   };
 
-  // Load results from data service
-  const loadResults = async () => {
-    try {
-      setLoadingResults(true);
-      const res = await DataService.getCrossCountryResults();
-      setResults(res || {});
-    } catch (e) {
-      console.error('Error loading cross country results:', e);
-    } finally {
-      setLoadingResults(false);
-    }
-  };
-
-  // Compute deadline for cross country
-  const currentDeadline = useMemo(() => {
-    const ccT = tournaments.find(t => t.sportId === 'cross_country');
-    return ccT?.registrationDeadline || null;
+  // Compute deadline and affiliation for cross country
+  const ccTournaments = useMemo(() => {
+    return tournaments.filter(t => t.sportId === 'cross_country');
   }, [tournaments]);
+
+  const hasClubTournament = useMemo(() => {
+    return ccTournaments.some(t => t.affiliationType === 'club_affiliated' || t.affiliationType === 'open');
+  }, [ccTournaments]);
+
+  const hasNonClubTournament = useMemo(() => {
+    return ccTournaments.some(t => !t.affiliationType || t.affiliationType === 'non_club' || t.affiliationType === 'open');
+  }, [ccTournaments]);
+
+  const [selectedAffiliationFilter, setSelectedAffiliationFilter] = useState<'ALL' | 'non_club' | 'club_affiliated'>('ALL');
+
+  const { currentDeadline, currentAffiliationType } = useMemo(() => {
+    const ccT = ccTournaments.find(t => selectedAffiliationFilter === 'club_affiliated' ? t.affiliationType === 'club_affiliated' : true) || ccTournaments[0];
+    return {
+      currentDeadline: ccT?.registrationDeadline || null,
+      currentAffiliationType: (ccT?.affiliationType as any) || (hasClubTournament && !hasNonClubTournament ? 'club_affiliated' : 'open')
+    };
+  }, [ccTournaments, selectedAffiliationFilter, hasClubTournament, hasNonClubTournament]);
 
   const ccSportObject: Sport = useMemo(() => ({
     id: 'cross_country',
@@ -144,21 +143,201 @@ export const CrossCountryChampionshipModal: React.FC<CrossCountryChampionshipMod
 
   // Refresh data on open
   useEffect(() => {
-    if (isOpen) {
-      loadResults();
-      if (onRefreshData) {
-        onRefreshData();
-      }
+    if (!isOpen) return;
+    if (onRefreshData) {
+      onRefreshData();
     }
   }, [isOpen]);
 
-  // Filter students participating in cross country
-  const ccStudents = useMemo(() => {
-    return allStudents.filter(s => s && s.sportId === 'cross_country');
+  // Local students state to allow immediate optimistic updates
+  const [localStudents, setLocalStudents] = useState<Student[]>(allStudents);
+
+  useEffect(() => {
+    setLocalStudents(allStudents);
   }, [allStudents]);
 
-  // Selected category object
-  const activeCategory = CROSS_COUNTRY_CATEGORIES.find(c => c.id === selectedCatId) || CROSS_COUNTRY_CATEGORIES[0];
+  // Student Delete & Edit State
+  const [studentToDelete, setStudentToDelete] = useState<Student | null>(null);
+  const [isDeletingStudent, setIsDeletingStudent] = useState(false);
+
+  const [studentToEditConfirm, setStudentToEditConfirm] = useState<Student | null>(null);
+  const [editingStudent, setEditingStudent] = useState<Student | null>(null);
+  const [editFullName, setEditFullName] = useState('');
+  const [editMassarNumber, setEditMassarNumber] = useState('');
+  const [editGender, setEditGender] = useState<'Male' | 'Female'>('Male');
+  const [editBirthDate, setEditBirthDate] = useState('');
+  const [editCategory, setEditCategory] = useState('U15');
+  const [editParticipationType, setEditParticipationType] = useState<'school_team' | 'individual'>('school_team');
+  const [editPhoto, setEditPhoto] = useState('');
+  const [editAffiliationType, setEditAffiliationType] = useState<'non_club' | 'club_affiliated'>('non_club');
+  const [isCompressingPhoto, setIsCompressingPhoto] = useState(false);
+  const [editCoachName, setEditCoachName] = useState('');
+  const [editCoachLease, setEditCoachLease] = useState('');
+  const [editCoachPhone, setEditCoachPhone] = useState('');
+  const [isSavingEditStudent, setIsSavingEditStudent] = useState(false);
+
+  // Permission checker for modifying or deleting a cross country runner
+  const canManageThisStudent = (stud: Student) => {
+    if (canManage) return true;
+    if (!isTeacherRole) return false;
+    if (!userProfile) return false;
+
+    const cleanStudentSchool = String(stud.schoolName || '').trim().toLowerCase();
+    const cleanTeacherSchool = String(userProfile.workLocation || teacherSchoolName || '').trim().toLowerCase();
+    const isSameSchoolName = cleanStudentSchool && cleanTeacherSchool && (
+      cleanStudentSchool === cleanTeacherSchool ||
+      cleanStudentSchool.includes(cleanTeacherSchool) ||
+      cleanTeacherSchool.includes(cleanStudentSchool)
+    );
+
+    const matched = schools.find(s => s.name === (userProfile.workLocation || teacherSchoolName) || s.name.includes(userProfile.workLocation || teacherSchoolName || ''));
+    const teacherSchoolId = matched ? matched.id : undefined;
+    const isSameSchoolId = (stud.schoolId && teacherSchoolId && stud.schoolId === teacherSchoolId) || (userProfile?.schoolId && stud.schoolId === userProfile.schoolId);
+
+    return isSameSchoolName || isSameSchoolId;
+  };
+
+  const customTitle = useMemo(() => {
+    if (tournaments && tournaments.length > 0) {
+      const ccTourn = tournaments.find(t => t.sportId === 'cross_country');
+      if (ccTourn && ccTourn.name) {
+        const raw = ccTourn.name;
+        const clean = raw.split(/\s*-\s*(?:البرعمات|البراعم|الصغيرات|الصغار|الفتيات|الفتيان|الشابات|الشبان|ذكور|إناث|مختلط|U12|U15|U18|U20|جميع الفئات|فئة|صغار|فتيان|شبان|براعم|صغيرات|فتيات|شابات|برعمات|لا منتمين|للمنتمين للأندية|مفتوحة|مواليد|السلك|دوري)/i)[0].trim();
+        if (clean && clean.length >= 3) return clean;
+        return raw.split(/\s*-\s*/)[0].trim() || raw;
+      }
+    }
+    return 'البطولة الإقليمية المدرسية للعدو الريفي';
+  }, [tournaments]);
+
+  // Sync editing student form values when a student is selected
+  useEffect(() => {
+    if (editingStudent) {
+      setEditFullName(editingStudent.fullName || '');
+      setEditMassarNumber(editingStudent.massarNumber || '');
+      setEditGender(editingStudent.gender || activeCategory.gender || 'Male');
+      setEditBirthDate(editingStudent.birthDate || '');
+      setEditCategory(editingStudent.category || activeCategory.category || 'U15');
+      setEditParticipationType(editingStudent.participationType || 'school_team');
+      setEditPhoto(editingStudent.photoUrl || '');
+      setEditAffiliationType(editingStudent.affiliationType || 'non_club');
+      setEditCoachName(editingStudent.coachName || (isTeacherRole && userProfile?.fullName ? userProfile.fullName : ''));
+      setEditCoachLease(editingStudent.coachLeaseNumber || (isTeacherRole && userProfile?.leaseNumber ? userProfile.leaseNumber : ''));
+      setEditCoachPhone(editingStudent.coachPhone || (isTeacherRole && userProfile?.phone ? userProfile.phone : ''));
+    }
+  }, [editingStudent, isTeacherRole, userProfile, activeCategory]);
+
+  const handleEditPhotoFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      setIsCompressingPhoto(true);
+      const compressed = await compressImageToBase64(file, { maxWidth: 240, maxHeight: 240, quality: 0.7 });
+      setEditPhoto(compressed);
+      toast.success('تم تحميل وتحديث الصورة بنجاح');
+    } catch (err) {
+      console.error('Error compressing image:', err);
+      toast.error('حدث خطأ أثناء معالجة الصورة');
+    } finally {
+      setIsCompressingPhoto(false);
+    }
+  };
+
+  const executeDeleteStudent = async () => {
+    if (!studentToDelete) return;
+    setIsDeletingStudent(true);
+    const toastId = toast.loading(`جاري حذف المشارك(ة) ${studentToDelete.fullName}...`);
+    try {
+      await DataService.deleteStudent(studentToDelete.id);
+      setLocalStudents(prev => prev.filter(s => s.id !== studentToDelete.id));
+      toast.dismiss(toastId);
+      toast.success(`تم حذف المشارك "${studentToDelete.fullName}" بنجاح`);
+      setStudentToDelete(null);
+      if (onRefreshData) onRefreshData();
+    } catch (err) {
+      console.error('Error deleting student:', err);
+      toast.dismiss(toastId);
+      toast.error('حدث خطأ أثناء حذف المشارك');
+    } finally {
+      setIsDeletingStudent(false);
+    }
+  };
+
+  const handleSaveEditedStudent = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingStudent) return;
+    if (!editFullName.trim()) {
+      toast.error('يرجى إدخال اسم ونسب المشارك(ة)');
+      return;
+    }
+    const massarRegex = /^[A-Z]\d{9}$/;
+    const cleanMassar = editMassarNumber.trim().toUpperCase();
+    if (!cleanMassar) {
+      toast.error('يرجى إدخال رقم مسار للمشارك(ة)');
+      return;
+    }
+    if (!massarRegex.test(cleanMassar)) {
+      toast.error('رقم مسار إجباري ويجب أن يتكون من حرف لاتيني كبير متبوعاً بـ 9 أرقام (مثال: F212121212)');
+      return;
+    }
+    if (!editBirthDate) {
+      toast.error('يرجى تحديد تاريخ الازدياد');
+      return;
+    }
+    const birthVal = validateBirthDateForCategory(editBirthDate, editCategory, activeSeason, editGender, true);
+    if (!birthVal.isValid) {
+      toast.error(`تاريخ الازدياد غير متوافق مع الفئة المحددة والجنس: ${birthVal.errorMessage}`);
+      return;
+    }
+    setIsSavingEditStudent(true);
+    const toastId = toast.loading('جاري حفظ التعديلات...');
+    try {
+      const updates: Partial<Student> = {
+        fullName: editFullName.trim(),
+        massarNumber: cleanMassar,
+        gender: editGender,
+        birthDate: editBirthDate,
+        category: editCategory,
+        participationType: editParticipationType,
+        photoUrl: editPhoto || undefined,
+        affiliationType: editAffiliationType,
+        coachName: (editCoachName.trim() || userProfile?.fullName || '').trim() || undefined,
+        coachLeaseNumber: (editCoachLease.trim() || userProfile?.leaseNumber || '').trim() || undefined,
+        coachPhone: (editCoachPhone.trim() || userProfile?.phone || '').trim() || undefined,
+      };
+      await DataService.updateStudent(editingStudent.id, updates);
+      setLocalStudents(prev => prev.map(s => s.id === editingStudent.id ? { ...s, ...updates } : s));
+      toast.dismiss(toastId);
+      toast.success(`تم تحديث بيانات المشارك(ة) "${editFullName}" بنجاح`);
+      setEditingStudent(null);
+      if (onRefreshData) onRefreshData();
+    } catch (err) {
+      console.error('Error updating student:', err);
+      toast.dismiss(toastId);
+      toast.error('حدث خطأ أثناء تعديل بيانات المشارك');
+    } finally {
+      setIsSavingEditStudent(false);
+    }
+  };
+
+  // Filter students participating in cross country (teachers only see their own school's participants)
+  const ccStudents = useMemo(() => {
+    let list = localStudents.filter(s => s && s.sportId === 'cross_country');
+    if (isTeacherRole) {
+      if (!teacherSchoolName && !userProfile?.schoolId) return [];
+      const cleanSchool = (teacherSchoolName || '').trim().toLowerCase();
+      list = list.filter(s => {
+        const sName = (s.schoolName || '').trim().toLowerCase();
+        return (
+          sName === cleanSchool ||
+          sName.includes(cleanSchool) ||
+          cleanSchool.includes(sName) ||
+          (userProfile?.schoolId && s.schoolId === userProfile.schoolId)
+        );
+      });
+    }
+    return list;
+  }, [localStudents, isTeacherRole, teacherSchoolName, userProfile?.schoolId]);
 
   // Participants in active category
   const activeCategoryParticipants = useMemo(() => {
@@ -171,7 +350,7 @@ export const CrossCountryChampionshipModal: React.FC<CrossCountryChampionshipMod
     );
   }, [ccStudents, activeCategory]);
 
-  // Filtered participants by search, type, and school
+  // Filtered participants by search, type, school, and affiliation
   const filteredParticipants = useMemo(() => {
     return activeCategoryParticipants.filter(p => {
       const runnerName = p.fullName || '';
@@ -181,97 +360,15 @@ export const CrossCountryChampionshipModal: React.FC<CrossCountryChampionshipMod
                           runnerSchool.toLowerCase().includes(searchQuery.toLowerCase()) ||
                           runnerMassar.toLowerCase().includes(searchQuery.toLowerCase());
       const matchType = filterType === 'ALL' || p.participationType === filterType;
-      const matchSchool = filterSchool === 'ALL' || p.schoolId === filterSchool || p.schoolName === filterSchool;
-      return matchSearch && matchType && matchSchool;
+      const matchSchool = isTeacherRole || filterSchool === 'ALL' || p.schoolId === filterSchool || p.schoolName === filterSchool;
+      const matchAffiliation = selectedAffiliationFilter === 'ALL'
+        ? true
+        : selectedAffiliationFilter === 'club_affiliated'
+          ? p.affiliationType === 'club_affiliated'
+          : (!p.affiliationType || p.affiliationType === 'non_club');
+      return matchSearch && matchType && matchSchool && matchAffiliation;
     });
-  }, [activeCategoryParticipants, searchQuery, filterType, filterSchool]);
-
-  // Current category result and calculations
-  const activeCategoryResult = useMemo(() => {
-    return results[selectedCatId] || {
-      categoryId: activeCategory.id,
-      category: activeCategory.category,
-      gender: activeCategory.gender,
-      titleAr: activeCategory.titleAr,
-      distance: activeCategory.distance,
-      podium: []
-    };
-  }, [results, selectedCatId, activeCategory]);
-
-  // Calculate team rankings for active category
-  const activeTeamRankings = useMemo(() => {
-    return calculateTeamRankings(activeCategoryResult?.podium || []);
-  }, [activeCategoryResult]);
-
-  // Active winning team
-  const activeWinningTeam = useMemo(() => {
-    return activeTeamRankings.length > 0 ? activeTeamRankings[0] : null;
-  }, [activeTeamRankings]);
-
-  // Regional qualifications
-  const activeRegionalQualifications = useMemo(() => {
-    return calculateRegionalQualifications(
-      activeCategoryResult?.podium || [],
-      activeWinningTeam?.schoolName || null
-    );
-  }, [activeCategoryResult, activeWinningTeam]);
-
-  // Open edit results modal
-  const handleOpenEditResults = () => {
-    setEditingVenue(activeCategoryResult.venueName || 'مضمار حلبة ألعاب القوى بتاوريرت');
-    if (activeCategoryResult.podium && activeCategoryResult.podium.length > 0) {
-      setEditingWinners([...activeCategoryResult.podium]);
-    } else {
-      // Initialize with standard places
-      setEditingWinners([
-        { rank: 1, fullName: '', schoolName: '', time: '', bibNumber: '', notes: 'مؤهل(ة) للبطولة الجهوية 🥇' },
-        { rank: 2, fullName: '', schoolName: '', time: '', bibNumber: '', notes: 'مؤهل(ة) للبطولة الجهوية 🥈' },
-        { rank: 3, fullName: '', schoolName: '', time: '', bibNumber: '', notes: 'مؤهل(ة) للبطولة الجهوية 🥉' },
-        { rank: 4, fullName: '', schoolName: '', time: '', bibNumber: '', notes: '' },
-        { rank: 5, fullName: '', schoolName: '', time: '', bibNumber: '', notes: '' }
-      ]);
-    }
-    setIsEditResultModalOpen(true);
-  };
-
-  const handleAddWinnerRow = () => {
-    const nextRank = editingWinners.length > 0 ? Math.max(...editingWinners.map(w => w.rank)) + 1 : 1;
-    setEditingWinners([...editingWinners, { rank: nextRank, fullName: '', schoolName: '', time: '', bibNumber: '', notes: '' }]);
-  };
-
-  const handleRemoveWinnerRow = (index: number) => {
-    const updated = editingWinners.filter((_, i) => i !== index);
-    setEditingWinners(updated);
-  };
-
-  const handleSaveResults = async () => {
-    try {
-      setIsSavingResults(true);
-      const validWinners = editingWinners.filter(w => w.fullName.trim() !== '');
-      validWinners.sort((a, b) => a.rank - b.rank);
-
-      const payload: CrossCountryCategoryResult = {
-        categoryId: activeCategory.id,
-        category: activeCategory.category,
-        gender: activeCategory.gender,
-        titleAr: activeCategory.titleAr,
-        distance: activeCategory.distance,
-        venueName: editingVenue,
-        updatedAt: new Date().toISOString().split('T')[0],
-        podium: validWinners
-      };
-
-      await DataService.saveCrossCountryCategoryResult(payload);
-      setResults(prev => ({ ...prev, [activeCategory.id]: payload }));
-      setIsEditResultModalOpen(false);
-      toast.success(`تم حفظ نتائج وتتويج ${activeCategory.titleAr} بنجاح!`);
-    } catch (e) {
-      console.error('Error saving category results:', e);
-      toast.error('حدث خطأ أثناء حفظ النتائج.');
-    } finally {
-      setIsSavingResults(false);
-    }
-  };
+  }, [activeCategoryParticipants, searchQuery, filterType, filterSchool, isTeacherRole, selectedAffiliationFilter]);
 
   if (!isOpen) return null;
 
@@ -351,11 +448,6 @@ export const CrossCountryChampionshipModal: React.FC<CrossCountryChampionshipMod
     toast.success('تم تصدير الملف الموحد لجميع الفئات الثمانية بنجاح!');
   };
 
-  const firstPlace = activeCategoryResult.podium?.find(w => w.rank === 1);
-  const secondPlace = activeCategoryResult.podium?.find(w => w.rank === 2);
-  const thirdPlace = activeCategoryResult.podium?.find(w => w.rank === 3);
-  const otherRankings = activeCategoryResult.podium?.filter(w => w.rank > 3) || [];
-
   return (
     <>
       <div ref={scrollContainerRef} className="fixed inset-0 z-50 flex items-start justify-center p-2 sm:p-4 md:p-6 bg-slate-900/70 backdrop-blur-xs overflow-y-auto scroll-smooth" dir="rtl">
@@ -372,7 +464,7 @@ export const CrossCountryChampionshipModal: React.FC<CrossCountryChampionshipMod
                 <div>
                   <div className="flex items-center gap-2 flex-wrap">
                     <h2 className="text-sm sm:text-base md:text-lg font-black tracking-tight text-white">
-                      البطولة الإقليمية المدرسية للعدو الريفي
+                      {customTitle}
                     </h2>
                     <span className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[10px] font-extrabold px-2 py-0.5 rounded-full">
                       8 فئات عمرية مدمجة
@@ -410,7 +502,7 @@ export const CrossCountryChampionshipModal: React.FC<CrossCountryChampionshipMod
                   )}
                 </button>
 
-                {isHeaderCollapsed && (
+                {isHeaderCollapsed && !isTeacherRole && (
                   <button
                     type="button"
                     onClick={() => setIsRegisterModalOpen(true)}
@@ -450,22 +542,27 @@ export const CrossCountryChampionshipModal: React.FC<CrossCountryChampionshipMod
 
                   <div className="flex flex-wrap items-center justify-end gap-2 shrink-0">
                     {canManage && (
-                      <button
-                        onClick={() => setIsEditDeadlineOpen(true)}
-                        className="px-3 py-2 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-400/40 rounded-xl text-xs font-bold transition-colors cursor-pointer flex items-center gap-1.5"
-                      >
-                        <Clock className="w-3.5 h-3.5 text-amber-400" />
-                        <span>تعديل آخر أجل للتسجيل ✏️</span>
-                      </button>
-                    )}
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => setIsEditDeadlineOpen(true)}
+                          className="px-3 py-2 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-400/40 rounded-xl text-xs font-bold transition-colors cursor-pointer flex items-center gap-1.5"
+                        >
+                          <Clock className="w-3.5 h-3.5 text-amber-400" />
+                          <span>تعديل آخر أجل للتسجيل ✏️</span>
+                        </button>
 
-                    <button
-                      onClick={() => setIsRegisterModalOpen(true)}
-                      className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black shadow-md transition-all cursor-pointer flex items-center gap-2 hover:scale-102 active:scale-98"
-                    >
-                      <GraduationCap className="w-4 h-4" />
-                      <span>تسجيل عدائين / فرق في هذه البطولة</span>
-                    </button>
+                        {onProgramTournament && (
+                          <button
+                            onClick={() => onProgramTournament('cross_country')}
+                            className="px-3 py-2 bg-blue-500/20 hover:bg-blue-500/30 text-blue-300 border border-blue-400/40 rounded-xl text-xs font-bold transition-colors cursor-pointer flex items-center gap-1.5"
+                            title="تعديل فئات وإعدادات البطولة"
+                          >
+                            <Settings className="w-3.5 h-3.5" />
+                            <span>إعدادات البطولة ⚙️</span>
+                          </button>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -526,17 +623,30 @@ export const CrossCountryChampionshipModal: React.FC<CrossCountryChampionshipMod
                 <span>الفئات المشاركة الثمانية المعتمدة (8 Categories):</span>
               </span>
               <span className="text-[11px] text-slate-500 font-medium hidden sm:inline">
-                انقر على الفئة لاستعراض تفاصيلها، لوائحها، ونتائج الفريق الفائز
+                انقر على الفئة لاستعراض تفاصيلها ولوائح التلاميذ المسجلين بها
               </span>
             </div>
 
             <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-1.5">
               {CROSS_COUNTRY_CATEGORIES.map((cat) => {
                 const isSelected = selectedCatId === cat.id;
-                const countInCat = ccStudents.filter(s => s.category === cat.category && s.gender === cat.gender).length;
-                const catResult = results[cat.id];
-                const catTeams = calculateTeamRankings(catResult?.podium || []);
-                const catWinningTeam = catTeams.length > 0 ? catTeams[0] : null;
+                const catCategory = cat.category.toLowerCase().trim();
+                const catGender = cat.gender.toLowerCase().trim();
+                const countInCat = ccStudents.filter(s => {
+                  const sCategory = (s.category || '').toLowerCase().trim();
+                  const sGender = (s.gender || '').toLowerCase().trim();
+                  const matchCat = sCategory === catCategory ||
+                    (catCategory === 'u12' && (sCategory.includes('براعم') || sCategory.includes('12') || sCategory.includes('برعم'))) ||
+                    (catCategory === 'u15' && (sCategory.includes('صغار') || sCategory.includes('15') || sCategory.includes('صغير'))) ||
+                    (catCategory === 'u18' && (sCategory.includes('فتيان') || sCategory.includes('18') || sCategory.includes('فتيات') || sCategory.includes('فتي'))) ||
+                    (catCategory === 'u20' && (sCategory.includes('شبان') || sCategory.includes('20') || sCategory.includes('شابات') || sCategory.includes('شب')));
+
+                  const matchGen = sGender === catGender ||
+                    (catGender === 'male' && (sGender.includes('ذكر') || sGender.includes('ذكور') || sGender === 'm' || sGender === 'male' || sGender.includes('ولد'))) ||
+                    (catGender === 'female' && (sGender.includes('أنثى') || sGender.includes('انثى') || sGender.includes('إناث') || sGender.includes('اناث') || sGender === 'f' || sGender === 'female' || sGender.includes('بنت')));
+
+                  return matchCat && matchGen;
+                }).length;
 
                 return (
                   <button
@@ -550,23 +660,13 @@ export const CrossCountryChampionshipModal: React.FC<CrossCountryChampionshipMod
                   >
                     <div className="flex items-center justify-between gap-1">
                       <span className="text-xs">{cat.icon}</span>
-                      <div className="flex items-center gap-1">
-                        {catWinningTeam && (
-                          <span
-                            title={`الفريق الفائز: ${catWinningTeam.schoolName} (${catWinningTeam.totalPoints} ن)`}
-                            className="text-[9px] bg-amber-400 text-slate-950 font-black px-1 rounded-full shadow-2xs flex items-center gap-0.5"
-                          >
-                            🏆
-                          </span>
-                        )}
-                        <span
-                          className={`text-[9px] font-black px-1.5 py-0.2 rounded-full ${
-                            isSelected ? 'bg-white/25 text-white' : 'bg-white text-slate-800 border border-slate-200/60'
-                          }`}
-                        >
-                          {countInCat}
-                        </span>
-                      </div>
+                      <span
+                        className={`text-[9px] font-black px-1.5 py-0.2 rounded-full ${
+                          isSelected ? 'bg-white/25 text-white' : 'bg-white text-slate-800 border border-slate-200/60'
+                        }`}
+                      >
+                        {countInCat}
+                      </span>
                     </div>
                     <div className="mt-1">
                       <div className={`text-[11px] font-black leading-tight truncate ${isSelected ? 'text-white' : 'text-slate-900'}`}>
@@ -575,15 +675,38 @@ export const CrossCountryChampionshipModal: React.FC<CrossCountryChampionshipMod
                       <div className={`text-[9px] font-semibold mt-0.5 ${isSelected ? 'text-blue-100' : 'text-slate-500'}`}>
                         المسافة: {cat.distance}
                       </div>
-                      {catWinningTeam && (
-                        <div className={`text-[9px] font-black truncate mt-0.5 ${isSelected ? 'text-amber-300' : 'text-amber-800'}`}>
-                          بطل الفرق: {catWinningTeam.schoolName.split(' ')[0]}..
-                        </div>
-                      )}
                     </div>
                   </button>
                 );
               })}
+            </div>
+
+            {/* Registration action buttons directly below the 8 categories */}
+            <div className="mt-3 pt-2.5 border-t border-slate-200 flex flex-wrap items-center justify-between gap-2.5 px-1 bg-white/70 rounded-xl p-2">
+              <div className="text-xs text-slate-700 font-bold flex items-center gap-1.5 flex-wrap">
+                <span>التسجيل في منافسات العدو الريفي:</span>
+                <span className="px-2 py-0.5 bg-blue-100 text-blue-800 rounded-md font-black text-xs">الفئة المحددة: {activeCategory.titleAr}</span>
+              </div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  type="button"
+                  onClick={() => setIsBulkRegisterModalOpen(true)}
+                  className="px-4 py-2 bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 text-slate-950 rounded-xl text-xs font-black shadow-xs transition-all cursor-pointer flex items-center gap-2 hover:scale-102 active:scale-98"
+                  title="تسجيل 8 مشاركين دفعة واحدة (3 فردي + 5 فريق المؤسسة) مع إمكانية التصدير إلى Excel"
+                >
+                  <Sparkles className="w-4 h-4 text-slate-950" />
+                  <span>تسجيل 8 مشاركين (3 فردي + 5 فريق) ⚡</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsRegisterModalOpen(true)}
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black shadow-xs transition-all cursor-pointer flex items-center gap-2 hover:scale-102 active:scale-98"
+                  title="تسجيل تلميذ مشارك بشكل منفرد"
+                >
+                  <GraduationCap className="w-4 h-4" />
+                  <span>تسجيل واحد تلو الآخر</span>
+                </button>
+              </div>
             </div>
           </div>
 
@@ -616,27 +739,15 @@ export const CrossCountryChampionshipModal: React.FC<CrossCountryChampionshipMod
 
                 {/* Quick Category Actions */}
                 <div className="flex flex-wrap items-center gap-2 shrink-0">
-                  {canManage && (
-                    <button
-                      onClick={handleOpenEditResults}
-                      className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors shadow-xs cursor-pointer"
-                      title="تسجيل أو تعديل نتائج التتويج والبوديوم لهذه الفئة"
-                    >
-                      <Edit3 className="h-3.5 w-3.5 text-amber-400" />
-                      <span>تسجيل / تعديل النتائج</span>
-                    </button>
-                  )}
+                  <button
+                    onClick={() => handleExportCategoryExcel(activeCategory)}
+                    className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors shadow-xs cursor-pointer"
+                    title="تصدير لائحة المشاركين المسجلين في هذه الفئة بصيغة Excel"
+                  >
+                    <Download className="h-3.5 w-3.5" />
+                    <span>تصدير المشاركين (Excel)</span>
+                  </button>
 
-                  {canManage && (
-                    <button
-                      onClick={() => handleExportCategoryExcel(activeCategory)}
-                      className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors shadow-xs cursor-pointer"
-                      title="تصدير لائحة هذه الفئة إلى Excel"
-                    >
-                      <Download className="h-3.5 w-3.5" />
-                      <span>تصدير اللائحة (Excel)</span>
-                    </button>
-                  )}
                   {filterSchool !== 'ALL' && (
                     <button
                       onClick={() => setIsPdfModalOpen(true)}
@@ -649,419 +760,50 @@ export const CrossCountryChampionshipModal: React.FC<CrossCountryChampionshipMod
                   )}
                 </div>
               </div>
-
-              {/* 🏆 WINNING TEAM CARD / BANNER IN ACTIVE CATEGORY */}
-              {activeWinningTeam ? (
-                <div className="p-4 rounded-2xl bg-gradient-to-r from-blue-950 via-slate-900 to-indigo-950 text-white border border-amber-400/50 shadow-md animate-in fade-in duration-200">
-                  <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
-                    <div className="flex items-center gap-3 min-w-0">
-                      <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-amber-400 to-yellow-500 text-slate-950 flex items-center justify-center font-black text-2xl shadow-lg border border-amber-300 shrink-0">
-                        🏆
-                      </div>
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="text-[10px] font-black text-amber-300 bg-amber-400/20 px-2.5 py-0.5 rounded-full border border-amber-400/30 flex items-center gap-1">
-                            <span>الفريق الفائز بالبطولة في هذه الفئة (فريق المؤسسة البطل)</span>
-                          </span>
-                          <span className="text-[10px] font-black text-emerald-300 bg-emerald-500/20 px-2 py-0.5 rounded-full border border-emerald-400/30 flex items-center gap-1">
-                            <CheckCircle2 className="w-3 h-3 text-emerald-400" />
-                            <span>متأهل جماعياً للبطولة الجهوية للرياضة المدرسية</span>
-                          </span>
-                        </div>
-                        <h4 className="text-base sm:text-lg font-black text-white mt-1 truncate">
-                          {activeWinningTeam.schoolName}
-                        </h4>
-                      </div>
-                    </div>
-
-                    <div className="flex flex-wrap items-center gap-2 text-xs self-stretch sm:self-auto justify-end">
-                      <div className="bg-white/10 px-3 py-1.5 rounded-xl border border-white/15">
-                        <span className="text-slate-300 text-[10px] block font-medium">مجموع نقط الأربعة الأوائل:</span>
-                        <span className="text-sm font-mono font-black text-amber-300">{activeWinningTeam.totalPoints} نقطة (الأصغر)</span>
-                      </div>
-                      <div className="bg-white/10 px-3 py-1.5 rounded-xl border border-white/15">
-                        <span className="text-slate-300 text-[10px] block font-medium">رتبة العداء الرابع (الحاسم):</span>
-                        <span className="text-sm font-mono font-black text-blue-200">الرتبة {activeWinningTeam.fourthRunnerRank}</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Top 4 runners chips for winning team */}
-                  <div className="mt-3 pt-3 border-t border-white/10">
-                    <div className="text-[11px] font-bold text-slate-300 mb-2 flex items-center gap-1.5">
-                      <Users className="w-3.5 h-3.5 text-amber-400" />
-                      <span>عناصر الفريق الفائز المحتسبين في التتويج (أول 4 عداءين في خط الوصول):</span>
-                    </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
-                      {activeWinningTeam.top4Runners.map((runner, rIdx) => (
-                        <div key={rIdx} className="bg-white/5 border border-white/10 rounded-xl p-2 flex items-center justify-between gap-2">
-                          <div className="flex items-center gap-2 min-w-0">
-                            <span className={`w-6 h-6 rounded-lg text-xs font-black flex items-center justify-center shrink-0 ${
-                              runner.rank === 1 ? 'bg-amber-400 text-slate-950 font-black' :
-                              runner.rank === 2 ? 'bg-slate-300 text-slate-950 font-black' :
-                              runner.rank === 3 ? 'bg-amber-600 text-white font-black' :
-                              'bg-blue-500/30 text-blue-200 font-bold'
-                            }`}>
-                              {runner.rank}
-                            </span>
-                            <span className="text-xs font-bold text-white truncate">{runner.fullName}</span>
-                          </div>
-                          {runner.time && (
-                            <span className="text-[10px] font-mono text-slate-300 shrink-0">{runner.time}</span>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              ) : activeCategoryResult.podium && activeCategoryResult.podium.length > 0 ? (
-                <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 text-xs font-bold flex items-center gap-2">
-                  <Info className="w-4 h-4 text-amber-600 shrink-0" />
-                  <span>لم يتم حسم فريق فائز في هذه الفئة بعد (يشترط وصول 4 عداءين على الأقل من نفس المؤسسة المصرح بمشاركتها كفريق).</span>
-                </div>
-              ) : null}
             </div>
 
-            {/* View Mode Switcher: Results vs. Registered Participants */}
-            <div className="flex items-center justify-between gap-3 bg-slate-100 p-1.5 rounded-2xl border border-slate-200">
-              <div className="flex items-center gap-1.5 flex-1">
-                <button
-                  type="button"
-                  onClick={() => setActiveTab('results')}
-                  className={`flex-1 flex items-center justify-center gap-2 py-2 px-3 rounded-xl text-xs font-black transition-all cursor-pointer ${
-                    activeTab === 'results'
-                      ? 'bg-white text-slate-900 shadow-sm border border-slate-200'
-                      : 'text-slate-600 hover:text-slate-900'
-                  }`}
-                >
-                  <Trophy className={`w-3.5 h-3.5 ${activeTab === 'results' ? 'text-amber-500' : 'text-slate-400'}`} />
-                  <span>منصة النتائج والتتويج الرسمي</span>
-                  {activeCategoryResult.podium && activeCategoryResult.podium.length > 0 && (
-                    <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-                  )}
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setActiveTab('participants')}
-                  className={`flex-1 flex items-center justify-center gap-2 py-2 px-3 rounded-xl text-xs font-black transition-all cursor-pointer ${
-                    activeTab === 'participants'
-                      ? 'bg-white text-slate-900 shadow-sm border border-slate-200'
-                      : 'text-slate-600 hover:text-slate-900'
-                  }`}
-                >
-                  <Users className={`w-3.5 h-3.5 ${activeTab === 'participants' ? 'text-blue-600' : 'text-slate-400'}`} />
-                  <span>لائحة العدائين المسجلين ({filteredParticipants.length})</span>
-                </button>
+            {/* Info Notice: Segregation of Scanner and Results */}
+            <div className="bg-gradient-to-r from-blue-50 via-slate-50 to-blue-50 border border-blue-200/80 rounded-2xl p-3 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs shadow-xs">
+              <div className="flex items-center gap-2.5">
+                <span className="text-xl">🏃</span>
+                <div>
+                  <div className="font-extrabold text-blue-950 flex items-center gap-2">
+                    <span>لائحة العدائين المسجلين في فئة {activeCategory.titleAr} ({filteredParticipants.length} مشارك)</span>
+                  </div>
+                  <p className="text-[11px] text-slate-600 mt-0.5">
+                    هذه النافذة مخصصة لإدارة وتسجيل العدائين والتحقق من الصدريات ولوائح المؤسسات المشاركة.
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 text-[11px] font-bold text-slate-600 self-stretch sm:self-auto justify-end">
+                <span className="px-2.5 py-1 bg-white rounded-lg border border-slate-200 text-slate-700 shadow-2xs">
+                  🏆 النتائج والتتويج: في زر <strong className="text-blue-700">المباريات والنتائج</strong>
+                </span>
+                <span className="px-2.5 py-1 bg-white rounded-lg border border-slate-200 text-slate-700 shadow-2xs">
+                  📱 ماسح الصدريات: في زر <strong className="text-blue-700">تطبيقات مساعدة</strong>
+                </span>
               </div>
             </div>
 
-            {/* TAB 1: RESULTS & PODIUM VIEW */}
-            {activeTab === 'results' && (
-              <div className="space-y-4">
-                {/* Results Subtabs: Individual Podium vs. Team Rankings vs. Regional Qualifications */}
-                <div className="flex flex-wrap items-center gap-2 bg-slate-50 p-1.5 rounded-xl border border-slate-200">
-                  <button
-                    type="button"
-                    onClick={() => setResultsSubTab('individual')}
-                    className={`flex-1 min-w-[120px] py-1.5 px-3 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
-                      resultsSubTab === 'individual'
-                        ? 'bg-amber-500 text-slate-950 font-black shadow-xs'
-                        : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
-                    }`}
-                  >
-                    <Medal className="w-3.5 h-3.5" />
-                    <span>البوديوم الفردي (الثلاثة الأوائل)</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setResultsSubTab('team')}
-                    className={`flex-1 min-w-[120px] py-1.5 px-3 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
-                      resultsSubTab === 'team'
-                        ? 'bg-blue-600 text-white font-black shadow-xs'
-                        : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
-                    }`}
-                  >
-                    <Users className="w-3.5 h-3.5" />
-                    <span>ترتيب فرق المؤسسات ({activeTeamRankings.length})</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setResultsSubTab('regional')}
-                    className={`flex-1 min-w-[120px] py-1.5 px-3 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
-                      resultsSubTab === 'regional'
-                        ? 'bg-emerald-600 text-white font-black shadow-xs'
-                        : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
-                    }`}
-                  >
-                    <ShieldCheck className="w-3.5 h-3.5" />
-                    <span>محضر التأهل الجهوي والبدلاء</span>
-                  </button>
-                </div>
-
-                {/* SubTab 1: Individual Podium */}
-                {resultsSubTab === 'individual' && (
-                  <div className="space-y-4">
-                    {/* Top 3 Podium Boxes */}
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                      {/* 1st Place */}
-                      <div className="p-4 rounded-2xl bg-gradient-to-b from-amber-50 to-yellow-100/60 border-2 border-amber-300 shadow-sm relative overflow-hidden flex flex-col justify-between">
-                        <div className="absolute -top-6 -right-6 w-24 h-24 bg-amber-400/20 rounded-full blur-xl pointer-events-none"></div>
-                        <div className="flex items-center justify-between">
-                          <span className="text-2xl">🥇</span>
-                          <span className="text-[10px] font-black bg-amber-400 text-slate-950 px-2 py-0.5 rounded-full shadow-2xs">
-                            المرتبة الأولى (بطل الفئة)
-                          </span>
-                        </div>
-                        <div className="my-3">
-                          <h4 className="text-sm font-black text-slate-900">
-                            {firstPlace?.fullName || 'في انتظار تسجيل النتائج'}
-                          </h4>
-                          <p className="text-xs text-amber-900 font-bold mt-0.5">
-                            {firstPlace?.schoolName || '—'}
-                          </p>
-                        </div>
-                        <div className="flex items-center justify-between text-xs pt-2 border-t border-amber-200 font-mono">
-                          <span className="text-slate-500 font-sans text-[10px]">التوقيت:</span>
-                          <span className="font-black text-amber-950">{firstPlace?.time || '—'}</span>
-                        </div>
-                      </div>
-
-                      {/* 2nd Place */}
-                      <div className="p-4 rounded-2xl bg-gradient-to-b from-slate-50 to-slate-100 border-2 border-slate-300 shadow-sm relative overflow-hidden flex flex-col justify-between">
-                        <div className="flex items-center justify-between">
-                          <span className="text-2xl">🥈</span>
-                          <span className="text-[10px] font-black bg-slate-300 text-slate-900 px-2 py-0.5 rounded-full shadow-2xs">
-                            المرتبة الثانية
-                          </span>
-                        </div>
-                        <div className="my-3">
-                          <h4 className="text-sm font-black text-slate-900">
-                            {secondPlace?.fullName || 'في انتظار تسجيل النتائج'}
-                          </h4>
-                          <p className="text-xs text-slate-600 font-bold mt-0.5">
-                            {secondPlace?.schoolName || '—'}
-                          </p>
-                        </div>
-                        <div className="flex items-center justify-between text-xs pt-2 border-t border-slate-200 font-mono">
-                          <span className="text-slate-500 font-sans text-[10px]">التوقيت:</span>
-                          <span className="font-black text-slate-800">{secondPlace?.time || '—'}</span>
-                        </div>
-                      </div>
-
-                      {/* 3rd Place */}
-                      <div className="p-4 rounded-2xl bg-gradient-to-b from-amber-50/40 to-orange-100/50 border-2 border-amber-200 shadow-sm relative overflow-hidden flex flex-col justify-between">
-                        <div className="flex items-center justify-between">
-                          <span className="text-2xl">🥉</span>
-                          <span className="text-[10px] font-black bg-amber-600 text-white px-2 py-0.5 rounded-full shadow-2xs">
-                            المرتبة الثالثة
-                          </span>
-                        </div>
-                        <div className="my-3">
-                          <h4 className="text-sm font-black text-slate-900">
-                            {thirdPlace?.fullName || 'في انتظار تسجيل النتائج'}
-                          </h4>
-                          <p className="text-xs text-amber-900 font-bold mt-0.5">
-                            {thirdPlace?.schoolName || '—'}
-                          </p>
-                        </div>
-                        <div className="flex items-center justify-between text-xs pt-2 border-t border-amber-200 font-mono">
-                          <span className="text-slate-500 font-sans text-[10px]">التوقيت:</span>
-                          <span className="font-black text-amber-950">{thirdPlace?.time || '—'}</span>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Other rankings table if available */}
-                    {otherRankings.length > 0 && (
-                      <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-xs">
-                        <div className="p-2.5 bg-slate-50 border-b border-slate-200 text-xs font-bold text-slate-700">
-                          باقي المراكز المسجلة في خط الوصول ({otherRankings.length})
-                        </div>
-                        <table className="w-full text-center text-xs">
-                          <thead className="bg-slate-100/80 text-slate-600 font-bold border-b border-slate-200">
-                            <tr>
-                              <th className="py-2 px-3 text-center w-12">الرتبة</th>
-                              <th className="py-2 px-3">الاسم والنسب</th>
-                              <th className="py-2 px-3">المؤسسة التعليمية</th>
-                              <th className="py-2 px-3 text-center">التوقيت</th>
-                              <th className="py-2 px-3 text-center">رقم الصدرية</th>
-                              <th className="py-2 px-3">ملاحظات</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-slate-100">
-                            {otherRankings.map((r, idx) => (
-                              <tr key={idx} className="hover:bg-slate-50">
-                                <td className="py-2 px-3 text-center font-bold text-slate-500">{r.rank}</td>
-                                <td className="py-2 px-3 font-bold text-slate-900">{r.fullName}</td>
-                                <td className="py-2 px-3 text-slate-700">{r.schoolName}</td>
-                                <td className="py-2 px-3 text-center font-mono font-bold text-slate-600">{r.time || '—'}</td>
-                                <td className="py-2 px-3 text-center font-mono">{r.bibNumber || '—'}</td>
-                                <td className="py-2 px-3 text-slate-500 text-[11px]">{r.notes || '—'}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* SubTab 2: Team Rankings */}
-                {resultsSubTab === 'team' && (
-                  <div className="space-y-4">
-                    {activeTeamRankings.length > 0 ? (
-                      <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-xs">
-                        <div className="p-3 bg-blue-50/50 border-b border-blue-100 flex items-center justify-between">
-                          <div className="flex items-center gap-2 text-xs font-bold text-blue-950">
-                            <Users className="w-4 h-4 text-blue-600" />
-                            <span>جدول ترتيب الفرق الرسمية (احتساب مجموع رتب 4 عداءين الأوائل لكل مؤسسة)</span>
-                          </div>
-                          <span className="text-[11px] text-blue-700 font-bold">
-                            قاعدة الحسم: أصغر مجموع نقاط، وعند التساوي رتبة العداء الرابع
-                          </span>
-                        </div>
-
-                        <table className="w-full text-center text-xs">
-                          <thead className="bg-slate-100 text-slate-700 font-bold border-b border-slate-200">
-                            <tr>
-                              <th className="py-2.5 px-3 text-center w-14">الترتيب</th>
-                              <th className="py-2.5 px-3">المؤسسة التعليمية</th>
-                              <th className="py-2.5 px-3 text-center">مجموع النقط (المجموع الأصغر يفوز)</th>
-                              <th className="py-2.5 px-3 text-center">رتبة العداء الرابع</th>
-                              <th className="py-2.5 px-3 text-center">رتبة أول عداء</th>
-                              <th className="py-2.5 px-3 text-center">صفة التأهل</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-slate-100">
-                            {activeTeamRankings.map((team) => (
-                              <tr key={team.schoolName} className={team.isWinnerTeam ? 'bg-amber-50/60 font-bold' : 'hover:bg-slate-50'}>
-                                <td className="py-2.5 px-3 text-center">
-                                  {team.rank === 1 ? (
-                                    <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-amber-400 text-slate-950 font-black text-xs shadow-2xs">
-                                      🥇
-                                    </span>
-                                  ) : (
-                                    <span className="font-bold text-slate-600">{team.rank}</span>
-                                  )}
-                                </td>
-                                <td className="py-2.5 px-3">
-                                  <div className="font-black text-slate-900 flex items-center gap-1.5">
-                                    <span>{team.schoolName}</span>
-                                    {team.isWinnerTeam && (
-                                      <span className="text-[10px] bg-amber-400 text-slate-950 px-1.5 py-0.2 rounded font-black">
-                                        الفريق البطل 🏆
-                                      </span>
-                                    )}
-                                  </div>
-                                </td>
-                                <td className="py-2.5 px-3 text-center font-mono font-black text-blue-700">
-                                  {team.totalPoints} نقطة
-                                </td>
-                                <td className="py-2.5 px-3 text-center font-mono text-slate-700">
-                                  الرتبة {team.fourthRunnerRank}
-                                </td>
-                                <td className="py-2.5 px-3 text-center font-mono text-slate-700">
-                                  الرتبة {team.firstRunnerRank}
-                                </td>
-                                <td className="py-2.5 px-3 text-center">
-                                  {team.isWinnerTeam ? (
-                                    <span className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-100 text-emerald-800 border border-emerald-300">
-                                      متأهل للبطولة الجهوية 🚀
-                                    </span>
-                                  ) : (
-                                    <span className="text-slate-400 text-[10px]">غير متأهل</span>
-                                  )}
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    ) : (
-                      <div className="p-8 text-center text-slate-500 bg-white rounded-xl border border-slate-200 space-y-2">
-                        <Users className="w-10 h-10 text-slate-300 mx-auto" />
-                        <p className="text-xs font-bold text-slate-700">لا يوجد ترتيب للفرق مسجل حالياً</p>
-                        <p className="text-[11px] text-slate-400">
-                          يشترط وجود 4 عداءين على الأقل من نفس المؤسسة في خط الوصول لاحتساب المؤسسة ضمن ترتيب الفرق.
-                        </p>
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* SubTab 3: Regional Qualifications & Replacements */}
-                {resultsSubTab === 'regional' && (
-                  <div className="space-y-4">
-                    <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-xs">
-                      <div className="p-3 bg-emerald-50/50 border-b border-emerald-100 flex items-center justify-between">
-                        <div className="flex items-center gap-2 text-xs font-bold text-emerald-950">
-                          <ShieldCheck className="w-4 h-4 text-emerald-600" />
-                          <span>محضر التأهل الفردي والجماعي للبطولة الجهوية للرياضة المدرسية</span>
-                        </div>
-                        <span className="text-[11px] text-emerald-700 font-bold">
-                          تطبيق قاعدة تعويض المتوج الفردي المتأهل مع فريقه
+            {/* REGISTERED ATHLETES TABLE */}
+              <div className="space-y-3">
+                {/* Teacher Notification Banner */}
+                {isTeacherRole && (
+                  <div className="bg-amber-50 border border-amber-200/90 rounded-xl p-3 flex items-center justify-between gap-3 text-xs text-amber-950 shadow-3xs">
+                    <div className="flex items-center gap-2">
+                      <span className="text-base">👤</span>
+                      <div>
+                        <span className="font-extrabold text-amber-900">لائحة مشاركي مؤسستك فقط: </span>
+                        <span className="text-amber-800">
+                          بصفتك أستاذاً، تُعرض هنا حصرياً مشاركات تلاميذ مؤسستك
+                          {teacherSchoolName ? ` [${teacherSchoolName}] ` : ' '}
+                          المسجلين في فئة {activeCategory.shortLabel}.
                         </span>
                       </div>
-
-                      {activeRegionalQualifications.length > 0 ? (
-                        <table className="w-full text-center text-xs">
-                          <thead className="bg-slate-100 text-slate-700 font-bold border-b border-slate-200">
-                            <tr>
-                              <th className="py-2.5 px-3 text-center w-14">مقعد التأهل</th>
-                              <th className="py-2.5 px-3">العداء المؤهل</th>
-                              <th className="py-2.5 px-3">المؤسسة التعليمية</th>
-                              <th className="py-2.5 px-3 text-center">الرتبة في السباق</th>
-                              <th className="py-2.5 px-3">نوع وصفة التأهل</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-slate-100">
-                            {activeRegionalQualifications.map((item) => (
-                              <tr key={item.qualifyingRank} className="hover:bg-slate-50">
-                                <td className="py-2.5 px-3 text-center">
-                                  <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-emerald-600 text-white font-black text-xs">
-                                    {item.qualifyingRank}
-                                  </span>
-                                </td>
-                                <td className="py-2.5 px-3 font-black text-slate-900">
-                                  {item.runner.fullName}
-                                </td>
-                                <td className="py-2.5 px-3 text-slate-700">
-                                  {item.runner.schoolName}
-                                </td>
-                                <td className="py-2.5 px-3 text-center font-mono font-bold text-blue-700">
-                                  المركز {item.originalFinishRank}
-                                </td>
-                                <td className="py-2.5 px-3">
-                                  <span className={`inline-flex px-2 py-0.5 rounded text-[10px] font-bold border ${
-                                    item.isReplacement
-                                      ? 'bg-purple-50 text-purple-700 border-purple-200'
-                                      : 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                                  }`}>
-                                    {item.reasonAr}
-                                  </span>
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      ) : (
-                        <div className="p-8 text-center text-slate-500 space-y-2">
-                          <ShieldCheck className="w-10 h-10 text-slate-300 mx-auto" />
-                          <p className="text-xs font-bold text-slate-700">في انتظار تسجيل نتائج السباق</p>
-                        </div>
-                      )}
                     </div>
                   </div>
                 )}
-              </div>
-            )}
 
-            {/* TAB 2: REGISTERED ATHLETES TABLE */}
-            {activeTab === 'participants' && (
-              <div className="space-y-3">
                 {/* Search & Sub-filters */}
                 <div className="flex flex-col sm:flex-row items-center gap-2.5 bg-slate-50 p-2.5 rounded-xl border border-slate-200">
                   <div className="flex flex-1 items-center px-2 w-full bg-white rounded-lg border border-slate-200">
@@ -1104,17 +846,34 @@ export const CrossCountryChampionshipModal: React.FC<CrossCountryChampionshipMod
                     </select>
 
                     <select
-                      value={filterSchool}
-                      onChange={(e) => setFilterSchool(e.target.value)}
-                      className="text-xs font-bold text-slate-700 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer w-full sm:w-auto max-w-[180px]"
+                      value={selectedAffiliationFilter}
+                      onChange={(e) => setSelectedAffiliationFilter(e.target.value as any)}
+                      className="text-xs font-bold text-amber-900 bg-amber-50/70 border border-amber-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-amber-500 cursor-pointer w-full sm:w-auto"
                     >
-                      <option value="ALL">جميع المؤسسات</option>
-                      {schools.map(sch => (
-                        <option key={sch.id} value={sch.id}>
-                          {sch.name}
-                        </option>
-                      ))}
+                      <option value="ALL">🌟 جميع الأصناف (منتمين وغير منتمين)</option>
+                      <option value="non_club">⚪ غير المنتمين للأندية (مدرسي)</option>
+                      <option value="club_affiliated">⚽ المنتمين للأندية (Club)</option>
                     </select>
+
+                    {isTeacherRole ? (
+                      <div className="flex items-center gap-1.5 text-xs font-bold text-amber-900 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5 shadow-3xs select-none max-w-[200px]" title="مؤسستك المعتمدة">
+                        <GraduationCap className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                        <span className="truncate">{teacherSchoolName || 'مؤسستك المعتمدة'}</span>
+                      </div>
+                    ) : (
+                      <select
+                        value={filterSchool}
+                        onChange={(e) => setFilterSchool(e.target.value)}
+                        className="text-xs font-bold text-slate-700 bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer w-full sm:w-auto max-w-[180px]"
+                      >
+                        <option value="ALL">جميع المؤسسات</option>
+                        {schools.map(sch => (
+                          <option key={sch.id} value={sch.id}>
+                            {sch.name}
+                          </option>
+                        ))}
+                      </select>
+                    )}
                   </div>
                 </div>
 
@@ -1137,6 +896,7 @@ export const CrossCountryChampionshipModal: React.FC<CrossCountryChampionshipMod
                               <th className="py-2.5 px-3">العداء(ة)</th>
                               <th className="py-2.5 px-3">رقم مسار</th>
                               <th className="py-2.5 px-3">المؤسسة التعليمية</th>
+                              <th className="py-2.5 px-3 text-center">الانتماء</th>
                               <th className="py-2.5 px-3 text-center">نوع المشاركة</th>
                               <th className="py-2.5 px-3 text-center">المسافة</th>
                               <th className="py-2.5 px-3 text-center">تاريخ الازدياد</th>
@@ -1184,6 +944,19 @@ export const CrossCountryChampionshipModal: React.FC<CrossCountryChampionshipMod
                                   <div className="font-bold text-slate-800">{runner.schoolName}</div>
                                 </td>
                                 <td className="py-2.5 px-3 text-center whitespace-nowrap">
+                                  {runner.affiliationType === 'club_affiliated' ? (
+                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-black bg-amber-100 text-amber-900 border border-amber-300 shadow-3xs">
+                                      <span>⚽</span>
+                                      <span>منتمي لنادي</span>
+                                    </span>
+                                  ) : (
+                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-200">
+                                      <span>⚪</span>
+                                      <span>لا منتمي (مدرسي)</span>
+                                    </span>
+                                  )}
+                                </td>
+                                <td className="py-2.5 px-3 text-center whitespace-nowrap">
                                   <span
                                     className={`inline-flex px-2.5 py-0.5 rounded-full text-[10px] font-bold border ${
                                       runner.participationType === 'school_team'
@@ -1200,16 +973,39 @@ export const CrossCountryChampionshipModal: React.FC<CrossCountryChampionshipMod
                                 <td className="py-2.5 px-3 text-center whitespace-nowrap text-slate-500 font-mono text-[11px]">
                                   {runner.birthDate || '—'}
                                 </td>
-                                <td className="py-2.5 px-3 text-center">
-                                  {runner.participationType === 'individual' && (
-                                    <button
-                                      onClick={() => downloadIndividualCardPdf(runner, { id: 'cross_country', name: 'العدو الريفي' }, activeSeason)}
-                                      className="p-1.5 text-blue-600 hover:bg-blue-100 rounded-lg transition-colors cursor-pointer"
-                                      title="تحميل بطاقة المشارك الفردية"
-                                    >
-                                      <CreditCard className="h-4 w-4" />
-                                    </button>
-                                  )}
+                                <td className="py-2.5 px-3 text-center whitespace-nowrap">
+                                  <div className="flex items-center justify-center gap-1.5">
+                                    {canManageThisStudent(runner) && (
+                                      <>
+                                        <button
+                                          type="button"
+                                          onClick={() => setStudentToEditConfirm(runner)}
+                                          className="p-1.5 text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors cursor-pointer inline-flex items-center"
+                                          title="تعديل بيانات العداء(ة)"
+                                        >
+                                          <Edit className="h-3.5 w-3.5" />
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => setStudentToDelete(runner)}
+                                          className="p-1.5 text-red-600 bg-red-50 hover:bg-red-100 rounded-lg transition-colors cursor-pointer inline-flex items-center"
+                                          title="حذف العداء(ة)"
+                                        >
+                                          <Trash2 className="h-3.5 w-3.5" />
+                                        </button>
+                                      </>
+                                    )}
+                                    {runner.participationType === 'individual' && (
+                                      <button
+                                        type="button"
+                                        onClick={() => downloadIndividualCardPdf(runner, { id: 'cross_country', name: 'العدو الريفي' }, activeSeason)}
+                                        className="p-1.5 text-emerald-600 bg-emerald-50 hover:bg-emerald-100 rounded-lg transition-colors cursor-pointer inline-flex items-center"
+                                        title="تحميل بطاقة المشارك الفردية"
+                                      >
+                                        <CreditCard className="h-4 w-4" />
+                                      </button>
+                                    )}
+                                  </div>
                                 </td>
                               </tr>
                             ))}
@@ -1268,6 +1064,18 @@ export const CrossCountryChampionshipModal: React.FC<CrossCountryChampionshipMod
                                     <span className="text-slate-400 font-medium">المسافة:</span>
                                     <span className="font-bold text-emerald-600">{runner.distance || activeCategory.distance}</span>
                                   </div>
+                                  <div className="flex items-center justify-between text-[10px]">
+                                    <span className="text-slate-400 font-medium">الانتماء:</span>
+                                    {runner.affiliationType === 'club_affiliated' ? (
+                                      <span className="font-black text-amber-800 bg-amber-100 px-1.5 py-0.2 rounded border border-amber-300">
+                                        ⚽ منتمي لنادي
+                                      </span>
+                                    ) : (
+                                      <span className="font-bold text-slate-700 bg-slate-100 px-1.5 py-0.2 rounded border border-slate-200">
+                                        ⚪ لا منتمي (مدرسي)
+                                      </span>
+                                    )}
+                                  </div>
                                 </div>
                               </div>
                             </div>
@@ -1281,13 +1089,37 @@ export const CrossCountryChampionshipModal: React.FC<CrossCountryChampionshipMod
                                 {runner.participationType === 'school_team' ? 'فريق المؤسسة' : 'مشاركة فردية'}
                               </span>
                               
-                              <button
-                                onClick={() => downloadIndividualCardPdf(runner, { id: 'cross_country', name: 'العدو الريفي' }, activeSeason)}
-                                className="flex items-center gap-1.5 px-2 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg text-[10px] font-extrabold transition-colors cursor-pointer"
-                              >
-                                <Download className="h-3 w-3" />
-                                <span>بطاقة المشارك</span>
-                              </button>
+                              <div className="flex items-center gap-1.5">
+                                {canManageThisStudent(runner) && (
+                                  <>
+                                    <button
+                                      type="button"
+                                      onClick={() => setStudentToEditConfirm(runner)}
+                                      className="p-1.5 text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors cursor-pointer inline-flex items-center"
+                                      title="تعديل بيانات العداء(ة)"
+                                    >
+                                      <Edit className="h-3.5 w-3.5" />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => setStudentToDelete(runner)}
+                                      className="p-1.5 text-red-600 bg-red-50 hover:bg-red-100 rounded-lg transition-colors cursor-pointer inline-flex items-center"
+                                      title="حذف العداء(ة)"
+                                    >
+                                      <Trash2 className="h-3.5 w-3.5" />
+                                    </button>
+                                  </>
+                                )}
+                                <button
+                                  type="button"
+                                  onClick={() => downloadIndividualCardPdf(runner, { id: 'cross_country', name: 'العدو الريفي' }, activeSeason)}
+                                  className="flex items-center gap-1.5 px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-[10px] font-extrabold transition-colors cursor-pointer"
+                                  title="تحميل بطاقة المشارك"
+                                >
+                                  <Download className="h-3 w-3" />
+                                  <span>بطاقة</span>
+                                </button>
+                              </div>
                             </div>
                           </div>
                         ))}
@@ -1306,8 +1138,7 @@ export const CrossCountryChampionshipModal: React.FC<CrossCountryChampionshipMod
                   )}
                 </div>
               </div>
-            )}
-          </div>
+            </div>
 
           {/* Floating Scroll to Top / Bottom Buttons */}
           {filteredParticipants.length > 3 && (
@@ -1362,152 +1193,6 @@ export const CrossCountryChampionshipModal: React.FC<CrossCountryChampionshipMod
         </div>
       </div>
 
-      {/* Edit Results Modal */}
-      {isEditResultModalOpen && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-3 sm:p-4 bg-slate-900/70 backdrop-blur-xs overflow-y-auto" dir="rtl">
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-2xl w-full p-5 space-y-4 my-8">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <div className="flex items-center gap-2.5">
-                <div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-600 border border-amber-200 flex items-center justify-center text-xl">
-                  🏆
-                </div>
-                <div>
-                  <h3 className="text-sm font-black text-slate-900">
-                    تسجيل وتعديل نتائج سباق: {activeCategory.titleAr}
-                  </h3>
-                  <p className="text-xs text-slate-500 font-medium mt-0.5">
-                    إدخال الرتب الرسمية للعدائين لحساب التتويج الفردي وترتيب الفرق الفائزة
-                  </p>
-                </div>
-              </div>
-              <button
-                onClick={() => setIsEditResultModalOpen(false)}
-                className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100 cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div className="space-y-3">
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  مكان إجراء السباق / المضمار:
-                </label>
-                <input
-                  type="text"
-                  value={editingVenue}
-                  onChange={(e) => setEditingVenue(e.target.value)}
-                  placeholder="مضمار حلبة ألعاب القوى..."
-                  className="w-full text-xs font-bold p-2 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
-
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <label className="text-xs font-black text-slate-800">
-                    لائحة العدائين الواصلين حسب الرتبة:
-                  </label>
-                  <button
-                    type="button"
-                    onClick={handleAddWinnerRow}
-                    className="text-xs font-bold text-blue-600 hover:text-blue-800 flex items-center gap-1 bg-blue-50 px-2.5 py-1 rounded-lg border border-blue-200 cursor-pointer"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                    <span>إضافة رتبة أخرى</span>
-                  </button>
-                </div>
-
-                <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
-                  {editingWinners.map((winner, idx) => (
-                    <div key={idx} className="flex items-center gap-2 bg-slate-50 p-2 rounded-xl border border-slate-200 text-xs">
-                      <div className="w-12 text-center shrink-0">
-                        <span className={`inline-block font-black px-2 py-0.5 rounded text-xs ${
-                          winner.rank === 1 ? 'bg-amber-400 text-slate-950' :
-                          winner.rank === 2 ? 'bg-slate-300 text-slate-950' :
-                          winner.rank === 3 ? 'bg-amber-600 text-white' :
-                          'bg-slate-200 text-slate-700'
-                        }`}>
-                          #{winner.rank}
-                        </span>
-                      </div>
-
-                      <input
-                        type="text"
-                        placeholder="الاسم والنسب..."
-                        value={winner.fullName}
-                        onChange={(e) => {
-                          const updated = [...editingWinners];
-                          updated[idx].fullName = e.target.value;
-                          setEditingWinners(updated);
-                        }}
-                        className="flex-1 p-1.5 bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-900 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                      />
-
-                      <select
-                        value={winner.schoolName}
-                        onChange={(e) => {
-                          const updated = [...editingWinners];
-                          updated[idx].schoolName = e.target.value;
-                          setEditingWinners(updated);
-                        }}
-                        className="w-44 p-1.5 bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-700 focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer"
-                      >
-                        <option value="">اختر المؤسسة...</option>
-                        {schools.map(sch => (
-                          <option key={sch.id} value={sch.name}>
-                            {sch.name}
-                          </option>
-                        ))}
-                      </select>
-
-                      <input
-                        type="text"
-                        placeholder="التوقيت (مثال: 04:32)"
-                        value={winner.time || ''}
-                        onChange={(e) => {
-                          const updated = [...editingWinners];
-                          updated[idx].time = e.target.value;
-                          setEditingWinners(updated);
-                        }}
-                        className="w-24 p-1.5 bg-white border border-slate-200 rounded-lg text-xs font-mono font-bold text-slate-800 text-center"
-                      />
-
-                      <button
-                        type="button"
-                        onClick={() => handleRemoveWinnerRow(idx)}
-                        className="p-1.5 text-slate-400 hover:text-red-600 rounded-lg hover:bg-red-50 transition-colors cursor-pointer shrink-0"
-                        title="حذف هذا الصف"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
-              <button
-                type="button"
-                onClick={() => setIsEditResultModalOpen(false)}
-                className="px-4 py-2 rounded-xl text-xs font-bold border border-slate-200 text-slate-600 hover:bg-slate-50 cursor-pointer"
-              >
-                إلغاء
-              </button>
-              <button
-                type="button"
-                onClick={handleSaveResults}
-                disabled={isSavingResults}
-                className="px-4 py-2 rounded-xl text-xs font-bold bg-blue-600 hover:bg-blue-700 text-white cursor-pointer shadow-xs flex items-center gap-1.5"
-              >
-                <Save className="w-4 h-4" />
-                <span>{isSavingResults ? 'جاري الحفظ...' : 'حفظ النتائج واحتساب التتويج'}</span>
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Register Student Modal */}
       <RegisterStudentModal
         isOpen={isRegisterModalOpen}
@@ -1515,9 +1200,25 @@ export const CrossCountryChampionshipModal: React.FC<CrossCountryChampionshipMod
         sport={ccSportObject}
         preselectedCategory={activeCategory.category}
         preselectedGender={activeCategory.gender}
-        preselectedAffiliation="non_club"
+        preselectedAffiliation={selectedAffiliationFilter === 'club_affiliated' ? 'club_affiliated' : (selectedAffiliationFilter === 'non_club' ? 'non_club' : (hasClubTournament && !hasNonClubTournament ? 'club_affiliated' : (hasNonClubTournament && !hasClubTournament ? 'non_club' : 'open')))}
         schools={schools}
         registrationDeadline={currentDeadline}
+        tournaments={tournaments}
+        onRegistered={() => {
+          if (onRefreshData) onRefreshData();
+        }}
+      />
+
+      {/* Bulk Register Modal (8 Participants: 3 individual + 5 school team) */}
+      <CrossCountryBulkRegisterModal
+        isOpen={isBulkRegisterModalOpen}
+        onClose={() => setIsBulkRegisterModalOpen(false)}
+        schools={schools}
+        initialCategoryDefId={activeCategory.id}
+        allExistingStudents={allStudents}
+        currentSeason={activeSeason}
+        affiliationType={selectedAffiliationFilter === 'club_affiliated' ? 'club_affiliated' : (selectedAffiliationFilter === 'non_club' ? 'non_club' : (hasClubTournament && !hasNonClubTournament ? 'club_affiliated' : 'non_club'))}
+        tournaments={tournaments}
         onRegistered={() => {
           if (onRefreshData) onRefreshData();
         }}
@@ -1543,6 +1244,420 @@ export const CrossCountryChampionshipModal: React.FC<CrossCountryChampionshipMod
           students={ccStudents.filter(s => s.schoolId === filterSchool || s.schoolName === filterSchool)}
           season={activeSeason}
         />
+      )}
+
+      {/* Confirmation Modal for Edit */}
+      {studentToEditConfirm && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs" dir="rtl">
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-md w-full overflow-hidden animate-in fade-in zoom-in-95 duration-150 p-5 space-y-4">
+            <div className="flex items-center gap-3 text-blue-600">
+              <div className="w-10 h-10 rounded-xl bg-blue-50 flex items-center justify-center text-xl shrink-0">
+                ✏️
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-slate-800">تأكيد تعديل بيانات العداء(ة)</h3>
+                <p className="text-[11px] text-slate-500">مسابقة العدو الريفي المدرسي</p>
+              </div>
+            </div>
+            
+             <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 space-y-2 text-xs relative">
+              {/* Photo Thumbnail if exists */}
+              <div className="absolute top-3.5 left-3.5 w-12 h-12 rounded-lg bg-slate-200 border border-slate-300 overflow-hidden flex items-center justify-center shadow-3xs">
+                {studentToEditConfirm.photoUrl ? (
+                  <img src={studentToEditConfirm.photoUrl} alt="صورة المشارك" className="w-full h-full object-cover" />
+                ) : (
+                  <span className="text-xl text-slate-400">👤</span>
+                )}
+              </div>
+
+              <div className="space-y-1.5 pl-14">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-slate-500 font-semibold shrink-0">اسم العداء(ة):</span>
+                  <span className="font-extrabold text-slate-900 truncate max-w-[180px]">{studentToEditConfirm.fullName}</span>
+                </div>
+                {studentToEditConfirm.massarNumber && (
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-slate-500 font-semibold shrink-0">رقم مسار:</span>
+                    <span className="font-mono font-bold text-slate-700">{studentToEditConfirm.massarNumber}</span>
+                  </div>
+                )}
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-slate-500 font-semibold shrink-0">المؤسسة التعليمية:</span>
+                  <span className="font-bold text-slate-800 truncate max-w-[180px]">{studentToEditConfirm.schoolName}</span>
+                </div>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-slate-500 font-semibold shrink-0">تاريخ الازدياد:</span>
+                  <span className="font-mono font-bold text-slate-700">{studentToEditConfirm.birthDate || 'غير محدد'}</span>
+                </div>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-slate-500 font-semibold shrink-0">الفئة والجنس:</span>
+                  <span className="font-bold text-blue-700">
+                    {studentToEditConfirm.category} ({studentToEditConfirm.gender === 'Male' ? 'ذكور' : 'إناث'})
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-slate-500 font-semibold shrink-0">نوع المشاركة:</span>
+                  <span className="font-bold text-blue-800">
+                    {studentToEditConfirm.participationType === 'school_team' ? '👥 فريق المؤسسة' : '👤 مشاركة فردية'}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-slate-500 font-semibold shrink-0">صنف العداء:</span>
+                  <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold border ${
+                    studentToEditConfirm.affiliationType === 'club_affiliated'
+                      ? 'bg-amber-100 text-amber-800 border-amber-200'
+                      : 'bg-slate-100 text-slate-700 border-slate-200'
+                  }`}>
+                    {studentToEditConfirm.affiliationType === 'club_affiliated' ? '🏆 مدرسي منخرط (نادي)' : '🏃 مدرسي (غير منخرط)'}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <p className="text-xs text-slate-600 leading-relaxed">
+              هل ترغب في تعديل بيانات هذا العداء(ة)؟ بالضغط على تأكيد، ستفتح نافذة تعديل بياناته لتحديثها وحفظها.
+            </p>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setStudentToEditConfirm(null)}
+                className="px-3.5 py-2 rounded-xl text-xs font-bold border border-slate-200 text-slate-600 hover:bg-slate-50 cursor-pointer transition-colors"
+              >
+                إلغاء
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setEditingStudent(studentToEditConfirm);
+                  setStudentToEditConfirm(null);
+                }}
+                className="px-4 py-2 rounded-xl text-xs font-bold bg-blue-600 text-white hover:bg-blue-700 cursor-pointer shadow-3xs transition-all flex items-center gap-1.5"
+              >
+                <Edit className="w-3.5 h-3.5" />
+                <span>نعم، تعديل البيانات</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Confirmation Modal for Deletion */}
+      {studentToDelete && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs" dir="rtl">
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-md w-full overflow-hidden animate-in fade-in zoom-in-95 duration-150 p-5 space-y-4">
+            <div className="flex items-center gap-3 text-red-600">
+              <div className="w-10 h-10 rounded-xl bg-red-50 flex items-center justify-center text-xl shrink-0">
+                ⚠️
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-slate-800">تأكيد حذف العداء(ة) نهائياً</h3>
+                <p className="text-[11px] text-slate-500">مسابقة العدو الريفي المدرسي</p>
+              </div>
+            </div>
+            
+            <div className="p-3 bg-red-50/50 rounded-xl border border-red-100 space-y-1.5 text-xs">
+              <div className="flex items-center justify-between">
+                <span className="text-slate-500 font-semibold">اسم العداء(ة):</span>
+                <span className="font-extrabold text-red-950">{studentToDelete.fullName}</span>
+              </div>
+              {studentToDelete.massarNumber && (
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-500 font-semibold">رقم مسار:</span>
+                  <span className="font-mono font-bold text-slate-700">{studentToDelete.massarNumber}</span>
+                </div>
+              )}
+              <div className="flex items-center justify-between">
+                <span className="text-slate-500 font-semibold">المؤسسة التعليمية:</span>
+                <span className="font-bold text-slate-800">{studentToDelete.schoolName}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-slate-500 font-semibold">نوع المشاركة:</span>
+                <span className="font-bold text-slate-800">
+                  {studentToDelete.participationType === 'school_team' ? '👥 فريق المؤسسة' : '👤 مشاركة فردية'}
+                </span>
+              </div>
+            </div>
+
+            <p className="text-xs text-slate-600 leading-relaxed">
+              هل أنت متأكد من رغبتك في حذف هذا العداء(ة) من لائحة المشاركين بشكل نهائي؟ سيتم تحرير المقعد ولن يمكن التراجع عن هذا الإجراء لاحقاً.
+            </p>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                disabled={isDeletingStudent}
+                onClick={() => setStudentToDelete(null)}
+                className="px-3.5 py-2 rounded-xl text-xs font-bold border border-slate-200 text-slate-600 hover:bg-slate-50 cursor-pointer transition-colors"
+              >
+                إلغاء
+              </button>
+              <button
+                type="button"
+                disabled={isDeletingStudent}
+                onClick={executeDeleteStudent}
+                className="px-4 py-2 rounded-xl text-xs font-bold bg-red-600 text-white hover:bg-red-700 cursor-pointer shadow-3xs transition-all flex items-center gap-1.5 disabled:opacity-50"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>{isDeletingStudent ? 'جاري الحذف...' : 'نعم، حذف العداء نهائياً'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Student Modal */}
+      {editingStudent && (
+        <div className="fixed inset-0 z-[110] bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-200" dir="rtl">
+          <div className="w-full max-w-lg bg-white rounded-3xl shadow-2xl border border-slate-100 overflow-hidden flex flex-col max-h-[90vh]">
+            <div className="p-5 bg-gradient-to-r from-blue-700 to-indigo-800 text-white flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center">
+                  <Edit className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-black">تعديل بيانات العداء(ة)</h3>
+                  <p className="text-[11px] text-white/80">{editingStudent.schoolName}</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEditingStudent(null)}
+                className="p-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveEditedStudent} className="p-6 overflow-y-auto space-y-4 text-xs">
+              {/* Photo Upload & Preview Section */}
+              <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-2xl flex items-center justify-between gap-4">
+                <div className="flex items-center gap-3.5">
+                  <div className="relative w-14 h-14 rounded-2xl overflow-hidden bg-slate-200 border-2 border-white shadow-xs shrink-0 flex items-center justify-center">
+                    {editPhoto ? (
+                      <img
+                        src={editPhoto}
+                        alt={editFullName || 'صورة المشارك'}
+                        className="w-full h-full object-cover"
+                        referrerPolicy="no-referrer"
+                      />
+                    ) : (
+                      <div className="text-slate-400 flex flex-col items-center justify-center">
+                        <ImageIcon className="w-6 h-6" />
+                      </div>
+                    )}
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-bold text-slate-800">صورة العداء(ة)</h4>
+                    <p className="text-[10px] text-slate-400 mt-0.5">
+                      {editPhoto ? 'تم تعيين صورة مخصصة' : 'لم يتم تحديد صورة بعد'}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <label className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-[11px] rounded-xl cursor-pointer transition-colors flex items-center gap-1.5 shadow-3xs">
+                    <Upload className="w-3.5 h-3.5" />
+                    <span>{isCompressingPhoto ? 'جاري المعالجة...' : 'تغيير الصورة'}</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={handleEditPhotoFileChange}
+                      disabled={isCompressingPhoto}
+                    />
+                  </label>
+                  {editPhoto && (
+                    <button
+                      type="button"
+                      onClick={() => setEditPhoto('')}
+                      className="px-2.5 py-1.5 bg-slate-200 hover:bg-red-50 hover:text-red-600 text-slate-600 font-bold text-[11px] rounded-xl transition-colors cursor-pointer"
+                      title="حذف الصورة"
+                    >
+                      حذف
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-slate-700 font-bold mb-1">الاسم الكامل للعداء(ة) *</label>
+                <input
+                  type="text"
+                  required
+                  value={editFullName}
+                  onChange={(e) => setEditFullName(e.target.value)}
+                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-900 focus:bg-white focus:border-blue-600 focus:outline-hidden transition-all"
+                  placeholder="مثال: يوسف العلوي"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-slate-700 font-bold mb-1">رقم مسار *</label>
+                  <input
+                    type="text"
+                    required
+                    value={editMassarNumber}
+                    onChange={(e) => setEditMassarNumber(e.target.value)}
+                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono font-bold text-slate-900 focus:bg-white focus:border-blue-600 focus:outline-hidden transition-all uppercase"
+                    placeholder="مثال: F212121212"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-slate-700 font-bold mb-1">تاريخ الازدياد *</label>
+                  <input
+                    type="date"
+                    required
+                    value={editBirthDate}
+                    onChange={(e) => setEditBirthDate(e.target.value)}
+                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-900 focus:bg-white focus:border-blue-600 focus:outline-hidden transition-all font-mono"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-slate-700 font-bold mb-1">الجنس *</label>
+                  <select
+                    value={editGender}
+                    onChange={(e) => setEditGender(e.target.value as 'Male' | 'Female')}
+                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-900 focus:bg-white focus:border-blue-600 focus:outline-hidden transition-all"
+                  >
+                    <option value="Male">ذكر (Male)</option>
+                    <option value="Female">أنثى (Female)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-slate-700 font-bold mb-1">الفئة العمرية *</label>
+                  <select
+                    value={editCategory}
+                    onChange={(e) => setEditCategory(e.target.value)}
+                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-900 focus:bg-white focus:border-blue-600 focus:outline-hidden transition-all"
+                  >
+                    <option value="U12">U12 - البراعم</option>
+                    <option value="U15">U15 - الصغار</option>
+                    <option value="U18">U18 - الفتيان</option>
+                    <option value="U20">U20 - الشبان</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-slate-700 font-bold mb-1">نوع المشاركة في سباق العدو الريفي *</label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setEditParticipationType('school_team')}
+                    className={`py-2.5 px-3 rounded-xl border text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                      editParticipationType === 'school_team'
+                        ? 'bg-emerald-50 border-emerald-500 text-emerald-900 shadow-3xs'
+                        : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
+                    }`}
+                  >
+                    <span>👥 فريق المؤسسة (جماعي)</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEditParticipationType('individual')}
+                    className={`py-2.5 px-3 rounded-xl border text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                      editParticipationType === 'individual'
+                        ? 'bg-amber-50 border-amber-500 text-amber-900 shadow-3xs'
+                        : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
+                    }`}
+                  >
+                    <span>👤 مشاركة فردية</span>
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-slate-700 font-bold mb-1">صنف العداء(ة) في البطولة (نوع الترخيص) *</label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setEditAffiliationType('non_club')}
+                    className={`py-2.5 px-3 rounded-xl border text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                      editAffiliationType === 'non_club'
+                        ? 'bg-blue-50 border-blue-500 text-blue-900 shadow-3xs'
+                        : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
+                    }`}
+                  >
+                    <span>🏃 مدرسي (غير منخرط في نادٍ)</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEditAffiliationType('club_affiliated')}
+                    className={`py-2.5 px-3 rounded-xl border text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                      editAffiliationType === 'club_affiliated'
+                        ? 'bg-indigo-50 border-indigo-500 text-indigo-900 shadow-3xs'
+                        : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
+                    }`}
+                  >
+                    <span>🏆 مدرسي منخرط (في نادٍ رياضي)</span>
+                  </button>
+                </div>
+              </div>
+
+              <div className="border-t border-slate-100 pt-3">
+                <h5 className="text-[11px] font-bold text-slate-500 mb-2">بيانات الأستاذ المؤطر:</h5>
+                <div className="grid grid-cols-3 gap-2">
+                  <div>
+                    <label className="block text-[10px] text-slate-600 font-bold mb-0.5">اسم المؤطر</label>
+                    <input
+                      type="text"
+                      value={editCoachName}
+                      onChange={(e) => setEditCoachName(e.target.value)}
+                      className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold text-slate-900"
+                      placeholder="الاسم"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] text-slate-600 font-bold mb-0.5">رقم التأجير SOM</label>
+                    <input
+                      type="text"
+                      value={editCoachLease}
+                      onChange={(e) => setEditCoachLease(e.target.value)}
+                      className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-mono font-bold text-slate-900"
+                      placeholder="SOM"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] text-slate-600 font-bold mb-0.5">الهاتف</label>
+                    <input
+                      type="text"
+                      value={editCoachPhone}
+                      onChange={(e) => setEditCoachPhone(e.target.value)}
+                      className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-mono font-bold text-slate-900"
+                      placeholder="الهاتف"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  disabled={isSavingEditStudent}
+                  onClick={() => setEditingStudent(null)}
+                  className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition-colors cursor-pointer"
+                >
+                  إلغاء
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingEditStudent}
+                  className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-black text-xs rounded-xl shadow-xs transition-colors cursor-pointer flex items-center gap-1.5"
+                >
+                  <Save className="w-4 h-4" />
+                  <span>{isSavingEditStudent ? 'جاري الحفظ...' : 'حفظ التعديلات'}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
     </>
   );

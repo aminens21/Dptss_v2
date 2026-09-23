@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { DataService, SPORTS_MAP, deduplicateById } from '../lib/dataService';
-import { School, Match, Student, Tournament, Sport, Directorate } from '../types';
+import { School, Match, Student, Tournament, Sport, Directorate, CrossCountryCategoryResult } from '../types';
+import { CROSS_COUNTRY_CATEGORIES, calculateTeamRankings } from '../lib/crossCountryConfig';
 import {
   BarChart3,
   Trophy,
@@ -19,7 +20,9 @@ import {
   ChevronDown,
   ChevronUp,
   PieChart,
-  Activity
+  Activity,
+  Flame,
+  ShieldCheck
 } from 'lucide-react';
 
 export const Statistics: React.FC = () => {
@@ -29,6 +32,7 @@ export const Statistics: React.FC = () => {
   const [students, setStudents] = useState<Student[]>([]);
   const [tournaments, setTournaments] = useState<Tournament[]>([]);
   const [sportsConfig, setSportsConfig] = useState<Sport[]>([]);
+  const [crossCountryResults, setCrossCountryResults] = useState<Record<string, CrossCountryCategoryResult>>({});
   const [loading, setLoading] = useState(true);
 
   // Filters
@@ -43,9 +47,25 @@ export const Statistics: React.FC = () => {
     const handleDirChange = () => {
       loadAllData();
     };
+    const handleCCChange = () => {
+      loadAllData();
+    };
+
     window.addEventListener('directorateChanged', handleDirChange);
+    window.addEventListener('crossCountryResultsUpdated', handleCCChange);
+    window.addEventListener('dataSynchronized', handleCCChange);
+
+    const unsubscribeCC = DataService.subscribeCrossCountryResults((liveResults) => {
+      if (liveResults) {
+        setCrossCountryResults(liveResults);
+      }
+    });
+
     return () => {
       window.removeEventListener('directorateChanged', handleDirChange);
+      window.removeEventListener('crossCountryResultsUpdated', handleCCChange);
+      window.removeEventListener('dataSynchronized', handleCCChange);
+      if (unsubscribeCC) unsubscribeCC();
     };
   }, []);
 
@@ -53,13 +73,14 @@ export const Statistics: React.FC = () => {
     setLoading(true);
     try {
       const activeDirId = DataService.getActiveDirectorateId();
-      const [sList, mList, stList, tList, cfgList, activeDir] = await Promise.all([
+      const [sList, mList, stList, tList, cfgList, activeDir, ccRes] = await Promise.all([
         DataService.getSchools(),
         DataService.getMatches(),
         DataService.getStudents(),
         DataService.getTournaments(),
         DataService.getSportsConfig(),
-        DataService.getActiveDirectorate()
+        DataService.getActiveDirectorate(),
+        DataService.getCrossCountryResults()
       ]);
 
       const dirSchools = sList.filter(s => (s.directorateId || 'taourirt') === activeDirId);
@@ -73,6 +94,7 @@ export const Statistics: React.FC = () => {
       setStudents(dirStudents);
       setTournaments(deduplicateById<Tournament>(dirTournaments));
       setSportsConfig(cfgList);
+      if (ccRes) setCrossCountryResults(ccRes);
     } catch (e) {
       console.error('Error loading stats data:', e);
     } finally {
@@ -130,8 +152,30 @@ export const Statistics: React.FC = () => {
 
     const getSchoolId = (nameOrId?: string): string => {
       if (!nameOrId) return '';
-      const found = schools.find((s) => s.id === nameOrId || s.name.trim().toLowerCase() === nameOrId.trim().toLowerCase());
-      return found ? found.id : nameOrId;
+      const clean = nameOrId.trim().toLowerCase();
+      const found = schools.find(
+        (s) =>
+          s.id === nameOrId ||
+          s.name.trim().toLowerCase() === clean ||
+          clean.includes(s.name.trim().toLowerCase()) ||
+          s.name.trim().toLowerCase().includes(clean)
+      );
+      if (found) return found.id;
+      if (!resultsMap[nameOrId]) {
+        resultsMap[nameOrId] = {
+          schoolId: nameOrId,
+          schoolName: nameOrId,
+          type: 'مؤسسة تعليمية',
+          commune: 'المديرية الإقليمية',
+          firstPlaces: 0,
+          secondPlaces: 0,
+          thirdPlaces: 0,
+          totalPodiums: 0,
+          points: 0,
+          achievements: []
+        };
+      }
+      return nameOrId;
     };
 
     // Process tournaments and finished categories
@@ -373,6 +417,109 @@ export const Statistics: React.FC = () => {
       }
     });
 
+    // Process Cross Country Results (Individual Podiums + Team Championships)
+    if (selectedSport === 'ALL' || selectedSport === 'cross_country') {
+      (Object.values(crossCountryResults) as CrossCountryCategoryResult[]).forEach((ccRes) => {
+        if (!ccRes || !ccRes.podium || ccRes.podium.length === 0) return;
+
+        const catDef = CROSS_COUNTRY_CATEGORIES.find((c) => c.id === ccRes.categoryId);
+        const catLabel = catDef ? `سباق ${catDef.shortLabel} (${catDef.distance})` : (ccRes.titleAr || 'سباق العدو الريفي');
+
+        // 1. Individual Podium (الترتيب الفردي)
+        const p1 = ccRes.podium.find((p) => p.rank === 1);
+        const p2 = ccRes.podium.find((p) => p.rank === 2);
+        const p3 = ccRes.podium.find((p) => p.rank === 3);
+
+        if (p1 && p1.schoolName) {
+          const sId = getSchoolId(p1.schoolName);
+          if (resultsMap[sId]) {
+            resultsMap[sId].firstPlaces += 1;
+            resultsMap[sId].achievements.push({
+              title: `بطل ${catLabel} (فردي - ${p1.fullName})`,
+              sportId: 'cross_country',
+              category: ccRes.category,
+              rank: 1,
+              tournamentName: 'البطولة الإقليمية للعدو الريفي'
+            });
+          }
+        }
+
+        if (p2 && p2.schoolName) {
+          const sId = getSchoolId(p2.schoolName);
+          if (resultsMap[sId]) {
+            resultsMap[sId].secondPlaces += 1;
+            resultsMap[sId].achievements.push({
+              title: `وصيف ${catLabel} (فردي - ${p2.fullName})`,
+              sportId: 'cross_country',
+              category: ccRes.category,
+              rank: 2,
+              tournamentName: 'البطولة الإقليمية للعدو الريفي'
+            });
+          }
+        }
+
+        if (p3 && p3.schoolName) {
+          const sId = getSchoolId(p3.schoolName);
+          if (resultsMap[sId]) {
+            resultsMap[sId].thirdPlaces += 1;
+            resultsMap[sId].achievements.push({
+              title: `المرتبة الثالثة في ${catLabel} (فردي - ${p3.fullName})`,
+              sportId: 'cross_country',
+              category: ccRes.category,
+              rank: 3,
+              tournamentName: 'البطولة الإقليمية للعدو الريفي'
+            });
+          }
+        }
+
+        // 2. Team Rankings (ترتيب المؤسسات الفائزة حسب الفرق)
+        const teams = calculateTeamRankings(ccRes.podium);
+        if (teams && teams.length > 0) {
+          if (teams[0] && teams[0].schoolName) {
+            const tId = getSchoolId(teams[0].schoolName);
+            if (resultsMap[tId]) {
+              resultsMap[tId].firstPlaces += 1;
+              resultsMap[tId].achievements.push({
+                title: `بطل ${catLabel} (حسب الفرق 🏆 - ${teams[0].totalPoints} ن)`,
+                sportId: 'cross_country',
+                category: ccRes.category,
+                rank: 1,
+                tournamentName: 'البطولة الإقليمية للعدو الريفي'
+              });
+            }
+          }
+
+          if (teams[1] && teams[1].schoolName) {
+            const tId = getSchoolId(teams[1].schoolName);
+            if (resultsMap[tId]) {
+              resultsMap[tId].secondPlaces += 1;
+              resultsMap[tId].achievements.push({
+                title: `وصيف ${catLabel} (حسب الفرق 🥈 - ${teams[1].totalPoints} ن)`,
+                sportId: 'cross_country',
+                category: ccRes.category,
+                rank: 2,
+                tournamentName: 'البطولة الإقليمية للعدو الريفي'
+              });
+            }
+          }
+
+          if (teams[2] && teams[2].schoolName) {
+            const tId = getSchoolId(teams[2].schoolName);
+            if (resultsMap[tId]) {
+              resultsMap[tId].thirdPlaces += 1;
+              resultsMap[tId].achievements.push({
+                title: `المرتبة الثالثة في ${catLabel} (حسب الفرق 🥉 - ${teams[2].totalPoints} ن)`,
+                sportId: 'cross_country',
+                category: ccRes.category,
+                rank: 3,
+                tournamentName: 'البطولة الإقليمية للعدو الريفي'
+              });
+            }
+          }
+        }
+      });
+    }
+
     // Calculate totals & points (1 point per podium rank: 🥇=1 pt, 🥈=1 pt, 🥉=1 pt)
     const list = Object.values(resultsMap).map((item) => {
       const totalPodiums = item.firstPlaces + item.secondPlaces + item.thirdPlaces;
@@ -408,7 +555,7 @@ export const Statistics: React.FC = () => {
         if (b.totalPodiums !== a.totalPodiums) return b.totalPodiums - a.totalPodiums;
         return a.schoolName.localeCompare(b.schoolName, 'ar');
       });
-  }, [schools, tournaments, matches, selectedSport, selectedType, selectedCommune, searchQuery]);
+  }, [schools, tournaments, matches, crossCountryResults, selectedSport, selectedType, selectedCommune, searchQuery]);
 
   // 2. Calculate Participation Ranking (ترتيب المؤسسات حسب عدد المشاركين والفرق)
   const schoolParticipationRanking = useMemo(() => {
@@ -542,29 +689,40 @@ export const Statistics: React.FC = () => {
       }
     });
 
+    // For Cross Country: count completed race podiums
+    if (map['cross_country']) {
+      const ccCompletedRaces = CROSS_COUNTRY_CATEGORIES.filter(c => crossCountryResults[c.id]?.podium && crossCountryResults[c.id].podium.length > 0).length;
+      map['cross_country'].matchesCount = ccCompletedRaces;
+    }
+
     return Object.values(map).sort((a, b) => b.studentsCount - a.studentsCount);
-  }, [students, matches]);
+  }, [students, matches, crossCountryResults]);
 
   // Total summary counts
   const summaryCounts = useMemo(() => {
     const totalStudents = students.length;
     const totalBoys = students.filter((s) => s.gender === 'Male').length;
     const totalGirls = students.filter((s) => s.gender === 'Female').length;
-    const completedMatches = matches.filter((m) => m.status === 'Completed').length;
+    const ccCompletedCount = CROSS_COUNTRY_CATEGORIES.filter(c => crossCountryResults[c.id]?.podium && crossCountryResults[c.id].podium.length > 0).length;
+    const completedMatches = matches.filter((m) => m.status === 'Completed').length + ccCompletedCount;
+    const totalMatchesCount = matches.length + 8; // Including 8 Cross Country races
     return {
       schools: schools.length,
       students: totalStudents,
       boys: totalBoys,
       girls: totalGirls,
-      matches: matches.length,
+      matches: totalMatchesCount,
       completedMatches,
-      tournaments: tournaments.length
+      tournaments: tournaments.length + 1 // Including Cross Country Championship
     };
-  }, [schools, students, matches, tournaments]);
+  }, [schools, students, matches, tournaments, crossCountryResults]);
 
   const handlePrint = () => {
     window.print();
   };
+
+  // State to toggle Cross Country breakdown in Statistics
+  const [showCCPodiums, setShowCCPodiums] = useState(true);
 
   return (
     <div className="space-y-6 pb-12" dir="rtl">
@@ -767,12 +925,161 @@ export const Statistics: React.FC = () => {
         {/* Tab 1: Results Leaderboard Table (ترتيب التتويجات والنتائج) */}
         {activeTab === 'results' && (
           <div>
+            {/* Cross Country Championship Honor Roll & Winning Institutions (when sport filter is ALL or cross_country) */}
+            {(selectedSport === 'ALL' || selectedSport === 'cross_country') && (
+              <div className="p-4 border-b border-slate-200 bg-gradient-to-r from-slate-900 via-blue-950 to-slate-900 text-white">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-9 h-9 rounded-xl bg-amber-500/20 text-amber-300 border border-amber-500/30 flex items-center justify-center text-lg shadow-xs">
+                      🏃‍♂️
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h3 className="text-sm font-black text-white">
+                          لوحة تتويجات البطولة الإقليمية للعدو الريفي المدرسي
+                        </h3>
+                        <span className="bg-amber-400/20 text-amber-300 border border-amber-400/30 text-[10px] font-black px-2 py-0.5 rounded-full">
+                          8 فئات مدمجة
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-300 font-medium mt-0.5">
+                        استعراض الأبطال المتوجين فردياً والمؤسسات الفائزة حسب الفرق المتأهلة للبطولة الجهوية
+                      </p>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => setShowCCPodiums(prev => !prev)}
+                    className="self-start sm:self-auto text-xs font-bold text-slate-200 hover:text-white bg-white/10 hover:bg-white/20 border border-white/15 px-3 py-1.5 rounded-xl transition-all flex items-center gap-1.5 cursor-pointer shrink-0"
+                  >
+                    <span>{showCCPodiums ? 'طي منصات العدو الريفي' : 'عرض منصات وتتويجات العدو الريفي'}</span>
+                    {showCCPodiums ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                  </button>
+                </div>
+
+                {showCCPodiums && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 pt-1">
+                    {CROSS_COUNTRY_CATEGORIES.map(cat => {
+                      const res = crossCountryResults[cat.id];
+                      const p1 = res?.podium?.find(p => p.rank === 1);
+                      const p2 = res?.podium?.find(p => p.rank === 2);
+                      const p3 = res?.podium?.find(p => p.rank === 3);
+                      const hasResult = p1 || p2 || p3;
+                      const catTeams = res?.podium ? calculateTeamRankings(res.podium) : [];
+                      const winningTeam = catTeams.length > 0 ? catTeams[0] : null;
+
+                      return (
+                        <div
+                          key={cat.id}
+                          className="bg-white/10 border border-white/15 rounded-xl p-3 backdrop-blur-xs flex flex-col justify-between hover:border-amber-400/50 transition-all group"
+                        >
+                          <div>
+                            {/* Card Header */}
+                            <div className="flex items-center justify-between pb-2 border-b border-white/10 mb-2">
+                              <div className="flex items-center gap-1.5 min-w-0">
+                                <span className="text-base shrink-0">{cat.icon}</span>
+                                <span className="text-xs font-black text-white truncate group-hover:text-amber-300 transition-colors">
+                                  {cat.shortLabel}
+                                </span>
+                              </div>
+                              <span className="text-[10px] font-bold text-amber-300 bg-amber-400/20 border border-amber-400/30 px-1.5 py-0.5 rounded-md shrink-0">
+                                {cat.distance}
+                              </span>
+                            </div>
+
+                            {/* Individual Podium */}
+                            {hasResult ? (
+                              <div className="space-y-1.5 text-xs">
+                                {/* 1st */}
+                                <div className="p-1.5 rounded-lg bg-amber-400/20 border border-amber-400/30 flex items-center justify-between gap-1.5">
+                                  <div className="flex items-center gap-1.5 min-w-0">
+                                    <span className="text-sm shrink-0">🥇</span>
+                                    <div className="truncate">
+                                      <p className="text-[11px] font-black text-amber-200 truncate">{p1?.fullName || 'غير محدد'}</p>
+                                      <p className="text-[9px] text-slate-300 truncate font-medium">{p1?.schoolName || 'المؤسسة'}</p>
+                                    </div>
+                                  </div>
+                                  {p1?.time && (
+                                    <span className="text-[9px] font-mono font-black text-amber-300 shrink-0 bg-black/30 px-1 py-0.5 rounded">
+                                      {p1.time}
+                                    </span>
+                                  )}
+                                </div>
+
+                                {/* 2nd */}
+                                <div className="p-1.5 rounded-lg bg-white/5 border border-white/10 flex items-center justify-between gap-1.5">
+                                  <div className="flex items-center gap-1.5 min-w-0">
+                                    <span className="text-sm shrink-0">🥈</span>
+                                    <div className="truncate">
+                                      <p className="text-[11px] font-bold text-slate-200 truncate">{p2?.fullName || 'غير محدد'}</p>
+                                      <p className="text-[9px] text-slate-400 truncate">{p2?.schoolName || 'المؤسسة'}</p>
+                                    </div>
+                                  </div>
+                                  {p2?.time && (
+                                    <span className="text-[9px] font-mono text-slate-300 shrink-0 bg-black/20 px-1 py-0.5 rounded">
+                                      {p2.time}
+                                    </span>
+                                  )}
+                                </div>
+
+                                {/* 3rd */}
+                                <div className="p-1.5 rounded-lg bg-white/5 border border-white/10 flex items-center justify-between gap-1.5">
+                                  <div className="flex items-center gap-1.5 min-w-0">
+                                    <span className="text-sm shrink-0">🥉</span>
+                                    <div className="truncate">
+                                      <p className="text-[11px] font-bold text-slate-200 truncate">{p3?.fullName || 'غير محدد'}</p>
+                                      <p className="text-[9px] text-slate-400 truncate">{p3?.schoolName || 'المؤسسة'}</p>
+                                    </div>
+                                  </div>
+                                  {p3?.time && (
+                                    <span className="text-[9px] font-mono text-amber-300 shrink-0 bg-black/20 px-1 py-0.5 rounded">
+                                      {p3.time}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="py-4 text-center text-slate-400 text-[10px]">
+                                في انتظار النتائج
+                              </div>
+                            )}
+
+                            {/* Winning Institution / Team */}
+                            {winningTeam && (
+                              <div className="mt-2 p-2 rounded-lg bg-blue-900/60 border border-blue-500/40">
+                                <div className="flex items-center justify-between gap-1 mb-0.5">
+                                  <span className="text-[9px] font-black text-amber-300">
+                                    🏆 بطل الفئة (حسب الفرق)
+                                  </span>
+                                  <span className="text-[9px] font-mono font-black text-amber-300 bg-black/40 px-1.5 py-0.2 rounded">
+                                    {winningTeam.totalPoints} ن
+                                  </span>
+                                </div>
+                                <div className="text-[11px] font-black text-white truncate">
+                                  {winningTeam.schoolName}
+                                </div>
+                                <div className="text-[9px] text-blue-200 mt-0.5 flex items-center justify-between font-medium">
+                                  <span>تأهل للجهوية 🚀</span>
+                                  <span>4 عداءين</span>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Scoring Rule Explanatory Banner */}
             <div className="p-3 bg-blue-50/70 border-b border-blue-100 flex items-center justify-between gap-2 text-xs text-blue-950 flex-wrap">
               <div className="flex items-center gap-2">
                 <span className="px-2 py-0.5 bg-blue-600 text-white rounded text-[10px] font-black">ضوابط الترتيب</span>
                 <span className="font-semibold text-[11px] sm:text-xs">
-                  كل رتبة محصل عليها (🥇 ذهبية، 🥈 فضية، 🥉 برونزية) تساوي <strong>نقطة واحدة (1ن)</strong>. وعند التعادل في النقط تكون الأولوية للذهب ثم الفضة ثم البرونز.
+                  كل رتبة محصل عليها في مختلف الرياضات والسباقات (🥇 ذهبية، 🥈 فضية، 🥉 برونزية) فردياً أو حسب الفرق تساوي <strong>نقطة واحدة (1ن)</strong>. وعند التعادل في النقط تكون الأولوية للذهب ثم الفضة ثم البرونز.
                 </span>
               </div>
               <span className="text-[10px] text-blue-700 bg-white border border-blue-200 px-2.5 py-0.5 rounded-full font-bold">
