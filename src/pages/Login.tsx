@@ -1625,9 +1625,10 @@ export const Login: React.FC = () => {
 
                       {/* Top 3 Olympic-Style Podium (1st in Center, 2nd on Left, 3rd on Right) */}
                       {(() => {
-                        const first = catGroup.runners[0] || null;
-                        const second = catGroup.runners[1] || null;
-                        const third = catGroup.runners[2] || null;
+                        const sortedRunners = [...catGroup.runners].sort((a, b) => (a.position || 0) - (b.position || 0));
+                        const first = sortedRunners[0] || null;
+                        const second = sortedRunners[1] || null;
+                        const third = sortedRunners[2] || null;
 
                         const renderPodiumSlot = (
                           runner: any | null,
