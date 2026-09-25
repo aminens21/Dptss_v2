@@ -1587,7 +1587,68 @@ export const Login: React.FC = () => {
 
             {/* TAB 1: CROSS COUNTRY PODIUM & RANKING RESULTS */}
             {activePublicTab === 'CC_PODIUM' && (
-              <div className="space-y-4">
+              <div className="space-y-6">
+                
+                {/* Category Quick Selector Pills for Public */}
+                <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-3 shadow-xs space-y-2">
+                  <div className="flex items-center justify-between text-xs font-black text-slate-700 dark:text-slate-300 px-1">
+                    <span className="flex items-center gap-1.5 text-emerald-700 dark:text-emerald-400">
+                      <Trophy className="w-4 h-4 text-amber-500" />
+                      <span>اختر الفئة لعرض منصة التتويج والنتائج الرسمية:</span>
+                    </span>
+                    <span className="text-[11px] text-slate-400 font-bold">
+                      {crossCountryList.length} فئة معتمدة
+                    </span>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedCategory('ALL');
+                        setSelectedGender('ALL');
+                      }}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer ${
+                        selectedCategory === 'ALL' && selectedGender === 'ALL'
+                          ? 'bg-emerald-600 text-white shadow-xs'
+                          : 'bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300'
+                      }`}
+                    >
+                      🌟 جميع السباقات والفئات
+                    </button>
+
+                    {[
+                      { cat: 'U12', g: 'Male', label: '🏃‍♂️ براعم ذكور (U12)' },
+                      { cat: 'U12', g: 'Female', label: '🏃‍♀️ برعمات إناث (U12)' },
+                      { cat: 'U15', g: 'Male', label: '🏃‍♂️ صغار ذكور (U15)' },
+                      { cat: 'U15', g: 'Female', label: '🏃‍♀️ صغيرات إناث (U15)' },
+                      { cat: 'U18', g: 'Male', label: '🏃‍♂️ فتيان ذكور (U18)' },
+                      { cat: 'U18', g: 'Female', label: '🏃‍♀️ فتيات إناث (U18)' },
+                      { cat: 'U20', g: 'Male', label: '🏃‍♂️ شبان ذكور (U20)' },
+                      { cat: 'U20', g: 'Female', label: '🏃‍♀️ شابات إناث (U20)' }
+                    ].map((item, idx) => {
+                      const isActive = selectedCategory === item.cat && selectedGender === item.g;
+                      return (
+                        <button
+                          key={idx}
+                          type="button"
+                          onClick={() => {
+                            setSelectedCategory(item.cat);
+                            setSelectedGender(item.g as any);
+                          }}
+                          className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                            isActive
+                              ? 'bg-amber-500 text-slate-950 font-black shadow-xs ring-2 ring-amber-300 dark:ring-amber-600'
+                              : 'bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300'
+                          }`}
+                        >
+                          {item.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
                 {crossCountryList.length === 0 ? (
                   <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-8 text-center space-y-3 shadow-xs transition-colors">
                     <Trophy className="w-12 h-12 text-slate-300 dark:text-slate-700 mx-auto" />
@@ -1595,235 +1656,313 @@ export const Login: React.FC = () => {
                       لا توجد نتائج مسجلة تطابق معايير التصفية الحالية
                     </p>
                     <p className="text-xs text-slate-500 dark:text-slate-400">
-                      جرب تغيير الفئة العمرية، معيار الانتماء للأندية، أو الرياضة المحددة.
+                      جرب اختيار &quot;جميع السباقات والفئات&quot; أو تغيير معيار الانتماء للأندية.
                     </p>
                   </div>
                 ) : (
-                  crossCountryList.map((catGroup) => (
-                    <div key={catGroup.key} className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 shadow-sm space-y-4 transition-colors">
-                      
-                      {/* Header */}
-                      <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
-                        <div className="flex items-center gap-2">
-                          <span className="p-2 bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 rounded-xl">
-                            <Trophy className="w-5 h-5" />
-                          </span>
-                          <div>
-                            <h3 className="text-sm font-black text-slate-900 dark:text-white">
-                              {catGroup.categoryName}
-                            </h3>
-                            <p className="text-[11px] text-slate-500 dark:text-slate-400 font-bold">
-                              عدد العدائين المعتمدين: {catGroup.runners.length} عداء(ة)
-                            </p>
+                  crossCountryList.map((catGroup) => {
+                    const sortedRunners = [...catGroup.runners].sort((a, b) => ((a.recalculatedRank || a.rank || 0) - (b.recalculatedRank || b.rank || 0)));
+                    const first = sortedRunners[0] || null;
+                    const second = sortedRunners[1] || null;
+                    const third = sortedRunners[2] || null;
+
+                    return (
+                      <div key={catGroup.key} className="bg-white dark:bg-slate-900 border-2 border-emerald-500/20 dark:border-slate-800 rounded-3xl p-4 sm:p-6 shadow-md space-y-5 transition-colors">
+                        
+                        {/* Header with Title & Badge */}
+                        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-800 pb-4">
+                          <div className="flex items-center gap-3">
+                            <span className="p-2.5 bg-gradient-to-br from-amber-400 to-amber-600 text-white rounded-2xl shadow-sm">
+                              <Trophy className="w-6 h-6" />
+                            </span>
+                            <div>
+                              <h3 className="text-base sm:text-lg font-black text-slate-900 dark:text-white flex items-center gap-2">
+                                <span>{catGroup.categoryName}</span>
+                              </h3>
+                              <p className="text-xs text-slate-500 dark:text-slate-400 font-bold mt-0.5">
+                                منصة التتويج الرسمية • عدد العدائين المصنفين: {catGroup.runners.length} عداء(ة)
+                              </p>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-2">
+                            <span className="px-3 py-1 bg-amber-50 dark:bg-amber-950/50 text-amber-800 dark:text-amber-200 border border-amber-200 dark:border-amber-800 rounded-full text-xs font-black flex items-center gap-1.5 shadow-xs">
+                              <span>👑</span>
+                              <span>منصة التتويج الأولمبية</span>
+                            </span>
                           </div>
                         </div>
 
-                        <span className="px-3 py-1 bg-emerald-50 dark:bg-emerald-900/30 text-emerald-800 dark:text-emerald-200 border border-emerald-200 dark:border-emerald-800 rounded-full text-xs font-bold">
-                          النتائج الرسمية
-                        </span>
-                      </div>
+                        {/* Top 3 Olympic-Style Podium (1st in Center, 2nd on Left, 3rd on Right) */}
+                        {(() => {
+                          const renderPodiumSlot = (
+                            runner: any | null,
+                            rank: 1 | 2 | 3
+                          ) => {
+                            const isGold = rank === 1;
+                            const isSilver = rank === 2;
+                            const isBronze = rank === 3;
 
-                      {/* Top 3 Olympic-Style Podium (1st in Center, 2nd on Left, 3rd on Right) */}
-                      {(() => {
-                        const sortedRunners = [...catGroup.runners].sort((a, b) => (a.position || 0) - (b.position || 0));
-                        const first = sortedRunners[0] || null;
-                        const second = sortedRunners[1] || null;
-                        const third = sortedRunners[2] || null;
+                            const runnerName = runner ? (runner.fullName || runner.studentName) : '';
+                            const isClub = runner ? (students.find(s => s.id === runner.studentId || s.fullName === runnerName)?.affiliationType === 'club_affiliated' || runner.affiliationType === 'club_affiliated') : false;
+                            const isTeam = runner ? (resolveRunnerParticipationType(runner, students) === 'school_team') : false;
 
-                        const renderPodiumSlot = (
-                          runner: any | null,
-                          rank: 1 | 2 | 3
-                        ) => {
-                          const isGold = rank === 1;
-                          const isSilver = rank === 2;
-                          const isBronze = rank === 3;
+                            const medalBg = isGold
+                              ? 'from-[#ffea79] via-[#fbc02d] to-[#f59e0b] border-amber-300 text-[#713F12]'
+                              : isSilver
+                              ? 'from-slate-100 via-slate-200 to-slate-400 border-slate-200 text-slate-900'
+                              : 'from-amber-600 via-amber-700 to-amber-900 border-amber-500 text-amber-100';
 
-                          const runnerName = runner ? (runner.fullName || runner.studentName) : '';
-                          const isClub = runner ? (students.find(s => s.id === runner.studentId || s.fullName === runnerName)?.affiliationType === 'club_affiliated' || runner.affiliationType === 'club_affiliated') : false;
-                          const isTeam = runner ? (resolveRunnerParticipationType(runner, students) === 'school_team') : false;
+                            const stepHeight = isGold
+                              ? 'h-24 sm:h-28 bg-gradient-to-t from-amber-500 via-yellow-400 to-amber-300 text-slate-950 border-t-4 border-yellow-100 shadow-lg'
+                              : isSilver
+                              ? 'h-16 sm:h-20 bg-gradient-to-t from-slate-400 to-slate-200 dark:from-slate-700 dark:to-slate-500 text-slate-950 dark:text-white border-t-4 border-slate-300 shadow-md'
+                              : 'h-12 sm:h-16 bg-gradient-to-t from-amber-800 to-amber-600 dark:from-amber-950 dark:to-amber-800 text-amber-50 border-t-4 border-amber-400 shadow-md';
 
-                          const medalBg = isGold
-                            ? 'from-[#ffea79] via-[#fbc02d] to-[#f59e0b] border-amber-400 text-[#713F12]'
-                            : isSilver
-                            ? 'from-slate-100 via-slate-200 to-slate-400 border-slate-300 text-slate-900'
-                            : 'from-amber-600 via-amber-700 to-amber-900 border-amber-600 text-amber-100';
+                            return (
+                              <div className={`flex flex-col items-center justify-end w-full ${isGold ? '-translate-y-2 sm:-translate-y-4 z-10' : 'z-0'}`}>
+                                {/* Circular Medal Badge at top with crown */}
+                                <div className="relative -mb-5 sm:-mb-7 z-10">
+                                  <div className={`w-12 h-12 sm:w-16 sm:h-16 md:w-20 md:h-20 rounded-full border-2 sm:border-4 bg-gradient-to-b ${medalBg} shadow-xl flex flex-col items-center justify-center relative overflow-hidden shrink-0 select-none`}>
+                                    {isGold && <span className="text-xs sm:text-sm md:text-base leading-none -mb-0.5">👑</span>}
+                                    <span className="font-black text-sm sm:text-lg md:text-xl font-mono leading-none">
+                                      #{rank}
+                                    </span>
+                                  </div>
+                                </div>
 
-                          const stepHeight = isGold
-                            ? 'h-20 sm:h-24 bg-gradient-to-t from-amber-500 via-yellow-400 to-amber-300 text-slate-950 border-t-4 border-yellow-200 shadow-md'
-                            : isSilver
-                            ? 'h-14 sm:h-16 bg-gradient-to-t from-slate-400 to-slate-200 dark:from-slate-700 dark:to-slate-600 text-slate-900 dark:text-slate-100 border-t-4 border-slate-300 shadow-xs'
-                            : 'h-10 sm:h-12 bg-gradient-to-t from-amber-800 to-amber-600 dark:from-amber-950 dark:to-amber-900 text-amber-100 border-t-4 border-amber-500 shadow-xs';
+                                {/* Podium Athlete Card */}
+                                <div className={`w-full pt-7 sm:pt-9 pb-3 px-2 sm:px-3 rounded-2xl border text-center flex flex-col items-center justify-between min-h-[170px] sm:min-h-[210px] shadow-sm transition-all ${
+                                  isGold
+                                    ? 'bg-amber-50/95 dark:bg-amber-950/40 border-amber-400 dark:border-amber-600 ring-4 ring-amber-400/20'
+                                    : isSilver
+                                    ? 'bg-slate-50 dark:bg-slate-800/90 border-slate-300 dark:border-slate-700 shadow-xs'
+                                    : 'bg-orange-50/80 dark:bg-orange-950/30 border-orange-300 dark:border-orange-800 shadow-xs'
+                                }`}>
+                                  <div className={`px-2.5 py-0.5 rounded-full text-[10px] sm:text-xs font-black mb-1.5 shadow-xs ${
+                                    isGold
+                                      ? 'bg-amber-400 text-slate-950'
+                                      : isSilver
+                                      ? 'bg-slate-300 dark:bg-slate-700 text-slate-900 dark:text-white'
+                                      : 'bg-amber-700 text-amber-50'
+                                  }`}>
+                                    {isGold ? 'بطل الفئة 🥇' : isSilver ? 'الوصيف 🥈' : 'المركز الثالث 🥉'}
+                                  </div>
+
+                                  {runner ? (
+                                    <div className="w-full space-y-1.5 my-auto">
+                                      <h4 className="text-xs sm:text-base font-black text-slate-900 dark:text-white truncate" title={runnerName}>
+                                        {runnerName}
+                                      </h4>
+                                      <p className="text-[11px] sm:text-xs font-bold text-slate-600 dark:text-slate-300 truncate" title={runner.schoolName}>
+                                        {runner.schoolName}
+                                      </p>
+                                      {runner.bibNumber && (
+                                        <p className="text-[10px] sm:text-xs font-mono font-bold text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/60 px-2 py-0.5 rounded-md inline-block">
+                                          صدرية: #{runner.bibNumber}
+                                        </p>
+                                      )}
+                                      <div className="flex flex-wrap items-center justify-center gap-1 pt-1">
+                                        <span className={`px-2 py-0.5 rounded text-[9px] sm:text-[10px] font-bold ${
+                                          isClub
+                                            ? 'bg-purple-100 dark:bg-purple-950 text-purple-800 dark:text-purple-300 border border-purple-200 dark:border-purple-800'
+                                            : 'bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800'
+                                        }`}>
+                                          {isClub ? 'منتمي للأندية' : 'مدرسي (غير منتمي)'}
+                                        </span>
+                                        <span className={`px-2 py-0.5 rounded text-[9px] sm:text-[10px] font-bold ${
+                                          isTeam
+                                            ? 'bg-blue-100 dark:bg-blue-950/80 text-blue-800 dark:text-blue-300 border border-blue-200 dark:border-blue-800'
+                                            : 'bg-amber-100 dark:bg-amber-950/80 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800'
+                                        }`}>
+                                          {isTeam ? '👥 فريق المؤسسة' : '👤 مشاركة فردية'}
+                                        </span>
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    <div className="my-auto py-3">
+                                      <p className="text-xs text-slate-400 font-bold">في انتظار استكمال النتائج</p>
+                                    </div>
+                                  )}
+                                </div>
+
+                                {/* Olympic Step Block with Number */}
+                                <div className={`w-full rounded-t-2xl font-black font-mono flex items-center justify-center text-lg sm:text-2xl ${stepHeight}`}>
+                                  <span>{rank}</span>
+                                </div>
+                              </div>
+                            );
+                          };
 
                           return (
-                            <div className={`flex flex-col items-center justify-end w-full ${isGold ? '-translate-y-2 sm:-translate-y-4 z-10' : 'z-0'}`}>
-                              {/* Circular Medal Badge at top */}
-                              <div className="relative -mb-4 sm:-mb-6 z-10">
-                                <div className={`w-10 h-10 sm:w-14 sm:h-14 md:w-16 md:h-16 rounded-full border-2 sm:border-[3px] bg-gradient-to-b ${medalBg} shadow-lg flex flex-col items-center justify-center relative overflow-hidden shrink-0 select-none`}>
-                                  {isGold && <span className="text-[9px] sm:text-xs leading-none -mb-0.5">👑</span>}
-                                  <span className="font-black text-xs sm:text-base md:text-lg font-mono leading-none">
-                                    #{rank}
-                                  </span>
-                                </div>
-                              </div>
-
-                              {/* Card Body */}
-                              <div className={`w-full pt-6 sm:pt-8 pb-3 px-2 sm:px-3 rounded-2xl border text-center flex flex-col items-center justify-between min-h-[160px] sm:min-h-[190px] shadow-sm transition-all ${
-                                isGold
-                                  ? 'bg-amber-50/90 dark:bg-amber-950/40 border-amber-300 dark:border-amber-700 ring-2 ring-amber-400/30'
-                                  : isSilver
-                                  ? 'bg-slate-50 dark:bg-slate-800/80 border-slate-300 dark:border-slate-700'
-                                  : 'bg-orange-50/70 dark:bg-orange-950/30 border-orange-200 dark:border-orange-800'
-                              }`}>
-                                <div className={`px-2 py-0.5 rounded-full text-[9px] sm:text-[10px] font-black mb-1 ${
-                                  isGold
-                                    ? 'bg-amber-400 text-slate-950'
-                                    : isSilver
-                                    ? 'bg-slate-200 dark:bg-slate-700 text-slate-900 dark:text-white'
-                                    : 'bg-amber-700 text-amber-50'
-                                }`}>
-                                  {isGold ? 'بطل الفئة 🥇' : isSilver ? 'الوصيف 🥈' : 'المركز الثالث 🥉'}
+                            <div className="bg-gradient-to-b from-slate-100/70 to-slate-50/30 dark:from-slate-800/50 dark:to-slate-900/30 p-4 sm:p-6 rounded-3xl border border-slate-200/80 dark:border-slate-800">
+                              {/* Layout: Left = 2nd (اليسار), Center = 1st (الوسط), Right = 3rd (اليمين) */}
+                              <div className="grid grid-cols-3 gap-2 sm:gap-4 items-end max-w-2xl mx-auto" dir="ltr">
+                                {/* Left on screen: 2nd place (الوصيف 🥈) */}
+                                <div dir="rtl" className="w-full">
+                                  {renderPodiumSlot(second, 2)}
                                 </div>
 
-                                {runner ? (
-                                  <div className="w-full space-y-1 my-auto">
-                                    <h4 className="text-xs sm:text-sm font-black text-slate-900 dark:text-white truncate" title={runnerName}>
-                                      {runnerName}
-                                    </h4>
-                                    <p className="text-[10px] sm:text-[11px] font-bold text-slate-600 dark:text-slate-300 truncate" title={runner.schoolName}>
-                                      {runner.schoolName}
-                                    </p>
-                                    {runner.bibNumber && (
-                                      <p className="text-[9px] sm:text-[10px] font-mono font-bold text-slate-500 dark:text-slate-400">
-                                        صدرية: #{runner.bibNumber}
-                                      </p>
-                                    )}
-                                    <div className="flex flex-wrap items-center justify-center gap-1 pt-1">
-                                      <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${
-                                        isClub
-                                          ? 'bg-purple-100 dark:bg-purple-950 text-purple-800 dark:text-purple-300 border border-purple-200 dark:border-purple-800'
-                                          : 'bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800'
-                                      }`}>
-                                        {isClub ? 'منتمي' : 'مدرسي'}
-                                      </span>
-                                      <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${
-                                        isTeam
-                                          ? 'bg-blue-100 dark:bg-blue-950/80 text-blue-800 dark:text-blue-300 border border-blue-200 dark:border-blue-800'
-                                          : 'bg-amber-100 dark:bg-amber-950/80 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800'
-                                      }`}>
-                                        {isTeam ? '👥 فريق المؤسسة' : '👤 مشاركة فردية'}
-                                      </span>
-                                    </div>
-                                  </div>
-                                ) : (
-                                  <div className="my-auto py-2">
-                                    <p className="text-[10px] text-slate-400 font-bold">في انتظار التتويج</p>
-                                  </div>
-                                )}
-                              </div>
+                                {/* Center on screen: 1st place (الأول 🥇) */}
+                                <div dir="rtl" className="w-full">
+                                  {renderPodiumSlot(first, 1)}
+                                </div>
 
-                              {/* Podium Step Block */}
-                              <div className={`w-full rounded-t-xl font-black font-mono flex items-center justify-center text-sm sm:text-xl ${stepHeight}`}>
-                                <span>{rank}</span>
+                                {/* Right on screen: 3rd place (الثالث 🥉) */}
+                                <div dir="rtl" className="w-full">
+                                  {renderPodiumSlot(third, 3)}
+                                </div>
                               </div>
                             </div>
                           );
-                        };
+                        })()}
 
-                        return (
-                          <div className="bg-slate-50/50 dark:bg-slate-800/30 p-3 sm:p-5 rounded-3xl border border-slate-200/80 dark:border-slate-800">
-                            {/* Layout: Left = 2nd (اليسار), Center = 1st (الوسط), Right = 3rd (اليمين) */}
-                            <div className="grid grid-cols-3 gap-2 sm:gap-4 items-end max-w-2xl mx-auto" dir="ltr">
-                              {/* Left on screen: 2nd place (الوصيف 🥈) */}
-                              <div dir="rtl" className="w-full">
-                                {renderPodiumSlot(second, 2)}
+                        {/* SCHOOL TEAM RANKINGS (ترتيب فرق المؤسسات التعليمية) */}
+                        {catGroup.teamRankings && catGroup.teamRankings.length > 0 ? (
+                          <div className="bg-gradient-to-br from-amber-500/10 via-amber-500/5 to-emerald-500/10 border border-amber-300 dark:border-amber-800/60 rounded-2xl p-4 space-y-3">
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-2">
+                                <span className="p-1.5 bg-amber-500 text-white rounded-lg shadow-xs">
+                                  <Award className="w-4 h-4" />
+                                </span>
+                                <div>
+                                  <h4 className="text-xs font-black text-slate-900 dark:text-white flex items-center gap-1.5">
+                                    <span>ترتيب فرق المؤسسات التعليمية</span>
+                                    <span className="px-2 py-0.5 bg-amber-100 dark:bg-amber-900/60 text-amber-800 dark:text-amber-200 text-[10px] font-bold rounded-full border border-amber-300 dark:border-amber-700">
+                                      تأهل 4 عداءين
+                                    </span>
+                                  </h4>
+                                  <p className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">
+                                    حسب المجموع الأقل لنقاط رتب أول 4 عداءين واصلين من نفس المدرسة
+                                  </p>
+                                </div>
                               </div>
 
-                              {/* Center on screen: 1st place (الأول 🥇) */}
-                              <div dir="rtl" className="w-full">
-                                {renderPodiumSlot(first, 1)}
-                              </div>
-
-                              {/* Right on screen: 3rd place (الثالث 🥉) */}
-                              <div dir="rtl" className="w-full">
-                                {renderPodiumSlot(third, 3)}
-                              </div>
-                            </div>
-                          </div>
-                        );
-                      })()}
-
-                      {/* SCHOOL TEAM RANKINGS (ترتيب فرق المؤسسات التعليمية) */}
-                      {catGroup.teamRankings && catGroup.teamRankings.length > 0 ? (
-                        <div className="bg-gradient-to-br from-amber-500/10 via-amber-500/5 to-emerald-500/10 border border-amber-300 dark:border-amber-800/60 rounded-2xl p-4 space-y-3">
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-2">
-                              <span className="p-1.5 bg-amber-500 text-white rounded-lg shadow-xs">
-                                <Award className="w-4 h-4" />
+                              <span className="text-[10px] font-bold text-amber-700 dark:text-amber-300 bg-amber-100/80 dark:bg-amber-900/40 px-2.5 py-1 rounded-lg border border-amber-200 dark:border-amber-800">
+                                🏆 نتائج الفرق الرسمية
                               </span>
-                              <div>
-                                <h4 className="text-xs font-black text-slate-900 dark:text-white flex items-center gap-1.5">
-                                  <span>ترتيب فرق المؤسسات التعليمية</span>
-                                  <span className="px-2 py-0.5 bg-amber-100 dark:bg-amber-900/60 text-amber-800 dark:text-amber-200 text-[10px] font-bold rounded-full border border-amber-300 dark:border-amber-700">
-                                    تأهل 4 عداءين
-                                  </span>
-                                </h4>
-                                <p className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">
-                                  حسب المجموع الأقل لنقاط رتب أول 4 عداءين واصلين من نفس المدرسة
-                                </p>
-                              </div>
                             </div>
 
-                            <span className="text-[10px] font-bold text-amber-700 dark:text-amber-300 bg-amber-100/80 dark:bg-amber-900/40 px-2.5 py-1 rounded-lg border border-amber-200 dark:border-amber-800">
-                              🏆 نتائج الفرق الرسمية
-                            </span>
+                            <div className="overflow-x-auto border border-amber-200 dark:border-amber-900/50 rounded-xl bg-white/80 dark:bg-slate-900/80 backdrop-blur-xs">
+                              <table className="w-full text-right text-xs">
+                                <thead className="bg-amber-100/60 dark:bg-amber-950/40 text-amber-950 dark:text-amber-200 font-bold border-b border-amber-200 dark:border-amber-900">
+                                  <tr>
+                                    <th className="p-2 text-center">الترتيب</th>
+                                    <th className="p-2">المؤسسة التعليمية</th>
+                                    <th className="p-2 text-center">مجموع النقاط</th>
+                                    <th className="p-2 text-center">رتب العدائين الـ 4 الأوائل</th>
+                                    <th className="p-2 text-center">حسم التعادل (العداء 4)</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-amber-100 dark:divide-slate-800">
+                                  {catGroup.teamRankings.map((team, tIdx) => {
+                                    const rank = tIdx + 1;
+                                    return (
+                                      <tr key={team.schoolName || tIdx} className="hover:bg-amber-50/50 dark:hover:bg-slate-800/60 transition-colors">
+                                        <td className="p-2 text-center font-black">
+                                          <span className={`inline-flex items-center justify-center w-6 h-6 rounded-full text-[11px] font-black ${
+                                            rank === 1
+                                              ? 'bg-amber-500 text-white shadow-xs'
+                                              : rank === 2
+                                              ? 'bg-slate-400 text-white'
+                                              : rank === 3
+                                              ? 'bg-amber-700 text-white'
+                                              : 'bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300'
+                                          }`}>
+                                            #{rank}
+                                          </span>
+                                        </td>
+                                        <td className="p-2 font-bold text-slate-900 dark:text-white">
+                                          {team.schoolName}
+                                        </td>
+                                        <td className="p-2 text-center font-mono font-black text-amber-700 dark:text-amber-400">
+                                          {team.totalPoints} ن
+                                        </td>
+                                        <td className="p-2 text-center">
+                                          <div className="flex items-center justify-center gap-1 font-mono text-[10px]">
+                                            {team.top4Runners.map((r, rI) => (
+                                              <span key={rI} className="px-1.5 py-0.5 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded border border-slate-200 dark:border-slate-700">
+                                                #{r.recalculatedRank || r.rank}
+                                              </span>
+                                            ))}
+                                          </div>
+                                        </td>
+                                        <td className="p-2 text-center font-mono text-[11px] text-slate-600 dark:text-slate-400">
+                                          العداء 4 (رتبة #{team.fourthRunnerRank})
+                                        </td>
+                                      </tr>
+                                    );
+                                  })}
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="p-3 bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-800 rounded-xl text-center">
+                            <p className="text-[11px] text-slate-500 dark:text-slate-400 font-medium">
+                              ℹ️ لم تتمكن أي مؤسسة من استكمال شروط الفريق (وصول 4 عداءين على الأقل من نفس المدرسة لخط النهاية) في هذه الفئة.
+                            </p>
+                          </div>
+                        )}
+
+                        {/* Full Runner Results Table Header & Table */}
+                        <div className="space-y-2 pt-2">
+                          <div className="flex items-center justify-between px-1">
+                            <h4 className="text-xs font-black text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                              <Layers className="w-4 h-4 text-emerald-600" />
+                              <span>الترتيب العام الكامل لجميع العدائين ({sortedRunners.length})</span>
+                            </h4>
                           </div>
 
-                          <div className="overflow-x-auto border border-amber-200 dark:border-amber-900/50 rounded-xl bg-white/80 dark:bg-slate-900/80 backdrop-blur-xs">
+                          <div className="overflow-x-auto border border-slate-200 dark:border-slate-800 rounded-2xl">
                             <table className="w-full text-right text-xs">
-                              <thead className="bg-amber-100/60 dark:bg-amber-950/40 text-amber-950 dark:text-amber-200 font-bold border-b border-amber-200 dark:border-amber-900">
+                              <thead className="bg-slate-100 dark:bg-slate-800/80 text-slate-700 dark:text-slate-300 font-bold border-b border-slate-200 dark:border-slate-700">
                                 <tr>
-                                  <th className="p-2 text-center">الترتيب</th>
-                                  <th className="p-2">المؤسسة التعليمية</th>
-                                  <th className="p-2 text-center">مجموع النقاط</th>
-                                  <th className="p-2 text-center">رتب العدائين الـ 4 الأوائل</th>
-                                  <th className="p-2 text-center">حسم التعادل (العداء 4)</th>
+                                  <th className="p-2.5 text-center">الترتيب</th>
+                                  <th className="p-2.5">رقم الصدرية</th>
+                                  <th className="p-2.5">اسم التلميذ(ة)</th>
+                                  <th className="p-2.5">المؤسسة التعليمية</th>
+                                  <th className="p-2.5 text-center">معيار الانتماء</th>
+                                  <th className="p-2.5 text-center">نوع المشاركة</th>
                                 </tr>
                               </thead>
-                              <tbody className="divide-y divide-amber-100 dark:divide-slate-800">
-                                {catGroup.teamRankings.map((team, tIdx) => {
-                                  const rank = tIdx + 1;
+                              <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                                {sortedRunners.map((runner, rIdx) => {
+                                  const runnerName = runner.fullName || runner.studentName;
+                                  const isClub = students.find(s => s.id === runner.studentId || s.fullName === runnerName)?.affiliationType === 'club_affiliated' || runner.affiliationType === 'club_affiliated';
+                                  const isTeam = runner.participationType === 'school_team' || runner.participationType === 'فريق';
+
                                   return (
-                                    <tr key={team.schoolName || tIdx} className="hover:bg-amber-50/50 dark:hover:bg-slate-800/60 transition-colors">
-                                      <td className="p-2 text-center font-black">
-                                        <span className={`inline-flex items-center justify-center w-6 h-6 rounded-full text-[11px] font-black ${
-                                          rank === 1
-                                            ? 'bg-amber-500 text-white shadow-xs'
-                                            : rank === 2
-                                            ? 'bg-slate-400 text-white'
-                                            : rank === 3
-                                            ? 'bg-amber-700 text-white'
-                                            : 'bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300'
+                                    <tr key={runner.studentId || rIdx} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
+                                      <td className="p-2.5 text-center font-black text-slate-900 dark:text-white">
+                                        #{runner.recalculatedRank || runner.rank || rIdx + 1}
+                                      </td>
+                                      <td className="p-2.5 font-mono font-bold text-emerald-700 dark:text-emerald-400">
+                                        {runner.bibNumber || '-'}
+                                      </td>
+                                      <td className="p-2.5 font-bold text-slate-900 dark:text-slate-100">
+                                        {runner.fullName || runner.studentName}
+                                      </td>
+                                      <td className="p-2.5 text-slate-600 dark:text-slate-400">
+                                        {runner.schoolName}
+                                      </td>
+                                      <td className="p-2.5 text-center">
+                                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                          isClub
+                                            ? 'bg-purple-100 dark:bg-purple-950/80 text-purple-800 dark:text-purple-300'
+                                            : 'bg-emerald-100 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300'
                                         }`}>
-                                          #{rank}
+                                          {isClub ? 'منتمي للأندية' : 'غير منتمي (مدرسي)'}
                                         </span>
                                       </td>
-                                      <td className="p-2 font-bold text-slate-900 dark:text-white">
-                                        {team.schoolName}
-                                      </td>
-                                      <td className="p-2 text-center font-mono font-black text-amber-700 dark:text-amber-400">
-                                        {team.totalPoints} ن
-                                      </td>
-                                      <td className="p-2 text-center">
-                                        <div className="flex items-center justify-center gap-1 font-mono text-[10px]">
-                                          {team.top4Runners.map((r, rI) => (
-                                            <span key={rI} className="px-1.5 py-0.5 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded border border-slate-200 dark:border-slate-700">
-                                              #{r.recalculatedRank || r.rank}
-                                            </span>
-                                          ))}
-                                        </div>
-                                      </td>
-                                      <td className="p-2 text-center font-mono text-[11px] text-slate-600 dark:text-slate-400">
-                                        العداء 4 (رتبة #{team.fourthRunnerRank})
+                                      <td className="p-2.5 text-center">
+                                        <span className={`px-2.5 py-0.5 rounded text-[10px] font-bold ${
+                                          isTeam
+                                            ? 'bg-blue-100 dark:bg-blue-950/80 text-blue-800 dark:text-blue-300 border border-blue-200 dark:border-blue-800'
+                                            : 'bg-amber-100 dark:bg-amber-950/80 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800'
+                                        }`}>
+                                          {isTeam ? '👥 فريق المؤسسة' : '👤 مشاركة فردية'}
+                                        </span>
                                       </td>
                                     </tr>
                                   );
@@ -1832,74 +1971,10 @@ export const Login: React.FC = () => {
                             </table>
                           </div>
                         </div>
-                      ) : (
-                        <div className="p-3 bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-800 rounded-xl text-center">
-                          <p className="text-[11px] text-slate-500 dark:text-slate-400 font-medium">
-                            ℹ️ لم تتمكن أي مؤسسة من استكمال شروط الفريق (وصول 4 عداءين على الأقل من نفس المدرسة لخط النهاية) في هذه الفئة.
-                          </p>
-                        </div>
-                      )}
 
-                       {/* Full Runner Results Table */}
-                      <div className="overflow-x-auto border border-slate-200 dark:border-slate-800 rounded-2xl">
-                        <table className="w-full text-right text-xs">
-                          <thead className="bg-slate-100 dark:bg-slate-800/80 text-slate-700 dark:text-slate-300 font-bold border-b border-slate-200 dark:border-slate-700">
-                            <tr>
-                              <th className="p-2.5 text-center">الترتيب</th>
-                              <th className="p-2.5">رقم الصدرية</th>
-                              <th className="p-2.5">اسم التلميذ(ة)</th>
-                              <th className="p-2.5">المؤسسة التعليمية</th>
-                              <th className="p-2.5 text-center">معيار الانتماء</th>
-                              <th className="p-2.5 text-center">نوع المشاركة</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                            {catGroup.runners.map((runner, rIdx) => {
-                              const runnerName = runner.fullName || runner.studentName;
-                              const isClub = students.find(s => s.id === runner.studentId || s.fullName === runnerName)?.affiliationType === 'club_affiliated' || runner.affiliationType === 'club_affiliated';
-                              const isTeam = runner.participationType === 'school_team' || runner.participationType === 'فريق';
-
-                              return (
-                                <tr key={runner.studentId || rIdx} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
-                                  <td className="p-2.5 text-center font-black text-slate-900 dark:text-white">
-                                    #{runner.recalculatedRank || runner.rank || rIdx + 1}
-                                  </td>
-                                  <td className="p-2.5 font-mono font-bold text-emerald-700 dark:text-emerald-400">
-                                    {runner.bibNumber || '-'}
-                                  </td>
-                                  <td className="p-2.5 font-bold text-slate-900 dark:text-slate-100">
-                                    {runner.fullName || runner.studentName}
-                                  </td>
-                                  <td className="p-2.5 text-slate-600 dark:text-slate-400">
-                                    {runner.schoolName}
-                                  </td>
-                                  <td className="p-2.5 text-center">
-                                    <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                                      isClub
-                                        ? 'bg-purple-100 dark:bg-purple-950/80 text-purple-800 dark:text-purple-300'
-                                        : 'bg-emerald-100 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300'
-                                    }`}>
-                                      {isClub ? 'منتمي للأندية' : 'غير منتمي (مدرسي)'}
-                                    </span>
-                                  </td>
-                                  <td className="p-2.5 text-center">
-                                    <span className={`px-2.5 py-0.5 rounded text-[10px] font-bold ${
-                                      isTeam
-                                        ? 'bg-blue-100 dark:bg-blue-950/80 text-blue-800 dark:text-blue-300 border border-blue-200 dark:border-blue-800'
-                                        : 'bg-amber-100 dark:bg-amber-950/80 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800'
-                                    }`}>
-                                      {isTeam ? '👥 فريق المؤسسة' : '👤 مشاركة فردية'}
-                                    </span>
-                                  </td>
-                                </tr>
-                              );
-                            })}
-                          </tbody>
-                        </table>
                       </div>
-
-                    </div>
-                  ))
+                    );
+                  })
                 )}
               </div>
             )}

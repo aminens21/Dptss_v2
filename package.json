@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "vite build && (mkdir -p build && cp -r dist/* build/ 2>/dev/null || true)",
     "preview": "vite preview",
     "lint": "tsc --noEmit"
   },
