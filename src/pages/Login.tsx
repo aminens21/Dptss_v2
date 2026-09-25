@@ -55,7 +55,7 @@ import { doc, setDoc, getDoc, serverTimestamp } from 'firebase/firestore';
 import { auth, db } from '../firebase/config';
 import { Role, Directorate, School, Tournament, Match, Student, CrossCountryCategoryResult } from '../types';
 import { DataService, SPORTS_MAP, getAgeCategoriesForSeason, getCategoryYearsLabel } from '../lib/dataService';
-import { calculateTeamRankings } from '../lib/crossCountryConfig';
+import { calculateTeamRankings, resolveRunnerParticipationType } from '../lib/crossCountryConfig';
 import { AppLogo } from '../components/AppLogo';
 import toast from 'react-hot-toast';
 
@@ -809,7 +809,7 @@ export const Login: React.FC = () => {
     });
   }, [matches, selectedDate, selectedSport, selectedCategory, selectedGender, searchQuery]);
 
-  // Cross Country Results Data (Strictly Deduplicated per Category & Team Rankings)
+  // Cross Country Results Data (Strictly Separated, Deduplicated, & Recalculated by Affiliation)
   const crossCountryList = useMemo(() => {
     const list: Array<{
       key: string;
@@ -826,27 +826,25 @@ export const Login: React.FC = () => {
       if (!catRes || !catRes.podium || catRes.podium.length === 0) return;
 
       // Canonical key for deduplication
-      const canonicalKey = catRes.categoryId || catRes.id || key;
+      const canonicalKey = catRes.categoryId || key;
       if (processedCategoryKeys.has(canonicalKey)) return;
       processedCategoryKeys.add(canonicalKey);
 
       const catName = catRes.titleAr || catRes.category || key;
+
+      // Gender Filter
+      if (selectedGender === 'Male' && (catRes.gender === 'Female' || catName.includes('إناث'))) return;
+      if (selectedGender === 'Female' && (catRes.gender === 'Male' || catName.includes('ذكور'))) return;
+
+      // Age Category Filter
+      if (selectedCategory !== 'ALL' && catRes.category !== selectedCategory) return;
+
       const winners = catRes.podium || [];
 
-      // Filter runners by search query & affiliation
+      // Filter runners by search query
       const filteredRunners = winners.filter(w => {
         const studentName = w.fullName || (w as any).studentName;
         if (!w || !studentName) return false;
-
-        // Affiliation Filter
-        const studentObj = students.find(s => s.id === w.studentId || s.fullName === studentName);
-        const isClub = studentObj?.affiliationType === 'club_affiliated' || w.affiliationType === 'club_affiliated';
-        if (selectedAffiliation === 'CLUB' && !isClub) return false;
-        if (selectedAffiliation === 'NON_CLUB' && isClub) return false;
-
-        // Gender Filter
-        if (selectedGender === 'Male' && (catRes.gender === 'Female' || catName.includes('إناث'))) return false;
-        if (selectedGender === 'Female' && (catRes.gender === 'Male' || catName.includes('ذكور'))) return false;
 
         // Search Query
         if (searchQuery.trim()) {
@@ -860,22 +858,66 @@ export const Login: React.FC = () => {
         return true;
       });
 
-      if (filteredRunners.length > 0) {
-        // Compute official school team rankings
-        const teamRankings = calculateTeamRankings(filteredRunners);
+      // Split into Non-Club and Club-Affiliated
+      const nonClubRunners = filteredRunners.filter(w => {
+        const studentName = w.fullName || (w as any).studentName;
+        const studentObj = students.find(s => s.id === w.studentId || s.fullName === studentName);
+        const isClub = studentObj?.affiliationType === 'club_affiliated' || w.affiliationType === 'club_affiliated';
+        return !isClub;
+      });
 
+      const clubRunners = filteredRunners.filter(w => {
+        const studentName = w.fullName || (w as any).studentName;
+        const studentObj = students.find(s => s.id === w.studentId || s.fullName === studentName);
+        const isClub = studentObj?.affiliationType === 'club_affiliated' || w.affiliationType === 'club_affiliated';
+        return isClub;
+      });
+
+      // Recalculate ranks for each separate class starting from #1
+      const rankedNonClub = nonClubRunners.map((w, idx) => {
+        const resolvedType = resolveRunnerParticipationType(w, students);
+        return {
+          ...w,
+          participationType: resolvedType,
+          recalculatedRank: idx + 1
+        };
+      });
+
+      const rankedClub = clubRunners.map((w, idx) => {
+        const resolvedType = resolveRunnerParticipationType(w, students);
+        return {
+          ...w,
+          participationType: resolvedType,
+          recalculatedRank: idx + 1
+        };
+      });
+
+      // 1. Process Non-Club Class (Only if selectedAffiliation is not CLUB)
+      if (rankedNonClub.length > 0 && selectedAffiliation !== 'CLUB') {
+        const teamRankings = calculateTeamRankings(rankedNonClub, students);
         list.push({
-          key: canonicalKey,
+          key: `${canonicalKey}_non_club`,
           categoryKey: canonicalKey,
-          categoryName: catName,
-          runners: filteredRunners,
+          categoryName: `${catName} – صنف غير المنتمين (مدرسي) 🏫`,
+          runners: rankedNonClub,
           teamRankings
+        });
+      }
+
+      // 2. Process Club-Affiliated Class (Only if selectedAffiliation is not NON_CLUB)
+      if (rankedClub.length > 0 && selectedAffiliation !== 'NON_CLUB') {
+        list.push({
+          key: `${canonicalKey}_club`,
+          categoryKey: canonicalKey,
+          categoryName: `${catName} – صنف المنتمين للأندية 🏅`,
+          runners: rankedClub,
+          teamRankings: [] // Club-affiliated do not participate in school teams
         });
       }
     });
 
     return list;
-  }, [crossCountryResults, students, selectedAffiliation, selectedGender, searchQuery]);
+  }, [crossCountryResults, students, selectedAffiliation, selectedCategory, selectedGender, searchQuery]);
 
   // News Marquee Items
   const marqueeNews = [
@@ -1581,59 +1623,133 @@ export const Login: React.FC = () => {
                         </span>
                       </div>
 
-                      {/* Top 3 Podium Highlights */}
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                        {catGroup.runners.slice(0, 3).map((winner, idx) => {
-                          const rank = idx + 1;
-                          const winnerName = winner.fullName || winner.studentName;
-                          const isClub = students.find(s => s.id === winner.studentId || s.fullName === winnerName)?.affiliationType === 'club_affiliated' || winner.affiliationType === 'club_affiliated';
-                          
+                      {/* Top 3 Olympic-Style Podium (1st in Center, 2nd on Left, 3rd on Right) */}
+                      {(() => {
+                        const first = catGroup.runners[0] || null;
+                        const second = catGroup.runners[1] || null;
+                        const third = catGroup.runners[2] || null;
+
+                        const renderPodiumSlot = (
+                          runner: any | null,
+                          rank: 1 | 2 | 3
+                        ) => {
+                          const isGold = rank === 1;
+                          const isSilver = rank === 2;
+                          const isBronze = rank === 3;
+
+                          const runnerName = runner ? (runner.fullName || runner.studentName) : '';
+                          const isClub = runner ? (students.find(s => s.id === runner.studentId || s.fullName === runnerName)?.affiliationType === 'club_affiliated' || runner.affiliationType === 'club_affiliated') : false;
+                          const isTeam = runner ? (resolveRunnerParticipationType(runner, students) === 'school_team') : false;
+
+                          const medalBg = isGold
+                            ? 'from-[#ffea79] via-[#fbc02d] to-[#f59e0b] border-amber-400 text-[#713F12]'
+                            : isSilver
+                            ? 'from-slate-100 via-slate-200 to-slate-400 border-slate-300 text-slate-900'
+                            : 'from-amber-600 via-amber-700 to-amber-900 border-amber-600 text-amber-100';
+
+                          const stepHeight = isGold
+                            ? 'h-20 sm:h-24 bg-gradient-to-t from-amber-500 via-yellow-400 to-amber-300 text-slate-950 border-t-4 border-yellow-200 shadow-md'
+                            : isSilver
+                            ? 'h-14 sm:h-16 bg-gradient-to-t from-slate-400 to-slate-200 dark:from-slate-700 dark:to-slate-600 text-slate-900 dark:text-slate-100 border-t-4 border-slate-300 shadow-xs'
+                            : 'h-10 sm:h-12 bg-gradient-to-t from-amber-800 to-amber-600 dark:from-amber-950 dark:to-amber-900 text-amber-100 border-t-4 border-amber-500 shadow-xs';
+
                           return (
-                            <div
-                              key={winner.studentId || idx}
-                              className={`p-3.5 rounded-2xl border transition-all text-center space-y-2 ${
-                                rank === 1
-                                  ? 'bg-amber-50/80 dark:bg-amber-950/30 border-amber-300 dark:border-amber-700'
-                                  : rank === 2
-                                  ? 'bg-slate-50 dark:bg-slate-800/80 border-slate-300 dark:border-slate-700'
-                                  : 'bg-orange-50/80 dark:bg-orange-950/30 border-orange-300 dark:border-orange-700'
-                              }`}
-                            >
-                              <div className="inline-flex items-center justify-center w-8 h-8 rounded-full font-black text-xs shadow-xs mx-auto" style={{
-                                backgroundColor: rank === 1 ? '#f59e0b' : rank === 2 ? '#94a3b8' : '#d97706',
-                                color: '#fff'
-                              }}>
-                                #{rank}
-                              </div>
-
-                              <div>
-                                <p className="text-xs font-black text-slate-900 dark:text-white truncate">
-                                  {winner.fullName || winner.studentName}
-                                </p>
-                                <p className="text-[11px] text-slate-600 dark:text-slate-400 truncate mt-0.5">
-                                  {winner.schoolName}
-                                </p>
-                              </div>
-
-                              <div className="flex items-center justify-center gap-1.5 pt-1">
-                                <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                                  isClub
-                                    ? 'bg-purple-100 dark:bg-purple-950 text-purple-800 dark:text-purple-300 border border-purple-200 dark:border-purple-800'
-                                    : 'bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800'
-                                }`}>
-                                  {isClub ? 'منتمي لنادٍ 🏅' : 'مدرسي 🏫'}
-                                </span>
-
-                                {winner.time && (
-                                  <span className="text-[10px] font-mono font-bold text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-800 px-2 py-0.5 rounded border border-slate-200 dark:border-slate-700">
-                                    ⏱️ {winner.time}
+                            <div className={`flex flex-col items-center justify-end w-full ${isGold ? '-translate-y-2 sm:-translate-y-4 z-10' : 'z-0'}`}>
+                              {/* Circular Medal Badge at top */}
+                              <div className="relative -mb-4 sm:-mb-6 z-10">
+                                <div className={`w-10 h-10 sm:w-14 sm:h-14 md:w-16 md:h-16 rounded-full border-2 sm:border-[3px] bg-gradient-to-b ${medalBg} shadow-lg flex flex-col items-center justify-center relative overflow-hidden shrink-0 select-none`}>
+                                  {isGold && <span className="text-[9px] sm:text-xs leading-none -mb-0.5">👑</span>}
+                                  <span className="font-black text-xs sm:text-base md:text-lg font-mono leading-none">
+                                    #{rank}
                                   </span>
+                                </div>
+                              </div>
+
+                              {/* Card Body */}
+                              <div className={`w-full pt-6 sm:pt-8 pb-3 px-2 sm:px-3 rounded-2xl border text-center flex flex-col items-center justify-between min-h-[160px] sm:min-h-[190px] shadow-sm transition-all ${
+                                isGold
+                                  ? 'bg-amber-50/90 dark:bg-amber-950/40 border-amber-300 dark:border-amber-700 ring-2 ring-amber-400/30'
+                                  : isSilver
+                                  ? 'bg-slate-50 dark:bg-slate-800/80 border-slate-300 dark:border-slate-700'
+                                  : 'bg-orange-50/70 dark:bg-orange-950/30 border-orange-200 dark:border-orange-800'
+                              }`}>
+                                <div className={`px-2 py-0.5 rounded-full text-[9px] sm:text-[10px] font-black mb-1 ${
+                                  isGold
+                                    ? 'bg-amber-400 text-slate-950'
+                                    : isSilver
+                                    ? 'bg-slate-200 dark:bg-slate-700 text-slate-900 dark:text-white'
+                                    : 'bg-amber-700 text-amber-50'
+                                }`}>
+                                  {isGold ? 'بطل الفئة 🥇' : isSilver ? 'الوصيف 🥈' : 'المركز الثالث 🥉'}
+                                </div>
+
+                                {runner ? (
+                                  <div className="w-full space-y-1 my-auto">
+                                    <h4 className="text-xs sm:text-sm font-black text-slate-900 dark:text-white truncate" title={runnerName}>
+                                      {runnerName}
+                                    </h4>
+                                    <p className="text-[10px] sm:text-[11px] font-bold text-slate-600 dark:text-slate-300 truncate" title={runner.schoolName}>
+                                      {runner.schoolName}
+                                    </p>
+                                    {runner.bibNumber && (
+                                      <p className="text-[9px] sm:text-[10px] font-mono font-bold text-slate-500 dark:text-slate-400">
+                                        صدرية: #{runner.bibNumber}
+                                      </p>
+                                    )}
+                                    <div className="flex flex-wrap items-center justify-center gap-1 pt-1">
+                                      <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${
+                                        isClub
+                                          ? 'bg-purple-100 dark:bg-purple-950 text-purple-800 dark:text-purple-300 border border-purple-200 dark:border-purple-800'
+                                          : 'bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800'
+                                      }`}>
+                                        {isClub ? 'منتمي' : 'مدرسي'}
+                                      </span>
+                                      <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${
+                                        isTeam
+                                          ? 'bg-blue-100 dark:bg-blue-950/80 text-blue-800 dark:text-blue-300 border border-blue-200 dark:border-blue-800'
+                                          : 'bg-amber-100 dark:bg-amber-950/80 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800'
+                                      }`}>
+                                        {isTeam ? '👥 فريق المؤسسة' : '👤 مشاركة فردية'}
+                                      </span>
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <div className="my-auto py-2">
+                                    <p className="text-[10px] text-slate-400 font-bold">في انتظار التتويج</p>
+                                  </div>
                                 )}
+                              </div>
+
+                              {/* Podium Step Block */}
+                              <div className={`w-full rounded-t-xl font-black font-mono flex items-center justify-center text-sm sm:text-xl ${stepHeight}`}>
+                                <span>{rank}</span>
                               </div>
                             </div>
                           );
-                        })}
-                      </div>
+                        };
+
+                        return (
+                          <div className="bg-slate-50/50 dark:bg-slate-800/30 p-3 sm:p-5 rounded-3xl border border-slate-200/80 dark:border-slate-800">
+                            {/* Layout: Left = 2nd (اليسار), Center = 1st (الوسط), Right = 3rd (اليمين) */}
+                            <div className="grid grid-cols-3 gap-2 sm:gap-4 items-end max-w-2xl mx-auto" dir="ltr">
+                              {/* Left on screen: 2nd place (الوصيف 🥈) */}
+                              <div dir="rtl" className="w-full">
+                                {renderPodiumSlot(second, 2)}
+                              </div>
+
+                              {/* Center on screen: 1st place (الأول 🥇) */}
+                              <div dir="rtl" className="w-full">
+                                {renderPodiumSlot(first, 1)}
+                              </div>
+
+                              {/* Right on screen: 3rd place (الثالث 🥉) */}
+                              <div dir="rtl" className="w-full">
+                                {renderPodiumSlot(third, 3)}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })()}
 
                       {/* SCHOOL TEAM RANKINGS (ترتيب فرق المؤسسات التعليمية) */}
                       {catGroup.teamRankings && catGroup.teamRankings.length > 0 ? (
@@ -1700,7 +1816,7 @@ export const Login: React.FC = () => {
                                         <div className="flex items-center justify-center gap-1 font-mono text-[10px]">
                                           {team.top4Runners.map((r, rI) => (
                                             <span key={rI} className="px-1.5 py-0.5 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded border border-slate-200 dark:border-slate-700">
-                                              #{r.rank}
+                                              #{r.recalculatedRank || r.rank}
                                             </span>
                                           ))}
                                         </div>
@@ -1723,7 +1839,7 @@ export const Login: React.FC = () => {
                         </div>
                       )}
 
-                      {/* Full Runner Results Table */}
+                       {/* Full Runner Results Table */}
                       <div className="overflow-x-auto border border-slate-200 dark:border-slate-800 rounded-2xl">
                         <table className="w-full text-right text-xs">
                           <thead className="bg-slate-100 dark:bg-slate-800/80 text-slate-700 dark:text-slate-300 font-bold border-b border-slate-200 dark:border-slate-700">
@@ -1733,18 +1849,19 @@ export const Login: React.FC = () => {
                               <th className="p-2.5">اسم التلميذ(ة)</th>
                               <th className="p-2.5">المؤسسة التعليمية</th>
                               <th className="p-2.5 text-center">معيار الانتماء</th>
-                              <th className="p-2.5 text-center">التوقيت</th>
+                              <th className="p-2.5 text-center">نوع المشاركة</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                             {catGroup.runners.map((runner, rIdx) => {
                               const runnerName = runner.fullName || runner.studentName;
                               const isClub = students.find(s => s.id === runner.studentId || s.fullName === runnerName)?.affiliationType === 'club_affiliated' || runner.affiliationType === 'club_affiliated';
-                              
+                              const isTeam = runner.participationType === 'school_team' || runner.participationType === 'فريق';
+
                               return (
                                 <tr key={runner.studentId || rIdx} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
                                   <td className="p-2.5 text-center font-black text-slate-900 dark:text-white">
-                                    #{runner.rank || rIdx + 1}
+                                    #{runner.recalculatedRank || runner.rank || rIdx + 1}
                                   </td>
                                   <td className="p-2.5 font-mono font-bold text-emerald-700 dark:text-emerald-400">
                                     {runner.bibNumber || '-'}
@@ -1764,8 +1881,14 @@ export const Login: React.FC = () => {
                                       {isClub ? 'منتمي للأندية' : 'غير منتمي (مدرسي)'}
                                     </span>
                                   </td>
-                                  <td className="p-2.5 text-center font-mono text-slate-700 dark:text-slate-300">
-                                    {runner.time || '-'}
+                                  <td className="p-2.5 text-center">
+                                    <span className={`px-2.5 py-0.5 rounded text-[10px] font-bold ${
+                                      isTeam
+                                        ? 'bg-blue-100 dark:bg-blue-950/80 text-blue-800 dark:text-blue-300 border border-blue-200 dark:border-blue-800'
+                                        : 'bg-amber-100 dark:bg-amber-950/80 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800'
+                                    }`}>
+                                      {isTeam ? '👥 فريق المؤسسة' : '👤 مشاركة فردية'}
+                                    </span>
                                   </td>
                                 </tr>
                               );

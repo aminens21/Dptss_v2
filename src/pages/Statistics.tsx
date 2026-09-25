@@ -506,7 +506,7 @@ export const Statistics: React.FC = () => {
         }
 
         // 2. Team Rankings (ترتيب المؤسسات الفائزة حسب الفرق)
-        const teams = calculateTeamRankings(ccRes.podium);
+        const teams = calculateTeamRankings(ccRes.podium, students);
         if (teams && teams.length > 0) {
           if (teams[0] && teams[0].schoolName) {
             const tId = getSchoolId(teams[0].schoolName);
@@ -999,7 +999,7 @@ export const Statistics: React.FC = () => {
                       const p2 = res?.podium?.find(p => p.rank === 2);
                       const p3 = res?.podium?.find(p => p.rank === 3);
                       const hasResult = p1 || p2 || p3;
-                      const catTeams = res?.podium ? calculateTeamRankings(res.podium) : [];
+                      const catTeams = res?.podium ? calculateTeamRankings(res.podium, students) : [];
                       const winningTeam = catTeams.length > 0 ? catTeams[0] : null;
 
                       return (

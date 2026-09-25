@@ -9,7 +9,8 @@ import {
   exportFullResultsExcel,
   TeamRankingResult,
   RegionalQualifiedIndividual,
-  getCrossCountryCategoryResultKey
+  getCrossCountryCategoryResultKey,
+  resolveRunnerParticipationType
 } from '../lib/crossCountryConfig';
 import { DataService, normalizeCategoryKey } from '../lib/dataService';
 import * as XLSX from 'xlsx';
@@ -317,8 +318,8 @@ export const CrossCountryPodiumView: React.FC<CrossCountryPodiumViewProps> = ({
 
   // Team Rankings Calculation for current category
   const teamRankings = useMemo(() => {
-    return calculateTeamRankings(currentCategoryResult.podium || []);
-  }, [currentCategoryResult.podium]);
+    return calculateTeamRankings(currentCategoryResult.podium || [], students);
+  }, [currentCategoryResult.podium, students]);
 
   const winningTeam = useMemo(() => {
     return teamRankings.length > 0 ? teamRankings[0] : null;
@@ -395,7 +396,7 @@ export const CrossCountryPodiumView: React.FC<CrossCountryPodiumViewProps> = ({
       time: existingIndex >= 0 && currentList[existingIndex].time ? currentList[existingIndex].time : '',
       bibNumber: stud.crossCountryBibNumber ? String(stud.crossCountryBibNumber) : `${100 + rank}`,
       notes: rank === 1 ? 'بطل الفئة (الذهب) 🥇' : rank === 2 ? 'الوصيف (الفضة) 🥈' : rank === 3 ? 'المركز الثالث (البرونز) 🥉' : 'مشارك',
-      participationType: 'فردي',
+      participationType: stud.participationType === 'school_team' ? 'فريق' : 'فردي',
       affiliationType: selectedAffiliation
     };
 
@@ -590,7 +591,11 @@ export const CrossCountryPodiumView: React.FC<CrossCountryPodiumViewProps> = ({
       ...newWinners[rankIndex],
       studentId: stud.id,
       fullName: stud.fullName,
-      schoolName: stud.schoolName || 'مؤسسة تعليمية'
+      schoolName: stud.schoolName || 'مؤسسة تعليمية',
+      bibNumber: stud.crossCountryBibNumber ? String(stud.crossCountryBibNumber) : (stud.bibNumber ? String(stud.bibNumber) : ''),
+      participationType: stud.participationType === 'school_team' ? 'فريق' : 'فردي',
+      directorateName: stud.directorateName || 'مديرية تاوريرت',
+      academyName: stud.academyName || 'الأكاديمية الجهوية'
     };
     setEditingWinners(newWinners);
   };
@@ -637,7 +642,7 @@ export const CrossCountryPodiumView: React.FC<CrossCountryPodiumViewProps> = ({
               'المديرية': p.directorateName || directorateName,
               'الأكاديمية': p.academyName || 'الأكاديمية الجهوية',
               'اسم المؤطر': p.supervisorName || '-',
-              'نوع المشاركة': p.participationType || 'فردي',
+              'نوع المشاركة': resolveRunnerParticipationType(p, students) === 'school_team' ? 'فريق المؤسسة' : 'مشاركة فردية',
               'الملاحظات والتأهيل': p.notes || '-'
             }))
           : [
@@ -663,7 +668,7 @@ export const CrossCountryPodiumView: React.FC<CrossCountryPodiumViewProps> = ({
       CROSS_COUNTRY_CATEGORIES.forEach(cat => {
         const resKey = getCrossCountryCategoryResultKey(cat.id, selectedAffiliation);
         const catRes = results[resKey] || (selectedAffiliation === 'non_club' ? results[cat.id] : undefined);
-        const teams = calculateTeamRankings(catRes?.podium || []);
+        const teams = calculateTeamRankings(catRes?.podium || [], students);
         teams.forEach(t => {
           allTeamRows.push({
             'الفئة العمرية': cat.titleAr,
@@ -687,7 +692,7 @@ export const CrossCountryPodiumView: React.FC<CrossCountryPodiumViewProps> = ({
       CROSS_COUNTRY_CATEGORIES.forEach(cat => {
         const resKey = getCrossCountryCategoryResultKey(cat.id, selectedAffiliation);
         const catRes = results[resKey] || (selectedAffiliation === 'non_club' ? results[cat.id] : undefined);
-        const teams = calculateTeamRankings(catRes?.podium || []);
+        const teams = calculateTeamRankings(catRes?.podium || [], students);
         const winningTeamName = teams.length > 0 ? teams[0].schoolName : null;
         const quals = calculateRegionalQualifications(catRes?.podium || [], winningTeamName);
 
@@ -1020,7 +1025,7 @@ export const CrossCountryPodiumView: React.FC<CrossCountryPodiumViewProps> = ({
             const resKey = getCrossCountryCategoryResultKey(cat.id, selectedAffiliation);
             const res = results[resKey] || (selectedAffiliation === 'non_club' ? results[cat.id] : undefined);
             const hasResult = res && res.podium && res.podium.length > 0;
-            const catTeams = res?.podium ? calculateTeamRankings(res.podium) : [];
+            const catTeams = res?.podium ? calculateTeamRankings(res.podium, students) : [];
             const catWinningTeam = catTeams.length > 0 ? catTeams[0] : null;
 
             return (
@@ -1078,7 +1083,7 @@ export const CrossCountryPodiumView: React.FC<CrossCountryPodiumViewProps> = ({
               const p3 = res?.podium ? getWinnerByRank(res.podium, 3) : null;
               const hasAny = p1 || p2 || p3;
 
-              const catTeams = res?.podium ? calculateTeamRankings(res.podium) : [];
+              const catTeams = res?.podium ? calculateTeamRankings(res.podium, students) : [];
               const catWinningTeam = catTeams.length > 0 ? catTeams[0] : null;
 
               return (
@@ -1470,7 +1475,6 @@ export const CrossCountryPodiumView: React.FC<CrossCountryPodiumViewProps> = ({
                           <th className="py-3 px-4 text-center">الترتيب الفردي</th>
                           <th className="py-3 px-4 text-center">الصورة</th>
                           <th className="py-3 px-4">الاسم</th>
-                          <th className="py-3 px-4 text-center">التوقيت</th>
                           <th className="py-3 px-4 text-center">نوع المشاركة</th>
                           <th className="py-3 px-4">المؤسسة</th>
                           <th className="py-3 px-4">المديرية</th>
@@ -1483,6 +1487,7 @@ export const CrossCountryPodiumView: React.FC<CrossCountryPodiumViewProps> = ({
                           const isGold = winner.rank === 1;
                           const isSilver = winner.rank === 2;
                           const isBronze = winner.rank === 3;
+                          const isTeam = resolveRunnerParticipationType(winner, students) === 'school_team';
 
                           return (
                             <tr
@@ -1520,8 +1525,8 @@ export const CrossCountryPodiumView: React.FC<CrossCountryPodiumViewProps> = ({
 
                               {/* Individual Rank Status */}
                               <td className="py-3 px-4 text-center">
-                                <span className={`px-2.5 py-0.5 rounded text-[11px] font-bold ${winner.participationType === 'فريق' ? 'bg-amber-100 text-amber-900' : 'bg-slate-100 text-slate-700'}`}>
-                                  {winner.participationType === 'فريق' ? 'ضمن فريق' : `${winner.rank} فردي`}
+                                <span className={`px-2.5 py-0.5 rounded text-[11px] font-bold ${isTeam ? 'bg-amber-100 text-amber-900' : 'bg-slate-100 text-slate-700'}`}>
+                                  {isTeam ? 'ضمن فريق' : `${winner.rank} فردي`}
                                 </span>
                               </td>
 
@@ -1543,18 +1548,10 @@ export const CrossCountryPodiumView: React.FC<CrossCountryPodiumViewProps> = ({
                                 </span>
                               </td>
 
-                              {/* Time */}
-                              <td className="py-3 px-4 text-center">
-                                <div className="inline-flex items-center gap-1 font-mono font-black text-xs text-blue-900 bg-blue-50 px-2 py-1 rounded-md border border-blue-100">
-                                  <Clock className="w-3.5 h-3.5 text-blue-600" />
-                                  <span>{winner.time || '00:00.0'}</span>
-                                </div>
-                              </td>
-
                               {/* Participation Type */}
                               <td className="py-3 px-4 text-center">
-                                <span className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold ${winner.participationType === 'فريق' ? 'bg-amber-100 text-amber-900' : 'bg-emerald-100 text-emerald-900'}`}>
-                                  {winner.participationType || 'فردي'}
+                                <span className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold ${isTeam ? 'bg-amber-100 text-amber-900' : 'bg-emerald-100 text-emerald-900'}`}>
+                                  {isTeam ? '👥 فريق المؤسسة' : '👤 مشاركة فردية'}
                                 </span>
                               </td>
 

@@ -1,4 +1,4 @@
-import { CrossCountryCategoryResult, PodiumWinner } from '../types';
+import { CrossCountryCategoryResult, PodiumWinner, Student } from '../types';
 import * as XLSX from 'xlsx';
 import toast from 'react-hot-toast';
 
@@ -129,13 +129,56 @@ export interface RegionalQualifiedIndividual {
 }
 
 /**
+ * استخراج وتوحيد نوع المشاركة (فريق المؤسسة أو مشاركة فردية) بدقة،
+ * بالاعتماد على قاعدة بيانات تسجيل التلاميذ كمرجع أساسي موحد وموثوق.
+ */
+export function resolveRunnerParticipationType(
+  runner: { studentId?: string; fullName?: string; participationType?: string },
+  studentsPool?: Student[]
+): 'school_team' | 'individual' {
+  let raw: string | undefined = undefined;
+
+  if (studentsPool && studentsPool.length > 0) {
+    const sName = runner.fullName?.trim().toLowerCase();
+    const matched = studentsPool.find(s => 
+      (runner.studentId && s.id === runner.studentId) ||
+      (sName && s.fullName && s.fullName.trim().toLowerCase() === sName)
+    );
+    if (matched && matched.participationType) {
+      raw = matched.participationType;
+    }
+  }
+
+  if (!raw) {
+    raw = runner.participationType;
+  }
+
+  if (!raw) return 'individual';
+
+  const lower = raw.trim().toLowerCase();
+  if (
+    lower === 'school_team' ||
+    lower === 'team' ||
+    lower === 'فريق' ||
+    lower === 'فريق المؤسسة' ||
+    lower.includes('team') ||
+    lower.includes('فريق') ||
+    lower.includes('جماعي')
+  ) {
+    return 'school_team';
+  }
+
+  return 'individual';
+}
+
+/**
  * حساب ترتيب الفرق للمؤسسات التعليمية طبقاً للقوانين الرسمية للرياضة المدرسية في العدو الريفي:
  * 1. شروط تكوين الفريق: اقتصار الحساب على المشاركين بصفتهم "فريق المؤسسة" (استبعاد المشاركة الفردية).
  * 2. الحد الأدنى للوصول: يجب وصول 4 عداءين على الأقل من نفس المؤسسة لخط النهاية لاحتساب نتائج الفريق.
  * 3. مجموع النقاط: جمع رتب الوصول الفردية لأول 4 عداءين من المؤسسة (المجموع الأقل هو الأفضل 🏆).
  * 4. معيار الحسم عند التعادل (Tie-Breaker): عند تساوي مجموع النقاط، يتم الاحتكام لـ رتبة العداء الرابع المكمل للفريق (الأفضل/الأسبق رتبة يفوز).
  */
-export function calculateTeamRankings(runners: PodiumWinner[]): TeamRankingResult[] {
+export function calculateTeamRankings(runners: PodiumWinner[], studentsPool?: Student[]): TeamRankingResult[] {
   if (!runners || runners.length === 0) return [];
 
   const schoolGroups: Record<string, PodiumWinner[]> = {};
@@ -143,10 +186,11 @@ export function calculateTeamRankings(runners: PodiumWinner[]): TeamRankingResul
   runners.forEach(r => {
     if (!r.schoolName || !r.fullName) return;
 
-    // استبعاد المشاركين الفرديين صراحة
-    const partType = (r.participationType || '').trim().toLowerCase();
-    const isIndividual = partType === 'فردي' || partType === 'مشاركة فردية' || partType === 'individual';
-    if (isIndividual) return;
+    // تحديد ما إذا كانت المشاركة جماعية (فريق المؤسسة) حصراً بالاعتماد على المرجع الموحد
+    const isTeam = resolveRunnerParticipationType(r, studentsPool) === 'school_team';
+
+    // استبعاد تام وصارم لأي مشارك ليس تابعاً لمشاركات فريق المؤسسة بشكل صريح (استبعاد الفردي)
+    if (!isTeam) return;
 
     const name = r.schoolName.trim();
     if (!schoolGroups[name]) {
@@ -167,16 +211,18 @@ export function calculateTeamRankings(runners: PodiumWinner[]): TeamRankingResul
     isValidTeam: boolean;
   }[] = [];
 
+  const rRank = (r: PodiumWinner) => (r as any).recalculatedRank || r.rank;
+
   Object.entries(schoolGroups).forEach(([schoolName, schoolRunners]) => {
-    const sorted = [...schoolRunners].sort((a, b) => a.rank - b.rank);
+    const sorted = [...schoolRunners].sort((a, b) => rRank(a) - rRank(b));
     // يُشترط القوانين الرسمية وصول 4 عداءين على الأقل من نفس المؤسسة لخط النهاية
     if (sorted.length >= 4) {
       const top4 = sorted.slice(0, 4);
-      const totalPoints = top4.reduce((sum, r) => sum + r.rank, 0);
-      const fourthRunnerRank = top4[3].rank;
-      const thirdRunnerRank = top4[2].rank;
-      const secondRunnerRank = top4[1].rank;
-      const firstRunnerRank = top4[0].rank;
+      const totalPoints = top4.reduce((sum, r) => sum + rRank(r), 0);
+      const fourthRunnerRank = rRank(top4[3]);
+      const thirdRunnerRank = rRank(top4[2]);
+      const secondRunnerRank = rRank(top4[1]);
+      const firstRunnerRank = rRank(top4[0]);
 
       validTeams.push({
         schoolName,
@@ -473,7 +519,8 @@ export const INITIAL_CROSS_COUNTRY_RESULTS: Record<string, CrossCountryCategoryR
 export function exportQualifiedListExcel(
   results: Record<string, CrossCountryCategoryResult>,
   activeSeason: string,
-  directorateName: string = 'مديرية تاوريرت'
+  directorateName: string = 'مديرية تاوريرت',
+  studentsPool?: Student[]
 ) {
   try {
     const wb = XLSX.utils.book_new();
@@ -482,7 +529,7 @@ export function exportQualifiedListExcel(
     const teamRows: Record<string, any>[] = [];
     CROSS_COUNTRY_CATEGORIES.forEach(cat => {
       const catRes = results[cat.id];
-      const teams = calculateTeamRankings(catRes?.podium || []);
+      const teams = calculateTeamRankings(catRes?.podium || [], studentsPool);
       const winningTeam = teams.find(t => t.isWinnerTeam);
 
       if (winningTeam) {
@@ -518,7 +565,7 @@ export function exportQualifiedListExcel(
     const individualRows: Record<string, any>[] = [];
     CROSS_COUNTRY_CATEGORIES.forEach(cat => {
       const catRes = results[cat.id];
-      const teams = calculateTeamRankings(catRes?.podium || []);
+      const teams = calculateTeamRankings(catRes?.podium || [], studentsPool);
       const winningTeamName = teams.length > 0 ? teams[0].schoolName : null;
       const quals = calculateRegionalQualifications(catRes?.podium || [], winningTeamName);
 
@@ -571,7 +618,8 @@ export function exportQualifiedListExcel(
 export function exportFullResultsExcel(
   results: Record<string, CrossCountryCategoryResult>,
   activeSeason: string,
-  directorateName: string = 'مديرية تاوريرت'
+  directorateName: string = 'مديرية تاوريرت',
+  studentsPool?: Student[]
 ) {
   try {
     const wb = XLSX.utils.book_new();
@@ -591,7 +639,7 @@ export function exportFullResultsExcel(
             'المديرية': p.directorateName || directorateName,
             'الأكاديمية': p.academyName || 'الأكاديمية الجهوية',
             'اسم المؤطر': p.supervisorName || '-',
-            'نوع المشاركة': p.participationType === 'school_team' || p.participationType === 'فريق' ? 'فريق المؤسسة' : 'مشاركة فردية',
+            'نوع المشاركة': resolveRunnerParticipationType(p, studentsPool) === 'school_team' ? 'فريق المؤسسة' : 'مشاركة فردية',
             'الملاحظات والنتيجة': p.notes || '-'
           }))
         : [
@@ -618,7 +666,7 @@ export function exportFullResultsExcel(
     const teamSummaryRows: Record<string, any>[] = [];
     CROSS_COUNTRY_CATEGORIES.forEach(cat => {
       const catRes = results[cat.id];
-      const teams = calculateTeamRankings(catRes?.podium || []);
+      const teams = calculateTeamRankings(catRes?.podium || [], studentsPool);
       teams.forEach(t => {
         teamSummaryRows.push({
           'الفئة العمرية': cat.titleAr,

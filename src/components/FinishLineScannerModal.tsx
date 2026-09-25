@@ -440,11 +440,12 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}.${tenths}`;
   };
 
-  // Camera QR/Barcode Scanning Effect (starts whenever camera mode is chosen and modal is open and race is running)
+  // Camera QR/Barcode Scanning Effect (starts whenever camera mode is chosen and modal is open)
   useEffect(() => {
-    if (isOpen && phase === 'running' && inputMode === 'camera' && !cameraActive) {
+    const isCameraPhase = phase === 'setup' || phase === 'running';
+    if (isOpen && isCameraPhase && inputMode === 'camera' && !cameraActive) {
       startCamera();
-    } else if ((!isOpen || phase !== 'running' || inputMode !== 'camera') && cameraActive) {
+    } else if ((!isOpen || !isCameraPhase || inputMode !== 'camera') && cameraActive) {
       stopCamera();
     }
     return () => {
@@ -464,7 +465,8 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
       if (!container) {
         // Element not yet mounted, wait 150ms and retry
         setTimeout(() => {
-          if (isOpen && phase === 'running' && inputMode === 'camera') {
+          const isCameraPhase = phase === 'setup' || phase === 'running';
+          if (isOpen && isCameraPhase && inputMode === 'camera') {
             startCamera();
           }
         }, 150);
@@ -518,12 +520,12 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
       setCameraActive(true);
     } catch (err: any) {
       const errStr = String(err || '');
+      console.warn('[Camera Scanner] Error starting camera:', err);
       if (err?.name === 'NotAllowedError' || errStr.includes('NotAllowedError') || errStr.includes('Permission denied')) {
-        console.warn('[Camera Scanner]: Permission was not granted or is restricted.');
+        setCameraError('تم رفض صلاحية الكاميرا. يرجى تفعيل إذن الكاميرا من إعدادات المتصفح عن طريق النقر على أيقونة القفل 🔒 بجانب رابط الموقع في شريط العنوان.');
       } else {
-        console.warn('[Camera Scanner]: Scanner initialization failed.');
+        setCameraError('لم نتمكن من تشغيل الكاميرا. يرجى التأكد من أن الكاميرا ليست قيد الاستخدام من تطبيق آخر، أو استخدم الإدخال اليدوي.');
       }
-      setCameraError('لم نتمكن من تشغيل الكاميرا. يرجى التأكد من منح صلاحية الكاميرا للمتصفح، أو استخدم الإدخال اليدوي / قارئ الباركود.');
       setCameraActive(false);
     }
   };
@@ -971,7 +973,7 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
       schoolName: finalSchool || (matchedStudent ? matchedStudent.schoolName : 'مؤسسة تعليمية'),
       time: currentTimeStr,
       bibNumber: displayBib,
-      participationType: matchedStudent?.participationType === 'school_team' ? 'فريق' : (matchedStudent?.participationType === 'individual' ? 'فردي' : 'فريق'),
+      participationType: (matchedStudent?.participationType === 'school_team' || (matchedStudent as any)?.participationType === 'فريق') ? 'school_team' : 'individual',
       affiliationType: matchedStudent?.affiliationType || raceAffiliation,
       directorateName: matchedStudent?.directorateName || 'مديرية تاوريرت',
       academyName: matchedStudent?.academyName || 'الأكاديمية الجهوية',
@@ -1283,7 +1285,7 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
   };
 
   // Calculate live team standings for current race
-  const liveTeamRankings = calculateTeamRankings(arrivals);
+  const liveTeamRankings = calculateTeamRankings(arrivals, allStudents);
 
   // Robust matching helper to count participants for any category
   const getCategoryRunnersCount = (cat: CrossCountryCategoryDef, aff?: 'non_club' | 'club_affiliated') => {
@@ -1848,15 +1850,28 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
                     </div>
 
                     {cameraError && (
-                      <div className="p-3 bg-red-950/80 border border-red-700 rounded-xl text-red-200 text-xs flex items-center justify-between gap-2">
-                        <p className="font-bold flex-1">{cameraError}</p>
-                        <button
-                          type="button"
-                          onClick={startCamera}
-                          className="px-3 py-1.5 bg-red-600 hover:bg-red-500 text-white font-bold text-xs rounded-lg cursor-pointer shrink-0"
-                        >
-                          إعادة المحاولة 🔄
-                        </button>
+                      <div className="space-y-2">
+                        <div className="p-3 bg-red-950/80 border border-red-700 rounded-xl text-red-200 text-xs flex items-center justify-between gap-2">
+                          <p className="font-bold flex-1">{cameraError}</p>
+                          <button
+                            type="button"
+                            onClick={startCamera}
+                            className="px-3 py-1.5 bg-red-600 hover:bg-red-500 text-white font-bold text-xs rounded-lg cursor-pointer shrink-0"
+                          >
+                            إعادة المحاولة 🔄
+                          </button>
+                        </div>
+                        <div className="p-3.5 bg-slate-850/95 border border-slate-750 rounded-xl text-slate-300 text-[11px] space-y-1.5 leading-relaxed">
+                          <p className="font-black text-amber-400 flex items-center gap-1">
+                            <span>💡</span>
+                            <span>طريقة تفعيل صلاحية الكاميرا للموقع:</span>
+                          </p>
+                          <ul className="list-disc list-inside space-y-1 text-slate-300 pr-1">
+                            <li><strong>على الهاتف (أندرويد / آيفون):</strong> اضغط على رمز القفل 🔒 أو أيقونة الإعدادات بجانب رابط الموقع في شريط عنوان المتصفح، ثم فعل إذن الكاميرا.</li>
+                            <li><strong>على الكمبيوتر:</strong> اضغط على أيقونة القفل 🔒 يسار رابط الموقع في المتصفح، ثم قم بتفعيل زر "الكاميرا" (Camera) وأعد تحميل الصفحة.</li>
+                            <li><strong>حل بديل فوري:</strong> يمكنك التبديل إلى "إدخال الصدرية يدوياً" أو استخدام قارئ باركود خارجي وهو يعمل بموثوقية تامة دون الحاجة للكاميرا.</li>
+                          </ul>
+                        </div>
                       </div>
                     )}
 

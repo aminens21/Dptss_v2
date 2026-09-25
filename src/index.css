@@ -187,10 +187,10 @@ html.dark .shadow-2xl {
 /* RTL Marquee Reverse */
 @keyframes marquee-rtl {
   0% {
-    transform: translateX(100%);
+    transform: translateX(-100%);
   }
   100% {
-    transform: translateX(-100%);
+    transform: translateX(100%);
   }
 }
 

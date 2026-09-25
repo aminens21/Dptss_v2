@@ -4,7 +4,8 @@ import {
   initializeFirestore,
   getFirestore,
   persistentLocalCache,
-  persistentMultipleTabManager
+  persistentMultipleTabManager,
+  setLogLevel
 } from "firebase/firestore";
 import firebaseConfig from "../../firebase-applet-config.json";
 
@@ -13,13 +14,16 @@ export const auth = getAuth(app);
 
 const databaseId = (firebaseConfig as any).firestoreDatabaseId || undefined;
 
+// Suppress non-fatal retry logs and network noise
+setLogLevel('error');
+
 // Robust Firestore initialization:
-// Enables auto-detect long polling to safely traverse proxies, sandboxes, and preview iframes.
-// Includes persistent local caching with multi-tab support for seamless offline operation.
+// Enables forced long polling to safely and instantly connect across preview iframes and proxies.
+// Includes persistent local caching with multi-tab support for seamless offline & online operation.
 let firestoreDb;
 try {
   firestoreDb = initializeFirestore(app, {
-    experimentalAutoDetectLongPolling: true,
+    experimentalForceLongPolling: true,
     localCache: persistentLocalCache({
       tabManager: persistentMultipleTabManager()
     })
@@ -27,7 +31,7 @@ try {
 } catch {
   try {
     firestoreDb = initializeFirestore(app, {
-      experimentalAutoDetectLongPolling: true
+      experimentalForceLongPolling: true
     }, databaseId);
   } catch {
     firestoreDb = databaseId ? getFirestore(app, databaseId) : getFirestore(app);
