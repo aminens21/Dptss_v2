@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { DataService, SPORTS_MAP, AGE_CATEGORIES, getAgeCategoriesForSeason, getCategoryGenderLabel, isClubTournament, normalizeCategoryKey, validateBirthDateForCategory } from '../lib/dataService';
+import { DataService, SPORTS_MAP, AGE_CATEGORIES, getAgeCategoriesForSeason, getCategoryGenderLabel, isClubTournament, normalizeCategoryKey, validateBirthDateForCategory, isTeacherLevelAllowedForTournament } from '../lib/dataService';
 import { Student, Sport, Tournament, School, Directorate } from '../types';
 import { ParticipationFormPdfModal } from '../components/ParticipationFormPdfModal';
 import { CrossCountryBulkRegisterModal } from '../components/CrossCountryBulkRegisterModal';
@@ -53,20 +53,43 @@ export const TeacherTeams: React.FC = () => {
   const [selectedSportId, setSelectedSportId] = useState<string | null>(urlSport || null);
   const [sportTabFilter, setSportTabFilter] = useState<'PROGRAMMED' | 'NON_PROGRAMMED' | 'ALL'>('PROGRAMMED');
 
+  const isTeacherRole = userProfile?.role === 'TEACHER';
+  const canManage = userProfile?.role === 'CENTRAL_ADMIN' || userProfile?.role === 'REGIONAL_ADMIN' || userProfile?.role === 'PROVINCIAL_ADMIN' || userProfile?.isTechCommitteeHead;
+
+  const teacherCadre = useMemo(() => {
+    if (userProfile?.teachingCadre) return userProfile.teachingCadre;
+    if (userProfile?.schoolId || userProfile?.schoolName) {
+      const userSchool = (schools || []).find(s => 
+        (userProfile.schoolId && s.id === userProfile.schoolId) || 
+        (userProfile.schoolName && s.name === userProfile.schoolName)
+      );
+      if (userSchool?.type) return userSchool.type;
+    }
+    return undefined;
+  }, [userProfile, schools]);
+
+  const teacherAllowedTournaments = useMemo(() => {
+    if (!isTeacherRole || canManage) return tournaments;
+    return tournaments.filter(t => isTeacherLevelAllowedForTournament(teacherCadre, t.level));
+  }, [tournaments, isTeacherRole, canManage, teacherCadre]);
+
   const isSportProgrammed = (s: Sport): boolean => {
-    if (tournaments.some(t => t.sportId === s.id)) return true;
-    if (s.isProgrammed !== undefined) return s.isProgrammed;
-    return (s.ageCategories && s.ageCategories.length > 0 && s.studentLimit !== undefined && s.studentLimit > 0) || false;
+    if (teacherAllowedTournaments.some(t => t.sportId === s.id)) return true;
+    if (canManage) {
+      if (s.isProgrammed !== undefined) return s.isProgrammed;
+      return (s.ageCategories && s.ageCategories.length > 0 && s.studentLimit !== undefined && s.studentLimit > 0) || false;
+    }
+    return false;
   };
 
   // Classified Sports
   const programmedSports = useMemo(() => {
     return sportsConfig.filter(s => isSportProgrammed(s));
-  }, [sportsConfig]);
+  }, [sportsConfig, teacherAllowedTournaments]);
 
   const nonProgrammedSports = useMemo(() => {
     return sportsConfig.filter(s => !isSportProgrammed(s));
-  }, [sportsConfig]);
+  }, [sportsConfig, teacherAllowedTournaments]);
 
   // New Student Form State
   const [isFormOpen, setIsFormOpen] = useState(false);
@@ -110,6 +133,7 @@ export const TeacherTeams: React.FC = () => {
   const [isCrossCountryBulkOpen, setIsCrossCountryBulkOpen] = useState(false);
   const [isSportBulkOpen, setIsSportBulkOpen] = useState(false);
   const [crossCountryInitialRaceId, setCrossCountryInitialRaceId] = useState('u15_male');
+  const [crossCountryInitialAffiliation, setCrossCountryInitialAffiliation] = useState<'non_club' | 'club_affiliated'>('non_club');
   const [activeDirectorateObj, setActiveDirectorateObj] = useState<Directorate | null>(null);
   const [showOnlyParticipatingCoaches, setShowOnlyParticipatingCoaches] = useState(true);
   const [rosterGenderFilter, setRosterGenderFilter] = useState<'ALL' | 'Male' | 'Female'>('ALL');
@@ -159,10 +183,22 @@ export const TeacherTeams: React.FC = () => {
       setSchools(dirSchools);
     });
 
+    const unsubTournaments = DataService.subscribeToTournaments((tournList) => {
+      const activeDirId = DataService.getActiveDirectorateId();
+      const dirTournaments = tournList.filter(t => (t.directorateId || 'taourirt') === activeDirId);
+      setTournaments(dirTournaments);
+    });
+
+    const unsubSportsConfig = DataService.subscribeToSportsConfig((sportsList) => {
+      setSportsConfig(sportsList);
+    });
+
     return () => {
       window.removeEventListener('directorateChanged', handleDirChange);
       unsubStudents();
       unsubSchools();
+      unsubTournaments();
+      unsubSportsConfig();
     };
   }, [userProfile, urlSchool]);
 
@@ -394,8 +430,23 @@ export const TeacherTeams: React.FC = () => {
     let targetAff: 'non_club' | 'club_affiliated' = 'non_club';
     let isAffLocked = false;
     if (selectedSportId === 'cross_country') {
-      targetAff = 'non_club';
-      isAffLocked = true;
+      if (cleanAffiliation) {
+        targetAff = cleanAffiliation;
+        isAffLocked = true;
+      } else {
+        const hasClubCC = sportTourns.some(t => t.affiliationType === 'club_affiliated' || t.affiliationType === 'open' || t.affiliationType === 'both');
+        const hasNonClubCC = sportTourns.some(t => !t.affiliationType || t.affiliationType === 'non_club' || t.affiliationType === 'open' || t.affiliationType === 'both');
+        if (hasClubCC && !hasNonClubCC) {
+          targetAff = 'club_affiliated';
+          isAffLocked = true;
+        } else if (hasNonClubCC && !hasClubCC) {
+          targetAff = 'non_club';
+          isAffLocked = true;
+        } else {
+          targetAff = 'non_club';
+          isAffLocked = false;
+        }
+      }
     } else if (cleanAffiliation) {
       targetAff = cleanAffiliation;
       isAffLocked = true;
@@ -661,24 +712,30 @@ export const TeacherTeams: React.FC = () => {
     // 2. Cross Country Specific Limit Checked
     if (selectedSportId === 'cross_country') {
       const normalizedCat = normalizeCategoryKey(category);
+      const studentAff = affiliationType || 'non_club';
       const sameGroupStudents = activeSportStudents.filter(
-        s => s.id !== editingStudentId && normalizeCategoryKey(s.category) === normalizedCat && s.gender === gender && s.participationType === participationType
+        s => s.id !== editingStudentId && 
+             normalizeCategoryKey(s.category) === normalizedCat && 
+             s.gender === gender && 
+             (s.affiliationType || 'non_club') === studentAff &&
+             s.participationType === participationType
       );
       const limitVal = participationType === 'individual' ? 3 : 5;
       if (sameGroupStudents.length >= limitVal) {
         const typeLabel = participationType === 'individual' ? 'مشاركة فردية (3 كحد أقصى)' : 'مشاركة فريق المؤسسة (5 كحد أقصى)';
-        toast.error(`خطأ في التسجيل: لقد بلغت السقف الأقصى للتسجيل لهذه الفئة والجنس لـ (${typeLabel}) وهو ${limitVal} تلاميذ.`);
+        const affLabel = studentAff === 'club_affiliated' ? 'لصنف المنتمين للأندية' : 'لصنف غير المنتمين للأندية';
+        toast.error(`خطأ في التسجيل: لقد بلغت السقف الأقصى للتسجيل لهذه الفئة والجنس ${affLabel} لـ (${typeLabel}) وهو ${limitVal} تلاميذ.`);
         return;
       }
-      const totalCatStudents = activeSportStudents.filter(
-        s => s.id !== editingStudentId && normalizeCategoryKey(s.category) === normalizedCat && s.gender === gender
+      const totalAffCatStudents = activeSportStudents.filter(
+        s => s.id !== editingStudentId && 
+             normalizeCategoryKey(s.category) === normalizedCat && 
+             s.gender === gender &&
+             (s.affiliationType || 'non_club') === studentAff
       );
-      if (totalCatStudents.length >= 8) {
-        toast.error('خطأ في التسجيل: لقد بلغت السقف الإجمالي الأقصى المسموح به لهذه الفئة والجنس وهو 8 تلاميذ (3 فردي + 5 فريق المؤسسة).');
-        return;
-      }
-      if (affiliationType === 'club_affiliated') {
-        toast.error('خطأ: بطولة العدو الريفي مبرمجة لفئة غير المنتمين (المدرسي فقط)، ولا يسمح بتسجيل مشاركين من صنف المنتمين.');
+      if (totalAffCatStudents.length >= 8) {
+        const affLabel = studentAff === 'club_affiliated' ? 'المنتمين للأندية' : 'غير المنتمين للأندية';
+        toast.error(`خطأ في التسجيل: لقد بلغت السقف الإجمالي الأقصى المسموح به لهذه الفئة والجنس لصنف ${affLabel} وهو 8 تلاميذ (3 فردي + 5 فريق المؤسسة).`);
         return;
       }
     }
@@ -891,7 +948,10 @@ export const TeacherTeams: React.FC = () => {
   }, [activeSportStudents, predefinedCoaches, selectedSportId]);
 
   // Cross Country Bulk Modal & Excel Export Handlers
-  const handleOpenCrossCountryBulk = (catKey?: string | null) => {
+  const handleOpenCrossCountryBulk = (catKey?: string | null, aff?: 'non_club' | 'club_affiliated') => {
+    if (aff) {
+      setCrossCountryInitialAffiliation(aff);
+    }
     if (catKey) {
       const parts = catKey.split('_');
       const cat = parts[0]?.toLowerCase();
@@ -1004,8 +1064,13 @@ export const TeacherTeams: React.FC = () => {
   const crossCountryLimitDetails = (() => {
     if (selectedSportId === 'cross_country') {
       const normalizedCat = normalizeCategoryKey(category);
+      const studentAff = affiliationType || 'non_club';
       const sameGroupStudents = activeSportStudents.filter(
-        s => s.id !== editingStudentId && normalizeCategoryKey(s.category) === normalizedCat && s.gender === gender && s.participationType === participationType
+        s => s.id !== editingStudentId && 
+             normalizeCategoryKey(s.category) === normalizedCat && 
+             s.gender === gender && 
+             (s.affiliationType || 'non_club') === studentAff &&
+             s.participationType === participationType
       );
       const limitVal = participationType === 'individual' ? 3 : 5;
       return {
@@ -2132,7 +2197,7 @@ export const TeacherTeams: React.FC = () => {
                                   type="button"
                                   onClick={(e) => {
                                     e.stopPropagation();
-                                    handleOpenCrossCountryBulk(`${catId}_${g}`);
+                                    handleOpenCrossCountryBulk(`${catId}_${g}`, aff as any);
                                   }}
                                   className="text-[10px] text-amber-900 hover:text-amber-950 font-black flex items-center gap-1 px-2 py-1 rounded bg-amber-100 hover:bg-amber-200 border border-amber-300 cursor-pointer transition-colors shadow-3xs"
                                   title="تسجيل 8 مشاركين في هذه الفئة (3 فردي + 5 فريق المؤسسة)"
@@ -2841,6 +2906,8 @@ export const TeacherTeams: React.FC = () => {
           onClose={() => setIsCrossCountryBulkOpen(false)}
           schools={schools}
           initialCategoryDefId={crossCountryInitialRaceId}
+          affiliationType={crossCountryInitialAffiliation}
+          tournaments={tournaments}
           preselectedSchoolName={schoolName}
           allExistingStudents={students}
           currentSeason={currentSeason}

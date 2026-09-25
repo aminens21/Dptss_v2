@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Sport, Student, School, Tournament } from '../types';
-import { DataService, getAgeCategoriesForSeason, SPORTS_MAP, getCategoryGenderLabel, validateBirthDateForCategory, normalizeCategoryKey, isSchoolLevelAllowedForTournament, getTournamentLevelAr } from '../lib/dataService';
+import { DataService, getAgeCategoriesForSeason, SPORTS_MAP, getCategoryGenderLabel, validateBirthDateForCategory, normalizeCategoryKey, isSchoolLevelAllowedForTournament, getTournamentLevelAr, isTeacherLevelAllowedForTournament } from '../lib/dataService';
 import { useAuth } from '../contexts/AuthContext';
 import { X, GraduationCap, User, Calendar, Upload, AlertCircle, Lock, ShieldCheck, CheckCircle2 } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -130,9 +130,24 @@ export const RegisterStudentModal: React.FC<RegisterStudentModalProps> = ({
   if (!isOpen || !sport) return null;
 
   const seasonalCategories = getAgeCategoriesForSeason(currentSeason, undefined, sport?.id);
-  const availableCategories = (sport.ageCategories && sport.ageCategories.length > 0)
+  const baseCategories = (sport.ageCategories && sport.ageCategories.length > 0)
     ? sport.ageCategories.map(normalizeCategoryKey)
     : seasonalCategories.map(c => c.id);
+
+  const availableCategories = useMemo(() => {
+    // If not a teacher, show everything
+    if (userProfile?.role !== 'TEACHER' || !userProfile?.teachingCadre) return baseCategories;
+
+    // Filter categories based on teacher cadre
+    const cadre = userProfile.teachingCadre.toUpperCase();
+    return baseCategories.filter(catId => {
+      const norm = normalizeCategoryKey(catId);
+      if (cadre.includes('PRIMARY')) return norm === 'U12';
+      if (cadre.includes('MIDDLE')) return norm === 'U15';
+      if (cadre.includes('HIGH') || cadre.includes('SECONDARY')) return norm === 'U18' || norm === 'U20';
+      return true;
+    });
+  }, [baseCategories, userProfile]);
 
   const handleBirthDateChange = (newDate: string) => {
     setBirthDate(newDate);
@@ -265,13 +280,21 @@ export const RegisterStudentModal: React.FC<RegisterStudentModalProps> = ({
         const normCategory = normalizeCategoryKey(category);
         const relevantTournament = tournaments.find(t => 
           t.sportId === sport.id && 
-          normalizeCategoryKey(t.ageCategory) === normCategory &&
+          (normalizeCategoryKey(t.ageCategory) === normCategory || normalizeCategoryKey(t.ageCategory) === 'جميع الفئات') &&
           (t.gender === gender || t.gender === 'Mixed')
         );
         if (relevantTournament && relevantTournament.level) {
           const isAllowed = isSchoolLevelAllowedForTournament(activeSchoolObj.type, relevantTournament.level);
           if (!isAllowed) {
             toast.error(`عذراً، السلك التعليمي لمؤسسة "${activeSchoolObj.name}" (${activeSchoolObj.type}) غير مسموح له بالمشاركة في هذه البطولة المخصصة لـ (${getTournamentLevelAr(relevantTournament.level)})`);
+            setIsSubmitting(false);
+            return;
+          }
+
+          // Check teacher cadre (extra safety)
+          if (userProfile?.teachingCadre && !isTeacherLevelAllowedForTournament(userProfile.teachingCadre, relevantTournament.level)) {
+            const cadreAr = userProfile.teachingCadre.includes('PRIMARY') ? 'ابتدائي' : userProfile.teachingCadre.includes('MIDDLE') ? 'إعدادي' : 'تأهيلي';
+            toast.error(`عذراً، بصفتك أستاذ سلك (${cadreAr})، لا يمكنك التسجيل في بطولة مخصصة لـ (${getTournamentLevelAr(relevantTournament.level)})`);
             setIsSubmitting(false);
             return;
           }
@@ -320,10 +343,10 @@ export const RegisterStudentModal: React.FC<RegisterStudentModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-3 sm:p-4 bg-slate-950/80 backdrop-blur-sm overflow-y-auto" dir="rtl">
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-lg w-full flex flex-col overflow-hidden my-auto animate-in fade-in zoom-in-95 duration-150 relative z-[101]">
+      <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl max-w-lg w-full flex flex-col overflow-hidden my-auto animate-in fade-in zoom-in-95 duration-150 relative z-[101]">
         
         {/* Header */}
-        <div className="p-4 bg-gradient-to-r from-blue-900 to-slate-900 text-white flex items-center justify-between gap-3">
+        <div className="p-4 bg-gradient-to-r from-blue-900 to-slate-900 dark:from-slate-900 dark:to-indigo-950 text-white flex items-center justify-between gap-3">
           <div className="flex items-center gap-2.5">
             <div className="w-9 h-9 rounded-xl bg-blue-600/30 text-blue-300 flex items-center justify-center font-bold border border-blue-400/30 text-lg">
               🎓
@@ -332,7 +355,7 @@ export const RegisterStudentModal: React.FC<RegisterStudentModalProps> = ({
               <h3 className="text-sm font-black text-white">
                 تسجيل تلميذ(ة) جديد في بطولة {sport.name}
               </h3>
-              <p className="text-[11px] text-slate-300">
+              <p className="text-[11px] text-slate-300 dark:text-slate-400">
                 إدخال البيانات الرسمية المشاركة بالمؤسسة التعليمية
               </p>
             </div>
@@ -348,11 +371,11 @@ export const RegisterStudentModal: React.FC<RegisterStudentModalProps> = ({
 
         {/* Expired Warning Banner */}
         {isExpired && (
-          <div className="p-3 bg-red-50 border-b border-red-200 flex items-center gap-2.5 text-red-900 text-xs font-bold">
-            <Lock className="w-5 h-5 text-red-600 shrink-0" />
+          <div className="p-3 bg-red-50 dark:bg-red-950/40 border-b border-red-200 dark:border-red-900/40 flex items-center gap-2.5 text-red-900 dark:text-red-300 text-xs font-bold transition-colors">
+            <Lock className="w-5 h-5 text-red-600 dark:text-red-400 shrink-0" />
             <div>
               <p>انتهى أجل التسجيل المحدد لهذه البطولة أوتوماتيكياً.</p>
-              <p className="text-[10px] text-red-700 font-normal mt-0.5">
+              <p className="text-[10px] text-red-700 dark:text-red-400/70 font-normal mt-0.5">
                 لا يمكن إضافة أو تعديل قائمة التلاميذ والفرق بعد انقضاء الوقت المحدد من طرف رئيس اللجنة التقنية.
               </p>
             </div>
@@ -362,12 +385,12 @@ export const RegisterStudentModal: React.FC<RegisterStudentModalProps> = ({
         <form onSubmit={handleSubmit} className="p-4 sm:p-5 space-y-4">
           {/* Automatic Tournament Constraints Banner */}
           {(preselectedCategory || preselectedGender || preselectedAffiliation) && (
-            <div className="p-3 bg-blue-50/80 border border-blue-200/90 rounded-2xl flex items-center justify-between gap-2 shadow-3xs">
-              <div className="flex items-center gap-2 text-xs font-bold text-blue-950">
+            <div className="p-3 bg-blue-50/80 dark:bg-blue-950/30 border border-blue-200/90 dark:border-blue-800/50 rounded-2xl flex items-center justify-between gap-2 shadow-3xs transition-colors">
+              <div className="flex items-center gap-2 text-xs font-bold text-blue-950 dark:text-blue-100">
                 <span className="text-base">🔒</span>
                 <span>
                   محدد ومقفل تلقائياً وفق شروط البطولة:{' '}
-                  <strong className="text-blue-700">
+                  <strong className="text-blue-700 dark:text-blue-400">
                     {preselectedGender ? (gender === 'Male' ? 'ذكور 👦' : 'إناث 👧') : ''}
                     {preselectedGender && preselectedCategory ? ' • ' : ''}
                     {preselectedCategory ? `فئة ${getCategoryGenderLabel(category, gender, currentSeason)} 🏅` : ''}
@@ -376,8 +399,8 @@ export const RegisterStudentModal: React.FC<RegisterStudentModalProps> = ({
                   </strong>
                 </span>
               </div>
-              <span className="text-[10px] font-black bg-blue-600 text-white px-2 py-0.5 rounded-full shrink-0">
-                التزام إجباري بالفرع
+              <span className="text-[10px] font-black bg-blue-600 dark:bg-blue-700 text-white px-2 py-0.5 rounded-full shrink-0">
+                التزام إجباري
               </span>
             </div>
           )}
@@ -386,7 +409,7 @@ export const RegisterStudentModal: React.FC<RegisterStudentModalProps> = ({
           <div className="flex items-start gap-3">
             <div className="flex-1 space-y-3">
               <div className="space-y-1">
-                <label className="block text-xs font-bold text-slate-700">
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
                   الاسم والنسب الكامل للتلميذ(ة) <span className="text-red-500">*</span>
                 </label>
                 <input
@@ -395,17 +418,17 @@ export const RegisterStudentModal: React.FC<RegisterStudentModalProps> = ({
                   placeholder="مثال: محمد العمراوي"
                   value={fullName}
                   onChange={(e) => setFullName(e.target.value)}
-                  className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2.5 text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-100"
+                  className="w-full text-xs rounded-xl border border-slate-200 dark:border-slate-700 px-3 py-2.5 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-100 dark:disabled:bg-slate-900 transition-colors"
                 />
               </div>
 
               <div className="space-y-1">
                 <div className="flex items-center justify-between">
-                  <label className="block text-xs font-bold text-slate-700">
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
                     رقم مسار (Code Massar) *
                   </label>
-                  <span className="text-[10px] text-blue-600 font-extrabold">
-                    حرف + 9 أرقام (مثال: F212121212)
+                  <span className="text-[10px] text-blue-600 dark:text-blue-400 font-extrabold">
+                    حرف + 9 أرقام
                   </span>
                 </div>
                 <input
@@ -416,18 +439,18 @@ export const RegisterStudentModal: React.FC<RegisterStudentModalProps> = ({
                   placeholder="مثال: F212121212"
                   value={massarNumber}
                   onChange={(e) => setMassarNumber(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))}
-                  className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 text-slate-800 font-mono font-bold placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-100 uppercase"
+                  className="w-full text-xs rounded-xl border border-slate-200 dark:border-slate-700 px-3 py-2 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 font-mono font-bold placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-100 dark:disabled:bg-slate-900 transition-colors uppercase"
                 />
               </div>
             </div>
 
             {/* Photo Avatar */}
             <div className="flex flex-col items-center pt-1">
-              <label className="block text-[10px] font-bold text-slate-500 mb-1">
-                الصورة (اختياري)
+              <label className="block text-[10px] font-bold text-slate-500 dark:text-slate-400 mb-1">
+                الصورة
               </label>
-              <label className={`relative w-14 h-16 rounded-2xl border-2 border-dashed flex items-center justify-center cursor-pointer overflow-hidden ${
-                photo ? 'border-blue-500' : 'border-slate-300 hover:border-blue-400 bg-slate-50'
+              <label className={`relative w-14 h-16 rounded-2xl border-2 border-dashed flex items-center justify-center cursor-pointer overflow-hidden transition-all ${
+                photo ? 'border-blue-500' : 'border-slate-300 dark:border-slate-700 hover:border-blue-400 bg-slate-50 dark:bg-slate-800'
               }`}>
                 {photo ? (
                   <img src={photo} alt="Avatar" className="w-full h-full object-cover" />
@@ -448,28 +471,28 @@ export const RegisterStudentModal: React.FC<RegisterStudentModalProps> = ({
           {/* Gender & BirthDate */}
           <div className="space-y-3">
             <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center justify-between">
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5 flex items-center justify-between">
                 <span>الجنس وتحديد الفئات المسموحة <span className="text-red-500">*</span></span>
                 {preselectedGender ? (
-                  <span className="text-[10px] font-black px-2 py-0.5 rounded border bg-blue-50 text-blue-700 border-blue-200 flex items-center gap-1">
+                  <span className="text-[10px] font-black px-2 py-0.5 rounded border bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800 flex items-center gap-1 transition-colors">
                     <Lock className="w-3 h-3" />
                     <span>مقفل وفق شروط البطولة</span>
                   </span>
                 ) : (
-                  <span className={`text-[10px] font-black px-2 py-0.5 rounded border ${
-                    gender === 'Male' ? 'bg-blue-50 text-blue-700 border-blue-200' : 'bg-pink-50 text-pink-700 border-pink-200'
+                  <span className={`text-[10px] font-black px-2 py-0.5 rounded border transition-colors ${
+                    gender === 'Male' ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800' : 'bg-pink-50 dark:bg-pink-900/30 text-pink-700 dark:text-pink-300 border-pink-200 dark:border-pink-800'
                   }`}>
-                    {gender === 'Male' ? '👦 فئات الذكور (البراعم / الصغار / الفتيان / الشبان)' : '👧 فئات الإناث (البرعمات / الصغيرات / الفتيات / الشابات)'}
+                    {gender === 'Male' ? '👦 فئات الذكور' : '👧 فئات الإناث'}
                   </span>
                 )}
               </label>
               {preselectedGender ? (
-                <div className="w-full text-xs px-3.5 py-2.5 bg-slate-100/90 border border-slate-200 rounded-xl text-slate-800 font-bold flex items-center justify-between cursor-not-allowed select-none">
+                <div className="w-full text-xs px-3.5 py-2.5 bg-slate-100/90 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-800 dark:text-slate-100 font-bold flex items-center justify-between cursor-not-allowed select-none transition-colors">
                   <span className="flex items-center gap-2">
                     <span>{gender === 'Male' ? '👦' : '👧'}</span>
-                    <span className="font-extrabold text-blue-950">{gender === 'Male' ? 'ذكر (فئات الذكور)' : 'أنثى (فئات الإناث)'}</span>
+                    <span className="font-extrabold text-blue-950 dark:text-blue-100">{gender === 'Male' ? 'ذكر (فئات الذكور)' : 'أنثى (فئات الإناث)'}</span>
                   </span>
-                  <span className="text-[10px] text-slate-400 font-bold flex items-center gap-1">
+                  <span className="text-[10px] text-slate-400 dark:text-slate-500 font-bold flex items-center gap-1">
                     <Lock className="w-3 h-3" /> مقفل
                   </span>
                 </div>
@@ -481,8 +504,8 @@ export const RegisterStudentModal: React.FC<RegisterStudentModalProps> = ({
                     onClick={() => setGender('Male')}
                     className={`py-2 px-3 text-xs font-bold rounded-xl border transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
                       gender === 'Male'
-                        ? 'bg-blue-50 border-blue-500 text-blue-700 shadow-2xs'
-                        : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-white'
+                        ? 'bg-blue-50 dark:bg-blue-900 border-blue-500 text-blue-700 dark:text-blue-100 shadow-2xs'
+                        : 'bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-white dark:hover:bg-slate-700'
                     }`}
                   >
                     <span>👦</span>
@@ -494,8 +517,8 @@ export const RegisterStudentModal: React.FC<RegisterStudentModalProps> = ({
                     onClick={() => setGender('Female')}
                     className={`py-2 px-3 text-xs font-bold rounded-xl border transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
                       gender === 'Female'
-                        ? 'bg-pink-50 border-pink-500 text-pink-700 shadow-2xs'
-                        : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-white'
+                        ? 'bg-pink-50 dark:bg-pink-900 border-pink-500 text-pink-700 dark:text-pink-100 shadow-2xs'
+                        : 'bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-white dark:hover:bg-slate-700'
                     }`}
                   >
                     <span>👧</span>
@@ -507,10 +530,10 @@ export const RegisterStudentModal: React.FC<RegisterStudentModalProps> = ({
 
             <div>
               <div className="flex items-center justify-between mb-1.5">
-                <label className="block text-xs font-bold text-slate-700">
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
                   تاريخ الازدياد <span className="text-red-500">*</span>
                 </label>
-                <span className="text-[10px] text-blue-600 font-bold bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
+                <span className="text-[10px] text-blue-600 dark:text-blue-400 font-bold bg-blue-50 dark:bg-blue-950/40 px-2 py-0.5 rounded border border-blue-200 dark:border-blue-800 transition-colors">
                   {preselectedCategory ? 'مطابقة الفئة المقفلة' : 'إحالة مباشرة للفئة'}
                 </span>
               </div>
@@ -519,19 +542,19 @@ export const RegisterStudentModal: React.FC<RegisterStudentModalProps> = ({
                 disabled={isExpired}
                 value={birthDate}
                 onChange={(e) => handleBirthDateChange(e.target.value)}
-                className={`w-full text-xs rounded-xl border px-3 py-2.5 text-slate-800 bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 font-mono ${
+                className={`w-full text-xs rounded-xl border px-3 py-2.5 text-slate-800 dark:text-slate-100 bg-slate-50 dark:bg-slate-800 focus:bg-white dark:focus:bg-slate-700 focus:outline-none focus:ring-2 font-mono transition-colors ${
                   birthDate && !birthDateValidation.isValid
-                    ? 'border-red-400 ring-2 ring-red-200 focus:ring-red-500 bg-red-50/40 text-red-900'
-                    : 'border-slate-200 focus:ring-blue-500'
-                } disabled:bg-slate-100`}
+                    ? 'border-red-400 dark:border-red-600 ring-2 ring-red-200 dark:ring-red-900/30 focus:ring-red-500 bg-red-50/40 dark:bg-red-900/20 text-red-900 dark:text-red-100'
+                    : 'border-slate-200 dark:border-slate-700 focus:ring-blue-500'
+                } disabled:bg-slate-100 dark:disabled:bg-slate-900`}
               />
               {birthDate && !birthDateValidation.isValid && (
-                <div className="mt-2 p-2.5 rounded-xl border border-red-200 bg-red-50 text-red-800 flex items-start gap-2 text-[11px] font-bold animate-in fade-in slide-in-from-top-1 duration-150">
-                  <AlertCircle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
+                <div className="mt-2 p-2.5 rounded-xl border border-red-200 dark:border-red-900/50 bg-red-50 dark:bg-red-950/40 text-red-800 dark:text-red-200 flex items-start gap-2 text-[11px] font-bold animate-in fade-in slide-in-from-top-1 duration-150 transition-colors">
+                  <AlertCircle className="w-4 h-4 text-red-600 dark:text-red-400 shrink-0 mt-0.5" />
                   <div className="flex-1">
-                    <p className="text-red-900 font-black">{birthDateValidation.errorMessage}</p>
-                    <p className="text-red-700 text-[10px] font-semibold mt-0.5">
-                      ⚠️ يرجى تصحيح تاريخ الازدياد ليتوافق مع السن المعتمد لفئة {getCategoryGenderLabel(category, gender, currentSeason)}.
+                    <p className="text-red-900 dark:text-red-100 font-black">{birthDateValidation.errorMessage}</p>
+                    <p className="text-red-700 dark:text-red-400/80 text-[10px] font-semibold mt-0.5">
+                      ⚠️ يرجى تصحيح تاريخ الازدياد ليتوافق مع السن المعتمد.
                     </p>
                   </div>
                 </div>
@@ -609,25 +632,25 @@ export const RegisterStudentModal: React.FC<RegisterStudentModalProps> = ({
 
           {/* School selection */}
           <div>
-            <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center justify-between">
+            <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1 flex items-center justify-between">
               <span>المؤسسة التعليمية</span>
               {userProfile?.role === 'TEACHER' && (
-                <span className="text-[10px] text-emerald-700 font-bold bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                <span className="text-[10px] text-emerald-700 dark:text-emerald-400 font-bold bg-emerald-50 dark:bg-emerald-950/40 px-2 py-0.5 rounded border border-emerald-200 dark:border-emerald-800/60 transition-colors">
                   مؤسستك المعتمدة
                 </span>
               )}
             </label>
             {userProfile?.role === 'TEACHER' ? (
-              <div className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2.5 bg-slate-50 text-slate-800 font-bold flex items-center justify-between">
+              <div className="w-full text-xs rounded-xl border border-slate-200 dark:border-slate-700 px-3 py-2.5 bg-slate-50 dark:bg-slate-800/80 text-slate-800 dark:text-slate-100 font-bold flex items-center justify-between transition-colors">
                 <span>{userProfile?.workLocation || 'يرجى تحديد المؤسسة في ملفكم الشخصي أولاً'}</span>
-                <span className="text-[10px] text-slate-400 font-normal">مغلق (مؤسستك فقط)</span>
+                <span className="text-[10px] text-slate-400 dark:text-slate-500 font-normal">مغلق (مؤسستك فقط)</span>
               </div>
             ) : (
               <select
                 disabled={isExpired}
                 value={selectedSchoolId}
                 onChange={(e) => setSelectedSchoolId(e.target.value)}
-                className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-100"
+                className="w-full text-xs rounded-xl border border-slate-200 dark:border-slate-700 px-3 py-2 text-slate-800 dark:text-slate-100 bg-white dark:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-100 dark:disabled:bg-slate-900 transition-colors"
               >
                 <option value="">-- {userProfile?.workLocation || 'اختر المؤسسة'} --</option>
                 {schools.map(s => (
@@ -669,25 +692,25 @@ export const RegisterStudentModal: React.FC<RegisterStudentModalProps> = ({
           {/* Affiliation Type: non_club vs club_affiliated */}
           <div>
             <div className="flex items-center justify-between mb-1.5">
-              <label className="block text-xs font-bold text-slate-700">
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
                 صفة الانتماء الرياضي للتلميذ(ة) <span className="text-red-500">*</span>
               </label>
               {effectiveLockedAffiliation && (
-                <span className="text-[10px] font-black px-2 py-0.5 rounded border bg-blue-50 text-blue-700 border-blue-200 flex items-center gap-1">
+                <span className="text-[10px] font-black px-2 py-0.5 rounded border bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800 transition-colors flex items-center gap-1">
                   <Lock className="w-3 h-3" />
-                  <span>مقفل وفق شروط البطولة (غير المنتمين)</span>
+                  <span>مقفل وفق شروط البطولة</span>
                 </span>
               )}
             </div>
             {effectiveLockedAffiliation ? (
-              <div className="w-full text-xs px-3.5 py-2.5 bg-slate-100/90 border border-slate-200 rounded-xl text-slate-800 font-bold flex items-center justify-between cursor-not-allowed select-none">
+              <div className="w-full text-xs px-3.5 py-2.5 bg-slate-100/90 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-800 dark:text-slate-100 font-bold flex items-center justify-between cursor-not-allowed select-none transition-colors">
                 <span className="flex items-center gap-2">
                   <span>{affiliationType === 'club_affiliated' ? '🟡' : '⚪'}</span>
-                  <span className="font-extrabold text-blue-950">
-                    {affiliationType === 'club_affiliated' ? 'منتمي لنادي / عصبة (بطولة المنتمين)' : 'لا منتمي (مدرسي فقط - بطولة غير المنتمين)'}
+                  <span className="font-extrabold text-blue-950 dark:text-blue-100">
+                    {affiliationType === 'club_affiliated' ? 'منتمي لنادي (بطولة المنتمين)' : 'لا منتمي (مدرسي فقط)'}
                   </span>
                 </span>
-                <span className="text-[10px] text-slate-400 font-bold flex items-center gap-1">
+                <span className="text-[10px] text-slate-400 dark:text-slate-500 font-bold flex items-center gap-1">
                   <Lock className="w-3 h-3" /> مقفل
                 </span>
               </div>
@@ -699,11 +722,11 @@ export const RegisterStudentModal: React.FC<RegisterStudentModalProps> = ({
                   onClick={() => setAffiliationType('non_club')}
                   className={`px-3 py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
                     affiliationType === 'non_club'
-                      ? 'bg-slate-900 text-white border-slate-900 shadow-xs'
-                      : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                      ? 'bg-slate-900 dark:bg-slate-700 text-white border-slate-900 dark:border-slate-600 shadow-xs'
+                      : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-400 border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700'
                   }`}
                 >
-                  ⚪ لا منتمي (مدرسي فقط)
+                  ⚪ لا منتمي (مدرسي)
                 </button>
                 <button
                   type="button"
@@ -711,11 +734,11 @@ export const RegisterStudentModal: React.FC<RegisterStudentModalProps> = ({
                   onClick={() => setAffiliationType('club_affiliated')}
                   className={`px-3 py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
                     affiliationType === 'club_affiliated'
-                      ? 'bg-amber-400 text-amber-950 font-extrabold border-amber-500 shadow-xs ring-1 ring-amber-400'
-                      : 'bg-amber-50 text-amber-900 border-amber-200 hover:bg-amber-100'
+                      ? 'bg-amber-400 dark:bg-amber-500 text-amber-950 font-extrabold border-amber-500 shadow-xs ring-1 ring-amber-400'
+                      : 'bg-amber-50 dark:bg-amber-900/30 text-amber-900 dark:text-amber-300 border-amber-200 dark:border-amber-800 hover:bg-amber-100 dark:hover:bg-amber-800'
                   }`}
                 >
-                  🟡 منتمي لنادي / عصبة
+                  🟡 منتمي لنادي
                 </button>
               </div>
             )}
@@ -724,7 +747,7 @@ export const RegisterStudentModal: React.FC<RegisterStudentModalProps> = ({
           {/* Cross Country Participation type */}
           {sport.id === 'cross_country' && (
             <div>
-              <label className="block text-xs font-bold text-indigo-900 mb-1">
+            <label className="block text-xs font-bold text-indigo-900 dark:text-indigo-100 mb-1">
                 نوع المشاركة في العدو الريفي
               </label>
               <div className="grid grid-cols-2 gap-2">
@@ -734,8 +757,8 @@ export const RegisterStudentModal: React.FC<RegisterStudentModalProps> = ({
                   onClick={() => setParticipationType('individual')}
                   className={`px-3 py-2 rounded-xl text-xs font-bold border transition-all ${
                     participationType === 'individual'
-                      ? 'bg-indigo-600 text-white border-indigo-600'
-                      : 'bg-white text-slate-700 border-slate-200'
+                      ? 'bg-indigo-600 dark:bg-indigo-700 text-white border-indigo-600 dark:border-indigo-500 shadow-sm'
+                      : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-indigo-400'
                   }`}
                 >
                   فردي (3 مشاركين)
@@ -746,8 +769,8 @@ export const RegisterStudentModal: React.FC<RegisterStudentModalProps> = ({
                   onClick={() => setParticipationType('school_team')}
                   className={`px-3 py-2 rounded-xl text-xs font-bold border transition-all ${
                     participationType === 'school_team'
-                      ? 'bg-indigo-600 text-white border-indigo-600'
-                      : 'bg-white text-slate-700 border-slate-200'
+                      ? 'bg-indigo-600 dark:bg-indigo-700 text-white border-indigo-600 dark:border-indigo-500 shadow-sm'
+                      : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-indigo-400'
                   }`}
                 >
                   فريق المؤسسة (5 مشاركين)
@@ -757,18 +780,18 @@ export const RegisterStudentModal: React.FC<RegisterStudentModalProps> = ({
           )}
 
           {/* Coach info section - automatically defaulted to logged in user */}
-          <div className="p-3.5 bg-indigo-50/70 rounded-2xl border border-indigo-100 space-y-2.5">
+          <div className="p-3.5 bg-indigo-50/70 dark:bg-indigo-950/30 rounded-2xl border border-indigo-100 dark:border-indigo-900/40 space-y-2.5 transition-colors">
             <div className="flex items-center justify-between">
-              <div className="flex items-center gap-1.5 text-xs font-black text-indigo-950">
+              <div className="flex items-center gap-1.5 text-xs font-black text-indigo-950 dark:text-indigo-100">
                 <span className="text-base">👨‍🏫</span>
                 <span>الأستاذ(ة) المؤطر(ة) للمشارك(ة)</span>
               </div>
-              <span className="text-[10px] text-indigo-700 bg-indigo-100 px-2 py-0.5 rounded-full font-bold">
-                تلقائي من الحساب الحالي
+              <span className="text-[10px] text-indigo-700 dark:text-indigo-400 bg-indigo-100 dark:bg-indigo-900/50 px-2 py-0.5 rounded-full font-bold">
+                تلقائي
               </span>
             </div>
-            <p className="text-[10.5px] text-slate-500 leading-relaxed">
-              المؤطر المسجل تلقائياً هو صاحب الحساب المسجل، ويمكنك تعديله إذا كان هناك مؤطر آخر يتولى تأطير هذه الفئة.
+            <p className="text-[10.5px] text-slate-500 dark:text-slate-400 leading-relaxed">
+              المؤطر المسجل تلقائياً هو صاحب الحساب، ويمكنك تعديله.
             </p>
             <div className="space-y-2">
               <div>
@@ -778,7 +801,7 @@ export const RegisterStudentModal: React.FC<RegisterStudentModalProps> = ({
                   placeholder="اسم ونسب الأستاذ المؤطر"
                   value={coachName}
                   onChange={(e) => setCoachName(e.target.value)}
-                  className="w-full text-xs rounded-xl border border-indigo-200 bg-white px-3 py-2 text-slate-900 font-bold placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:bg-slate-100"
+                  className="w-full text-xs rounded-xl border border-indigo-200 dark:border-indigo-800 bg-white dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-slate-100 font-bold placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:bg-slate-100 dark:disabled:bg-slate-900 transition-colors"
                 />
               </div>
               <div className="grid grid-cols-2 gap-2">
@@ -788,7 +811,7 @@ export const RegisterStudentModal: React.FC<RegisterStudentModalProps> = ({
                   placeholder="رقم التأجير (SOM)"
                   value={coachLeaseNumber}
                   onChange={(e) => setCoachLeaseNumber(e.target.value)}
-                  className="w-full text-xs rounded-xl border border-indigo-200 bg-white px-3 py-2 text-slate-900 font-mono font-bold placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:bg-slate-100"
+                  className="w-full text-xs rounded-xl border border-indigo-200 dark:border-indigo-800 bg-white dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-slate-100 font-mono font-bold placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:bg-slate-100 dark:disabled:bg-slate-900 transition-colors"
                 />
                 <input
                   type="tel"
@@ -796,25 +819,25 @@ export const RegisterStudentModal: React.FC<RegisterStudentModalProps> = ({
                   placeholder="رقم الهاتف"
                   value={coachPhone}
                   onChange={(e) => setCoachPhone(e.target.value)}
-                  className="w-full text-xs rounded-xl border border-indigo-200 bg-white px-3 py-2 text-slate-900 font-mono font-bold placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:bg-slate-100"
+                  className="w-full text-xs rounded-xl border border-indigo-200 dark:border-indigo-800 bg-white dark:bg-slate-800 px-3 py-2 text-slate-900 dark:text-slate-100 font-mono font-bold placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:bg-slate-100 dark:disabled:bg-slate-900 transition-colors"
                 />
               </div>
             </div>
           </div>
 
           {/* Submit buttons */}
-          <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
+          <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100 dark:border-slate-800">
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer"
+              className="px-4 py-2 text-xs font-bold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
             >
               إلغاء
             </button>
             <button
               type="submit"
               disabled={isSubmitting || isExpired}
-              className="px-5 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl transition-colors shadow-xs disabled:bg-slate-300 disabled:cursor-not-allowed cursor-pointer flex items-center gap-1.5"
+              className="px-5 py-2 text-xs font-bold text-white bg-blue-600 dark:bg-blue-700 hover:bg-blue-700 dark:hover:bg-blue-600 rounded-xl transition-all shadow-xs disabled:bg-slate-300 dark:disabled:bg-slate-800 disabled:cursor-not-allowed cursor-pointer flex items-center gap-1.5"
             >
               {isSubmitting ? (
                 <span>جاري الحفظ...</span>

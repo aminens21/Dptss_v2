@@ -75,6 +75,52 @@ export const AppLayout: React.FC = () => {
   const [schoolAccessInput, setSchoolAccessInput] = useState('');
   const [isVerifyingCode, setIsVerifyingCode] = useState(false);
 
+  // Regional & National Qualification state
+  const [hasRegionalQualification, setHasRegionalQualification] = useState(false);
+  const [hasNationalQualification, setHasNationalQualification] = useState(false);
+
+  useEffect(() => {
+    if (!userProfile) return;
+
+    const userSchoolId = userProfile.schoolId;
+    const userSchoolName = userProfile.workLocation;
+
+    const checkQualifications = async () => {
+      try {
+        const [students, tournaments] = await Promise.all([
+          DataService.getStudents(),
+          DataService.getTournaments()
+        ]);
+
+        const hasRegTournaments = tournaments.some(t => t.level === 'REGIONAL' || t.scope === 'REGIONAL');
+        const hasNatTournaments = tournaments.some(t => t.level === 'NATIONAL' || t.scope === 'NATIONAL');
+
+        const userStudents = students.filter(s => 
+          (userSchoolId && s.schoolId === userSchoolId) ||
+          (userSchoolName && (s.schoolName === userSchoolName || s.schoolName?.trim() === userSchoolName?.trim()))
+        );
+
+        const isReg = hasRegTournaments || userStudents.some(s => 
+          s.isQualifiedRegional || 
+          s.qualificationLevel === 'regional' || 
+          s.qualificationLevel === 'national' || 
+          s.isQualifiedNational
+        );
+        const isNat = hasNatTournaments || userStudents.some(s => 
+          s.isQualifiedNational || 
+          s.qualificationLevel === 'national'
+        );
+
+        setHasRegionalQualification(isReg);
+        setHasNationalQualification(isNat);
+      } catch (e) {
+        console.error("Qualification check error:", e);
+      }
+    };
+
+    checkQualifications();
+  }, [userProfile]);
+
   useEffect(() => {
     if (userProfile && userProfile.role === 'TEACHER' && !userProfile.schoolAccessVerified && !isDemo) {
       const unsub = DataService.subscribeToSchools((liveSchools) => {
@@ -157,14 +203,24 @@ export const AppLayout: React.FC = () => {
   });
   
   useEffect(() => {
-    // Load active season initially
+    // Load active season initially and subscribe to real-time changes
+    const unsubSeason = DataService.subscribeToActiveSeason((season) => {
+      if (season) setActiveSeason(season);
+    });
+
     DataService.getActiveSeason()
       .then(season => {
         if (season) setActiveSeason(season);
       })
       .catch(err => console.error("Error fetching active season inside AppLayout:", err));
 
-    // Load directorates
+    // Load directorates and subscribe
+    const unsubDirs = DataService.subscribeToDirectorates((dirs) => {
+      if (dirs && dirs.length > 0) {
+        setDirectoratesList(dirs);
+      }
+    });
+
     DataService.getDirectorates()
       .then(dirs => {
         setDirectoratesList(dirs);
@@ -220,6 +276,8 @@ export const AppLayout: React.FC = () => {
     window.addEventListener('directoratesListUpdated', handleDirectoratesListUpdate);
     window.addEventListener('sidebarPermissionsChanged', handlePermissionsChanged);
     return () => {
+      unsubSeason();
+      unsubDirs();
       unsubPerms();
       window.removeEventListener('seasonChanged', handleSeasonChange);
       window.removeEventListener('directorateChanged', handleDirectorateChange);
@@ -490,7 +548,7 @@ export const AppLayout: React.FC = () => {
   }
 
   return (
-    <div className="flex h-screen w-full bg-[#f8fafc] text-[#1e293b]" dir="rtl">
+    <div className="flex h-screen w-full bg-[#f8fafc] dark:bg-[#0b0f1a] text-[#1e293b] dark:text-slate-200 transition-colors duration-300" dir="rtl">
       {/* Sidebar for Desktop - High Density Dark Navy with Collapse/Expand feature */}
       <aside
         className={cn(
@@ -552,10 +610,10 @@ export const AppLayout: React.FC = () => {
                   }}
                   className={({ isActive }) =>
                     cn(
-                      'flex items-center gap-3 px-3 py-2.5 rounded-lg text-xs font-semibold transition-all group min-w-0',
+                      'flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-black transition-all group min-w-0',
                       isActive
-                        ? 'bg-blue-600 text-white shadow-sm font-bold'
-                        : 'text-slate-300 hover:bg-slate-800 hover:text-white',
+                        ? 'bg-blue-600 text-white shadow-md shadow-blue-600/30 font-black'
+                        : 'text-slate-200 hover:bg-slate-800/90 hover:text-white font-bold',
                       isSidebarCollapsed && 'justify-center px-2'
                     )
                   }
@@ -568,10 +626,12 @@ export const AppLayout: React.FC = () => {
                 {isTournamentsItem && isTournamentsExpanded && !isSidebarCollapsed && (
                   <div className="mr-5 my-1 pr-2 border-r border-slate-700/60 space-y-1 animate-in fade-in slide-in-from-top-1 duration-150">
                     {[
-                      { name: 'بطولة إقليمية', tab: 'provincial', icon: '🏆' },
-                      { name: 'بطولة جهوية', tab: 'regional', icon: '🏅' },
-                      { name: 'بطولة وطنية', tab: 'national', icon: '🥇' },
-                    ].map((sub) => {
+                      { name: 'بطولة إقليمية', tab: 'provincial', icon: '🏆', show: true },
+                      { name: 'بطولة جهوية', tab: 'regional', icon: '🏅', show: hasRegionalQualification },
+                      { name: 'بطولة وطنية', tab: 'national', icon: '🥇', show: hasNationalQualification },
+                    ]
+                      .filter(sub => sub.show)
+                      .map((sub) => {
                       const isSubActive = location.pathname === '/tournaments' && (
                         location.search.includes(`tab=${sub.tab}`) ||
                         (!location.search.includes('tab=') && sub.tab === 'provincial')
@@ -583,8 +643,8 @@ export const AppLayout: React.FC = () => {
                           className={cn(
                             'flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-[11px] font-normal transition-all',
                             isSubActive
-                              ? 'bg-blue-600/25 text-blue-300 font-medium border-r-2 border-blue-400'
-                              : 'text-slate-400 font-light hover:text-white hover:bg-slate-800/50'
+                              ? 'bg-blue-600/30 text-blue-200 font-bold border-r-2 border-blue-400'
+                              : 'text-slate-200 font-bold hover:text-white hover:bg-slate-800/80'
                           )}
                         >
                           <span className="text-[11px] opacity-80">{sub.icon}</span>
@@ -611,8 +671,8 @@ export const AppLayout: React.FC = () => {
                           className={cn(
                             'flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-[11px] font-normal transition-all',
                             isSubActive
-                              ? 'bg-blue-600/25 text-blue-300 font-medium border-r-2 border-blue-400'
-                              : 'text-slate-400 font-light hover:text-white hover:bg-slate-800/50'
+                              ? 'bg-blue-600/30 text-blue-200 font-bold border-r-2 border-blue-400'
+                              : 'text-slate-200 font-bold hover:text-white hover:bg-slate-800/80'
                           )}
                         >
                           <span className="text-[11px] opacity-80">{sub.icon}</span>
@@ -627,9 +687,12 @@ export const AppLayout: React.FC = () => {
                 {isMatchesItem && isMatchesExpanded && !isSidebarCollapsed && (
                   <div className="mr-5 my-1 pr-2 border-r border-slate-700/60 space-y-1 animate-in fade-in slide-in-from-top-1 duration-150">
                     {[
-                      { name: 'جدول المقابلات والنتائج', tab: 'list', icon: '⚽' },
-                      { name: 'الرزنامة والبرنامج (Calendrier)', tab: 'calendar', icon: '📅' },
-                    ].map((sub) => {
+                      { name: 'جدول المقابلات والنتائج', tab: 'list', icon: '⚽', show: true },
+                      { name: 'الرزنامة والبرنامج (Calendrier)', tab: 'calendar', icon: '📅', show: true },
+                      { name: 'مبارياتي التحكيمية', tab: 'referee', icon: '🏁', show: userProfile?.role === 'TEACHER' || userProfile?.role === 'REFEREE' || userProfile?.role === 'CENTRAL_ADMIN' }
+                    ]
+                      .filter(sub => sub.show)
+                      .map((sub) => {
                       const isSubActive = location.pathname === '/matches' && (
                         location.search.includes(`tab=${sub.tab}`) ||
                         (!location.search.includes('tab=') && sub.tab === 'list')
@@ -641,8 +704,8 @@ export const AppLayout: React.FC = () => {
                           className={cn(
                             'flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-[11px] font-normal transition-all',
                             isSubActive
-                              ? 'bg-blue-600/25 text-blue-300 font-medium border-r-2 border-blue-400'
-                              : 'text-slate-400 font-light hover:text-white hover:bg-slate-800/50'
+                              ? 'bg-blue-600/30 text-blue-200 font-bold border-r-2 border-blue-400'
+                              : 'text-slate-200 font-bold hover:text-white hover:bg-slate-800/80'
                           )}
                         >
                           <span className="text-[11px] opacity-80">{sub.icon}</span>
@@ -708,15 +771,15 @@ export const AppLayout: React.FC = () => {
       </aside>
 
       {/* Main App Container */}
-      <div className="flex flex-1 flex-col overflow-hidden">
+      <div className="flex flex-1 flex-col overflow-hidden bg-slate-50 dark:bg-[#0b0f1a] transition-colors duration-300">
         {/* Top Header - High Density Crisp Style */}
-        <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-3 sm:px-4 md:px-8 z-10 shadow-[0_1px_3px_rgba(0,0,0,0.02)]">
+        <header className="h-16 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between px-3 sm:px-4 md:px-8 z-10 shadow-[0_1px_3px_rgba(0,0,0,0.02)] transition-colors">
           <div className="flex items-center gap-2 sm:gap-3 min-w-0">
             {/* Mobile menu trigger & AppLogo */}
             <div className="flex items-center gap-1.5 md:hidden shrink-0">
               <button
                 onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-                className="p-1.5 text-slate-600 hover:text-slate-900 rounded-lg bg-slate-100/80 cursor-pointer shrink-0"
+                className="p-1.5 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white rounded-lg bg-slate-100/80 dark:bg-slate-800/80 cursor-pointer shrink-0"
                 aria-label="القائمة الجانبية"
               >
                 {isMobileMenuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
@@ -727,18 +790,18 @@ export const AppLayout: React.FC = () => {
             {/* Desktop toggle sidebar button */}
             <button
               onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
-              className="hidden md:flex p-1.5 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer items-center gap-1.5 text-xs font-semibold shrink-0"
+              className="hidden md:flex p-1.5 text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors cursor-pointer items-center gap-1.5 text-xs font-semibold shrink-0"
               title={isSidebarCollapsed ? 'إظهار القائمة الجانبية' : 'إخفاء القائمة الجانبية'}
             >
-              <Menu className="h-4 w-4 text-slate-600" />
-              <span className="text-[11px] text-slate-500">{isSidebarCollapsed ? 'إظهار القائمة' : 'إخفاء'}</span>
+              <Menu className="h-4 w-4 text-slate-600 dark:text-slate-400" />
+              <span className="text-[11px] text-slate-500 dark:text-slate-400">{isSidebarCollapsed ? 'إظهار القائمة' : 'إخفاء'}</span>
             </button>
 
             {/* Page Title (Desktop & Tablet) */}
-            <h2 className="hidden lg:block text-xs sm:text-sm md:text-base font-bold text-slate-800 truncate">
+            <h2 className="hidden lg:block text-xs sm:text-sm md:text-base font-bold text-slate-800 dark:text-slate-100 truncate">
               {isTeacher ? 'فضاء الأستاذ - المقابلات والنتائج' : 'لوحة التحكم والتدبير الإقليمي'}
             </h2>
-            <span className="hidden xl:inline-flex px-2.5 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded text-[11px] font-bold shrink-0">
+            <span className="hidden xl:inline-flex px-2.5 py-0.5 bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 rounded text-[11px] font-bold shrink-0">
               الموسم {activeSeason}
             </span>
 
@@ -748,18 +811,18 @@ export const AppLayout: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setIsDirectorateMenuOpen(!isDirectorateMenuOpen)}
-                  className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50/90 hover:bg-blue-100 border border-blue-200 text-blue-900 rounded-full text-xs font-black transition-all cursor-pointer shadow-2xs shrink-0 select-none"
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50/90 dark:bg-blue-900/20 hover:bg-blue-100 dark:hover:bg-blue-900/30 border border-blue-200 dark:border-blue-800 text-blue-900 dark:text-blue-100 rounded-full text-xs font-black transition-all cursor-pointer shadow-2xs shrink-0 select-none"
                   title="المديرية الإقليمية المحددة حالياً - انقر للتبديل"
                 >
-                  <Building2 className="w-4 h-4 text-blue-600 shrink-0" />
-                  <span className="truncate max-w-[160px] font-black text-blue-900">
+                  <Building2 className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0" />
+                  <span className="truncate max-w-[160px] font-black text-blue-900 dark:text-blue-50">
                     {activeDirObj?.shortName || activeDirObj?.name || 'المديرية الإقليمية'}
                   </span>
-                  <div className="flex items-center gap-1 bg-amber-100/90 text-amber-900 border border-amber-300 px-1.5 py-0.5 rounded-full font-mono text-[9px] font-bold">
-                    <KeyRound className="w-2.5 h-2.5 text-amber-700" />
+                  <div className="flex items-center gap-1 bg-amber-100/90 dark:bg-amber-900/40 text-amber-900 dark:text-amber-200 border border-amber-300 dark:border-amber-800 px-1.5 py-0.5 rounded-full font-mono text-[9px] font-bold">
+                    <KeyRound className="w-2.5 h-2.5 text-amber-700 dark:text-amber-400" />
                     <span>{activeDirObj?.code || 'PIN'}</span>
                   </div>
-                  <ChevronDown className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                  <ChevronDown className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 shrink-0" />
                 </button>
 
                 {/* Desktop Dropdown Menu */}
@@ -1004,8 +1067,8 @@ export const AppLayout: React.FC = () => {
 
             <div className="h-6 w-px bg-slate-200 hidden sm:block"></div>
 
-            {/* Quick Action Button - Central Admin & Tech Head */}
-            {(isCentralAdmin || isTechCommitteeHead) && (
+            {/* Quick Action Button - Central Admin Only */}
+            {isCentralAdmin && (
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => navigate('/tournaments')}
@@ -1129,10 +1192,12 @@ export const AppLayout: React.FC = () => {
                       {isTournamentsItem && isTournamentsExpanded && (
                         <div className="mr-5 my-1 pr-2 border-r-2 border-blue-500/60 space-y-1 animate-in fade-in slide-in-from-top-1 duration-150">
                           {[
-                            { name: 'بطولة إقليمية', tab: 'provincial', icon: '🏆' },
-                            { name: 'بطولة جهوية', tab: 'regional', icon: '🏅' },
-                            { name: 'بطولة وطنية', tab: 'national', icon: '🥇' },
-                          ].map((sub) => (
+                            { name: 'بطولة إقليمية', tab: 'provincial', icon: '🏆', show: true },
+                            { name: 'بطولة جهوية', tab: 'regional', icon: '🏅', show: hasRegionalQualification },
+                            { name: 'بطولة وطنية', tab: 'national', icon: '🥇', show: hasNationalQualification },
+                          ]
+                            .filter(sub => sub.show)
+                            .map((sub) => (
                             <NavLink
                               key={sub.tab}
                               to={`/tournaments?tab=${sub.tab}`}

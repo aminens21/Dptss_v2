@@ -10,6 +10,7 @@ import {
 } from '../lib/programExportService';
 import {
   Calendar as CalendarIcon,
+  Calendar,
   ChevronRight,
   ChevronLeft,
   Download,
@@ -31,6 +32,7 @@ import {
   X
 } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { formatMatchDate } from '../lib/utils';
 
 export interface CalendarEventItem {
   id: string;
@@ -1003,6 +1005,11 @@ export const ChampionshipCalendarView: React.FC<ChampionshipCalendarViewProps> =
                         <span className="font-semibold text-slate-700">{ev.venue}</span>
                       </div>
 
+                      <div className="flex items-center gap-1.5">
+                        <Calendar className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+                        <span>التاريخ: <strong className="text-slate-700">{formatMatchDate(ev.date)}</strong></span>
+                      </div>
+
                       {ev.time && (
                         <div className="flex items-center gap-1.5">
                           <Clock className="h-3.5 w-3.5 text-slate-400 shrink-0" />
@@ -1140,6 +1147,10 @@ export const ChampionshipCalendarView: React.FC<ChampionshipCalendarViewProps> =
                       </div>
 
                       <div className="grid grid-cols-2 gap-2 text-[11px] text-slate-700 font-medium bg-slate-50/80 p-2.5 rounded-xl border border-slate-100">
+                        <div className="flex items-center gap-1.5">
+                          <Calendar className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+                          <span>التاريخ: <strong>{formatMatchDate(ev.date)}</strong></span>
+                        </div>
                         <div className="flex items-center gap-1.5">
                           <Clock className="w-3.5 h-3.5 text-blue-600 shrink-0" />
                           <span>التوقيت: <strong>{ev.time || '15:00'}</strong></span>

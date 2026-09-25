@@ -47,6 +47,7 @@ export interface BibRunnerData {
   categoryLabel: string;
   gender: 'Male' | 'Female' | string;
   genderLabel: string;
+  affiliationType?: string;
   qrDataUrl?: string;
 }
 
@@ -79,6 +80,7 @@ export const BibGeneratorModal: React.FC<BibGeneratorModalProps> = ({
   const [separatePagesPerRace, setSeparatePagesPerRace] = useState<boolean>(true);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedGender, setSelectedGender] = useState<string>('ALL');
+  const [selectedAffiliation, setSelectedAffiliation] = useState<string>('ALL');
   const [previewRaceFilter, setPreviewRaceFilter] = useState<string>('ALL');
   const [bibBgColor, setBibBgColor] = useState<string>('#FFFFFF');
 
@@ -213,7 +215,8 @@ export const BibGeneratorModal: React.FC<BibGeneratorModalProps> = ({
         category: catDef?.id || student.category || 'U12',
         categoryLabel,
         gender: isFemale ? 'Female' : 'Male',
-        genderLabel
+        genderLabel,
+        affiliationType: student.affiliationType || 'non_club'
       };
     });
   }, [students, schoolMap, directorateName]);
@@ -242,6 +245,11 @@ export const BibGeneratorModal: React.FC<BibGeneratorModalProps> = ({
         return false;
       }
 
+      // Affiliation filter
+      if (selectedAffiliation !== 'ALL' && runner.affiliationType !== selectedAffiliation) {
+        return false;
+      }
+
       // Search query filter (name, massar, school, bib)
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase().trim();
@@ -254,7 +262,7 @@ export const BibGeneratorModal: React.FC<BibGeneratorModalProps> = ({
 
       return true;
     });
-  }, [allRunners, selectedRaces, selectedGender, searchQuery]);
+  }, [allRunners, selectedRaces, selectedGender, selectedAffiliation, searchQuery]);
 
   // Race counts for each of the 8 individual races
   const raceCounts = useMemo(() => {
@@ -279,6 +287,17 @@ export const BibGeneratorModal: React.FC<BibGeneratorModalProps> = ({
       ALL: allRunners.length,
       Male: maleCount,
       Female: femaleCount
+    };
+  }, [allRunners]);
+
+  // Affiliation counts
+  const affiliationCounts = useMemo(() => {
+    const clubCount = allRunners.filter(r => r.affiliationType === 'club_affiliated').length;
+    const schoolCount = allRunners.filter(r => r.affiliationType === 'non_club').length;
+    return {
+      ALL: allRunners.length,
+      club_affiliated: clubCount,
+      non_club: schoolCount
     };
   }, [allRunners]);
 
@@ -377,7 +396,7 @@ export const BibGeneratorModal: React.FC<BibGeneratorModalProps> = ({
   // Reset preview page if filter or layout changes
   useEffect(() => {
     setPreviewPage(1);
-  }, [selectedRaces, selectedGender, searchQuery, bibsPerPage, previewRaceFilter]);
+  }, [selectedRaces, selectedGender, selectedAffiliation, searchQuery, bibsPerPage, previewRaceFilter]);
 
   // Generate and Download Bibs as pure Native Typography / Text (Instant, Vector Quality, No Rasterization lag)
   const handleFastTextDownloadOrPrint = async () => {
@@ -897,7 +916,7 @@ export const BibGeneratorModal: React.FC<BibGeneratorModalProps> = ({
             </div>
 
             {/* Section B: Secondary Filters & Layout & Race Page Separation */}
-            <div className="pt-3 border-t border-slate-100 grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="pt-3 border-t border-slate-100 grid grid-cols-1 sm:grid-cols-4 gap-3">
               
               {/* Search filter (name, massar, school, bib) */}
               <div>
@@ -938,6 +957,23 @@ export const BibGeneratorModal: React.FC<BibGeneratorModalProps> = ({
                   <option value="ALL">جميع الأجناس ({genderCounts.ALL})</option>
                   <option value="Male">ذكور ({genderCounts.Male})</option>
                   <option value="Female">إناث ({genderCounts.Female})</option>
+                </select>
+              </div>
+
+              {/* Affiliation Filter */}
+              <div>
+                <label className="text-xs font-black text-slate-800 flex items-center gap-1.5 mb-1.5">
+                  <Users className="w-3.5 h-3.5 text-blue-600" />
+                  <span>تصفية حسب الانتماء للأندية</span>
+                </label>
+                <select
+                  value={selectedAffiliation}
+                  onChange={(e) => setSelectedAffiliation(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all"
+                >
+                  <option value="ALL">جميع الفئات ({affiliationCounts.ALL})</option>
+                  <option value="club_affiliated">منتمي للأندية ({affiliationCounts.club_affiliated})</option>
+                  <option value="non_club">غير منتمي للأندية ({affiliationCounts.non_club})</option>
                 </select>
               </div>
 

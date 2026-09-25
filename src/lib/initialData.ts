@@ -184,7 +184,7 @@ export const INITIAL_TOURNAMENTS: Tournament[] = [
     gender: 'Mixed',
     level: 'جميع الأسلاك',
     scope: 'Provincial',
-    affiliationType: 'non_club',
+    affiliationType: 'open',
     startDate: new Date('2026-03-01'),
     endDate: new Date('2026-03-30'),
     status: 'Scheduled',
@@ -213,4 +213,45 @@ export const INITIAL_VENUES: Venue[] = [
   { id: 'ven-4', name: 'ملاعب ثانوية الفتح', city: 'تاوريرت', address: 'قرب المديرية الإقليمية', capacity: 400, directorateId: 'taourirt' }
 ];
 
-export const INITIAL_MATCHES: Match[] = [];
+export const INITIAL_MATCHES: Match[] = [
+  {
+    id: 'demo-m1',
+    tournamentId: 'tourn-1',
+    sportId: 'football',
+    stage: 'نصف النهائي',
+    team1Id: 'team-1',
+    team2Id: 'team-2',
+    team1Name: 'ثانوية الفتح',
+    team2Name: 'ثانوية علال الفاسي',
+    date: new Date(),
+    startTime: '10:00',
+    venueId: 'ven-2',
+    venueName: 'الملعب البلدي',
+    status: 'Completed',
+    team1Score: 2,
+    team2Score: 0,
+    ageCategory: 'U18',
+    gender: 'Male',
+    updatedAt: new Date()
+  },
+  {
+    id: 'demo-m2',
+    tournamentId: 'tourn-4',
+    sportId: 'basketball',
+    stage: 'دور المجموعات',
+    team1Id: 'team-3',
+    team2Id: 'team-4',
+    team1Name: 'إعدادية ابن سينا',
+    team2Name: 'إعدادية سيدي لحسن',
+    date: new Date(),
+    startTime: '15:30',
+    venueId: 'ven-1',
+    venueName: 'القاعة المغطاة',
+    status: 'Ongoing',
+    team1Score: 45,
+    team2Score: 42,
+    ageCategory: 'U15',
+    gender: 'Male',
+    updatedAt: new Date()
+  }
+];

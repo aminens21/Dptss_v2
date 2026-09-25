@@ -121,9 +121,17 @@ export const HelperApps: React.FC = () => {
         DataService.getSchools(),
         DataService.getStudents()
       ]);
-      setResults(ccResults);
-      setSchools(scList);
-      setStudents(stList.filter(s => s.sportId === 'cross_country'));
+      
+      setResults(prev => {
+        if (Object.keys(prev).length > 0 && ccResults && Object.keys(ccResults).length > 0) {
+           return { ...ccResults, ...prev };
+        }
+        return ccResults || prev;
+      });
+
+      setSchools(prev => scList.length > prev.length ? scList : (prev.length > 0 ? prev : scList));
+      setStudents(prev => stList.length > prev.length ? stList.filter(s => s.sportId === 'cross_country') : (prev.length > 0 ? prev : stList.filter(s => s.sportId === 'cross_country')));
+      
       if (scList.length > 0 && drawPool.length === 0) {
         setDrawPool(scList.slice(0, 8).map(s => s.name));
       }
@@ -137,7 +145,38 @@ export const HelperApps: React.FC = () => {
     const unsubscribe = DataService.subscribeCrossCountryResults((newResults) => {
       setResults(newResults);
     });
-    return () => unsubscribe();
+
+    const handleCCUpdate = (e: Event | { type: string, result: CrossCountryCategoryResult }) => {
+      let updatedResult: CrossCountryCategoryResult | null = null;
+      if (e instanceof Event) {
+        const customEvent = e as CustomEvent;
+        if (customEvent.detail) updatedResult = customEvent.detail;
+      } else if (e && e.result) {
+        updatedResult = e.result;
+      }
+
+      if (updatedResult) {
+        setResults(prev => ({
+          ...prev,
+          [updatedResult!.categoryId]: updatedResult!
+        }));
+      }
+    };
+
+    const bc = new BroadcastChannel('cc_results_sync');
+    bc.onmessage = (event) => {
+      if (event.data.type === 'UPDATE') {
+        handleCCUpdate({ type: 'UPDATE', result: event.data.result });
+      }
+    };
+
+    window.addEventListener('crossCountryResultsUpdated', handleCCUpdate);
+
+    return () => {
+      unsubscribe();
+      window.removeEventListener('crossCountryResultsUpdated', handleCCUpdate);
+      bc.close();
+    };
   }, []);
 
   // Stopwatch timer logic

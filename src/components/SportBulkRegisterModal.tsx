@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { School, Student, Sport, User, Tournament } from '../types';
-import { DataService, validateBirthDateForCategory, normalizeCategoryKey, getCategoryGenderLabel, getCategoryYearsLabel, isSchoolLevelAllowedForTournament, getTournamentLevelAr } from '../lib/dataService';
+import { DataService, validateBirthDateForCategory, normalizeCategoryKey, getCategoryGenderLabel, getCategoryYearsLabel, isSchoolLevelAllowedForTournament, getTournamentLevelAr, isTeacherLevelAllowedForTournament } from '../lib/dataService';
 import { useAuth } from '../contexts/AuthContext';
 import * as XLSX from 'xlsx';
 import {
@@ -63,24 +63,47 @@ export const SportBulkRegisterModal: React.FC<SportBulkRegisterModalProps> = ({
   const isTeacher = userProfile?.role === 'TEACHER';
   const [currentSeason, setCurrentSeason] = useState(initialSeason);
 
+  // Available categories for selection
+  const availableCategories = useMemo(() => {
+    const baseCats = (sport?.ageCategories && sport.ageCategories.length > 0)
+      ? sport.ageCategories.map(normalizeCategoryKey)
+      : ['U12', 'U15', 'U18', 'U20'];
+
+    if (!isTeacher || !userProfile?.teachingCadre) return baseCats;
+
+    const cadre = userProfile.teachingCadre.toUpperCase();
+    return baseCats.filter(catId => {
+      const norm = normalizeCategoryKey(catId);
+      if (cadre.includes('PRIMARY')) return norm === 'U12';
+      if (cadre.includes('MIDDLE')) return norm === 'U15';
+      if (cadre.includes('HIGH') || cadre.includes('SECONDARY')) return norm === 'U18' || norm === 'U20';
+      return true;
+    });
+  }, [sport, isTeacher, userProfile]);
+
   // Selected age category
   const [selectedCategory, setSelectedCategory] = useState<string>('U15');
   // Selected gender
   const [selectedGender, setSelectedGender] = useState<'Male' | 'Female'>(preselectedGender);
-
+  
   // Sync category & gender from props on open
   useEffect(() => {
     if (isOpen) {
       if (preselectedCategory) {
         setSelectedCategory(normalizeCategoryKey(preselectedCategory));
-      } else if (sport?.ageCategories && sport.ageCategories.length > 0) {
-        setSelectedCategory(normalizeCategoryKey(sport.ageCategories[0]));
+      } else if (availableCategories.length > 0) {
+        // If U15 is not available for this teacher, pick the first available one
+        if (!availableCategories.includes('U15')) {
+          setSelectedCategory(availableCategories[0]);
+        } else {
+          setSelectedCategory('U15');
+        }
       } else {
         setSelectedCategory('U15');
       }
       setSelectedGender(preselectedGender);
     }
-  }, [isOpen, preselectedCategory, preselectedGender, sport]);
+  }, [isOpen, preselectedCategory, preselectedGender, availableCategories]);
 
   // Selected school
   const [selectedSchoolId, setSelectedSchoolId] = useState<string>('');
@@ -591,13 +614,21 @@ export const SportBulkRegisterModal: React.FC<SportBulkRegisterModalProps> = ({
         const normCategory = normalizeCategoryKey(selectedCategory);
         const relevantTournament = tournaments.find(t => 
           t.sportId === sport.id && 
-          normalizeCategoryKey(t.ageCategory) === normCategory &&
+          (normalizeCategoryKey(t.ageCategory) === normCategory || normalizeCategoryKey(t.ageCategory) === 'جميع الفئات') &&
           (t.gender === selectedGender || t.gender === 'Mixed')
         );
         if (relevantTournament && relevantTournament.level) {
           const isAllowed = isSchoolLevelAllowedForTournament(activeSchoolObj.type, relevantTournament.level);
           if (!isAllowed) {
             toast.error(`عذراً، السلك التعليمي لمؤسسة "${activeSchoolObj.name}" (${activeSchoolObj.type}) غير مسموح له بالمشاركة في هذه البطولة المخصصة لـ (${getTournamentLevelAr(relevantTournament.level)})`);
+            setIsSubmitting(false);
+            return;
+          }
+
+          // Check teacher cadre (extra safety)
+          if (userProfile?.teachingCadre && !isTeacherLevelAllowedForTournament(userProfile.teachingCadre, relevantTournament.level)) {
+            const cadreAr = userProfile.teachingCadre.includes('PRIMARY') ? 'ابتدائي' : userProfile.teachingCadre.includes('MIDDLE') ? 'إعدادي' : 'تأهيلي';
+            toast.error(`عذراً، بصفتك أستاذ سلك (${cadreAr})، لا يمكنك التسجيل في بطولة مخصصة لـ (${getTournamentLevelAr(relevantTournament.level)})`);
             setIsSubmitting(false);
             return;
           }
@@ -665,11 +696,11 @@ export const SportBulkRegisterModal: React.FC<SportBulkRegisterModalProps> = ({
   if (!isOpen || !sport) return null;
 
   return (
-    <div className="fixed inset-0 z-[150] overflow-y-auto" id="sport-bulk-modal">
+    <div className="fixed inset-0 z-[150] overflow-y-auto" id="sport-bulk-modal" dir="rtl">
       <div className="flex min-h-screen items-center justify-center p-4 text-center sm:p-0">
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs transition-opacity" onClick={onClose} />
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm transition-opacity" onClick={onClose} />
 
-        <div className="relative transform overflow-hidden rounded-3xl bg-slate-50 text-right shadow-2xl transition-all sm:my-8 sm:w-full sm:max-w-6xl flex flex-col max-h-[92vh]">
+        <div className="relative transform overflow-hidden rounded-3xl bg-slate-50 dark:bg-slate-900 text-right shadow-2xl transition-all sm:my-8 sm:w-full sm:max-w-6xl flex flex-col max-h-[92vh]">
           {/* Header */}
           <div className="bg-gradient-to-r from-blue-700 to-indigo-800 px-6 py-5 text-white flex items-center justify-between shadow-md shrink-0">
             <div className="flex items-center gap-3">
@@ -694,7 +725,7 @@ export const SportBulkRegisterModal: React.FC<SportBulkRegisterModalProps> = ({
           </div>
 
           {/* Quick Info & Instructions */}
-          <div className="bg-blue-50 px-6 py-3 border-b border-blue-100 flex flex-wrap items-center justify-between gap-3 text-xs text-blue-900 font-bold shrink-0">
+          <div className="bg-blue-50 dark:bg-blue-900/30 px-6 py-3 border-b border-blue-100 dark:border-blue-800 flex flex-wrap items-center justify-between gap-3 text-xs text-blue-900 dark:text-blue-200 font-bold shrink-0">
             <span className="flex items-center gap-1.5">
               <Info className="w-4 h-4 text-blue-600" />
               قم بتنزيل النموذج وتعبئته ثم رفعه، أو الصق الأسماء والمقاعد مباشرة في الحقول أدناه.
@@ -733,87 +764,84 @@ export const SportBulkRegisterModal: React.FC<SportBulkRegisterModalProps> = ({
           <form onSubmit={handleSubmitAll} className="flex flex-col flex-1 overflow-hidden">
             {/* Scrollable Container */}
             <div className="p-6 overflow-y-auto space-y-6 flex-1">
-              {/* Controls Grid (Category, Gender, School) */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 bg-white p-5 rounded-2xl border border-slate-200/80 shadow-3xs">
-                {/* Age Category */}
-                <div>
-                  <label className="block text-xs font-black text-slate-800 mb-1.5">الفئة العمرية المقررة *</label>
-                  <select
-                    value={selectedCategory}
-                    onChange={(e) => setSelectedCategory(e.target.value)}
-                    className="w-full text-xs font-bold px-3 py-2.5 bg-white border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-800"
+            {/* Quick Paste Modal State */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-3xs transition-colors">
+              {/* Age Category */}
+              <div>
+                <label className="block text-xs font-black text-slate-800 dark:text-slate-200 mb-1.5">الفئة العمرية المقررة *</label>
+                <select
+                  value={selectedCategory}
+                  onChange={(e) => setSelectedCategory(e.target.value)}
+                  className="w-full text-xs font-bold px-3 py-2.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-800 dark:text-slate-100 shadow-2xs transition-colors"
+                >
+                  {availableCategories.map(catId => (
+                    <option key={catId} value={catId}>
+                      {getCategoryYearsLabel(catId, currentSeason, sport?.id)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Gender */}
+              <div>
+                <label className="block text-xs font-black text-slate-800 dark:text-slate-200 mb-1.5">الجنس *</label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedGender('Male')}
+                    className={`py-2 px-3 text-xs font-bold rounded-xl border transition-all cursor-pointer ${
+                      selectedGender === 'Male'
+                        ? 'bg-blue-50 dark:bg-blue-900/40 text-blue-700 dark:text-blue-200 border-blue-400 dark:border-blue-600 ring-2 ring-blue-500/20'
+                        : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700'
+                    }`}
                   >
-                    {(sport.ageCategories && sport.ageCategories.length > 0
-                      ? sport.ageCategories.map(normalizeCategoryKey)
-                      : ['U12', 'U15', 'U18', 'U20']
-                    ).map(catId => (
-                      <option key={catId} value={catId}>
-                        {getCategoryYearsLabel(catId, currentSeason, sport?.id)}
+                    👦 ذكور
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedGender('Female')}
+                    className={`py-2 px-3 text-xs font-bold rounded-xl border transition-all cursor-pointer ${
+                      selectedGender === 'Female'
+                        ? 'bg-pink-50 dark:bg-pink-900/40 text-pink-700 dark:text-pink-200 border-pink-400 dark:border-pink-600 ring-2 ring-pink-500/20'
+                        : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700'
+                    }`}
+                  >
+                    👧 إناث
+                  </button>
+                </div>
+              </div>
+
+              {/* School Select */}
+              <div>
+                <label className="block text-xs font-black text-slate-800 dark:text-slate-200 mb-1.5 flex items-center justify-between">
+                  <span>المؤسسة التعليمية *</span>
+                  {isTeacher && (
+                    <span className="text-[10px] font-bold text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 px-2 py-0.5 rounded border border-emerald-200 dark:border-emerald-800 flex items-center gap-1 transition-colors">
+                      <Lock className="w-3 h-3" /> مؤسستك الرسمية
+                    </span>
+                  )}
+                </label>
+                {isTeacher ? (
+                  <div className="w-full text-xs font-bold px-3 py-2.5 bg-slate-100 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-800 dark:text-slate-100 flex items-center justify-between transition-colors">
+                    <span>{resolvedSchoolName}</span>
+                    <span className="text-[10px] text-slate-400 dark:text-slate-500 font-medium">مغلق للأساتذة</span>
+                  </div>
+                ) : (
+                  <select
+                    value={selectedSchoolId}
+                    onChange={(e) => setSelectedSchoolId(e.target.value)}
+                    className="w-full text-xs font-bold px-3 py-2.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-800 dark:text-slate-100 shadow-2xs transition-colors"
+                  >
+                    <option value="">-- اختر المؤسسة التعليمية --</option>
+                    {schools.map(sch => (
+                      <option key={sch.id} value={sch.id}>
+                        {sch.name} ({sch.type})
                       </option>
                     ))}
                   </select>
-                </div>
-
-                {/* Gender */}
-                <div>
-                  <label className="block text-xs font-black text-slate-800 mb-1.5">الجنس *</label>
-                  <div className="grid grid-cols-2 gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setSelectedGender('Male')}
-                      className={`py-2 px-3 text-xs font-bold rounded-xl border transition-all cursor-pointer ${
-                        selectedGender === 'Male'
-                          ? 'bg-blue-50 text-blue-700 border-blue-400 ring-2 ring-blue-500/20'
-                          : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
-                      }`}
-                    >
-                      👦 ذكور
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setSelectedGender('Female')}
-                      className={`py-2 px-3 text-xs font-bold rounded-xl border transition-all cursor-pointer ${
-                        selectedGender === 'Female'
-                          ? 'bg-pink-50 text-pink-700 border-pink-400 ring-2 ring-pink-500/20'
-                          : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
-                      }`}
-                    >
-                      👧 إناث
-                    </button>
-                  </div>
-                </div>
-
-                {/* School Select */}
-                <div>
-                  <label className="block text-xs font-black text-slate-800 mb-1.5 flex items-center justify-between">
-                    <span>المؤسسة التعليمية *</span>
-                    {isTeacher && (
-                      <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200 flex items-center gap-1">
-                        <Lock className="w-3 h-3" /> مؤسستك الرسمية
-                      </span>
-                    )}
-                  </label>
-                  {isTeacher ? (
-                    <div className="w-full text-xs font-bold px-3 py-2.5 bg-slate-100 border border-slate-200 rounded-xl text-slate-800 flex items-center justify-between">
-                      <span>{resolvedSchoolName}</span>
-                      <span className="text-[10px] text-slate-400 font-medium">مغلق للأساتذة</span>
-                    </div>
-                  ) : (
-                    <select
-                      value={selectedSchoolId}
-                      onChange={(e) => setSelectedSchoolId(e.target.value)}
-                      className="w-full text-xs font-bold px-3 py-2.5 bg-white border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-800 shadow-2xs"
-                    >
-                      <option value="">-- اختر المؤسسة التعليمية --</option>
-                      {schools.map(sch => (
-                        <option key={sch.id} value={sch.id}>
-                          {sch.name} ({sch.type} - {sch.commune})
-                        </option>
-                      ))}
-                    </select>
-                  )}
-                </div>
+                )}
               </div>
+            </div>
 
               {/* Coach Details */}
               <div className="pt-2 border-t border-slate-200/80">

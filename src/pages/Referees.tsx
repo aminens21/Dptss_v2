@@ -10,7 +10,10 @@ import {
   RefreshCw,
   Plus,
   Trash2,
-  Edit2
+  Edit2,
+  Table as TableIcon,
+  LayoutGrid,
+  GraduationCap
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -20,6 +23,7 @@ export const Referees: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedSport, setSelectedSport] = useState('');
+  const [viewMode, setViewMode] = useState<'table' | 'cards'>('table');
 
   // Determine user's primary/preferred sport specialty for automatic focus on login
   const preferredSportId = useMemo(() => {
@@ -184,9 +188,9 @@ export const Referees: React.FC = () => {
         </div>
       </div>
 
-      {/* Filters */}
-      <div className="bg-white p-3 md:p-4 rounded-xl border border-slate-200 shadow-xs flex flex-col md:flex-row gap-3">
-        <div className="flex-1 relative">
+      {/* Filters & View Controls */}
+      <div className="bg-white p-3 md:p-4 rounded-xl border border-slate-200 shadow-xs flex flex-col md:flex-row items-center justify-between gap-3">
+        <div className="flex-1 relative w-full">
           <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
             <Search className="h-4 w-4 text-slate-400" />
           </div>
@@ -199,20 +203,50 @@ export const Referees: React.FC = () => {
           />
         </div>
         
-        <div className="relative md:w-64">
-          <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
-            <Filter className="h-4 w-4 text-slate-400" />
+        <div className="flex items-center gap-2 w-full md:w-auto">
+          <div className="relative flex-1 md:w-64">
+            <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
+              <Filter className="h-4 w-4 text-slate-400" />
+            </div>
+            <select
+              value={selectedSport}
+              onChange={(e) => setSelectedSport(e.target.value)}
+              className="block w-full pr-9 pl-3 py-2 border border-slate-200 rounded-lg text-xs focus:ring-2 focus:ring-blue-500 focus:border-transparent appearance-none text-slate-800"
+            >
+              <option value="">جميع التخصصات</option>
+              {Object.entries(SPORTS_MAP).map(([key, sport]) => (
+                <option key={key} value={key}>{sport.icon} {sport.name}</option>
+              ))}
+            </select>
           </div>
-          <select
-            value={selectedSport}
-            onChange={(e) => setSelectedSport(e.target.value)}
-            className="block w-full pr-9 pl-3 py-2 border border-slate-200 rounded-lg text-xs focus:ring-2 focus:ring-blue-500 focus:border-transparent appearance-none text-slate-800"
-          >
-            <option value="">جميع التخصصات</option>
-            {Object.entries(SPORTS_MAP).map(([key, sport]) => (
-              <option key={key} value={key}>{sport.icon} {sport.name}</option>
-            ))}
-          </select>
+
+          {/* View Mode Toggle Buttons */}
+          <div className="flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200 shrink-0">
+            <button
+              onClick={() => setViewMode('table')}
+              className={`p-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1 cursor-pointer ${
+                viewMode === 'table'
+                  ? 'bg-white text-blue-700 shadow-xs'
+                  : 'text-slate-500 hover:text-slate-800'
+              }`}
+              title="عرض الجدول"
+            >
+              <TableIcon className="h-4 w-4" />
+              <span className="hidden sm:inline">جدول</span>
+            </button>
+            <button
+              onClick={() => setViewMode('cards')}
+              className={`p-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1 cursor-pointer ${
+                viewMode === 'cards'
+                  ? 'bg-white text-blue-700 shadow-xs'
+                  : 'text-slate-500 hover:text-slate-800'
+              }`}
+              title="عرض البطائق"
+            >
+              <LayoutGrid className="h-4 w-4" />
+              <span className="hidden sm:inline">بطائق</span>
+            </button>
+          </div>
         </div>
       </div>
 
@@ -232,7 +266,108 @@ export const Referees: React.FC = () => {
             لم يتم العثور على أي حكم يطابق معايير البحث
           </p>
         </div>
+      ) : viewMode === 'table' ? (
+        /* TABLE VIEW (DEFAULT) */
+        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-right text-xs">
+              <thead className="bg-slate-50/90 border-b border-slate-200 text-slate-600 font-bold uppercase tracking-wider">
+                <tr>
+                  <th className="p-3.5 text-center w-12">#</th>
+                  <th className="p-3.5">اسم الحكم</th>
+                  <th className="p-3.5">التخصص الرياضي</th>
+                  <th className="p-3.5">الصفة</th>
+                  <th className="p-3.5">رقم الهاتف والتواصل</th>
+                  <th className="p-3.5 text-center w-28">الإجراءات</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
+                {filteredReferees.map((ref, idx) => {
+                  const specialties = Array.isArray(ref.specialty) ? ref.specialty : (ref.specialty ? [ref.specialty] : []);
+                  return (
+                    <tr key={ref.id} className="hover:bg-blue-50/30 transition-colors">
+                      <td className="p-3.5 text-center font-bold text-slate-400">{idx + 1}</td>
+                      <td className="p-3.5 font-bold text-slate-900">
+                        <div className="flex items-center gap-2.5">
+                          <div className="w-8 h-8 rounded-full bg-blue-50 border border-blue-100 text-blue-700 flex items-center justify-center font-bold text-xs shrink-0 shadow-2xs">
+                            {ref.fullName[0]?.toUpperCase() || 'ح'}
+                          </div>
+                          <span className="text-sm font-bold text-slate-800">{ref.fullName}</span>
+                        </div>
+                      </td>
+                      <td className="p-3.5">
+                        <div className="flex flex-wrap gap-1">
+                          {specialties.length > 0 ? (
+                            specialties.map(spec => {
+                              const sportDetails = SPORTS_MAP[spec];
+                              if (!sportDetails) return null;
+                              return (
+                                <span key={spec} className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-800 bg-emerald-50 px-2.5 py-0.5 rounded-lg border border-emerald-200/70">
+                                  <span>{sportDetails.icon}</span>
+                                  <span>{sportDetails.name}</span>
+                                </span>
+                              );
+                            })
+                          ) : (
+                            <span className="inline-flex items-center gap-1 text-[10px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-lg border border-slate-200">
+                              متعدد التخصصات
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="p-3.5">
+                        {ref.isTeacher ? (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-bold text-indigo-700 bg-indigo-50 px-2.5 py-1 rounded-full border border-indigo-200">
+                            <GraduationCap className="h-3 w-3" />
+                            <span>أستاذ(ة) تربية بدنية</span>
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-bold text-slate-700 bg-slate-100 px-2.5 py-1 rounded-full border border-slate-200">
+                            <ShieldCheck className="h-3 w-3 text-blue-600" />
+                            <span>حكم معتمد</span>
+                          </span>
+                        )}
+                      </td>
+                      <td className="p-3.5">
+                        <a
+                          href={`tel:${ref.phone}`}
+                          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 text-xs font-mono font-bold transition-colors"
+                        >
+                          <Phone className="h-3.5 w-3.5 text-emerald-600" />
+                          <span dir="ltr">{ref.phone}</span>
+                        </a>
+                      </td>
+                      <td className="p-3.5 text-center">
+                        {!ref.isTeacher ? (
+                          <div className="flex items-center justify-center gap-1">
+                            <button
+                              onClick={() => handleOpenModal(ref)}
+                              className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
+                              title="تعديل"
+                            >
+                              <Edit2 className="h-4 w-4" />
+                            </button>
+                            <button
+                              onClick={() => handleDelete(ref.id)}
+                              className="p-1.5 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
+                              title="حذف"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          </div>
+                        ) : (
+                          <span className="text-[10px] text-slate-400 font-bold">تلقائي من الأساتذة</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
       ) : (
+        /* CARDS VIEW */
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {filteredReferees.map((ref) => {
             const specialties = Array.isArray(ref.specialty) ? ref.specialty : (ref.specialty ? [ref.specialty] : []);

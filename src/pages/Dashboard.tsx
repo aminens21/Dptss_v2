@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import { formatMatchDate } from '../lib/utils';
 import { DataService, deduplicateById, normalizeCategoryKey } from '../lib/dataService';
 import { Match, Tournament, School, Venue, Referee, User } from '../types';
 import {
@@ -69,9 +70,52 @@ export const Dashboard: React.FC = () => {
     const handleDirChange = () => {
       loadDashboardData();
     };
+
+    const unsubscribeTournaments = DataService.subscribeToTournaments(() => {
+      loadDashboardData();
+    });
+
+    const unsubscribeMatches = DataService.subscribeToMatches(() => {
+      loadDashboardData();
+    });
+
+    const unsubscribeSchools = DataService.subscribeToSchools(() => {
+      loadDashboardData();
+    });
+
+    const unsubscribeVenues = DataService.subscribeToVenues(() => {
+      loadDashboardData();
+    });
+
+    const unsubscribeStudents = DataService.subscribeToStudents(() => {
+      loadDashboardData();
+    });
+
+    const unsubscribeReferees = DataService.subscribeToReferees(() => {
+      loadDashboardData();
+    });
+
+    const unsubscribeUsers = DataService.subscribeToUsers(() => {
+      loadDashboardData();
+    });
+
+    const unsubscribeCC = DataService.subscribeCrossCountryResults(() => {
+      loadDashboardData();
+    });
+
     window.addEventListener('directorateChanged', handleDirChange);
+    window.addEventListener('seasonChanged', handleDirChange);
     return () => {
       window.removeEventListener('directorateChanged', handleDirChange);
+      window.removeEventListener('seasonChanged', handleDirChange);
+      if (unsubscribeTournaments) unsubscribeTournaments();
+      if (unsubscribeMatches) unsubscribeMatches();
+      if (unsubscribeSchools) unsubscribeSchools();
+      if (unsubscribeVenues) unsubscribeVenues();
+      if (unsubscribeStudents) unsubscribeStudents();
+      if (unsubscribeReferees) unsubscribeReferees();
+      if (unsubscribeUsers) unsubscribeUsers();
+      if (unsubscribeCC) unsubscribeCC();
     };
   }, []);
 
@@ -428,7 +472,7 @@ export const Dashboard: React.FC = () => {
                     className="flex items-center gap-3 p-3 border border-blue-100 rounded-lg hover:border-blue-300 hover:bg-blue-50/50 transition-all cursor-pointer bg-blue-50/20"
                   >
                     <div className="w-20 text-center border-l border-blue-100 pl-2">
-                      <p className="text-[10px] font-bold text-slate-500 mb-0.5">{new Date(m.date).toLocaleDateString('ar-MA')}</p>
+                      <p className="text-[10px] font-bold text-slate-500 mb-0.5">{formatMatchDate(m.date)}</p>
                       <p className="text-sm font-black text-blue-700">{m.startTime}</p>
                       <p className="text-[10px] text-blue-600/80 font-bold mt-0.5">
                         {m.status === 'Ongoing' ? 'جارية الآن' : 'في الانتظار'}
@@ -440,7 +484,7 @@ export const Dashboard: React.FC = () => {
                       </span>
                       <div className="flex items-center gap-1.5 text-xs text-slate-500 font-medium">
                         <CalendarDays className="h-3.5 w-3.5 text-slate-400" />
-                        <span>يوم: {new Date(m.date).toLocaleDateString('ar-MA')}</span>
+                        <span>يوم: {formatMatchDate(m.date)}</span>
                       </div>
                     </div>
                   </div>
@@ -471,7 +515,8 @@ export const Dashboard: React.FC = () => {
                   onClick={() => navigate('/matches')}
                   className="flex items-center gap-3 p-3 border border-slate-100 rounded-lg hover:border-blue-200 hover:bg-blue-50/20 transition-all cursor-pointer"
                 >
-                  <div className="w-16 text-center border-l border-slate-100 pl-2">
+                  <div className="w-20 text-center border-l border-slate-100 pl-2 shrink-0">
+                    <p className="text-[10px] font-bold text-slate-500 mb-0.5">{formatMatchDate(m.date)}</p>
                     <p className="text-xs font-bold text-blue-600">{m.startTime || '10:00'}</p>
                     <p className="text-[10px] text-slate-400 font-medium">
                       {m.status === 'Completed' ? 'انتهت' : m.status === 'Ongoing' ? 'مباشر' : 'مبرمجة'}

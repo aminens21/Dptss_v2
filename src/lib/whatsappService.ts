@@ -98,9 +98,9 @@ export const getWhatsAppUrl = (phone: string, message: string): string => {
   const sanitized = sanitizePhoneNumber(phone);
   const encoded = encodeURIComponent(message);
   if (sanitized) {
-    return `https://api.whatsapp.com/send?phone=${sanitized}&text=${encoded}`;
+    return `https://wa.me/${sanitized}?text=${encoded}`;
   }
-  return `https://api.whatsapp.com/send?text=${encoded}`;
+  return `https://wa.me/?text=${encoded}`;
 };
 
 /**

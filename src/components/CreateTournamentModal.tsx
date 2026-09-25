@@ -263,7 +263,7 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
               sportId,
               ageCategory: catId,
               gender: gen,
-              level: selectedLevels.join(','),
+              level: catId === 'U12' ? 'Primary' : catId === 'U15' ? 'Middle' : (catId === 'U18' || catId === 'U20') ? 'High' : 'Primary,Middle,High',
               scope,
               affiliationType: aff,
               startDate: new Date(startDate),
@@ -299,26 +299,26 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs" dir="rtl">
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-xl max-w-xl w-full overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-xs" dir="rtl">
+      <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xl max-w-xl w-full overflow-hidden animate-in fade-in zoom-in-95 duration-150 text-slate-900 dark:text-slate-100">
         {/* Header */}
-        <div className="flex items-center justify-between p-4 md:p-5 border-b border-slate-100 bg-slate-50/70">
+        <div className="flex items-center justify-between p-4 md:p-5 border-b border-slate-100 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-800/60">
           <div className="flex items-center gap-2.5">
             <div className="w-9 h-9 rounded-xl bg-blue-600 text-white flex items-center justify-center shadow-xs">
               <Trophy className="h-5 w-5" />
             </div>
             <div>
-              <h3 className="text-sm font-bold text-slate-800">
+              <h3 className="text-sm font-bold text-slate-800 dark:text-white">
                 {isEditing ? `تعديل وإعداد بطولة ${activeSportConfig?.name || SPORTS_MAP[sportId]?.name || ''}` : 'إضافة وإعداد بطولة إقليمية متعددة'}
               </h3>
-              <p className="text-[11px] text-slate-500 font-medium">
+              <p className="text-[11px] text-slate-500 dark:text-slate-400 font-medium">
                 {isEditing ? 'تعديل الفئات العمرية، الجنس، الانتساب، التواريخ والضوابط التنظيمية' : 'يقوم النظام بتوليد بطولات منفصلة لكل فئة وجنس ونوع انتساب محدد'}
               </p>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="p-1.5 text-slate-400 hover:text-slate-700 rounded-lg hover:bg-slate-200/60 transition-colors"
+            className="p-1.5 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 rounded-lg hover:bg-slate-200/60 dark:hover:bg-slate-800 transition-colors"
           >
             <X className="h-5 w-5" />
           </button>
@@ -344,81 +344,44 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
             </span>
           </div>
 
-          {/* Sport & Level */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-bold text-slate-800 mb-1">
-                صنف الرياضة / التخصص الرياضي <span className="text-red-500">*</span>
-              </label>
-              <select
-                value={sportId}
-                onChange={(e) => setSportId(e.target.value)}
-                disabled={allowedSportIds !== null && allowedSportIds !== undefined && allowedSportIds.length === 1}
-                className="w-full text-xs rounded-lg border border-slate-200 px-3 py-2 text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 font-bold disabled:bg-slate-100 disabled:text-slate-700 disabled:cursor-not-allowed cursor-pointer"
-              >
-                {availableSports.length > 0
-                  ? availableSports.map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.icon || SPORTS_MAP[s.id]?.icon || '🏆'} {s.name}
+          {/* Sport Selection */}
+          <div>
+            <label className="block text-xs font-bold text-slate-800 mb-1">
+              صنف الرياضة / التخصص الرياضي <span className="text-red-500">*</span>
+            </label>
+            <select
+              value={sportId}
+              onChange={(e) => setSportId(e.target.value)}
+              disabled={allowedSportIds !== null && allowedSportIds !== undefined && allowedSportIds.length === 1}
+              className="w-full text-xs rounded-lg border border-slate-200 px-3 py-2 text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 font-bold disabled:bg-slate-100 disabled:text-slate-700 disabled:cursor-not-allowed cursor-pointer"
+            >
+              {availableSports.length > 0
+                ? availableSports.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.icon || SPORTS_MAP[s.id]?.icon || '🏆'} {s.name}
+                    </option>
+                  ))
+                : Object.entries(SPORTS_MAP)
+                    .filter(([id]) => !allowedSportIds || allowedSportIds.includes(id))
+                    .map(([id, info]) => (
+                      <option key={id} value={id}>
+                        {info.icon} {info.name}
                       </option>
-                    ))
-                  : Object.entries(SPORTS_MAP)
-                      .filter(([id]) => !allowedSportIds || allowedSportIds.includes(id))
-                      .map(([id, info]) => (
-                        <option key={id} value={id}>
-                          {info.icon} {info.name}
-                        </option>
-                      ))}
-              </select>
-              <span className="text-[10px] text-slate-500 font-medium block mt-1">
-                * تحديد صنف الرياضة يربط البطولات مباشرة بإشراف رئيس اللجنة التقنية الخاص بها (مثال: الكرة الطائرة تشمل كل بطولات الكرة الطائرة بالمديرية).
+                    ))}
+            </select>
+            <span className="text-[10px] text-slate-500 font-medium block mt-1">
+              * تحديد صنف الرياضة يربط البطولات مباشرة بإشراف رئيس اللجنة التقنية الخاص بها (مثال: الكرة الطائرة تشمل كل بطولات الكرة الطائرة بالمديرية).
+            </span>
+            {isEditing && (
+              <span className="text-[10px] text-blue-700 font-bold block mt-1 bg-blue-50 p-1.5 rounded border border-blue-200">
+                ✏️ تعديل إعدادات وتصنيفات هذه الرياضة المبرمجة.
               </span>
-              {isEditing && (
-                <span className="text-[10px] text-blue-700 font-bold block mt-1 bg-blue-50 p-1.5 rounded border border-blue-200">
-                  ✏️ تعديل إعدادات وتصنيفات هذه الرياضة المبرمجة.
-                </span>
-              )}
-              {!isEditing && allowedSportIds && allowedSportIds.length > 0 && (
-                <span className="text-[10px] text-amber-700 font-bold block mt-1 bg-amber-50 p-1.5 rounded border border-amber-200">
-                  🔒 رئيس لجنة تقنية: مسند لك إضافة بطولات في تخصصك فقط.
-                </span>
-              )}
-            </div>
-
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">
-                الأسلاك التعليمية المعنية * (يمكن تحديد سلك أو أكثر)
-              </label>
-              <div className="flex flex-wrap gap-1.5 mt-1">
-                {[
-                  { id: 'Primary', label: 'ابتدائي (Primaire)' },
-                  { id: 'Middle', label: 'إعدادي (Collège)' },
-                  { id: 'High', label: 'تأهيلي (Lycée)' }
-                ].map((item) => {
-                  const isSelected = selectedLevels.includes(item.id as any);
-                  return (
-                    <button
-                      type="button"
-                      key={item.id}
-                      onClick={() => {
-                        setSelectedLevels(prev =>
-                          prev.includes(item.id as any)
-                            ? (prev.length > 1 ? prev.filter(x => x !== item.id) : prev)
-                            : [...prev, item.id as any]
-                        );
-                      }}
-                      className={`px-2.5 py-1.5 rounded-lg text-[11px] font-bold border transition-all cursor-pointer ${
-                        isSelected
-                          ? 'bg-blue-600 border-blue-600 text-white shadow-3xs'
-                          : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
-                      }`}
-                    >
-                      {item.label}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
+            )}
+            {!isEditing && allowedSportIds && allowedSportIds.length > 0 && (
+              <span className="text-[10px] text-amber-700 font-bold block mt-1 bg-amber-50 p-1.5 rounded border border-amber-200">
+                🔒 رئيس لجنة تقنية: مسند لك إضافة بطولات في تخصصك فقط.
+              </span>
+            )}
           </div>
 
           {/* Gender and Multi-select Age Categories */}

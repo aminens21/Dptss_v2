@@ -22,7 +22,9 @@ import {
   PieChart,
   Activity,
   Flame,
-  ShieldCheck
+  ShieldCheck,
+  X,
+  Eye
 } from 'lucide-react';
 
 export const Statistics: React.FC = () => {
@@ -34,6 +36,7 @@ export const Statistics: React.FC = () => {
   const [sportsConfig, setSportsConfig] = useState<Sport[]>([]);
   const [crossCountryResults, setCrossCountryResults] = useState<Record<string, CrossCountryCategoryResult>>({});
   const [loading, setLoading] = useState(true);
+  const [selectedSchoolAchievements, setSelectedSchoolAchievements] = useState<{ schoolName: string; achievements: any[] } | null>(null);
 
   // Filters
   const [activeTab, setActiveTab] = useState<'results' | 'participation' | 'sports'>('results');
@@ -61,11 +64,41 @@ export const Statistics: React.FC = () => {
       }
     });
 
+    const unsubscribeTournaments = DataService.subscribeToTournaments(() => {
+      loadAllData();
+    });
+
+    const unsubscribeMatches = DataService.subscribeToMatches(() => {
+      loadAllData();
+    });
+
+    const unsubscribeSchools = DataService.subscribeToSchools(() => {
+      loadAllData();
+    });
+
+    const unsubscribeStudents = DataService.subscribeToStudents(() => {
+      loadAllData();
+    });
+
+    const unsubscribeVenues = DataService.subscribeToVenues(() => {
+      loadAllData();
+    });
+
+    const unsubscribeSportsConfig = DataService.subscribeToSportsConfig(() => {
+      loadAllData();
+    });
+
     return () => {
       window.removeEventListener('directorateChanged', handleDirChange);
       window.removeEventListener('crossCountryResultsUpdated', handleCCChange);
       window.removeEventListener('dataSynchronized', handleCCChange);
       if (unsubscribeCC) unsubscribeCC();
+      if (unsubscribeTournaments) unsubscribeTournaments();
+      if (unsubscribeMatches) unsubscribeMatches();
+      if (unsubscribeSchools) unsubscribeSchools();
+      if (unsubscribeStudents) unsubscribeStudents();
+      if (unsubscribeVenues) unsubscribeVenues();
+      if (unsubscribeSportsConfig) unsubscribeSportsConfig();
     };
   }, []);
 
@@ -1231,31 +1264,16 @@ export const Statistics: React.FC = () => {
                         {/* Achievements list */}
                         <td className="py-3 px-4">
                           {item.achievements && item.achievements.length > 0 ? (
-                            <div className="flex flex-wrap gap-1 max-w-xs">
-                              {item.achievements.slice(0, 3).map((ach, aIdx) => (
-                                <span
-                                  key={aIdx}
-                                  className={`text-[10px] font-bold px-2 py-0.5 rounded-md border ${
-                                    ach.rank === 1
-                                      ? 'bg-amber-50 text-amber-900 border-amber-200'
-                                      : ach.rank === 2
-                                      ? 'bg-slate-100 text-slate-800 border-slate-200'
-                                      : 'bg-orange-50 text-orange-900 border-orange-200'
-                                  }`}
-                                  title={ach.title}
-                                >
-                                  {ach.rank === 1 ? '🥇 ' : ach.rank === 2 ? '🥈 ' : '🥉 '}
-                                  {ach.title}
-                                </span>
-                              ))}
-                              {item.achievements.length > 3 && (
-                                <span className="text-[10px] font-bold text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">
-                                  +{item.achievements.length - 3} تتويجات
-                                </span>
-                              )}
-                            </div>
+                            <button
+                              onClick={() => setSelectedSchoolAchievements({ schoolName: item.schoolName, achievements: item.achievements })}
+                              className="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 hover:text-indigo-800 border border-indigo-200 hover:border-indigo-300 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 mx-auto transition-colors cursor-pointer shadow-3xs"
+                              title="عرض تفاصيل وبيان التتويجات والجوائز لهذه المؤسسة"
+                            >
+                              <Trophy className="w-3.5 h-3.5 text-amber-500" />
+                              <span>التتويجات ({item.achievements.length})</span>
+                            </button>
                           ) : (
-                            <span className="text-[11px] text-slate-400 font-normal">في طور التباري</span>
+                            <span className="text-[11px] text-slate-400 font-normal">في طور التباري ⏳</span>
                           )}
                         </td>
                       </tr>
@@ -1361,6 +1379,116 @@ export const Statistics: React.FC = () => {
           </div>
         )}
       </div>
+
+      {/* Coronation Achievements Details Modal */}
+      {selectedSchoolAchievements && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs overflow-y-auto" dir="rtl">
+          <div className="relative w-full max-w-lg bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden animate-in fade-in zoom-in duration-200">
+            {/* Modal Header */}
+            <div className="p-4 bg-gradient-to-r from-indigo-950 via-slate-900 to-indigo-950 text-white flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-amber-500/20 text-amber-300 border border-amber-500/30 flex items-center justify-center text-lg shadow-sm">
+                  🏆
+                </div>
+                <div>
+                  <h3 className="text-sm sm:text-base font-black text-white leading-none">
+                    سجل تتويجات وإنجازات المؤسسة
+                  </h3>
+                  <p className="text-[10px] text-slate-300 font-medium mt-1">
+                    {selectedSchoolAchievements.schoolName}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedSchoolAchievements(null)}
+                className="p-1.5 rounded-lg hover:bg-white/10 text-slate-300 hover:text-white transition-colors cursor-pointer"
+                title="إغلاق"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Content */}
+            <div className="p-5 space-y-4 max-h-[60vh] overflow-y-auto">
+              {/* Summary Counter */}
+              <div className="p-3 bg-indigo-50 border border-indigo-100 rounded-xl flex items-center justify-between">
+                <span className="text-xs font-bold text-indigo-900">إجمالي الصعود لمنصة التتويج:</span>
+                <span className="px-3 py-1 bg-indigo-600 text-white font-black text-xs rounded-lg shadow-3xs">
+                  {selectedSchoolAchievements.achievements.length} تتويج(ات) 🥇🥈🥉
+                </span>
+              </div>
+
+              {/* Achievements List */}
+              <div className="space-y-2.5">
+                {selectedSchoolAchievements.achievements.map((ach, index) => {
+                  const isGold = ach.rank === 1;
+                  const isSilver = ach.rank === 2;
+                  const isBronze = ach.rank === 3;
+
+                  return (
+                    <div
+                      key={index}
+                      className={`p-3.5 rounded-xl border flex items-start gap-3.5 transition-all hover:scale-[1.01] ${
+                        isGold
+                          ? 'bg-amber-50/70 border-amber-200 shadow-3xs'
+                          : isSilver
+                          ? 'bg-slate-50/70 border-slate-200'
+                          : 'bg-orange-50/70 border-orange-200'
+                      }`}
+                    >
+                      {/* Rank Medal Indicator */}
+                      <span className="text-2xl shrink-0">
+                        {isGold ? '🥇' : isSilver ? '🥈' : '🥉'}
+                      </span>
+
+                      {/* Achievement details */}
+                      <div className="space-y-1 min-w-0 flex-1">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className={`text-[10px] font-black px-2 py-0.5 rounded-md ${
+                            isGold
+                              ? 'bg-amber-100 text-amber-950 border border-amber-300'
+                              : isSilver
+                              ? 'bg-slate-200 text-slate-900 border border-slate-300'
+                              : 'bg-orange-100 text-orange-950 border border-orange-300'
+                          }`}>
+                            {isGold ? 'المركز الأول • الذهب' : isSilver ? 'المركز الثاني • الفضة' : 'المركز الثالث • البرونز'}
+                          </span>
+                          {ach.category && (
+                            <span className="text-[9px] bg-slate-100 text-slate-600 font-bold px-1.5 py-0.2 rounded border border-slate-200">
+                              فئة {ach.category}
+                            </span>
+                          )}
+                        </div>
+                        <h4 className="text-xs font-black text-slate-900 leading-normal">
+                          {ach.title}
+                        </h4>
+                        {ach.tournamentName && (
+                          <p className="text-[10px] text-slate-500 font-medium flex items-center gap-1">
+                            <span>🏆</span>
+                            <span>{ach.tournamentName}</span>
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-4 bg-slate-50 border-t border-slate-100 flex items-center justify-end">
+              <button
+                type="button"
+                onClick={() => setSelectedSchoolAchievements(null)}
+                className="px-4 py-2 bg-white hover:bg-slate-100 text-slate-700 font-black text-xs rounded-xl border border-slate-200 transition-colors cursor-pointer"
+              >
+                إغلاق النافذة
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

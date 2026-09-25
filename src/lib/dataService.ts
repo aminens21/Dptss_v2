@@ -32,6 +32,27 @@ export function deduplicateById<T extends { id?: string }>(items: T[]): T[] {
   return result;
 }
 
+// Helper to recursively sanitize payloads for Firestore (removes/replaces undefined with null)
+export function sanitizeFirestorePayload<T>(obj: T): T {
+  if (obj === null || obj === undefined) {
+    return null as any;
+  }
+  if (Array.isArray(obj)) {
+    return obj.map(item => sanitizeFirestorePayload(item)) as any;
+  }
+  if (typeof obj === 'object') {
+    const cleaned: any = {};
+    for (const key in obj) {
+      if (Object.prototype.hasOwnProperty.call(obj, key)) {
+        const val = obj[key];
+        cleaned[key] = val === undefined ? null : sanitizeFirestorePayload(val);
+      }
+    }
+    return cleaned as any;
+  }
+  return obj;
+}
+
 // Local storage helpers with automatic deduplication and self-healing
 function getLocal<T extends { id?: string }>(key: string, fallback: T[]): T[] {
   try {
@@ -305,18 +326,69 @@ export function isSchoolLevelAllowedForTournament(schoolType: string, tournament
   // Normalize school type to english level keys
   let schoolLevelKey = '';
   const cleanType = String(schoolType || '').trim();
-  if (cleanType === 'ابتدائي' || cleanType.toLowerCase() === 'primary') {
+  if (cleanType === 'ابتدائي' || cleanType.toLowerCase() === 'primary' || cleanType.includes('ابتدائي')) {
     schoolLevelKey = 'Primary';
-  } else if (cleanType === 'إعدادي' || cleanType.toLowerCase() === 'middle' || cleanType === 'أعدادي' || cleanType === 'اعدادي') {
+  } else if (cleanType === 'إعدادي' || cleanType.toLowerCase() === 'middle' || cleanType === 'أعدادي' || cleanType === 'اعدادي' || cleanType.includes('إعدادي')) {
     schoolLevelKey = 'Middle';
-  } else if (cleanType === 'تأهيلي' || cleanType.toLowerCase() === 'high' || cleanType === 'ثانوي' || cleanType === 'تاهيلي') {
+  } else if (cleanType === 'تأهيلي' || cleanType.toLowerCase() === 'high' || cleanType === 'ثانوي' || cleanType === 'تاهيلي' || cleanType.includes('تأهيلي')) {
     schoolLevelKey = 'High';
   }
   
   if (!schoolLevelKey) return true; // If we can't determine the level, allow it
   
   const allowedLevels = tournamentLevel.split(',').map(l => l.trim());
+  
+  // Also check for Arabic synonyms in the tournamentLevel string itself just in case
+  if (allowedLevels.includes('Primary') || tournamentLevel.includes('ابتدائي')) {
+    if (schoolLevelKey === 'Primary') return true;
+  }
+  if (allowedLevels.includes('Middle') || tournamentLevel.includes('إعدادي') || tournamentLevel.includes('اعدادي')) {
+    if (schoolLevelKey === 'Middle') return true;
+  }
+  if (allowedLevels.includes('High') || tournamentLevel.includes('تأهيلي') || tournamentLevel.includes('تاهيلي') || tournamentLevel.includes('ثانوي')) {
+    if (schoolLevelKey === 'High') return true;
+  }
+
   return allowedLevels.includes(schoolLevelKey);
+}
+
+export function isTeacherLevelAllowedForTournament(teachingCadre?: string, tournamentLevel?: string): boolean {
+  if (!tournamentLevel || tournamentLevel === 'جميع الأسلاك' || tournamentLevel.includes('جميع')) return true; 
+  if (!teachingCadre) return false; // STRICT: If cadre is missing, teachers shouldn't register until they set it
+  
+  let teacherLevelKey = '';
+  const cleanCadre = String(teachingCadre).trim().toUpperCase();
+  
+  // Support both English keys and Arabic values/synonyms
+  if (cleanCadre === 'PRIMARY' || cleanCadre.includes('ابتدائي')) {
+    teacherLevelKey = 'Primary';
+  } else if (cleanCadre === 'MIDDLE' || cleanCadre.includes('إعدادي') || cleanCadre.includes('اعدادي')) {
+    teacherLevelKey = 'Middle';
+  } else if (cleanCadre === 'HIGH' || cleanCadre.includes('تأهيلي') || cleanCadre.includes('تاهيلي') || cleanCadre.includes('ثانوي')) {
+    teacherLevelKey = 'High';
+  }
+  
+  if (!teacherLevelKey) return false; // If we can't determine the cadre, block it for safety
+  
+  const allowedLevels = tournamentLevel.split(',').map(l => l.trim());
+  
+  // Check mapping
+  if (allowedLevels.includes(teacherLevelKey)) return true;
+  
+  // Arabic synonyms check in tournament level string
+  if (teacherLevelKey === 'Primary' && (tournamentLevel.includes('ابتدائي') || allowedLevels.includes('Primary'))) return true;
+  if (teacherLevelKey === 'Middle' && (tournamentLevel.includes('إعدادي') || tournamentLevel.includes('اعدادي') || allowedLevels.includes('Middle'))) return true;
+  if (teacherLevelKey === 'High' && (tournamentLevel.includes('تأهيلي') || tournamentLevel.includes('تاهيلي') || tournamentLevel.includes('ثانوي') || allowedLevels.includes('High'))) return true;
+
+  return false;
+}
+
+export function getCategoryLevel(categoryId: string): 'Primary' | 'Middle' | 'High' | 'Other' {
+  const norm = normalizeCategoryKey(categoryId);
+  if (norm === 'U12') return 'Primary';
+  if (norm === 'U15') return 'Middle';
+  if (norm === 'U18' || norm === 'U20') return 'High';
+  return 'Other';
 }
 
 export function getTournamentLevelAr(level?: string): string {
@@ -336,8 +408,8 @@ export function getTournamentLevelAr(level?: string): string {
 export function getCategoryGenderLabel(category: any, gender?: string, season: string = '2026/2027', sportIdOrIsCc?: string | boolean): string {
   if (!category || typeof category !== 'string') return category || '';
   const normKey = normalizeCategoryKey(category);
-  const match = season.match(/(\d{4})/);
-  const startYear = match ? parseInt(match[1], 10) : 2026;
+  const yearsMatch = (season || '').match(/\d{4}/g);
+  const startYear = yearsMatch && yearsMatch.length > 0 ? parseInt(yearsMatch[0], 10) : 2026;
   const isCrossCountry = isCc(sportIdOrIsCc);
 
   const u12Years = isCrossCountry ? ` - مواليد ${startYear - 12} وما بعد` : ` - مواليد ${startYear - 11} وما بعد`;
@@ -965,7 +1037,9 @@ export const DataService = {
       if (!snap.empty) {
         const firestoreList = snap.docs.map(d => ({ id: d.id, ...d.data() } as Match));
         const filtered = firestoreList.filter(m => m.id !== 'mat-1' && m.id !== 'mat-2' && m.id !== 'mat-3');
-        return deduplicateById(filtered);
+        const deduped = deduplicateById(filtered);
+        setLocal(STORAGE_KEYS.MATCHES, deduped);
+        return deduped;
       }
     } catch (e) {
       console.warn("Firestore fetch matches error, falling back to cache:", e);
@@ -1023,12 +1097,14 @@ export const DataService = {
     try {
       // Remove id from matchData if it exists before updating Firestore
       const { id, ...dataToUpdate } = matchData as any;
+      const sanitizedData = sanitizeFirestorePayload(dataToUpdate);
       await updateDoc(doc(db, 'matches', matchId), {
-        ...dataToUpdate,
+        ...sanitizedData,
         updatedAt: serverTimestamp()
       });
     } catch (e) {
-      console.warn("Updated match locally:", e);
+      console.error("Error updating match in Firestore:", e);
+      throw e;
     }
 
     const fullMatch = updated.find(m => m.id === matchId);
@@ -1062,15 +1138,17 @@ export const DataService = {
     setLocal(STORAGE_KEYS.MATCHES, updated);
 
     try {
+      const sanitizedExtras = sanitizeFirestorePayload(extras || {});
       await updateDoc(doc(db, 'matches', matchId), {
         score1,
         score2,
         status,
-        ...(extras || {}),
+        ...sanitizedExtras,
         updatedAt: serverTimestamp()
       });
     } catch (e) {
-      console.warn("Updated match score locally:", e);
+      console.error("Error updating match score in Firestore:", e);
+      throw e;
     }
 
     const fullMatch = updated.find(m => m.id === matchId);
@@ -1170,6 +1248,123 @@ export const DataService = {
       return unsubscribe;
     } catch (err) {
       console.warn("Failed to subscribe to schools:", err);
+      return () => {};
+    }
+  },
+
+  subscribeToTournaments(callback: (tournaments: Tournament[]) => void): () => void {
+    try {
+      const unsubscribe = onSnapshot(collection(db, 'tournaments'), (snap) => {
+        const tournsMap = new Map<string, Tournament>();
+        snap.docs.forEach(d => {
+          const data = d.data();
+          const firestoreTourn: Tournament = {
+            id: d.id,
+            name: data.name || '',
+            sportId: data.sportId || '',
+            seasonId: data.seasonId || '',
+            directorateId: data.directorateId || '',
+            ageCategory: data.ageCategory || '',
+            gender: data.gender || 'Mixed',
+            level: data.level || '',
+            scope: data.scope || 'Provincial',
+            status: data.status || 'Scheduled',
+            description: data.description || '',
+            affiliationType: data.affiliationType || 'non_club',
+            managerName: data.managerName || '',
+            managerPhone: data.managerPhone || '',
+            managerEmail: data.managerEmail || '',
+            accessCode: data.accessCode || '',
+            ...data,
+            startDate: data.startDate?.toDate ? data.startDate.toDate() : (data.startDate ? new Date(data.startDate) : undefined),
+            endDate: data.endDate?.toDate ? data.endDate.toDate() : (data.endDate ? new Date(data.endDate) : undefined),
+            registrationDeadline: data.registrationDeadline?.toDate ? data.registrationDeadline.toDate() : (data.registrationDeadline ? new Date(data.registrationDeadline) : undefined),
+            createdAt: data.createdAt?.toDate ? data.createdAt.toDate() : (data.createdAt ? new Date(data.createdAt) : undefined),
+            updatedAt: data.updatedAt?.toDate ? data.updatedAt.toDate() : (data.updatedAt ? new Date(data.updatedAt) : undefined),
+          } as Tournament;
+          tournsMap.set(d.id, firestoreTourn);
+        });
+        const list = Array.from(tournsMap.values());
+        setLocal(STORAGE_KEYS.TOURNAMENTS, list);
+        callback(list);
+      }, (err) => {
+        console.warn("Real-time tournaments listener error:", err);
+      });
+      return unsubscribe;
+    } catch (err) {
+      console.warn("Failed to subscribe to tournaments:", err);
+      return () => {};
+    }
+  },
+
+  subscribeToMatches(callback: (matches: Match[]) => void): () => void {
+    try {
+      const unsubscribe = onSnapshot(collection(db, 'matches'), (snap) => {
+        const firestoreList = snap.docs.map(d => ({ id: d.id, ...d.data() } as Match));
+        const filtered = firestoreList.filter(m => m.id !== 'mat-1' && m.id !== 'mat-2' && m.id !== 'mat-3');
+        const deduped = deduplicateById(filtered);
+        setLocal(STORAGE_KEYS.MATCHES, deduped);
+        callback(deduped);
+      }, (err) => {
+        console.warn("Real-time matches listener error:", err);
+      });
+      return unsubscribe;
+    } catch (err) {
+      console.warn("Failed to subscribe to matches:", err);
+      return () => {};
+    }
+  },
+
+  subscribeToVenues(callback: (venues: Venue[]) => void): () => void {
+    try {
+      const unsubscribe = onSnapshot(collection(db, 'venues'), (snap) => {
+        const firestoreList = snap.docs.map(d => ({ id: d.id, ...d.data() } as Venue));
+        const deduped = deduplicateById(firestoreList);
+        setLocal(STORAGE_KEYS.VENUES, deduped);
+        callback(deduped);
+      }, (err) => {
+        console.warn("Real-time venues listener error:", err);
+      });
+      return unsubscribe;
+    } catch (err) {
+      console.warn("Failed to subscribe to venues:", err);
+      return () => {};
+    }
+  },
+
+  subscribeToSportsConfig(callback: (sports: Sport[]) => void): () => void {
+    try {
+      const unsubscribe = onSnapshot(collection(db, 'sports'), (snap) => {
+        let fetchedSports: Sport[] = [];
+        if (!snap.empty) {
+          fetchedSports = snap.docs.map(d => ({ id: d.id, ...d.data() } as Sport));
+        }
+        
+        const localSports = getLocal<Sport>('taourirt_sports_config', []);
+        if (fetchedSports.length === 0) {
+          fetchedSports = localSports;
+        } else if (localSports.length > 0) {
+          fetchedSports = fetchedSports.map(f => {
+            const loc = localSports.find(l => l.id === f.id);
+            if (loc) {
+              return {
+                ...f,
+                ...loc,
+                ageCategories: (loc.ageCategories && loc.ageCategories.length > 0) ? loc.ageCategories : f.ageCategories
+              };
+            }
+            return f;
+          });
+        }
+        
+        setLocal('taourirt_sports_config', fetchedSports);
+        callback(fetchedSports);
+      }, (err) => {
+        console.warn("Real-time sports listener error:", err);
+      });
+      return unsubscribe;
+    } catch (err) {
+      console.warn("Failed to subscribe to sports configuration:", err);
       return () => {};
     }
   },
@@ -2192,10 +2387,13 @@ export const DataService = {
 
   async getActiveSeason(): Promise<string> {
     try {
-      const snap = await getDocs(collection(db, 'config'));
-      const seasonDoc = snap.docs.find(d => d.id === 'season');
-      if (seasonDoc) {
-        return seasonDoc.data().current || '2026/2027';
+      const snap = await getDoc(doc(db, 'config', 'season'));
+      if (snap.exists()) {
+        const season = snap.data().current || '2026/2027';
+        localStorage.setItem('taourirt_sports_season', season);
+        // Sync legacy key
+        localStorage.setItem('active_season', season);
+        return season;
       }
     } catch (e) {
       console.warn("Error loading active season from Firestore:", e);
@@ -2203,8 +2401,28 @@ export const DataService = {
     return localStorage.getItem('taourirt_sports_season') || '2026/2027';
   },
 
+  subscribeToActiveSeason(callback: (season: string) => void): () => void {
+    try {
+      return onSnapshot(doc(db, 'config', 'season'), (docSnap) => {
+        if (docSnap.exists()) {
+          const season = docSnap.data().current || '2026/2027';
+          localStorage.setItem('taourirt_sports_season', season);
+          localStorage.setItem('active_season', season);
+          callback(season);
+        }
+      }, (error) => {
+        console.warn("Firestore subscription error for active season:", error);
+      });
+    } catch (e) {
+      console.warn("Error setting up onSnapshot for active season:", e);
+      return () => {};
+    }
+  },
+
   async setActiveSeason(season: string): Promise<void> {
     localStorage.setItem('taourirt_sports_season', season);
+    localStorage.setItem('active_season', season);
+    window.dispatchEvent(new CustomEvent('seasonChanged', { detail: season }));
     try {
       await setDoc(doc(db, 'config', 'season'), {
         current: season,
@@ -2250,9 +2468,17 @@ export const DataService = {
     const mergedBase: Sport[] = Object.entries(BASE_SPORTS).map(([id, s]) => {
       const existing = fetchedSports.find(item => item.id === id);
       if (existing) {
+        // Prevent tournament title corruption from ever overriding base sport discipline name
+        const isTournamentTitle = existing.name && (
+          existing.name.includes('البطولة') ||
+          existing.name.includes('دوري') ||
+          existing.name.includes('بطولة')
+        );
+        const cleanName = isTournamentTitle || !existing.name ? s.name : existing.name;
+
         return {
           ...existing,
-          name: existing.name || s.name,
+          name: cleanName,
           icon: existing.icon || s.icon,
           description: existing.description || `منافسات ${s.name} الإقليمية`
         };
@@ -2271,16 +2497,24 @@ export const DataService = {
     // 2. Custom sports created by central admin (any sport in fetchedSports not in BASE_SPORTS)
     const customSports: Sport[] = fetchedSports
       .filter(item => !Object.prototype.hasOwnProperty.call(BASE_SPORTS, item.id))
-      .map(item => ({
-        ...item,
-        name: item.name || 'رياضة جديدة',
-        icon: item.icon || '🏆',
-        description: item.description || `منافسات ${item.name || 'رياضة جديدة'} المدرسية`,
-        ageCategories: item.ageCategories || allCategoryIds,
-        studentLimit: item.studentLimit !== undefined ? item.studentLimit : 0,
-        athleticsSpecialties: item.athleticsSpecialties || [],
-        isCustom: true
-      }));
+      .map(item => {
+        let cleanName = item.name || 'رياضة جديدة';
+        if (cleanName.includes('البطولة الإقليمية لـ')) {
+          cleanName = cleanName.replace(/البطولة الإقليمية لـ\s*/, '').trim();
+        } else if (cleanName.includes('البطولة الإقليمية')) {
+          cleanName = cleanName.replace(/البطولة الإقليمية\s*/, '').trim();
+        }
+        return {
+          ...item,
+          name: cleanName || 'رياضة جديدة',
+          icon: item.icon || '🏆',
+          description: item.description || `منافسات ${cleanName || 'رياضة جديدة'} المدرسية`,
+          ageCategories: item.ageCategories || allCategoryIds,
+          studentLimit: item.studentLimit !== undefined ? item.studentLimit : 0,
+          athleticsSpecialties: item.athleticsSpecialties || [],
+          isCustom: true
+        };
+      });
 
     const allSports: Sport[] = deduplicateById<Sport>([...mergedBase, ...customSports]).map(s => {
       const rawCats = (Array.isArray(s.ageCategories) ? s.ageCategories : allCategoryIds) as string[];
@@ -2400,6 +2634,14 @@ export const DataService = {
     const list = await this.getSportsConfig();
     const existingSport = list.find(s => s.id === sportId);
 
+    // Prevent tournament title corruption from setting sport name
+    const isTournamentTitle = name && (
+      name.includes('البطولة') ||
+      name.includes('دوري') ||
+      name.includes('بطولة')
+    );
+    const validSportName = isTournamentTitle ? undefined : name;
+
     const updated = list.map(s => {
       if (s.id !== sportId) return s;
       return {
@@ -2408,16 +2650,16 @@ export const DataService = {
         customAgeCategories: customAgeCategories !== undefined ? customAgeCategories : s.customAgeCategories,
         studentLimit: studentLimit !== undefined ? studentLimit : s.studentLimit,
         athleticsSpecialties: athleticsSpecialties !== undefined ? athleticsSpecialties : s.athleticsSpecialties,
-        name: name || s.name,
+        name: validSportName || s.name,
         icon: icon || s.icon,
         isProgrammed: isProgrammed !== undefined ? isProgrammed : s.isProgrammed
       };
     });
     setLocal('taourirt_sports_config', updated);
 
-    if (name || icon) {
+    if (validSportName || icon) {
       SPORTS_MAP[sportId] = {
-        name: name || SPORTS_MAP[sportId]?.name || 'الرياضة',
+        name: validSportName || SPORTS_MAP[sportId]?.name || 'الرياضة',
         icon: icon || SPORTS_MAP[sportId]?.icon || '🏆'
       };
     }
@@ -2429,7 +2671,7 @@ export const DataService = {
         studentLimit: studentLimit !== undefined ? studentLimit : (existingSport?.studentLimit || null),
         athleticsSpecialties: athleticsSpecialties !== undefined ? athleticsSpecialties : (existingSport?.athleticsSpecialties || null),
         ...(isProgrammed !== undefined ? { isProgrammed } : {}),
-        ...(name ? { name } : {}),
+        ...(validSportName ? { name: validSportName } : {}),
         ...(icon ? { icon } : {}),
         updatedAt: serverTimestamp()
       }, { merge: true });
@@ -2774,6 +3016,48 @@ export const DataService = {
     return DEFAULT_PERMISSIONS;
   },
 
+  subscribeToReferees(callback: (referees: Referee[]) => void): () => void {
+    try {
+      return onSnapshot(collection(db, 'referees'), (snap) => {
+        const referees = snap.docs.map(d => ({ id: d.id, ...d.data() } as Referee));
+        callback(referees);
+      }, (error) => {
+        console.warn("Firestore subscription error for referees:", error);
+      });
+    } catch (e) {
+      console.warn("Error setting up onSnapshot for referees:", e);
+      return () => {};
+    }
+  },
+
+  subscribeToUsers(callback: (users: User[]) => void): () => void {
+    try {
+      return onSnapshot(collection(db, 'users'), (snap) => {
+        const users = snap.docs.map(d => ({ id: d.id, ...d.data() } as User));
+        callback(users);
+      }, (error) => {
+        console.warn("Firestore subscription error for users:", error);
+      });
+    } catch (e) {
+      console.warn("Error setting up onSnapshot for users:", e);
+      return () => {};
+    }
+  },
+
+  subscribeToDirectorates(callback: (dirs: Directorate[]) => void): () => void {
+    try {
+      return onSnapshot(collection(db, 'directorates'), (snap) => {
+        const dirs = snap.docs.map(d => ({ id: d.id, ...d.data() } as Directorate));
+        callback(dirs);
+      }, (error) => {
+        console.warn("Firestore subscription error for directorates:", error);
+      });
+    } catch (e) {
+      console.warn("Error setting up onSnapshot for directorates:", e);
+      return () => {};
+    }
+  },
+
   subscribeToRoleSidebarPermissions(callback: (permissions: RoleSidebarPermissions) => void): () => void {
     const docRef = doc(db, 'settings', 'role_sidebar_permissions');
     return onSnapshot(docRef, (docSnap) => {
@@ -2928,17 +3212,26 @@ export const DataService = {
     const rawCatId = (data.categoryId || data.category_id || data.id || docId || '').toLowerCase().trim();
     let normalizedId = rawCatId;
     
+    // Check if this document represents a club-affiliated category
+    const isClub = data.affiliationType === 'club_affiliated' || normalizedId.includes('_club') || normalizedId.includes('club');
+
     // Strip directorate prefix if present, e.g. taourirt_u13_male -> u13_male
     if (activeDirId && normalizedId.startsWith(`${activeDirId.toLowerCase()}_`)) {
       normalizedId = normalizedId.replace(`${activeDirId.toLowerCase()}_`, '');
     } else if (normalizedId.includes('_')) {
       const parts = normalizedId.split('_');
       if (parts.length >= 2) {
-        const lastPart = parts[parts.length - 1];
-        const secondLast = parts[parts.length - 2];
+        // If it ends with 'club', look at the parts before it
+        let lastPart = parts[parts.length - 1];
+        let secondLast = parts[parts.length - 2];
+        if (lastPart === 'club' && parts.length >= 3) {
+          lastPart = parts[parts.length - 2];
+          secondLast = parts[parts.length - 3];
+        }
+
         if (['male', 'female', 'ذكور', 'إناث', 'اناث', 'm', 'f'].includes(lastPart)) {
           const gNorm = (lastPart === 'ذكور' || lastPart === 'm') ? 'male' : (lastPart === 'إناث' || lastPart === 'اناث' || lastPart === 'f') ? 'female' : lastPart;
-          normalizedId = `${secondLast}_${gNorm}`;
+          normalizedId = isClub ? `${secondLast}_${gNorm}_club` : `${secondLast}_${gNorm}`;
         }
       }
     }
@@ -2956,7 +3249,7 @@ export const DataService = {
       rawGender === 'صغيرات' ||
       rawGender === 'برعمات' ||
       rawGender === 'شابات' ||
-      normalizedId.endsWith('female')
+      normalizedId.includes('female')
     ) {
       gender = 'Female';
     }
@@ -3006,14 +3299,15 @@ export const DataService = {
     // Standard title
     let titleAr = data.titleAr || data.title || data.nom_course || (data as any).categoryName || '';
     if (!titleAr) {
-      if (category === 'U12' && gender === 'Male') titleAr = 'سباق البراعم ذكور (U12)';
-      else if (category === 'U12' && gender === 'Female') titleAr = 'سباق البرعمات إناث (U12)';
-      else if (category === 'U15' && gender === 'Male') titleAr = 'سباق الصغار ذكور (U15)';
-      else if (category === 'U15' && gender === 'Female') titleAr = 'سباق الصغيرات إناث (U15)';
-      else if (category === 'U18' && gender === 'Male') titleAr = 'سباق الفتيان ذكور (U18)';
-      else if (category === 'U18' && gender === 'Female') titleAr = 'سباق الفتيات إناث (U18)';
-      else if (category === 'U20' && gender === 'Male') titleAr = 'سباق الشبان ذكور (U20)';
-      else if (category === 'U20' && gender === 'Female') titleAr = 'سباق الشابات إناث (U20)';
+      const suffix = isClub ? ' - المنتمين للأندية' : ' - مدرسي';
+      if (category === 'U12' && gender === 'Male') titleAr = `سباق البراعم ذكور (U12)${suffix}`;
+      else if (category === 'U12' && gender === 'Female') titleAr = `سباق البرعمات إناث (U12)${suffix}`;
+      else if (category === 'U15' && gender === 'Male') titleAr = `سباق الصغار ذكور (U15)${suffix}`;
+      else if (category === 'U15' && gender === 'Female') titleAr = `سباق الصغيرات إناث (U15)${suffix}`;
+      else if (category === 'U18' && gender === 'Male') titleAr = `سباق الفتيان ذكور (U18)${suffix}`;
+      else if (category === 'U18' && gender === 'Female') titleAr = `سباق الفتيات إناث (U18)${suffix}`;
+      else if (category === 'U20' && gender === 'Male') titleAr = `سباق الشبان ذكور (U20)${suffix}`;
+      else if (category === 'U20' && gender === 'Female') titleAr = `سباق الشابات إناث (U20)${suffix}`;
     }
 
     // Flexible extraction of podium/results/rankings array from external application
@@ -3041,7 +3335,8 @@ export const DataService = {
           time: item.time || item.timing || item.temps || item.chrono || item.duration || undefined,
           bibNumber: item.bibNumber ? String(item.bibNumber) : (item.bib ? String(item.bib) : (item.dossard ? String(item.dossard) : (item.number ? String(item.number) : undefined))),
           notes: item.notes || item.observation || item.remarks || item.remarques || item.qualif || item.status || undefined,
-          massarNumber: item.massarNumber || item.massar || item.cne || item.codeMassar || undefined
+          massarNumber: item.massarNumber || item.massar || item.cne || item.codeMassar || undefined,
+          affiliationType: item.affiliationType || (isClub ? 'club_affiliated' : 'non_club')
         };
       })
       .sort((a, b) => a.rank - b.rank);
@@ -3054,6 +3349,8 @@ export const DataService = {
       distance: data.distance || (category === 'U12' ? (gender === 'Male' ? '1500 م' : '1000 م') : category === 'U15' ? (gender === 'Male' ? '3000 م' : '2000 م') : category === 'U18' ? (gender === 'Male' ? '4000 م' : '3000 م') : (gender === 'Male' ? '5000 م' : '3000 م')),
       venueName: data.venueName || data.venue || data.lieu || 'مضمار حلبة ألعاب القوى بتاوريرت',
       directorateId: data.directorateId || activeDirId,
+      affiliationType: isClub ? 'club_affiliated' : 'non_club',
+      status: data.status,
       updatedAt: data.updatedAt ? (typeof data.updatedAt === 'string' ? data.updatedAt : (data.updatedAt.toDate ? data.updatedAt.toDate().toISOString() : new Date().toISOString())) : new Date().toISOString(),
       podium
     };
@@ -3063,26 +3360,30 @@ export const DataService = {
    * Subscribe to real-time Cross Country results from Firestore (onSnapshot)
    */
   subscribeCrossCountryResults(callback: (results: Record<string, CrossCountryCategoryResult>) => void): () => void {
-    const activeDirId = this.getActiveDirectorateId();
-    const cacheKey = `taourirt_cc_results_${activeDirId}`;
-
-    try {
-      const q = collection(db, 'cross_country_results');
-      const unsubscribe = onSnapshot(q, (snap) => {
-        const resultsMap: Record<string, CrossCountryCategoryResult> = { ...INITIAL_CROSS_COUNTRY_RESULTS };
+    const q = collection(db, 'cross_country_results');
+    const unsubscribe = onSnapshot(q, async (snap) => {
+      const activeDirId = this.getActiveDirectorateId();
+      const activeSeason = await this.getActiveSeason();
+      const cacheKey = `taourirt_cc_results_${activeDirId}`;
+      const resultsMap: Record<string, CrossCountryCategoryResult> = JSON.parse(JSON.stringify(INITIAL_CROSS_COUNTRY_RESULTS));
+      
+      snap.docs.forEach(docSnap => {
+        const data = docSnap.data();
+        const docDirId = data.directorateId || (docSnap.id.includes('_') ? docSnap.id.substring(0, docSnap.id.lastIndexOf('_')) : docSnap.id);
+        const docSeasonId = data.seasonId || '2026/2027';
         
-        snap.docs.forEach(docSnap => {
-          const data = docSnap.data();
-          // Accept document for current directorate or global
-          if (!data.directorateId || data.directorateId === activeDirId || activeDirId === 'taourirt' || !activeDirId) {
-            const item = this._normalizeCrossCountryDoc(docSnap.id, data, activeDirId);
-            
-            // Register by exact doc ID, raw category ID, and normalized ID
-            resultsMap[docSnap.id] = item;
+        // Only process results for the current active season
+        if (docSeasonId !== activeSeason) return;
+
+        // Accept document for current directorate or global view
+        if (!activeDirId || activeDirId === 'all' || activeDirId === 'taourirt' || docDirId === activeDirId) {
+          const item = this._normalizeCrossCountryDoc(docSnap.id, data, activeDirId);
+          resultsMap[docSnap.id] = item;
+          
+          // Priority for base keys (like 'u15_male') should be results from current directorate
+          if (docDirId === activeDirId || (!activeDirId && docDirId === 'taourirt') || (activeDirId === 'all' && docDirId === 'taourirt')) {
             resultsMap[item.categoryId] = item;
-            if (data.categoryId) resultsMap[data.categoryId] = item;
             
-            // Map u13 aliases to u12 and vice versa
             if (item.categoryId === 'u13_male' || item.categoryId === 'u12_male') {
               resultsMap['u12_male'] = item;
               resultsMap['u13_male'] = item;
@@ -3091,45 +3392,44 @@ export const DataService = {
               resultsMap['u12_female'] = item;
               resultsMap['u13_female'] = item;
             }
+          } else if (activeDirId === 'all') {
+            // In 'all' view, use directorate-prefixed key or base key if none exists
+            if (!resultsMap[item.categoryId]) {
+               resultsMap[item.categoryId] = item;
+            }
           }
-        });
-
-        localStorage.setItem(cacheKey, JSON.stringify(resultsMap));
-        callback(resultsMap);
-      }, (error) => {
-        console.warn("Firestore real-time subscription error for cross_country_results:", error);
+        }
       });
 
-      return unsubscribe;
-    } catch (e) {
-      console.warn("Error setting up onSnapshot for cross_country_results:", e);
-      return () => {};
-    }
+      localStorage.setItem(cacheKey, JSON.stringify(resultsMap));
+      callback(resultsMap);
+    }, (error) => {
+      console.warn("Firestore real-time subscription error for cross_country_results:", error);
+    });
+
+    return unsubscribe;
   },
 
   async getCrossCountryResults(): Promise<Record<string, CrossCountryCategoryResult>> {
     const activeDirId = this.getActiveDirectorateId();
+    const activeSeason = await this.getActiveSeason();
     const cacheKey = `taourirt_cc_results_${activeDirId}`;
     try {
       const snap = await getDocs(collection(db, 'cross_country_results'));
       if (!snap.empty) {
-        const resultsMap: Record<string, CrossCountryCategoryResult> = { ...INITIAL_CROSS_COUNTRY_RESULTS };
+        const resultsMap: Record<string, CrossCountryCategoryResult> = JSON.parse(JSON.stringify(INITIAL_CROSS_COUNTRY_RESULTS));
         snap.docs.forEach(docSnap => {
           const data = docSnap.data();
-          if (!data.directorateId || data.directorateId === activeDirId || activeDirId === 'taourirt' || !activeDirId) {
-            const item = this._normalizeCrossCountryDoc(docSnap.id, data, activeDirId);
-            resultsMap[docSnap.id] = item;
-            resultsMap[item.categoryId] = item;
-            if (data.categoryId) resultsMap[data.categoryId] = item;
+          const docDirId = data.directorateId || (docSnap.id.includes('_') ? docSnap.id.substring(0, docSnap.id.lastIndexOf('_')) : docSnap.id);
+          const docSeasonId = data.seasonId || '2026/2027';
 
-            if (item.categoryId === 'u13_male' || item.categoryId === 'u12_male') {
-              resultsMap['u12_male'] = item;
-              resultsMap['u13_male'] = item;
-            }
-            if (item.categoryId === 'u13_female' || item.categoryId === 'u12_female') {
-              resultsMap['u12_female'] = item;
-              resultsMap['u13_female'] = item;
-            }
+          // Only process results for the current active season
+          if (docSeasonId !== activeSeason) return;
+
+          if (!activeDirId || activeDirId === 'all' || activeDirId === 'taourirt' || docDirId === activeDirId) {
+            const item = this._normalizeCrossCountryDoc(docSnap.id, data, activeDirId);
+            const keyToUse = item.categoryId || docSnap.id;
+            resultsMap[keyToUse] = item;
           }
         });
         localStorage.setItem(cacheKey, JSON.stringify(resultsMap));
@@ -3144,20 +3444,35 @@ export const DataService = {
       const local = localStorage.getItem(cacheKey);
       if (local) {
         const parsed = JSON.parse(local);
-        return { ...INITIAL_CROSS_COUNTRY_RESULTS, ...parsed };
+        return { ...JSON.parse(JSON.stringify(INITIAL_CROSS_COUNTRY_RESULTS)), ...parsed };
       }
     } catch (e) {
       console.error("Local storage error reading cross country results:", e);
     }
-    return { ...INITIAL_CROSS_COUNTRY_RESULTS };
+    return JSON.parse(JSON.stringify(INITIAL_CROSS_COUNTRY_RESULTS));
+  },
+
+  // Dispatch local and cross-tab updates
+  _notifyCCUpdate(result: CrossCountryCategoryResult) {
+    const event = new CustomEvent('crossCountryResultsUpdated', { detail: result });
+    window.dispatchEvent(event);
+    try {
+      const bc = new BroadcastChannel('cc_results_sync');
+      bc.postMessage({ type: 'UPDATE', result });
+      bc.close();
+    } catch (e) {}
   },
 
   async saveCrossCountryCategoryResult(result: CrossCountryCategoryResult): Promise<void> {
     const activeDirId = this.getActiveDirectorateId();
-    const cacheKey = `taourirt_cc_results_${activeDirId}`;
+    const effectiveDirId = (!activeDirId || activeDirId === 'all') ? 'taourirt' : activeDirId;
+    const cacheKey = `taourirt_cc_results_${effectiveDirId}`;
+    const activeSeason = await this.getActiveSeason();
+    
     const resultWithDir: CrossCountryCategoryResult = {
       ...result,
-      directorateId: result.directorateId || activeDirId,
+      directorateId: result.directorateId || effectiveDirId,
+      seasonId: result.seasonId || activeSeason,
       updatedAt: new Date().toISOString()
     };
 
@@ -3165,14 +3480,6 @@ export const DataService = {
     try {
       const current = await this.getCrossCountryResults();
       current[result.categoryId] = resultWithDir;
-      if (result.categoryId === 'u12_male' || result.categoryId === 'u13_male') {
-        current['u12_male'] = resultWithDir;
-        current['u13_male'] = resultWithDir;
-      }
-      if (result.categoryId === 'u12_female' || result.categoryId === 'u13_female') {
-        current['u12_female'] = resultWithDir;
-        current['u13_female'] = resultWithDir;
-      }
       localStorage.setItem(cacheKey, JSON.stringify(current));
     } catch (e) {
       console.error("Error updating local CC results:", e);
@@ -3180,7 +3487,7 @@ export const DataService = {
 
     // Sync to Firestore
     try {
-      const docId = `${activeDirId}_${result.categoryId}`;
+      const docId = `${effectiveDirId}_${result.categoryId}`;
       // Clean undefined values to prevent Firestore rejection
       const sanitized = JSON.parse(JSON.stringify(resultWithDir));
       await setDoc(doc(db, 'cross_country_results', docId), {
@@ -3192,7 +3499,7 @@ export const DataService = {
       console.warn("Firestore save CC result error:", e);
     }
 
-    window.dispatchEvent(new CustomEvent('crossCountryResultsUpdated', { detail: resultWithDir }));
+    this._notifyCCUpdate(resultWithDir);
   },
 
   /**
@@ -3209,16 +3516,17 @@ export const DataService = {
         current[categoryId] = {
           ...current[categoryId],
           podium: [],
+          status: 'setup',
           updatedAt: new Date().toISOString()
         };
       }
       if (categoryId === 'u12_male' || categoryId === 'u13_male') {
-        if (current['u12_male']) current['u12_male'] = { ...current['u12_male'], podium: [], updatedAt: new Date().toISOString() };
-        if (current['u13_male']) current['u13_male'] = { ...current['u13_male'], podium: [], updatedAt: new Date().toISOString() };
+        if (current['u12_male']) current['u12_male'] = { ...current['u12_male'], podium: [], status: 'setup', updatedAt: new Date().toISOString() };
+        if (current['u13_male']) current['u13_male'] = { ...current['u13_male'], podium: [], status: 'setup', updatedAt: new Date().toISOString() };
       }
       if (categoryId === 'u12_female' || categoryId === 'u13_female') {
-        if (current['u12_female']) current['u12_female'] = { ...current['u12_female'], podium: [], updatedAt: new Date().toISOString() };
-        if (current['u13_female']) current['u13_female'] = { ...current['u13_female'], podium: [], updatedAt: new Date().toISOString() };
+        if (current['u12_female']) current['u12_female'] = { ...current['u12_female'], podium: [], status: 'setup', updatedAt: new Date().toISOString() };
+        if (current['u13_female']) current['u13_female'] = { ...current['u13_female'], podium: [], status: 'setup', updatedAt: new Date().toISOString() };
       }
       localStorage.setItem(cacheKey, JSON.stringify(current));
     } catch (e) {
@@ -3230,14 +3538,15 @@ export const DataService = {
       const docId = `${activeDirId}_${categoryId}`;
       await setDoc(doc(db, 'cross_country_results', docId), {
         podium: [],
+        status: 'setup',
         updatedAt: serverTimestamp()
       }, { merge: true });
 
       // Also clean alias doc if applicable
       if (categoryId === 'u12_male') {
-        await setDoc(doc(db, 'cross_country_results', `${activeDirId}_u13_male`), { podium: [], updatedAt: serverTimestamp() }, { merge: true }).catch(() => {});
+        await setDoc(doc(db, 'cross_country_results', `${activeDirId}_u13_male`), { podium: [], status: 'setup', updatedAt: serverTimestamp() }, { merge: true }).catch(() => {});
       } else if (categoryId === 'u12_female') {
-        await setDoc(doc(db, 'cross_country_results', `${activeDirId}_u13_female`), { podium: [], updatedAt: serverTimestamp() }, { merge: true }).catch(() => {});
+        await setDoc(doc(db, 'cross_country_results', `${activeDirId}_u13_female`), { podium: [], status: 'setup', updatedAt: serverTimestamp() }, { merge: true }).catch(() => {});
       }
     } catch (e) {
       console.warn("Firestore clear CC category error:", e);
@@ -3259,6 +3568,7 @@ export const DataService = {
       freshMap[catId] = {
         ...def,
         podium: [],
+        status: 'setup',
         directorateId: activeDirId,
         updatedAt: new Date().toISOString()
       };
@@ -3276,6 +3586,7 @@ export const DataService = {
           if (!data.directorateId || data.directorateId === activeDirId || activeDirId === 'taourirt' || !activeDirId) {
             batch.update(d.ref, {
               podium: [],
+              status: 'setup',
               updatedAt: serverTimestamp()
             });
           }
@@ -3345,7 +3656,8 @@ export const DataService = {
         directoratesSnap,
         sportsSnap,
         ccSnap,
-        permsSnap
+        permsSnap,
+        configSnap
       ] = await Promise.all([
         getDocs(collection(db, 'schools')).catch(() => null),
         getDocs(collection(db, 'tournaments')).catch(() => null),
@@ -3356,7 +3668,8 @@ export const DataService = {
         getDocs(collection(db, 'directorates')).catch(() => null),
         getDocs(collection(db, 'sports')).catch(() => null),
         getDocs(collection(db, 'cross_country_results')).catch(() => null),
-        getDoc(doc(db, 'settings', 'role_sidebar_permissions')).catch(() => null)
+        getDoc(doc(db, 'settings', 'role_sidebar_permissions')).catch(() => null),
+        getDocs(collection(db, 'config')).catch(() => null)
       ]);
 
       let schoolsCount = 0;
@@ -3471,6 +3784,18 @@ export const DataService = {
         if (firestorePerms) {
           localStorage.setItem('taourirt_role_sidebar_permissions', JSON.stringify(firestorePerms));
           window.dispatchEvent(new CustomEvent('sidebarPermissionsChanged', { detail: firestorePerms }));
+        }
+      }
+
+      if (configSnap && !configSnap.empty) {
+        const seasonsDoc = configSnap.docs.find(d => d.id === 'seasons');
+        if (seasonsDoc && seasonsDoc.data().list) {
+          localStorage.setItem('taourirt_sports_seasons_list', JSON.stringify(seasonsDoc.data().list));
+        }
+        const seasonDoc = configSnap.docs.find(d => d.id === 'season');
+        if (seasonDoc && seasonDoc.data().current) {
+          localStorage.setItem('taourirt_sports_season', seasonDoc.data().current);
+          window.dispatchEvent(new CustomEvent('seasonChanged', { detail: seasonDoc.data().current }));
         }
       }
 

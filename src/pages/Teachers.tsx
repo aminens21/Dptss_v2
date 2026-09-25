@@ -448,11 +448,9 @@ export const Teachers: React.FC = () => {
               <thead>
                 <tr className="bg-slate-50 border-b border-slate-200 text-[11px] font-bold text-slate-500 uppercase tracking-wider">
                   <th className="px-6 py-4">الأستاذ المؤطر</th>
-                  <th className="px-6 py-4">رقم التأجير</th>
                   <th className="px-6 py-4">مقر العمل (المؤسسة)</th>
-                  <th className="px-6 py-4">تخصص التحكيم/الإشراف</th>
                   <th className="px-6 py-4">معلومات الاتصال</th>
-                  <th className="px-6 py-4 text-center">التفاصيل</th>
+                  <th className="px-6 py-4 text-center">الإجراءات</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 text-xs">
@@ -498,28 +496,6 @@ export const Teachers: React.FC = () => {
                         </div>
                       </td>
 
-                      {/* Lease Number */}
-                      <td className="px-6 py-4 font-mono font-bold text-slate-700">
-                        {teacher.leaseNumber ? (
-                          <div className="flex items-center gap-1.5">
-                            <span>{teacher.leaseNumber}</span>
-                            <button
-                              onClick={(e) => handleCopy(e, teacher.leaseNumber || '', `l-${teacher.id}`)}
-                              className="text-slate-400 hover:text-slate-600 p-1 rounded transition-colors cursor-pointer"
-                              title="نسخ رقم التأجير"
-                            >
-                              {copiedId === `l-${teacher.id}` ? (
-                                <Check className="h-3 w-3 text-emerald-500" />
-                              ) : (
-                                <Copy className="h-3 w-3" />
-                              )}
-                            </button>
-                          </div>
-                        ) : (
-                          <span className="text-slate-400 italic">لم يدخل بعد</span>
-                        )}
-                      </td>
-
                       {/* Work Location */}
                       <td className="px-6 py-4 text-slate-600 font-medium">
                         {teacher.workLocation ? (
@@ -530,52 +506,6 @@ export const Teachers: React.FC = () => {
                         ) : (
                           <span className="text-slate-400 italic">لم يدخل بعد</span>
                         )}
-                      </td>
-
-                      {/* Referee Specialty */}
-                      <td className="px-6 py-4">
-                        <div className="space-y-1.5 max-w-[240px]">
-                          {/* Referee specialties */}
-                          {specialties.length > 0 && (
-                            <CollapsibleSpecialties specialties={specialties} SPORTS_MAP={SPORTS_MAP} />
-                          )}
-
-                          {/* Committee Head */}
-                          {teacher.isTechCommitteeHead && teacher.techCommitteeSports && teacher.techCommitteeSports.length > 0 && (
-                            <div className="flex flex-wrap gap-1">
-                              {teacher.techCommitteeSports.map(spec => {
-                                const sportDetails = SPORTS_MAP[spec];
-                                if (!sportDetails) return null;
-                                return (
-                                  <span key={`head-${spec}`} className="inline-flex items-center gap-1 px-2 py-0.5 bg-blue-50 text-blue-800 border border-blue-100 rounded-md font-bold text-[10px]" title="رئيس لجنة تقنية إقليمية">
-                                    <span>{sportDetails.icon}</span>
-                                    <span>{sportDetails.name} (رئيس)</span>
-                                  </span>
-                                );
-                              })}
-                            </div>
-                          )}
-
-                          {/* Committee Member */}
-                          {teacher.isTechCommitteeMember && teacher.techCommitteeSportsMemberOf && teacher.techCommitteeSportsMemberOf.length > 0 && (
-                            <div className="flex flex-wrap gap-1">
-                              {teacher.techCommitteeSportsMemberOf.map(spec => {
-                                const sportDetails = SPORTS_MAP[spec];
-                                if (!sportDetails) return null;
-                                return (
-                                  <span key={`member-${spec}`} className="inline-flex items-center gap-1 px-2 py-0.5 bg-indigo-50 text-indigo-800 border border-indigo-100 rounded-md font-bold text-[10px]" title="عضو لجنة تقنية إقليمية">
-                                    <span>{sportDetails.icon}</span>
-                                    <span>{sportDetails.name} (عضو)</span>
-                                  </span>
-                                );
-                              })}
-                            </div>
-                          )}
-
-                          {specialties.length === 0 && !teacher.isTechCommitteeHead && !teacher.isTechCommitteeMember && (
-                            <span className="text-slate-400 italic text-[11px]">لا يوجد تكليف</span>
-                          )}
-                        </div>
                       </td>
 
                       {/* Contact Info */}
@@ -605,20 +535,18 @@ export const Teachers: React.FC = () => {
                                   e.stopPropagation();
                                   handleOpenEditRole(teacher);
                                 }}
-                                className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-bold text-xs rounded-xl border border-emerald-200 transition-all cursor-pointer shadow-3xs"
+                                className="p-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-xl border border-emerald-200 transition-all cursor-pointer shadow-3xs"
                                 title="تعديل بيانات الأستاذ ومهامه"
                               >
-                                <Pencil className="h-3.5 w-3.5" />
-                                <span>تعديل</span>
+                                <Pencil className="h-4 w-4" />
                               </button>
                               <button
                                 type="button"
                                 onClick={(e) => handleDeleteClick(e, teacher)}
-                                className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-red-50 hover:bg-red-100 text-red-600 font-bold text-xs rounded-xl border border-red-200 transition-all cursor-pointer shadow-3xs"
+                                className="p-2 bg-red-50 hover:bg-red-100 text-red-600 rounded-xl border border-red-200 transition-all cursor-pointer shadow-3xs"
                                 title="حذف حساب الأستاذ نهائياً"
                               >
-                                <Trash2 className="h-3.5 w-3.5" />
-                                <span>حذف</span>
+                                <Trash2 className="h-4 w-4" />
                               </button>
                             </>
                           ) : null}
@@ -628,10 +556,10 @@ export const Teachers: React.FC = () => {
                               e.stopPropagation();
                               handleOpenTeacherDetail(teacher);
                             }}
-                            className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold text-xs rounded-xl border border-blue-200 transition-all cursor-pointer shadow-3xs"
+                            className="p-2 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-xl border border-blue-200 transition-all cursor-pointer shadow-3xs"
+                            title="عرض تفاصيل البطاقة"
                           >
-                            <Eye className="h-3.5 w-3.5" />
-                            <span>عرض البطاقة</span>
+                            <Eye className="h-4 w-4" />
                           </button>
                         </div>
                       </td>

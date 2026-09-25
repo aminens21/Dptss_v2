@@ -103,6 +103,26 @@ export default defineConfig(() => {
       emptyOutDir: true,
       sourcemap: false,
       chunkSizeWarningLimit: 2500,
+      rollupOptions: {
+        output: {
+          manualChunks(id) {
+            if (id.includes('node_modules')) {
+              if (id.includes('react') || id.includes('react-dom') || id.includes('react-router-dom')) {
+                return 'vendor-react';
+              }
+              if (id.includes('firebase')) {
+                return 'vendor-firebase';
+              }
+              if (id.includes('xlsx') || id.includes('jspdf') || id.includes('html2canvas') || id.includes('html-to-image')) {
+                return 'vendor-export';
+              }
+              if (id.includes('lucide-react')) {
+                return 'vendor-icons';
+              }
+            }
+          }
+        }
+      }
     },
     server: {
       hmr: false,

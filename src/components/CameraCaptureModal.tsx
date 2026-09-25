@@ -48,10 +48,12 @@ export const CameraCaptureModal: React.FC<CameraCaptureModalProps> = ({
         videoRef.current.play().catch(e => console.error('Video play error:', e));
       }
     } catch (err: any) {
-      console.warn('Camera stream error:', err);
-      if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+      const errStr = String(err || '');
+      if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError' || errStr.includes('NotAllowedError') || errStr.includes('Permission denied')) {
+        console.warn('[Camera Capture]: Permission not granted or restricted.');
         setCameraError('تم رفض الإذن بالوصول للكاميرا. يرجى السماح للموقع باستخدام الكاميرا، أو التقاط الصورة مباشرة عبر زر الهاتف.');
       } else {
+        console.warn('[Camera Capture]: Stream initialization failed.');
         setCameraError('تعذر فتح الكاميرا المباشرة. يمكنك استخدام زر "كاميرا الهاتف" أدناه.');
       }
     }

@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { Tournament, Student, School, User, Sport, Match } from '../types';
-import { SPORTS_MAP, getAgeCategoriesForSeason, normalizeCategoryKey, DataService, getCategoryYearsLabel } from '../lib/dataService';
+import { SPORTS_MAP, getAgeCategoriesForSeason, normalizeCategoryKey, DataService, getCategoryYearsLabel, isTeacherLevelAllowedForTournament, getTournamentLevelAr } from '../lib/dataService';
 import { useAuth } from '../contexts/AuthContext';
 import { AppLogo } from './AppLogo';
 import { CountdownTimer } from './CountdownTimer';
@@ -382,19 +382,47 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
     );
   }, [teachers, sport]);
 
+  const teacherCadre = useMemo(() => {
+    if (userProfile?.teachingCadre) return userProfile.teachingCadre;
+    if (userProfile?.schoolId || userProfile?.schoolName) {
+      const userSchool = (schools || []).find(s => 
+        (userProfile.schoolId && s.id === userProfile.schoolId) || 
+        (userProfile.schoolName && s.name === userProfile.schoolName)
+      );
+      if (userSchool?.type) return userSchool.type;
+    }
+    return undefined;
+  }, [userProfile, schools]);
+
   // Determine which branch cards to show based on programmed tournaments for this sport
   const sportTournaments = useMemo(() => {
     if (!sport) return [];
-    return tournaments.filter(t => t.sportId === sport.id);
-  }, [tournaments, sport]);
+    const raw = tournaments.filter(t => t.sportId === sport.id);
+    if (isTeacherRole && !canManage) {
+      return raw.filter(t => isTeacherLevelAllowedForTournament(teacherCadre, t.level));
+    }
+    return raw;
+  }, [tournaments, sport, isTeacherRole, canManage, teacherCadre]);
 
   // Categories list configured for this sport
   const seasonalCategories = getAgeCategoriesForSeason(activeSeason, undefined, sport?.id);
   const sportCategories = useMemo(() => {
-    return (sport?.ageCategories && sport.ageCategories.length > 0)
+    const rawCats = (sport?.ageCategories && sport.ageCategories.length > 0)
       ? sport.ageCategories.map(normalizeCategoryKey)
       : seasonalCategories.map(c => c.id);
-  }, [sport, seasonalCategories]);
+
+    if (isTeacherRole && !canManage && teacherCadre) {
+      const cadre = String(teacherCadre).toUpperCase();
+      return rawCats.filter(catId => {
+        const norm = normalizeCategoryKey(catId);
+        if (cadre.includes('PRIMARY') || cadre.includes('ابتدائي')) return norm === 'U12';
+        if (cadre.includes('MIDDLE') || cadre.includes('إعدادي')) return norm === 'U15';
+        if (cadre.includes('HIGH') || cadre.includes('SECONDARY') || cadre.includes('تأهيلي')) return norm === 'U18' || norm === 'U20';
+        return true;
+      });
+    }
+    return rawCats;
+  }, [sport, seasonalCategories, isTeacherRole, canManage, teacherCadre]);
 
   // Derive custom tournament title from programmed tournaments
   const customTitle = useMemo(() => {
@@ -406,6 +434,42 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
     }
     return `البطولة الإقليمية المدرسية لـ ${sport?.name || ''}`;
   }, [sportTournaments, sport?.name]);
+
+  // Check if teacher level is allowed for this sport (at least one tournament matches their cadre)
+  const isTeacherAllowedForSport = useMemo(() => {
+    if (!isTeacherRole || !userProfile || !sportTournaments.length) return true;
+    if (canManage) return true; // Admins/Managers always allowed
+    
+    return sportTournaments.some(t => 
+      isTeacherLevelAllowedForTournament(userProfile.teachingCadre, t.level)
+    );
+  }, [isTeacherRole, userProfile, sportTournaments, canManage]);
+
+  const teacherCadreAr = useMemo(() => {
+    if (!userProfile?.teachingCadre) return '';
+    if (userProfile.teachingCadre === 'PRIMARY') return 'ابتدائي';
+    if (userProfile.teachingCadre === 'MIDDLE') return 'إعدادي';
+    if (userProfile.teachingCadre === 'HIGH') return 'تأهيلي';
+    return userProfile.teachingCadre;
+  }, [userProfile?.teachingCadre]);
+
+  const allowedSportLevelsAr = useMemo(() => {
+    const levels = new Set<string>();
+    sportTournaments.forEach(t => {
+      if (t.level) {
+        t.level.split(',').forEach(l => levels.add(l.trim()));
+      }
+    });
+    if (levels.size === 0) return '';
+    return getTournamentLevelAr(Array.from(levels).join(','));
+  }, [sportTournaments]);
+
+  const allowedTournamentsForTeacher = useMemo(() => {
+    if (!isTeacherRole || canManage) return tournaments;
+    return tournaments.filter(t => 
+      isTeacherLevelAllowedForTournament(userProfile?.teachingCadre, t.level)
+    );
+  }, [tournaments, isTeacherRole, canManage, userProfile?.teachingCadre]);
 
   const hasNonClubTournaments = useMemo(() => {
     return sportTournaments.some(t => (t.affiliationType || 'non_club') === 'non_club');
@@ -419,14 +483,25 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
     return sportTournaments.some(t => t.affiliationType === 'open' || (t.name && (t.name.includes('مفتوحة') || t.name.includes('المفتوحة'))));
   }, [sportTournaments]);
 
-  // Set default category on open or when sport changes
+  // Set default category on open or when sport changes + auto guard for teacher cadre
   useEffect(() => {
-    if (isOpen && sportCategories && sportCategories.length > 0) {
-      setSelectedCatId(sportCategories[0]);
-    } else {
-      setSelectedCatId('ALL');
+    if (isOpen) {
+      if (isTeacherRole && !canManage && !isTeacherAllowedForSport) {
+        toast.error(
+          `عذراً، هذه البطولة مخصصة لـ (${allowedSportLevelsAr || 'أسلاك أخرى'}) فقط.\nبصفتك أستاذ سلك (${teacherCadreAr || 'غير مطابق'}), لا يمكنك الولوج لتسجيل الفرق والمشاركين بها.`,
+          { id: 'modal-cadre-blocked' }
+        );
+        onClose();
+        return;
+      }
+
+      if (sportCategories && sportCategories.length > 0) {
+        setSelectedCatId(sportCategories[0]);
+      } else {
+        setSelectedCatId('ALL');
+      }
     }
-  }, [isOpen, sport?.id, sportCategories]);
+  }, [isOpen, sport?.id, sportCategories, isTeacherRole, canManage, isTeacherAllowedForSport, allowedSportLevelsAr, teacherCadreAr, onClose]);
 
   // Students registered for this sport
   const sportStudents = localStudents.filter(s => s && s.sportId === sport?.id);
@@ -757,7 +832,7 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-slate-900/70 backdrop-blur-xs overflow-y-auto" dir="rtl">
-      <div className={`bg-white rounded-2xl border border-slate-200 shadow-2xl w-full flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150 my-auto transition-all ${
+      <div className={`bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl w-full flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150 my-auto transition-all text-slate-900 dark:text-slate-100 ${
         isFullScreen ? 'max-w-[98vw] h-[96vh]' : 'max-w-6xl xl:max-w-7xl h-[92vh] sm:h-[85vh] max-h-[96vh] sm:max-h-[92vh]'
       }`}>
         
@@ -827,8 +902,18 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
             {isHeaderCollapsed && isProgrammed && (
               <button
                 type="button"
-                onClick={() => setIsRegisterModalOpen(true)}
-                className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-xs transition-all cursor-pointer flex items-center gap-1.5"
+                onClick={() => {
+                  if (!isTeacherAllowedForSport) {
+                    toast.error(`عذراً، أنت مسجل كأستاذ سلك (${teacherCadreAr})، وهذه البطولة مخصصة لأسلاك (${allowedSportLevelsAr}) فقط.`);
+                    return;
+                  }
+                  setIsRegisterModalOpen(true);
+                }}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold shadow-xs transition-all cursor-pointer flex items-center gap-1.5 ${
+                  !isTeacherAllowedForSport 
+                    ? 'bg-slate-300 text-slate-500 cursor-not-allowed opacity-70' 
+                    : 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                }`}
               >
                 <GraduationCap className="w-3.5 h-3.5" />
                 <span>تسجيل مشاركين</span>
@@ -1206,8 +1291,8 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
         </div>
 
         {/* Footer */}
-        <div className="p-4 bg-slate-100 border-t border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-3">
-          <div className="text-xs text-slate-500 font-medium">
+        <div className="p-4 bg-slate-100 dark:bg-slate-800/80 border-t border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-3 text-slate-800 dark:text-slate-100">
+          <div className="text-xs text-slate-500 dark:text-slate-400 font-medium">
             🏆 بطولة إقليمية مدرسية بمديرية تاوريرت
           </div>
 
@@ -1272,10 +1357,18 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
                 <button
                   type="button"
                   onClick={() => {
+                    if (!isTeacherAllowedForSport) {
+                      toast.error(`عذراً، بصفتك أستاذ سلك (${teacherCadreAr})، لا يمكنك التسجيل في هذه البطولة المخصصة لـ (${allowedSportLevelsAr})`);
+                      return;
+                    }
                     setPreselectedSchoolForRegister(selectedSchoolNameForView || undefined);
                     setIsRegisterModalOpen(true);
                   }}
-                  className="px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs sm:text-sm font-black shadow-xs flex items-center gap-1.5 transition-all cursor-pointer hover:scale-102 flex-1 sm:flex-initial justify-center"
+                  className={`px-3 py-2 rounded-xl text-xs sm:text-sm font-black shadow-xs flex items-center gap-1.5 transition-all cursor-pointer hover:scale-102 flex-1 sm:flex-initial justify-center ${
+                    !isTeacherAllowedForSport
+                      ? 'bg-slate-200 text-slate-400 cursor-not-allowed'
+                      : 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                  }`}
                 >
                   <Plus className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                   <span>تسجيل واحد تلو الآخر</span>
@@ -1284,10 +1377,18 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
                 <button
                   type="button"
                   onClick={() => {
+                    if (!isTeacherAllowedForSport) {
+                      toast.error(`عذراً، بصفتك أستاذ سلك (${teacherCadreAr})، لا يمكنك التسجيل في هذه البطولة المخصصة لـ (${allowedSportLevelsAr})`);
+                      return;
+                    }
                     setPreselectedSchoolForRegister(selectedSchoolNameForView || undefined);
                     setIsBulkRegisterOpen(true);
                   }}
-                  className="px-3 py-2 bg-amber-500 hover:bg-amber-600 text-slate-950 rounded-xl text-xs sm:text-sm font-black shadow-xs flex items-center gap-1.5 transition-all cursor-pointer hover:scale-102 flex-1 sm:flex-initial justify-center"
+                  className={`px-3 py-2 rounded-xl text-xs sm:text-sm font-black shadow-xs flex items-center gap-1.5 transition-all cursor-pointer hover:scale-102 flex-1 sm:flex-initial justify-center ${
+                    !isTeacherAllowedForSport
+                      ? 'bg-slate-200 text-slate-400 cursor-not-allowed'
+                      : 'bg-amber-500 hover:bg-amber-600 text-slate-950'
+                  }`}
                   title="تسجيل عدة مشاركين دفعة واحدة لتوفير الوقت"
                 >
                   <Sparkles className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
@@ -1433,11 +1534,19 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
                                 type="button"
                                 onClick={(e) => {
                                   e.stopPropagation();
+                                  if (!isTeacherAllowedForSport) {
+                                    toast.error(`عذراً، أنت مسجل كأستاذ سلك (${teacherCadreAr})، ولا يمكنك التسجيل في هذه البطولة المخصصة لـ (${allowedSportLevelsAr})`);
+                                    return;
+                                  }
                                   setPreselectedSchoolForRegister(sch.name);
                                   setIsRegisterModalOpen(true);
                                 }}
-                                className="px-2.5 py-1.5 text-xs font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-xl flex items-center gap-1 transition-all cursor-pointer shadow-3xs hover:scale-102"
-                                title={`إضافة مشارك جديد لمؤسسة ${sch.name}`}
+                                className={`px-2.5 py-1.5 text-xs font-bold border rounded-xl flex items-center gap-1 transition-all cursor-pointer shadow-3xs hover:scale-102 ${
+                                  !isTeacherAllowedForSport
+                                    ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed'
+                                    : 'text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border-emerald-200'
+                                }`}
+                                title={!isTeacherAllowedForSport ? 'غير مسموح لسلكك التعليمي' : `إضافة مشارك جديد لمؤسسة ${sch.name}`}
                               >
                                 <Plus className="w-3.5 h-3.5" />
                                 <span>إضافة مشارك</span>
@@ -1491,10 +1600,18 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
                       <button
                         type="button"
                         onClick={() => {
+                          if (!isTeacherAllowedForSport) {
+                            toast.error(`عذراً، أنت مسجل كأستاذ سلك (${teacherCadreAr})، ولا يمكنك التسجيل في هذه البطولة المخصصة لـ (${allowedSportLevelsAr})`);
+                            return;
+                          }
                           setPreselectedSchoolForRegister(undefined);
                           setIsRegisterModalOpen(true);
                         }}
-                        className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-xs inline-flex items-center gap-1.5 transition-all cursor-pointer"
+                        className={`px-4 py-2 font-bold text-xs rounded-xl shadow-xs inline-flex items-center gap-1.5 transition-all cursor-pointer ${
+                          !isTeacherAllowedForSport
+                            ? 'bg-slate-200 text-slate-400 cursor-not-allowed'
+                            : 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                        }`}
                       >
                         <Plus className="w-4 h-4" />
                         <span>تسجيل مشاركين</span>
@@ -1963,7 +2080,7 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
         preselectedAffiliation={effectivePreselectedAffiliation}
         schools={schools}
         registrationDeadline={currentDeadline}
-        tournaments={tournaments}
+        tournaments={allowedTournamentsForTeacher}
         onRegistered={() => {
           if (onRefreshData) onRefreshData();
         }}
@@ -1983,7 +2100,7 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
           preselectedCategory={effectivePreselectedCategory}
           preselectedGender={effectivePreselectedGender}
           allExistingStudents={localStudents}
-          tournaments={tournaments}
+          tournaments={allowedTournamentsForTeacher}
           onRegistered={() => {
             if (onRefreshData) onRefreshData();
           }}

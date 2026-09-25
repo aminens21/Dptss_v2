@@ -259,11 +259,15 @@ export const CrossCountryBulkRegisterModal: React.FC<CrossCountryBulkRegisterMod
     const normCat = normalizeCategoryKey(activeRaceDef.category);
     const raceGender = activeRaceDef.gender;
 
-    // Filter existing students of this school in this category/gender for cross country
+    // Filter existing students of this school in this category/gender and affiliation for cross country
     const matchingStudents = allExistingStudents.filter(s => {
       if (s.sportId !== 'cross_country') return false;
       const sCat = normalizeCategoryKey(s.category);
       if (sCat !== normCat || s.gender !== raceGender) return false;
+
+      // Affiliation match: non_club vs club_affiliated
+      const sAff = s.affiliationType || 'non_club';
+      if (sAff !== selectedAffiliation) return false;
 
       // School match
       if (selectedSchoolId && s.schoolId && s.schoolId === selectedSchoolId) return true;
@@ -366,7 +370,7 @@ export const CrossCountryBulkRegisterModal: React.FC<CrossCountryBulkRegisterMod
       if (firstWithCoach.coachLeaseNumber) setCoachLeaseNumber(firstWithCoach.coachLeaseNumber);
       if (firstWithCoach.coachPhone) setCoachPhone(firstWithCoach.coachPhone);
     }
-  }, [isOpen, selectedRaceId, selectedSchoolId, resolvedSchoolName, allExistingStudents, activeRaceDef]);
+  }, [isOpen, selectedRaceId, selectedSchoolId, resolvedSchoolName, allExistingStudents, activeRaceDef, selectedAffiliation]);
 
   // Update a single slot
   const handleUpdateSlot = (slotIndex: number, field: 'fullName' | 'massarNumber' | 'birthDate' | 'photoUrl', value: string | undefined) => {

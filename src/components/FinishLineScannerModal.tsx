@@ -32,7 +32,8 @@ import {
   Download,
   CheckSquare,
   Square,
-  Loader2
+  Loader2,
+  Activity
 } from 'lucide-react';
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
 import toast from 'react-hot-toast';
@@ -73,6 +74,9 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
   const [selectedRaceId, setSelectedRaceId] = useState<string>(initialRaceId || 'u15_male');
   const activeCategory = CROSS_COUNTRY_CATEGORIES.find(c => c.id === selectedRaceId) || CROSS_COUNTRY_CATEGORIES[0];
 
+  // Race Affiliation: non_club (مدرسي) vs club_affiliated (المنتمين للأندية)
+  const [raceAffiliation, setRaceAffiliation] = useState<'non_club' | 'club_affiliated'>('non_club');
+
   // Active category filter tab in live arrivals view: 'ALL' or a specific category ID
   const [viewCategoryFilter, setViewCategoryFilter] = useState<string>('ALL');
 
@@ -101,6 +105,18 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
 
   // Live Arrivals Stream
   const [arrivals, setArrivals] = useState<PodiumWinner[]>([]);
+
+  // Local cache of all CC results to show completion status icons and handle multi-race status
+  const [resultsMap, setResultsMap] = useState<Record<string, CrossCountryCategoryResult>>(existingResults || {});
+
+  // Subscribe to real-time CC results to show status icons (Green dots / Completed states)
+  useEffect(() => {
+    if (!isOpen) return;
+    const unsubscribe = DataService.subscribeCrossCountryResults((live) => {
+      if (live) setResultsMap(live);
+    });
+    return () => unsubscribe();
+  }, [isOpen]);
 
   // Stable refs to eliminate stale closure bugs during live camera & barcode scanning
   const arrivalsRef = useRef<PodiumWinner[]>(arrivals);
@@ -222,25 +238,91 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
     }
   };
 
+  // Audio Error Tone generator via Web Audio API (low buzz warning for invalid bib or wrong category)
+  const playErrorTone = () => {
+    if (!soundEnabled) return;
+    try {
+      const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioContextClass) return;
+      const audioCtx = new AudioContextClass();
+      if (audioCtx.state === 'suspended') {
+        audioCtx.resume();
+      }
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(180, audioCtx.currentTime); // 180Hz low buzz
+      gain.gain.setValueAtTime(0.28, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.38);
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.38);
+    } catch (e) {
+      console.error('Audio error tone play error:', e);
+    }
+  };
+
+  // Resolve Student Category ID strictly and accurately (avoiding 'female'.includes('male'))
+  const resolveStudentCategoryId = (student?: Partial<Student> | null, defaultCatId?: string): string => {
+    if (!student) return defaultCatId || activeCategory.id;
+
+    const rawCat = String(student.category || '').toLowerCase().trim();
+    const rawGen = String(student.gender || '').toLowerCase().trim();
+
+    // Exact ID already?
+    if (['u12_male', 'u12_female', 'u15_male', 'u15_female', 'u18_male', 'u18_female', 'u20_male', 'u20_female'].includes(rawCat)) {
+      return rawCat;
+    }
+
+    // Determine Gender STRICTLY (avoiding 'female'.includes('male'))
+    const isFemale =
+      rawGen === 'female' ||
+      rawGen === 'f' ||
+      rawGen.includes('أنثى') ||
+      rawGen.includes('انثى') ||
+      rawGen.includes('إناث') ||
+      rawGen.includes('اناث') ||
+      rawGen.includes('بنت') ||
+      rawCat.includes('برعمات') ||
+      rawCat.includes('صغيرات') ||
+      rawCat.includes('فتيات') ||
+      rawCat.includes('شابات') ||
+      rawCat.includes('female');
+
+    const isMale = !isFemale && (
+      rawGen === 'male' ||
+      rawGen === 'm' ||
+      rawGen.includes('ذكر') ||
+      rawGen.includes('ذكور') ||
+      rawGen.includes('ولد') ||
+      rawCat.includes('فتيان') ||
+      rawCat.includes('شبان') ||
+      rawCat.includes('male')
+    );
+
+    const effectiveMale = isFemale ? false : (isMale ? true : (activeCategory.gender === 'Male'));
+
+    if (rawCat.includes('براعم') || rawCat.includes('برعمات') || rawCat.includes('u12') || rawCat.includes('12')) {
+      return effectiveMale ? 'u12_male' : 'u12_female';
+    }
+    if (rawCat.includes('صغار') || rawCat.includes('صغيرات') || rawCat.includes('u15') || rawCat.includes('15')) {
+      return effectiveMale ? 'u15_male' : 'u15_female';
+    }
+    if (rawCat.includes('فتيان') || rawCat.includes('فتيات') || rawCat.includes('u18') || rawCat.includes('18')) {
+      return effectiveMale ? 'u18_male' : 'u18_female';
+    }
+    if (rawCat.includes('شبان') || rawCat.includes('شابات') || rawCat.includes('u20') || rawCat.includes('20')) {
+      return effectiveMale ? 'u20_male' : 'u20_female';
+    }
+
+    const baseAge = activeCategory.id.split('_')[0] || 'u12';
+    return `${baseAge}_${effectiveMale ? 'male' : 'female'}`;
+  };
+
   // Match Excel Arabic Category/Gender names to active Category IDs
   const getCategoryFromArabic = (categoryAr: string, genderAr: string): string => {
-    const cat = String(categoryAr).trim();
-    const gen = String(genderAr).trim();
-    const isMale = gen.includes('ذكر') || gen.includes('ذكور') || gen.includes('ولد') || gen.includes('Male') || gen.includes('M') || gen.includes('ذك');
-
-    if (cat.includes('براعم') || cat.includes('U12')) {
-      return isMale ? 'u12_male' : 'u12_female';
-    }
-    if (cat.includes('صغار') || cat.includes('صغيرات') || cat.includes('U15')) {
-      return isMale ? 'u15_male' : 'u15_female';
-    }
-    if (cat.includes('فتيان') || cat.includes('فتيات') || cat.includes('U18')) {
-      return isMale ? 'u18_male' : 'u18_female';
-    }
-    if (cat.includes('شبان') || cat.includes('شابات') || cat.includes('U20')) {
-      return isMale ? 'u20_male' : 'u20_female';
-    }
-    return isMale ? 'u15_male' : 'u15_female'; // default fallback
+    return resolveStudentCategoryId({ category: categoryAr, gender: genderAr as any });
   };
 
   // Track initial load to prevent clobbering arrivals during active scanning
@@ -260,21 +342,27 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
 
     const loadAllSelectedResults = async () => {
       try {
-        const resultsMap = existingResults && Object.keys(existingResults).length > 0 
+        const liveResults = (existingResults && Object.keys(existingResults).length > 0)
           ? existingResults 
           : await DataService.getCrossCountryResults();
 
+        if (liveResults) {
+          setResultsMap(liveResults);
+        }
+
         const combinedArrivals: PodiumWinner[] = [];
         selectedRaceIds.forEach(catId => {
-          const catRes = resultsMap[catId];
+          const targetKey = raceAffiliation === 'club_affiliated' ? `${catId}_club` : catId;
+          const catRes = liveResults[targetKey];
           const catDef = CROSS_COUNTRY_CATEGORIES.find(c => c.id === catId);
           if (catRes && catRes.podium && catRes.podium.length > 0) {
             catRes.podium.forEach((item, idx) => {
               combinedArrivals.push({
                 ...item,
                 rank: item.rank || (idx + 1),
-                categoryId: item.categoryId || catId,
-                categoryTitle: item.categoryTitle || catDef?.titleAr || catRes.titleAr
+                categoryId: item.categoryId || targetKey,
+                categoryTitle: item.categoryTitle || catDef?.titleAr || catRes.titleAr,
+                affiliationType: item.affiliationType || raceAffiliation
               });
             });
           }
@@ -297,7 +385,7 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
     };
 
     loadAllSelectedResults();
-  }, [selectedRaceIds, isOpen]);
+  }, [selectedRaceIds, isOpen, raceAffiliation]);
 
   // Load registered students list (both cross_country and all available students)
   const fetchStudents = async () => {
@@ -352,17 +440,17 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}.${tenths}`;
   };
 
-  // Camera QR/Barcode Scanning Effect (starts whenever camera mode is chosen and modal is open)
+  // Camera QR/Barcode Scanning Effect (starts whenever camera mode is chosen and modal is open and race is running)
   useEffect(() => {
-    if (isOpen && inputMode === 'camera' && !cameraActive) {
+    if (isOpen && phase === 'running' && inputMode === 'camera' && !cameraActive) {
       startCamera();
-    } else if ((!isOpen || inputMode !== 'camera') && cameraActive) {
+    } else if ((!isOpen || phase !== 'running' || inputMode !== 'camera') && cameraActive) {
       stopCamera();
     }
     return () => {
       stopCamera();
     };
-  }, [isOpen, inputMode]);
+  }, [isOpen, phase, inputMode]);
 
   const startCamera = async () => {
     setCameraError(null);
@@ -376,7 +464,7 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
       if (!container) {
         // Element not yet mounted, wait 150ms and retry
         setTimeout(() => {
-          if (isOpen && inputMode === 'camera') {
+          if (isOpen && phase === 'running' && inputMode === 'camera') {
             startCamera();
           }
         }, 150);
@@ -429,7 +517,12 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
       }
       setCameraActive(true);
     } catch (err: any) {
-      console.error('Failed to start camera:', err);
+      const errStr = String(err || '');
+      if (err?.name === 'NotAllowedError' || errStr.includes('NotAllowedError') || errStr.includes('Permission denied')) {
+        console.warn('[Camera Scanner]: Permission was not granted or is restricted.');
+      } else {
+        console.warn('[Camera Scanner]: Scanner initialization failed.');
+      }
       setCameraError('لم نتمكن من تشغيل الكاميرا. يرجى التأكد من منح صلاحية الكاميرا للمتصفح، أو استخدم الإدخال اليدوي / قارئ الباركود.');
       setCameraActive(false);
     }
@@ -733,17 +826,31 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
     const studentsPool = allStudentsRef.current;
     let matchedStudent: Student | undefined;
 
-    // 1. Prioritize current active category match by bibNumber or crossCountryBibNumber
+    // 1. Prioritize runner in EXACT active race (matching category, gender, affiliation, and bib)
     matchedStudent = studentsPool.find(s => {
-      const matchCategory = !s.category || s.category.toLowerCase().includes(activeCategory.category.toLowerCase());
-      if (!matchCategory) return false;
+      const resolvedCatId = resolveStudentCategoryId(s);
+      if (resolvedCatId !== activeCategory.id) return false;
+      const sAff = s.affiliationType || 'non_club';
+      if (sAff !== raceAffiliation) return false;
       const sBib = String(s.bibNumber ?? (s as any).crossCountryBibNumber ?? '').trim();
       if (sBib && sBib === cleanBib) return true;
       if (bibNum !== null && sBib && !isNaN(Number(sBib)) && Number(sBib) === bibNum) return true;
       return false;
     });
 
-    // 2. If not found in current category, search across ALL students by bibNumber or crossCountryBibNumber
+    // 2. Search in current active race category & gender (any affiliation)
+    if (!matchedStudent) {
+      matchedStudent = studentsPool.find(s => {
+        const resolvedCatId = resolveStudentCategoryId(s);
+        if (resolvedCatId !== activeCategory.id) return false;
+        const sBib = String(s.bibNumber ?? (s as any).crossCountryBibNumber ?? '').trim();
+        if (sBib && sBib === cleanBib) return true;
+        if (bibNum !== null && sBib && !isNaN(Number(sBib)) && Number(sBib) === bibNum) return true;
+        return false;
+      });
+    }
+
+    // 3. Search across ALL students in database by bibNumber or crossCountryBibNumber
     if (!matchedStudent) {
       matchedStudent = studentsPool.find(s => {
         const sBib = String(s.bibNumber ?? (s as any).crossCountryBibNumber ?? '').trim();
@@ -753,26 +860,21 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
       });
     }
 
-    // 3. If still not found, check by id (UUID)
+    // 4. If still not found, check by id (UUID)
     if (!matchedStudent) {
       matchedStudent = studentsPool.find(s => s.id === cleanBib);
     }
 
-    // 4. Check by massarNumber
+    // 5. Check by massarNumber
     if (!matchedStudent) {
       matchedStudent = studentsPool.find(s => s.massarNumber && s.massarNumber.trim().toUpperCase() === cleanBib.toUpperCase());
     }
 
-    // 5. Fallback for systematic numbering generated by BibGeneratorModal (101 + index)
+    // 6. Fallback for systematic numbering generated by BibGeneratorModal (101 + index)
     if (!matchedStudent && bibNum !== null && bibNum >= 101) {
       const categoryRunners = studentsPool.filter(s => {
-        const cat = (s.category || '').toLowerCase();
-        const activeCat = activeCategory.category.toLowerCase();
-        const matchesCat = !cat || cat.includes(activeCat);
-        const matchesGender = activeCategory.gender === 'Male'
-          ? (s.gender === 'Male' || (s.gender as any) === 'ذكور')
-          : (s.gender === 'Female' || (s.gender as any) === 'إناث');
-        return matchesCat && matchesGender;
+        const resolvedCatId = resolveStudentCategoryId(s);
+        return resolvedCatId === activeCategory.id && (s.affiliationType || 'non_club') === raceAffiliation;
       });
       const systematicIdx = bibNum - 101;
       if (systematicIdx >= 0 && systematicIdx < categoryRunners.length) {
@@ -784,8 +886,8 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
     const currentMs = elapsedMsRef.current;
     const currentTimeStr = currentMs > 0 ? formatElapsedTime(currentMs) : (elapsedMs > 0 ? formatElapsedTime(elapsedMs) : '00:00.0');
 
-    const studentCatId = matchedStudent?.category 
-      ? getCategoryFromArabic(matchedStudent.category, matchedStudent.gender || (activeCategory.gender === 'Male' ? 'ذكور' : 'إناث'))
+    const studentCatId = matchedStudent 
+      ? resolveStudentCategoryId(matchedStudent, manualCategory || activeCategory.id)
       : (manualCategory || activeCategory.id);
 
     const targetCatDef = CROSS_COUNTRY_CATEGORIES.find(c => c.id === studentCatId) || activeCategory;
@@ -793,6 +895,71 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
     const displayBib = (matchedStudent?.bibNumber || (matchedStudent as any)?.crossCountryBibNumber)
       ? String(matchedStudent.bibNumber || (matchedStudent as any).crossCountryBibNumber)
       : cleanBib;
+
+    // 🛑 VALIDATION 1: Check category and gender mismatch!
+    if (matchedStudent) {
+      const isCategoryAllowed = selectedRaceIds.includes(studentCatId);
+      if (!isCategoryAllowed) {
+        playErrorTone();
+        if (typeof navigator !== 'undefined' && navigator.vibrate) {
+          try { navigator.vibrate([300, 100, 300]); } catch (e) {}
+        }
+        const activeRaceTitles = selectedRaceIds
+          .map(id => CROSS_COUNTRY_CATEGORIES.find(c => c.id === id)?.titleAr || id)
+          .join(' أو ');
+        const studentCatDef = CROSS_COUNTRY_CATEGORIES.find(c => c.id === studentCatId) || targetCatDef;
+        const studentGenderLabel = studentCatId.includes('female') ? 'إناث 🚺' : 'ذكور 🚹';
+        toast.error(
+          `🚫 هذه الصدرية لا تنتمي لهاته الفئة!\nالصدرية #${displayBib} (${matchedStudent.fullName}) تنتمي لفئة "${studentCatDef.titleAr}" [${studentGenderLabel}]، بينما السباق الحالي مخصص لـ "${activeRaceTitles}". لا يمكن احتسابها في هذا السباق!`,
+          {
+            id: `cat-mismatch-${cleanBib}`,
+            duration: 7000,
+            icon: '⛔'
+          }
+        );
+        setManualBib('');
+        setTimeout(() => manualBibInputRef.current?.focus(), 50);
+        return;
+      }
+
+      // 🛑 VALIDATION 2: Check affiliation mismatch (non_club vs club_affiliated)
+      const studentAff = matchedStudent.affiliationType || 'non_club';
+      if (raceAffiliation && studentAff !== raceAffiliation) {
+        playErrorTone();
+        if (typeof navigator !== 'undefined' && navigator.vibrate) {
+          try { navigator.vibrate([300, 100, 300]); } catch (e) {}
+        }
+        const expectedAffLabel = raceAffiliation === 'club_affiliated' ? 'المنتمين للأندية 🟡' : 'غير المنتمين للأندية ⚪';
+        const actualAffLabel = studentAff === 'club_affiliated' ? 'المنتمين للأندية 🟡' : 'غير المنتمين للأندية ⚪';
+        toast.error(
+          `🚫 خطأ في الصنف: الصدرية #${displayBib} (${matchedStudent.fullName}) مسجل في صنف "${actualAffLabel}"، بينما السباق الحالي مخصص لصنف "${expectedAffLabel}". يتنافس المنتمين لوحدهم وغير المنتمين لوحدهم ولا يمكن احتساب نتائج صنف مع صنف آخر!`,
+          {
+            id: `aff-mismatch-${cleanBib}`,
+            duration: 7000,
+            icon: '⛔'
+          }
+        );
+        setManualBib('');
+        setTimeout(() => manualBibInputRef.current?.focus(), 50);
+        return;
+      }
+    }
+
+    // 🛑 VALIDATION 3: Unregistered bib protection for automated / scanned input
+    if (!matchedStudent && !finalName) {
+      playErrorTone();
+      toast.error(
+        `⚠️ الصدرية #${cleanBib} غير مسجلة في قاعدة بيانات العداءين! يرجى التأكد من رقم الصدرية أو تسجيل التلميذ أو إدخال الاسم والمؤسسة يدوياً.`,
+        {
+          id: `not-found-${cleanBib}`,
+          duration: 5000,
+          icon: '❓'
+        }
+      );
+      setManualBib('');
+      setTimeout(() => manualBibInputRef.current?.focus(), 50);
+      return;
+    }
 
     const newArrival: PodiumWinner = {
       rank: nextRank,
@@ -805,6 +972,7 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
       time: currentTimeStr,
       bibNumber: displayBib,
       participationType: matchedStudent?.participationType === 'school_team' ? 'فريق' : (matchedStudent?.participationType === 'individual' ? 'فردي' : 'فريق'),
+      affiliationType: matchedStudent?.affiliationType || raceAffiliation,
       directorateName: matchedStudent?.directorateName || 'مديرية تاوريرت',
       academyName: matchedStudent?.academyName || 'الأكاديمية الجهوية',
       supervisorName: matchedStudent?.coachName || '-',
@@ -883,38 +1051,118 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
 
   // Save Results Live to Database for All Arrived Runners
   const [isSavingLive, setIsSavingLive] = useState<boolean>(false);
-  const saveLiveResults = async (updatedArrivals: PodiumWinner[], showSuccessToast = false) => {
+  const saveLiveResults = async (updatedArrivals: PodiumWinner[], showSuccessToast = false, statusOverride?: CrossCountryCategoryResult['status']) => {
     setIsSavingLive(true);
     try {
+      const activeSeason = await DataService.getActiveSeason();
+
+      // Determine final status
+      let finalStatus: CrossCountryCategoryResult['status'] = statusOverride;
+      if (!finalStatus) {
+        if (phase === 'running') finalStatus = 'running';
+        else if (phase === 'summary') finalStatus = 'completed';
+        else finalStatus = 'setup';
+      }
+
+      const targetActiveKey = raceAffiliation === 'club_affiliated' ? `${activeCategory.id}_club` : activeCategory.id;
+      const affSuffix = raceAffiliation === 'club_affiliated' ? ' (المنتمين للأندية)' : ' (مدرسي)';
+
       // 1. Save all arrivals for the activeCategory
       const categoryResult: CrossCountryCategoryResult = {
-        categoryId: activeCategory.id,
+        categoryId: targetActiveKey,
         category: activeCategory.category,
         gender: activeCategory.gender,
-        titleAr: activeCategory.titleAr,
+        titleAr: `${activeCategory.titleAr}${affSuffix}`,
         distance: activeCategory.distance,
+        seasonId: activeSeason,
+        affiliationType: raceAffiliation,
         podium: updatedArrivals,
+        status: finalStatus,
         updatedAt: new Date().toISOString()
       };
 
       await DataService.saveCrossCountryCategoryResult(categoryResult);
 
-      // 2. Also distribute to each category in selectedRaceIds if multiple races
-      if (selectedRaceIds.length > 1) {
-        for (const catId of selectedRaceIds) {
-          const catDef = CROSS_COUNTRY_CATEGORIES.find(c => c.id === catId);
+      // Also update local resultsMap state for instant UI feedback
+      setResultsMap(prev => ({
+        ...prev,
+        [targetActiveKey]: categoryResult
+      }));
+
+      // 2. Also distribute to each category found in the arrivals
+      const categoriesInArrivals = Array.from(new Set(updatedArrivals.map(a => a.categoryId).filter(Boolean)));
+      for (const catId of categoriesInArrivals) {
+        if (!catId) continue;
+        const cleanBaseId = catId.replace(/_club(_affiliated)?$/, '');
+        if (cleanBaseId === activeCategory.id) continue;
+        const targetMultiKey = raceAffiliation === 'club_affiliated' ? `${cleanBaseId}_club` : cleanBaseId;
+        const catDef = CROSS_COUNTRY_CATEGORIES.find(c => c.id === cleanBaseId);
+        if (catDef) {
+          const catArrivals = updatedArrivals.filter(a => (a.categoryId || '').replace(/_club(_affiliated)?$/, '') === cleanBaseId);
+          if (catArrivals.length > 0) {
+            const multiRes: CrossCountryCategoryResult = {
+              categoryId: targetMultiKey,
+              category: catDef.category,
+              gender: catDef.gender,
+              titleAr: `${catDef.titleAr}${affSuffix}`,
+              distance: catDef.distance,
+              seasonId: activeSeason,
+              affiliationType: raceAffiliation,
+              podium: catArrivals.map((arr, i) => ({ ...arr, rank: i + 1 })),
+              status: finalStatus,
+              updatedAt: new Date().toISOString()
+            };
+            await DataService.saveCrossCountryCategoryResult(multiRes);
+            setResultsMap(prev => ({ ...prev, [targetMultiKey]: multiRes }));
+          }
+        }
+      }
+
+      // 4. Propagate final status to all selected race IDs
+      // This ensures all categories in a multi-race run show the same status (running or completed)
+      if (finalStatus === 'running' || finalStatus === 'completed') {
+        for (const raceId of selectedRaceIds) {
+          if (raceId === activeCategory.id) continue;
+          
+          const targetPropKey = raceAffiliation === 'club_affiliated' ? `${raceId}_club` : raceId;
+          const catDef = CROSS_COUNTRY_CATEGORIES.find(c => c.id === raceId);
           if (catDef) {
-            const catArrivals = updatedArrivals.filter(a => a.categoryId === catId);
-            if (catArrivals.length > 0) {
+            const catArrivals = updatedArrivals.filter(a => (a.categoryId || '').replace(/_club(_affiliated)?$/, '') === raceId);
+            const existing = resultsMap[targetPropKey];
+            
+            // If it's completed, we force the update. 
+            // If it's running, we only update if it doesn't already have results to avoid wiping them
+            const shouldUpdate = finalStatus === 'completed' || (!existing || !existing.podium || existing.podium.length === 0);
+            
+            if (shouldUpdate) {
               await DataService.saveCrossCountryCategoryResult({
-                categoryId: catDef.id,
+                categoryId: targetPropKey,
                 category: catDef.category,
                 gender: catDef.gender,
-                titleAr: catDef.titleAr,
+                titleAr: `${catDef.titleAr}${affSuffix}`,
                 distance: catDef.distance,
-                podium: catArrivals.map((arr, i) => ({ ...arr, rank: i + 1 })),
+                seasonId: activeSeason,
+                affiliationType: raceAffiliation,
+                podium: catArrivals.length > 0 ? catArrivals.map((arr, i) => ({ ...arr, rank: i + 1 })) : (existing?.podium || []),
+                status: finalStatus,
                 updatedAt: new Date().toISOString()
               });
+              // Update local resultsMap for instant feedback
+              setResultsMap(prev => ({
+                ...prev,
+                [targetPropKey]: {
+                  categoryId: targetPropKey,
+                  category: catDef.category,
+                  gender: catDef.gender,
+                  titleAr: `${catDef.titleAr}${affSuffix}`,
+                  distance: catDef.distance,
+                  seasonId: activeSeason,
+                  affiliationType: raceAffiliation,
+                  podium: catArrivals.length > 0 ? catArrivals.map((arr, i) => ({ ...arr, rank: i + 1 })) : (existing?.podium || []),
+                  status: finalStatus,
+                  updatedAt: new Date().toISOString()
+                }
+              }));
             }
           }
         }
@@ -922,7 +1170,7 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
 
       // 3. Backup to localStorage directly so nothing can be lost
       try {
-        localStorage.setItem(`cc_scanner_arrivals_${activeCategory.id}`, JSON.stringify(updatedArrivals));
+        localStorage.setItem(`cc_scanner_arrivals_${targetActiveKey}`, JSON.stringify(updatedArrivals));
       } catch (e) {
         console.warn('Local storage backup error:', e);
       }
@@ -961,7 +1209,9 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
         setArrivals([]);
         setElapsedMs(0);
         setTimerRunning(false);
-        await DataService.clearCrossCountryCategoryResult(activeCategory.id);
+        setPhase('setup');
+        const targetClearKey = raceAffiliation === 'club_affiliated' ? `${activeCategory.id}_club` : activeCategory.id;
+        await DataService.clearCrossCountryCategoryResult(targetClearKey);
         if (onResultsUpdated) onResultsUpdated();
         toast.success(`تم تفريغ نتائج سباق (${activeCategory.titleAr}) وتصفير التوقيت بنجاح 🗑️`);
       } else if (clearScope === 'all_races') {
@@ -969,6 +1219,7 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
         setArrivals([]);
         setElapsedMs(0);
         setTimerRunning(false);
+        setPhase('setup');
         await DataService.clearAllCrossCountryResults();
         if (onResultsUpdated) onResultsUpdated();
         toast.success('تم تفريغ نتائج جميع سباقات العدو الريفي الـ 8 بالكامل 🔄');
@@ -999,7 +1250,7 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
   };
 
   // Start the race officially
-  const handleStartRace = (clearExisting = false) => {
+  const handleStartRace = async (clearExisting = false) => {
     if (clearExisting) {
       setArrivals([]);
       arrivalsRef.current = [];
@@ -1008,14 +1259,18 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
     }
     setTimerRunning(true);
     setPhase('running');
+    
+    // Notify platform that race has started (Green Dot logic)
+    await saveLiveResults(clearExisting ? [] : arrivalsRef.current, false, 'running');
+    
     toast.success(`انطلق سباق (${activeCategory.titleAr})! بالتوفيق لجميع المشاركين 🏃‍♂️💨`);
   };
 
   // End the Race & Transition to Summary View
   const handleEndRace = async () => {
     setTimerRunning(false);
-    await saveLiveResults(arrivals);
     setPhase('summary');
+    await saveLiveResults(arrivals, false, 'completed');
     toast.success(`تم إنهاء السباق بنجاح! تم حفظ النتائج والترتيب النهائي للفئة 🏆`);
   };
 
@@ -1031,24 +1286,13 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
   const liveTeamRankings = calculateTeamRankings(arrivals);
 
   // Robust matching helper to count participants for any category
-  const getCategoryRunnersCount = (cat: CrossCountryCategoryDef) => {
+  const getCategoryRunnersCount = (cat: CrossCountryCategoryDef, aff?: 'non_club' | 'club_affiliated') => {
+    const targetAff = aff || raceAffiliation;
     return allStudents.filter(s => {
-      const sCategory = (s.category || '').toLowerCase().trim();
-      const sGender = (s.gender || '').toLowerCase().trim();
-      const catCategory = cat.category.toLowerCase().trim();
-      const catGender = cat.gender.toLowerCase().trim();
-
-      const matchCat = sCategory === catCategory ||
-        (catCategory === 'u12' && (sCategory.includes('براعم') || sCategory.includes('12') || sCategory.includes('برعم'))) ||
-        (catCategory === 'u15' && (sCategory.includes('صغار') || sCategory.includes('15') || sCategory.includes('صغير'))) ||
-        (catCategory === 'u18' && (sCategory.includes('فتيان') || sCategory.includes('18') || sCategory.includes('فتيات') || sCategory.includes('فتي'))) ||
-        (catCategory === 'u20' && (sCategory.includes('شبان') || sCategory.includes('20') || sCategory.includes('شابات') || sCategory.includes('شب')));
-
-      const matchGen = sGender === catGender ||
-        (catGender === 'male' && (sGender.includes('ذكر') || sGender.includes('ذكور') || sGender === 'm' || sGender === 'male' || sGender.includes('ولد'))) ||
-        (catGender === 'female' && (sGender.includes('أنثى') || sGender.includes('انثى') || sGender.includes('إناث') || sGender.includes('اناث') || sGender === 'f' || sGender === 'female' || sGender.includes('بنت')));
-
-      return matchCat && matchGen;
+      const sAff = s.affiliationType || 'non_club';
+      if (targetAff && sAff !== targetAff) return false;
+      const resolved = resolveStudentCategoryId(s);
+      return resolved === cat.id;
     }).length;
   };
 
@@ -1223,27 +1467,81 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
                   </h3>
 
                   <div className="space-y-3">
+                    {/* Race Affiliation Selector */}
+                    <div>
+                      <label className="text-xs font-black text-slate-700 block mb-1.5">صنف المشاركة للسباق:</label>
+                      <div className="grid grid-cols-2 gap-2 mb-3">
+                        <button
+                          type="button"
+                          onClick={() => setRaceAffiliation('non_club')}
+                          className={`py-2 px-3 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-1.5 border cursor-pointer ${
+                            raceAffiliation === 'non_club'
+                              ? 'bg-blue-600 text-white border-blue-700 shadow-xs'
+                              : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                          }`}
+                        >
+                          <span>⚪</span>
+                          <span>غير المنتمين (مدرسي)</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setRaceAffiliation('club_affiliated')}
+                          className={`py-2 px-3 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-1.5 border cursor-pointer ${
+                            raceAffiliation === 'club_affiliated'
+                              ? 'bg-amber-500 text-slate-950 border-amber-600 shadow-xs ring-2 ring-amber-300'
+                              : 'bg-white text-amber-900 border-amber-200 hover:bg-amber-50'
+                          }`}
+                        >
+                          <span>🟡</span>
+                          <span>المنتمين للأندية</span>
+                        </button>
+                      </div>
+                    </div>
+
                     <div>
                       <label className="text-xs font-black text-slate-700 block mb-1.5">اختر الفئة والعمر والجنس للسباق:</label>
                       <div className="grid grid-cols-1 gap-2 max-h-[260px] overflow-y-auto pr-1">
                         {CROSS_COUNTRY_CATEGORIES.map((cat) => {
                           const isSelected = selectedRaceId === cat.id;
-                          const count = getCategoryRunnersCount(cat);
+                          const count = getCategoryRunnersCount(cat, raceAffiliation);
+                          const targetKey = raceAffiliation === 'club_affiliated' ? `${cat.id}_club` : cat.id;
+                          const catResult = resultsMap[targetKey];
+                          const isCompleted = catResult?.status === 'completed' || (catResult && catResult.podium && catResult.podium.length > 0 && catResult.status !== 'running');
+                          const isRunning = catResult?.status === 'running';
+
                           return (
                             <button
                               key={cat.id}
                               onClick={() => setSelectedRaceId(cat.id)}
-                              className={`p-2.5 rounded-xl text-right text-xs transition-all flex items-center justify-between border cursor-pointer ${
+                              className={`p-2.5 rounded-xl text-right text-xs transition-all flex items-center justify-between border cursor-pointer group ${
                                 isSelected
                                   ? 'bg-blue-600 border-blue-700 text-white font-black shadow-sm ring-2 ring-blue-400/40'
+                                  : isCompleted
+                                  ? 'bg-emerald-600 border-emerald-700 text-white shadow-md'
+                                  : isRunning
+                                  ? 'bg-emerald-500 border-emerald-400 text-white animate-pulse shadow-[0_0_10px_rgba(16,185,129,0.5)]'
                                   : 'bg-white hover:bg-slate-50 border-slate-200 text-slate-800'
                               }`}
                             >
                               <div className="flex items-center gap-2.5">
-                                <span className="text-xl shrink-0">{cat.icon}</span>
+                                <span className={`text-xl shrink-0 ${isCompleted || isRunning ? 'grayscale-0' : 'grayscale group-hover:grayscale-0 transition-all'}`}>{cat.icon}</span>
                                 <div>
-                                  <span className="block text-[11px] font-black">{cat.titleAr}</span>
-                                  <span className={`text-[9px] font-bold ${isSelected ? 'text-blue-100' : 'text-slate-500'}`}>
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="block text-[11px] font-black">{cat.titleAr}</span>
+                                    {isCompleted && (
+                                      <span className="inline-flex items-center gap-0.5 text-[9px] bg-white text-emerald-700 px-1.5 py-0.2 rounded-md font-bold shadow-xs">
+                                        <CheckCircle2 className="w-2.5 h-2.5" />
+                                        <span>مكتمل</span>
+                                      </span>
+                                    )}
+                                    {isRunning && (
+                                      <span className="inline-flex items-center gap-0.5 text-[9px] bg-white text-emerald-600 px-1.5 py-0.2 rounded-md font-bold animate-pulse">
+                                        <div className="w-1.5 h-1.5 rounded-full bg-emerald-600 animate-ping"></div>
+                                        <span>جارٍ...</span>
+                                      </span>
+                                    )}
+                                  </div>
+                                  <span className={`text-[9px] font-bold ${isSelected || isCompleted || isRunning ? 'text-white/80' : 'text-slate-500'}`}>
                                     مسافة: {cat.distance}
                                   </span>
                                 </div>
@@ -1251,7 +1549,7 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
 
                               <div className="flex items-center gap-2 shrink-0">
                                 <span className={`px-2 py-0.5 rounded-lg text-[10px] font-black flex items-center gap-1 ${
-                                  isSelected
+                                  isSelected || isCompleted || isRunning
                                     ? 'bg-white/20 text-white border border-white/30'
                                     : count > 0
                                     ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
@@ -1261,6 +1559,8 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
                                   <span className="text-[9px]">عداء(ة)</span>
                                 </span>
                                 {isSelected && <Check className="w-4 h-4 text-white" />}
+                                {!isSelected && isCompleted && <CheckCircle2 className="w-4 h-4 text-white" />}
+                                {!isSelected && isRunning && <Activity className="w-4 h-4 text-white animate-pulse" />}
                               </div>
                             </button>
                           );
@@ -1337,6 +1637,13 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
                 <span className="text-[10px] sm:text-xs font-bold text-slate-600 shrink-0 hidden xs:inline">السباق المفعل:</span>
                 <span className="px-2.5 py-1 bg-blue-600 text-white rounded-lg text-[10px] sm:text-xs font-black truncate flex-1 sm:flex-none">
                   {activeCategory.icon} {activeCategory.titleAr} ({activeCategory.distance})
+                </span>
+                <span className={`px-2.5 py-0.5 rounded-full text-[9px] sm:text-[10px] font-black whitespace-nowrap border shadow-xs ${
+                  raceAffiliation === 'club_affiliated'
+                    ? 'bg-amber-400 text-slate-950 border-amber-500 ring-1 ring-amber-300'
+                    : 'bg-white text-slate-800 border-slate-300'
+                }`}>
+                  {raceAffiliation === 'club_affiliated' ? '🟡 المنتمين للأندية' : '⚪ غير المنتمين (مدرسي)'}
                 </span>
                 <span className="px-2 py-0.5 rounded-full text-[9px] sm:text-[10px] bg-red-100 text-red-700 border border-red-200 font-extrabold animate-pulse whitespace-nowrap">
                   جارٍ 🏃‍♂️

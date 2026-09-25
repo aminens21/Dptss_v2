@@ -146,6 +146,8 @@ export interface Team {
   gender: 'Male' | 'Female' | 'Mixed';
   category: string;
   directorateId?: string;
+  isQualifiedRegional?: boolean;
+  isQualifiedNational?: boolean;
 }
 
 export interface Referee {
@@ -166,6 +168,11 @@ export interface Match {
   stage: string;
   team1Id: string;
   team2Id: string;
+  team1Name?: string;
+  team2Name?: string;
+  team1Score?: number;
+  team2Score?: number;
+  venueName?: string;
   ageCategory?: string;
   gender?: 'Male' | 'Female' | 'Mixed';
   date: any;
@@ -234,6 +241,9 @@ export interface Student {
   academyName?: string;
   bibNumber?: string | number;
   crossCountryBibNumber?: string | number;
+  isQualifiedRegional?: boolean;
+  isQualifiedNational?: boolean;
+  qualificationLevel?: 'provincial' | 'regional' | 'national';
 }
 
 export interface AppNotification {
@@ -260,13 +270,14 @@ export interface PodiumWinner {
   academyName?: string;
   supervisorName?: string;
   participationType?: string;
+  affiliationType?: 'non_club' | 'club_affiliated' | string; // صنف المشاركة: غير منتمين أو منتمين
   categoryId?: string; // معرف الفئة، مثل: 'u12_male' أو 'u12_female'
   categoryTitle?: string; // التسمية العربية للفئة، مثل: 'سباق البراعم ذكور'
   overallRank?: number; // الترتيب العام في السباق المشترك
 }
 
 export interface CrossCountryCategoryResult {
-  categoryId: string; // e.g. 'u12_male', 'u15_female'
+  categoryId: string; // e.g. 'u12_male', 'u15_female', 'u12_male_club'
   category: string; // 'U12' | 'U15' | 'U18' | 'U20'
   gender: 'Male' | 'Female';
   titleAr: string;
@@ -274,7 +285,9 @@ export interface CrossCountryCategoryResult {
   seasonId?: string;
   directorateId?: string;
   venueName?: string;
+  affiliationType?: 'non_club' | 'club_affiliated' | string; // صنف السباق: غير منتمين أو منتمين
   podium: PodiumWinner[];
+  status?: 'setup' | 'running' | 'summary' | 'completed';
   updatedAt?: any;
   updatedBy?: string;
 }

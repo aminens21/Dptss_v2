@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { DataService, SPORTS_MAP, getAgeCategoriesForSeason, deduplicateById, getCategoryGenderLabel, isClubTournament, normalizeCategoryKey, getTournamentLevelAr } from '../lib/dataService';
+import { DataService, SPORTS_MAP, getAgeCategoriesForSeason, deduplicateById, getCategoryGenderLabel, isClubTournament, normalizeCategoryKey, getTournamentLevelAr, isTeacherLevelAllowedForTournament } from '../lib/dataService';
 import { Tournament, User, Student, School, Sport, Match, Directorate } from '../types';
 import { CountdownTimer } from '../components/CountdownTimer';
 import * as XLSX from 'xlsx';
@@ -130,6 +130,46 @@ export const Tournaments: React.FC = () => {
   const isTechCommitteeHead = userProfile?.isTechCommitteeHead === true || currentTeacherProfile?.isTechCommitteeHead === true;
   const isTeacherRole = effectiveRole === 'TEACHER';
 
+  const canManageAllLevels = isCentralAdmin || userProfile?.isSuperAdmin || isSportManager || isTechCommitteeHead;
+  const userSchoolId = userProfile?.schoolId || currentTeacherProfile?.schoolId;
+  const userSchoolName = userProfile?.workLocation || currentTeacherProfile?.workLocation || userProfile?.schoolName;
+
+  const hasRegionalQualification = useMemo(() => {
+    const hasRegTournaments = tournaments.some(t => t.level === 'REGIONAL' || t.scope === 'REGIONAL');
+    if (hasRegTournaments) return true;
+    return allStudents.some(s => 
+      ((userSchoolId && s.schoolId === userSchoolId) || (userSchoolName && (s.schoolName === userSchoolName || s.schoolName?.trim() === userSchoolName?.trim()))) &&
+      (s.isQualifiedRegional || s.qualificationLevel === 'regional' || s.qualificationLevel === 'national' || s.isQualifiedNational)
+    );
+  }, [tournaments, allStudents, userSchoolId, userSchoolName]);
+
+  const hasNationalQualification = useMemo(() => {
+    const hasNatTournaments = tournaments.some(t => t.level === 'NATIONAL' || t.scope === 'NATIONAL');
+    if (hasNatTournaments) return true;
+    return allStudents.some(s => 
+      ((userSchoolId && s.schoolId === userSchoolId) || (userSchoolName && (s.schoolName === userSchoolName || s.schoolName?.trim() === userSchoolName?.trim()))) &&
+      (s.isQualifiedNational || s.qualificationLevel === 'national')
+    );
+  }, [tournaments, allStudents, userSchoolId, userSchoolName]);
+
+  useEffect(() => {
+    if (!loading) {
+      if (activeBranch === 'regional' && !hasRegionalQualification) {
+        toast.error('البطولة الجهوية تظهر فقط للمؤسسات والتلاميذ المتأهلين. لم يُسجل تأهل لمؤسستك بعد.', {
+          id: 'regional-lock-toast'
+        });
+        setActiveBranch('provincial');
+        setSearchParams({ tab: 'provincial' });
+      } else if (activeBranch === 'national' && !hasNationalQualification) {
+        toast.error('البطولة الوطنية تظهر فقط للمؤسسات والتلاميذ المتأهلين. لم يُسجل تأهل لمؤسستك بعد.', {
+          id: 'national-lock-toast'
+        });
+        setActiveBranch('provincial');
+        setSearchParams({ tab: 'provincial' });
+      }
+    }
+  }, [activeBranch, hasRegionalQualification, hasNationalQualification, loading, setSearchParams]);
+
   // Helper to format category for badges elegantly in Arabic
   const formatCategoryBadge = (catId: string, sportTournaments: Tournament[] = []) => {
     const norm = normalizeCategoryKey(catId);
@@ -216,9 +256,40 @@ export const Tournaments: React.FC = () => {
     const handleDirChange = () => {
       loadData();
     };
+
+    const unsubscribeTournaments = DataService.subscribeToTournaments(() => {
+      loadData();
+    });
+
+    const unsubscribeMatches = DataService.subscribeToMatches(() => {
+      loadData();
+    });
+
+    const unsubscribeSchools = DataService.subscribeToSchools(() => {
+      loadData();
+    });
+
+    const unsubscribeVenues = DataService.subscribeToVenues(() => {
+      loadData();
+    });
+
+    const unsubscribeStudents = DataService.subscribeToStudents(() => {
+      loadData();
+    });
+
+    const unsubscribeSportsConfig = DataService.subscribeToSportsConfig(() => {
+      loadData();
+    });
+
     window.addEventListener('directorateChanged', handleDirChange);
     return () => {
       window.removeEventListener('directorateChanged', handleDirChange);
+      if (unsubscribeTournaments) unsubscribeTournaments();
+      if (unsubscribeMatches) unsubscribeMatches();
+      if (unsubscribeSchools) unsubscribeSchools();
+      if (unsubscribeVenues) unsubscribeVenues();
+      if (unsubscribeStudents) unsubscribeStudents();
+      if (unsubscribeSportsConfig) unsubscribeSportsConfig();
     };
   }, []);
 
@@ -306,7 +377,7 @@ export const Tournaments: React.FC = () => {
           newSelectedCats, 
           undefined, 
           undefined, 
-          cleanBaseNameCreate && cleanBaseNameCreate.length >= 3 ? cleanBaseNameCreate : undefined, 
+          undefined, // Keep base sport discipline name intact
           undefined, 
           true
         );
@@ -395,7 +466,7 @@ export const Tournaments: React.FC = () => {
           newSelectedCats, 
           undefined, 
           undefined, 
-          cleanBaseNameEdit && cleanBaseNameEdit.length >= 3 ? cleanBaseNameEdit : undefined, 
+          undefined, // Keep base sport discipline name intact
           undefined, 
           true
         );
@@ -463,20 +534,31 @@ export const Tournaments: React.FC = () => {
 
   const handleGenerateCcMockData = async () => {
     const activeDirId = DataService.getActiveDirectorateId();
-    const loadToastId = toast.loading('جاري توليد 20 تلميذ وتلميذة لكل فئة من الفئات الثمانية للعدو الريفي... ⏳');
+    const loadToastId = toast.loading('جاري توليد معطيات العدو الريفي لـ 5 مؤسسات تعليمية (8 مشاركين لكل مؤسسة: 3 فردي و 5 فريق)... ⏳');
     try {
-      // 1. Ensure we have schools to link the students to
-      let targetSchools = [...schools];
-      if (targetSchools.length === 0) {
-        const mockSchoolsData: Omit<School, 'id'>[] = [
-          { name: 'مدرسة المسيرة الابتدائية', type: 'primary', directorateId: activeDirId, commune: 'تاوريرت', teacherName: 'أنس البقالي' },
-          { name: 'إعدادية طارق بن زياد', type: 'middle', directorateId: activeDirId, commune: 'تاوريرت', teacherName: 'خالد العلوي' },
-          { name: 'ثانوية علال الفاسي التأهيلية', type: 'high', directorateId: activeDirId, commune: 'تاوريرت', teacherName: 'ياسين الداودي' }
-        ];
-        const added = await DataService.addSchoolsBulk(mockSchoolsData);
-        targetSchools = added;
-        setSchools(added);
+      // 1. Define exactly 5 educational institutions to use for cross-country
+      const ccSchoolsData: Omit<School, 'id'>[] = [
+        { name: 'ثانوية الفتح التأهيلية', type: 'high', directorateId: activeDirId, commune: 'تاوريرت المركز', teacherName: 'ذ. عبد الرحيم بلقاسم' },
+        { name: 'ثانوية علال الفاسي التأهيلية', type: 'high', directorateId: activeDirId, commune: 'العيون سيدي ملوك', teacherName: 'ذ. رشيد الداودي' },
+        { name: 'إعدادية ابن سينا', type: 'middle', directorateId: activeDirId, commune: 'تاوريرت', teacherName: 'ذة. فاطمة الزهراء بنعلي' },
+        { name: 'إعدادية سيدي لحسن', type: 'middle', directorateId: activeDirId, commune: 'سيدي لحسن', teacherName: 'ذ. حميد بنعيسى' },
+        { name: 'مدرسة المسيرة الابتدائية', type: 'primary', directorateId: activeDirId, commune: 'تاوريرت', teacherName: 'ذ. يوسف المراكشي' }
+      ];
+
+      let currentSchools = await DataService.getSchools();
+      let targetSchools: School[] = [];
+
+      for (const mockSch of ccSchoolsData) {
+        const existing = currentSchools.find(s => s.name === mockSch.name && s.directorateId === activeDirId);
+        if (existing) {
+          targetSchools.push(existing);
+        } else {
+          const added = await DataService.addSchoolsBulk([mockSch]);
+          targetSchools.push(added[0]);
+          currentSchools.push(added[0]);
+        }
       }
+      setSchools(currentSchools);
 
       // 2. Define the 8 categories with their exact gender, category ID, correct birth date ranges and school type preferences
       const categoriesToGenerate = [
@@ -498,53 +580,49 @@ export const Tournaments: React.FC = () => {
       const newStudentsToCreate: any[] = [];
 
       for (const catConfig of categoriesToGenerate) {
-        // Generate exactly 20 students for this category
-        for (let i = 0; i < 20; i++) {
-          const isBoy = catConfig.gender === 'Male';
-          const randomFirst = isBoy 
-            ? boysNames[Math.floor(Math.random() * boysNames.length)] 
-            : girlsNames[Math.floor(Math.random() * girlsNames.length)];
-          const randomLast = lastNames[Math.floor(Math.random() * lastNames.length)];
-          const fullName = `${randomFirst} ${randomLast}`;
+        // Generate exactly 8 students for each of the 5 schools
+        for (const school of targetSchools) {
+          for (let i = 0; i < 8; i++) {
+            const isBoy = catConfig.gender === 'Male';
+            const randomFirst = isBoy 
+              ? boysNames[Math.floor(Math.random() * boysNames.length)] 
+              : girlsNames[Math.floor(Math.random() * girlsNames.length)];
+            const randomLast = lastNames[Math.floor(Math.random() * lastNames.length)];
+            const fullName = `${randomFirst} ${randomLast}`;
 
-          // Generate a valid year and a random birthdate
-          const birthYear = Math.floor(Math.random() * (catConfig.maxYear - catConfig.minYear + 1)) + catConfig.minYear;
-          const birthMonth = String(Math.floor(Math.random() * 12) + 1).padStart(2, '0');
-          const birthDay = String(Math.floor(Math.random() * 28) + 1).padStart(2, '0');
-          const birthDate = `${birthYear}-${birthMonth}-${birthDay}`;
+            // Generate a valid year and a random birthdate
+            const birthYear = Math.floor(Math.random() * (catConfig.maxYear - catConfig.minYear + 1)) + catConfig.minYear;
+            const birthMonth = String(Math.floor(Math.random() * 12) + 1).padStart(2, '0');
+            const birthDay = String(Math.floor(Math.random() * 28) + 1).padStart(2, '0');
+            const birthDate = `${birthYear}-${birthMonth}-${birthDay}`;
 
-          // MASSAR number G130000000
-          const massarLetter = 'GHJKLM'.charAt(Math.floor(Math.random() * 6));
-          const massarNum = String(Math.floor(100000000 + Math.random() * 900000000));
-          const massarNumber = `${massarLetter}${massarNum}`;
+            // MASSAR number G130000000
+            const massarLetter = 'GHJKLM'.charAt(Math.floor(Math.random() * 6));
+            const massarNum = String(Math.floor(100000000 + Math.random() * 900000000));
+            const massarNumber = `${massarLetter}${massarNum}`;
 
-          // Select a school matching the level/type or a random fallback school
-          const matchingSchools = targetSchools.filter(s => s.type === catConfig.schoolType);
-          const selectedSchool = matchingSchools.length > 0 
-            ? matchingSchools[Math.floor(Math.random() * matchingSchools.length)]
-            : targetSchools[Math.floor(Math.random() * targetSchools.length)];
+            // 3 فردي و 5 فريق المؤسسة
+            const participationType = i < 3 ? 'individual' : 'school_team';
+            const affiliationType = Math.random() < 0.1 ? 'club_affiliated' : 'non_club';
 
-          // Alternate affiliation and participation types for testing
-          const affiliationType = i % 10 === 0 ? 'club_affiliated' : 'non_club';
-          const participationType = i % 2 === 0 ? 'school_team' : 'individual';
-
-          newStudentsToCreate.push({
-            fullName,
-            massarNumber,
-            gender: catConfig.gender,
-            birthDate,
-            category: catConfig.category,
-            schoolId: selectedSchool.id,
-            schoolName: selectedSchool.name,
-            sportId: 'cross_country',
-            affiliationType,
-            participationType,
-            distance: catConfig.category === 'U12' ? '1500 م' : catConfig.category === 'U15' ? '2500 م' : catConfig.category === 'U18' ? '3500 م' : '5000 م',
-            coachName: isBoy ? 'أستاذ التربية البدنية ذكور' : 'أستاذة التربية البدنية إناث',
-            coachLeaseNumber: '9988' + String(10 + Math.floor(Math.random() * 90)),
-            coachPhone: '06' + String(10000000 + Math.floor(Math.random() * 90000000)),
-            directorateId: activeDirId
-          });
+            newStudentsToCreate.push({
+              fullName,
+              massarNumber,
+              gender: catConfig.gender,
+              birthDate,
+              category: catConfig.category,
+              schoolId: school.id,
+              schoolName: school.name,
+              sportId: 'cross_country',
+              affiliationType,
+              participationType,
+              distance: catConfig.category === 'U12' ? '1500 م' : catConfig.category === 'U15' ? '2500 م' : catConfig.category === 'U18' ? '3500 م' : '5000 م',
+              coachName: isBoy ? 'أستاذ التربية البدنية ذكور' : 'أستاذة التربية البدنية إناث',
+              coachLeaseNumber: '9988' + String(10 + Math.floor(Math.random() * 90)),
+              coachPhone: '06' + String(10000000 + Math.floor(Math.random() * 90000000)),
+              directorateId: activeDirId
+            });
+          }
         }
       }
 
@@ -555,7 +633,7 @@ export const Tournaments: React.FC = () => {
       setAllStudents(prev => [...addedStudents, ...prev]);
 
       toast.dismiss(loadToastId);
-      toast.success(`🎉 تم توليد وإضافة ${addedStudents.length} تلميذاً وتلميذة بنجاح وتوزيعهم بالتساوي (20 في كل فئة) على الفئات الثمانية للعدو الريفي!`);
+      toast.success(`🎉 تم توليد وإضافة ${addedStudents.length} تلميذاً وتلميذة بنجاح لـ 5 مؤسسات تعليمية (8 مشاركين لكل مؤسسة: 3 فردي و 5 فريق المؤسسة) للفئات الثمانية للعدو الريفي!`);
       
       // Trigger data reload to recalculate counts instantly
       await loadData();
@@ -646,15 +724,32 @@ export const Tournaments: React.FC = () => {
     const seasonalCats = getAgeCategoriesForSeason(activeSeason);
     const teacherSchoolName = userProfile?.workLocation;
 
+    let teacherCadre = userProfile?.teachingCadre || currentTeacherProfile?.teachingCadre;
+    if (isTeacherRole && !teacherCadre) {
+      const teacherSchoolId = userProfile?.schoolId || currentTeacherProfile?.schoolId;
+      const teacherSchoolName = userProfile?.schoolName || currentTeacherProfile?.schoolName;
+      const userSchool = schools.find(s => 
+        (teacherSchoolId && s.id === teacherSchoolId) || 
+        (teacherSchoolName && s.name === teacherSchoolName)
+      );
+      if (userSchool?.type) {
+        teacherCadre = userSchool.type;
+      }
+    }
+
     return sportsConfig.map(sport => {
-      const sportTournaments = tournaments.filter(t => t.sportId === sport.id);
+      let sportTournaments = tournaments.filter(t => t.sportId === sport.id);
+      const isManagerOfSport = canManageSport(sport.id);
+
+      // For teachers (non-admins), strictly filter tournaments to ONLY those allowed for their teaching cadre
+      if (isTeacherRole && !isManagerOfSport) {
+        sportTournaments = sportTournaments.filter(t => 
+          isTeacherLevelAllowedForTournament(teacherCadre, t.level)
+        );
+      }
       
-      // Determine if programmed
-      const isProgrammed = sportTournaments.length > 0
-        ? true
-        : (sport.isProgrammed !== undefined
-          ? sport.isProgrammed
-          : (sport.ageCategories && sport.ageCategories.length > 0 && sport.studentLimit !== undefined && sport.studentLimit > 0));
+      // Determine if programmed for this level
+      const isProgrammed = sportTournaments.length > 0;
 
       // Technical head
       const techHead = teachers.find(tch =>
@@ -664,11 +759,22 @@ export const Tournaments: React.FC = () => {
 
       // Categories list configured: prefer actual active tournament categories if present
       const tournCats = Array.from(new Set(sportTournaments.map(t => normalizeCategoryKey(t.ageCategory)).filter(Boolean)));
-      const categoriesList = (sportTournaments.length > 0 && tournCats.length > 0)
+      let categoriesList = (sportTournaments.length > 0 && tournCats.length > 0)
         ? tournCats
         : ((sport.ageCategories && sport.ageCategories.length > 0)
           ? sport.ageCategories.map(normalizeCategoryKey)
           : seasonalCats.map(c => c.id));
+
+      if (isTeacherRole && !isManagerOfSport && teacherCadre) {
+        const cadre = String(teacherCadre).toUpperCase();
+        categoriesList = categoriesList.filter(catId => {
+          const norm = normalizeCategoryKey(catId);
+          if (cadre.includes('PRIMARY') || cadre.includes('ابتدائي')) return norm === 'U12';
+          if (cadre.includes('MIDDLE') || cadre.includes('إعدادي')) return norm === 'U15';
+          if (cadre.includes('HIGH') || cadre.includes('SECONDARY') || cadre.includes('تأهيلي')) return norm === 'U18' || norm === 'U20';
+          return true;
+        });
+      }
 
       // Total students registered in this sport across all schools
       const registeredCount = allStudents.filter(s => s.sportId === sport.id).length;
@@ -692,7 +798,7 @@ export const Tournaments: React.FC = () => {
         isTeacherRole
       };
     });
-  }, [sportsConfig, tournaments, teachers, allStudents, activeSeason, effectiveRole, userProfile]);
+  }, [sportsConfig, tournaments, teachers, allStudents, activeSeason, effectiveRole, userProfile, currentTeacherProfile, isTeacherRole, schools]);
 
   // Filtered sports list (Always sorting programmed tournaments to the top)
   const filteredSports = useMemo(() => {
@@ -728,6 +834,57 @@ export const Tournaments: React.FC = () => {
   }, [sportsWithTournamentData, filterSport, filterStatus, search]);
 
   const handleOpenSportModal = (sport: Sport) => {
+    // 1. Get programmed tournaments for this sport
+    const sportTourns = tournaments.filter(t => 
+      t.sportId === sport.id &&
+      (!t.seasonId || t.seasonId === activeSeason) &&
+      (!t.directorateId || (t.directorateId || 'taourirt') === (activeDirObj?.id || 'taourirt'))
+    );
+
+    // 2. Strict Cadre restriction for Teachers
+    if (isTeacherRole) {
+      let teacherCadre = userProfile?.teachingCadre || currentTeacherProfile?.teachingCadre;
+      if (!teacherCadre) {
+        const teacherSchoolId = userProfile?.schoolId || currentTeacherProfile?.schoolId;
+        const teacherSchoolName = userProfile?.schoolName || currentTeacherProfile?.schoolName;
+        const userSchool = schools.find(s => 
+          (teacherSchoolId && s.id === teacherSchoolId) || 
+          (teacherSchoolName && s.name === teacherSchoolName)
+        );
+        if (userSchool?.type) {
+          teacherCadre = userSchool.type;
+        }
+      }
+
+      if (sportTourns.length > 0) {
+        const isAnyAllowed = sportTourns.some(t => 
+          isTeacherLevelAllowedForTournament(teacherCadre, t.level)
+        );
+
+        if (!isAnyAllowed) {
+          const levelsSet = new Set<string>();
+          sportTourns.forEach(t => {
+            if (t.level) {
+              t.level.split(',').forEach(l => levelsSet.add(l.trim()));
+            }
+          });
+          const allowedLevelsAr = getTournamentLevelAr(Array.from(levelsSet).join(','));
+
+          let cadreAr = 'السلك المسند لك';
+          const cleanCadre = String(teacherCadre || '').toUpperCase();
+          if (cleanCadre === 'PRIMARY' || cleanCadre.includes('ابتدائي')) cadreAr = 'التعليم الابتدائي';
+          else if (cleanCadre === 'MIDDLE' || cleanCadre.includes('إعدادي')) cadreAr = 'التعليم الإعدادي';
+          else if (cleanCadre === 'HIGH' || cleanCadre.includes('تأهيلي') || cleanCadre.includes('ثانوي')) cadreAr = 'التعليم الثانوي التأهيلي';
+
+          toast.error(
+            `عذراً، هذه البطولة (${sport.name}) مخصصة لـ (${allowedLevelsAr}) فقط.\nبصفتك أستاذ سلك (${cadreAr})، لا يمكنك الولوج لتسجيل الفرق والمشاركين فيها.`,
+            { duration: 6000, id: 'cadre-restriction-toast' }
+          );
+          return;
+        }
+      }
+    }
+
     setSelectedSportForModal(sport);
     setIsSportModalOpen(true);
   };
@@ -762,33 +919,58 @@ export const Tournaments: React.FC = () => {
               </p>
             </div>
 
-        <div className="flex flex-wrap items-center gap-2">
-          <button
-            onClick={() => setIsDemoDataModalOpen(true)}
-            className="inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 px-3.5 py-2 text-xs font-black text-white shadow-xs transition-all cursor-pointer hover:shadow-sm"
-            title="ملأ وتعبئة بيانات تجريبية لاختبار التطبيق"
-          >
-            <Sparkles className="h-4 w-4 text-emerald-200" />
-            <span>بيانات تجريبية للاختبار</span>
-          </button>
-          <button
-            onClick={() => setIsDrawModalOpen(true)}
-            className="inline-flex items-center justify-center gap-2 rounded-xl bg-amber-500 hover:bg-amber-600 px-3.5 py-2 text-xs font-bold text-white shadow-xs transition-colors cursor-pointer"
-          >
-            <Shuffle className="h-4 w-4" />
-            <span>القرعة وتحديد المواعيد</span>
-          </button>
-          {canCreate && (
-            <button
-              onClick={() => handleOpenProgramModal()}
-              className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-xs font-bold text-white shadow-xs hover:bg-blue-700 transition-colors cursor-pointer"
-            >
-              <Plus className="h-4 w-4" />
-              <span>إضافة / برمجة بطولة جديدة</span>
-            </button>
-          )}
-        </div>
-      </div>
+            {/* Level switcher pills (only shown if qualified or admin) */}
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0 shrink-0">
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveBranch('provincial');
+                  setSearchParams({ tab: 'provincial' });
+                }}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
+                  activeBranch === 'provincial'
+                    ? 'bg-blue-600 text-white shadow-xs'
+                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                }`}
+              >
+                🏆 البطولة الإقليمية
+              </button>
+
+              {hasRegionalQualification && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveBranch('regional');
+                    setSearchParams({ tab: 'regional' });
+                  }}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
+                    activeBranch === 'regional'
+                      ? 'bg-emerald-600 text-white shadow-xs'
+                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  }`}
+                >
+                  🏅 البطولة الجهوية
+                </button>
+              )}
+
+              {hasNationalQualification && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveBranch('national');
+                    setSearchParams({ tab: 'national' });
+                  }}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
+                    activeBranch === 'national'
+                      ? 'bg-amber-600 text-white shadow-xs'
+                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  }`}
+                >
+                  🥇 البطولة الوطنية
+                </button>
+              )}
+            </div>
+          </div>
 
       {/* Notice for Sport Managers */}
       {isSportManager && (
@@ -1040,11 +1222,11 @@ export const Tournaments: React.FC = () => {
                               e.stopPropagation();
                               handleGenerateCcMockData();
                             }}
-                            title="توليد 20 مشارك ومشاركة افتراضيين في كل فئة لتسهيل الاختبار"
+                            title="توليد معطيات لـ 5 مؤسسات تعليمية بـ 8 مشاركين (3 فردي و5 فريق) لكل فئة"
                             className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 text-[10px] font-black rounded-lg transition-all shadow-xs cursor-pointer select-none"
                             id="btn-generate-cc-mock"
                           >
-                            <span>⚡ توليد بيانات افتراضية (20/فئة)</span>
+                            <span>⚡ توليد بيانات العدو الريفي (8 مشاركين/مؤسسة)</span>
                           </button>
                         </div>
                       )}

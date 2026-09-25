@@ -697,15 +697,6 @@ export const CrossCountryChampionshipModal: React.FC<CrossCountryChampionshipMod
                   <Sparkles className="w-4 h-4 text-slate-950" />
                   <span>تسجيل 8 مشاركين (3 فردي + 5 فريق) ⚡</span>
                 </button>
-                <button
-                  type="button"
-                  onClick={() => setIsRegisterModalOpen(true)}
-                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black shadow-xs transition-all cursor-pointer flex items-center gap-2 hover:scale-102 active:scale-98"
-                  title="تسجيل تلميذ مشارك بشكل منفرد"
-                >
-                  <GraduationCap className="w-4 h-4" />
-                  <span>تسجيل واحد تلو الآخر</span>
-                </button>
               </div>
             </div>
           </div>
@@ -995,16 +986,6 @@ export const CrossCountryChampionshipModal: React.FC<CrossCountryChampionshipMod
                                         </button>
                                       </>
                                     )}
-                                    {runner.participationType === 'individual' && (
-                                      <button
-                                        type="button"
-                                        onClick={() => downloadIndividualCardPdf(runner, { id: 'cross_country', name: 'العدو الريفي' }, activeSeason)}
-                                        className="p-1.5 text-emerald-600 bg-emerald-50 hover:bg-emerald-100 rounded-lg transition-colors cursor-pointer inline-flex items-center"
-                                        title="تحميل بطاقة المشارك الفردية"
-                                      >
-                                        <CreditCard className="h-4 w-4" />
-                                      </button>
-                                    )}
                                   </div>
                                 </td>
                               </tr>
@@ -1110,15 +1091,6 @@ export const CrossCountryChampionshipModal: React.FC<CrossCountryChampionshipMod
                                     </button>
                                   </>
                                 )}
-                                <button
-                                  type="button"
-                                  onClick={() => downloadIndividualCardPdf(runner, { id: 'cross_country', name: 'العدو الريفي' }, activeSeason)}
-                                  className="flex items-center gap-1.5 px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-[10px] font-extrabold transition-colors cursor-pointer"
-                                  title="تحميل بطاقة المشارك"
-                                >
-                                  <Download className="h-3 w-3" />
-                                  <span>بطاقة</span>
-                                </button>
                               </div>
                             </div>
                           </div>

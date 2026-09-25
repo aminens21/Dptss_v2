@@ -1456,7 +1456,7 @@ export const SportsConfig: React.FC = () => {
                 : 'text-slate-600 hover:text-slate-900'
             }`}
           >
-            جميع البطولات ({visibleSportsList.length})
+            جميع التخصصات الرياضية ({visibleSportsList.length})
           </button>
           <button
             type="button"
@@ -1491,7 +1491,7 @@ export const SportsConfig: React.FC = () => {
         <div>
           <p className="font-bold text-amber-950">ملاحظة تنظيمية هامة للمسير ورؤساء اللجن التقنية:</p>
           <p className="mt-0.5 text-amber-800 leading-normal">
-            من هذه الشاشة، يمكنك التبديل المباشر لوضعية أي رياضة بين <strong>"🟢 مبرمجة ومفتوحة للتسجيل"</strong> أو <strong>"⚪ في طور الإعداد"</strong>. عند اختيار "في طور الإعداد"، تظهر البطولة رمادية في المنصة حتى يتم اعتمادها وبرمجتها رسمياً.
+            من هذه الشاشة، يمكنك التبديل المباشر لوضعية أي تخصص رياضي بين <strong>"🟢 مبرمجة ومفتوحة للتسجيل"</strong> أو <strong>"⚪ في طور الإعداد"</strong>. عند اختيار "في طور الإعداد"، يظهر التخصص رمادياً في المنصة حتى يتم برنامجه واعتماده رسمياً.
           </p>
         </div>
       </div>
@@ -1592,7 +1592,7 @@ export const SportsConfig: React.FC = () => {
 
                     {/* STATUS SWITCHER TOGGLE BUTTONS */}
                     <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2 bg-slate-50 p-1.5 rounded-2xl border border-slate-200">
-                      <span className="text-[11px] font-bold text-slate-500 px-2">وضع البطولة:</span>
+                      <span className="text-[11px] font-bold text-slate-500 px-2">وضع التخصص الرياضي:</span>
                       <div className="flex items-center gap-1 w-full sm:w-auto">
                         <button
                           type="button"

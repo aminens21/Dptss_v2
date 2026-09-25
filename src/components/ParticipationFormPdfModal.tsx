@@ -265,7 +265,7 @@ export const ParticipationFormPdfModal: React.FC<ParticipationFormPdfModalProps>
 
   const getCategoryLabel = (catId: string) => {
     if (catId === 'ALL') return 'جميع الفئات';
-    return getCategoryGenderLabel(catId, selectedGender === 'ALL' ? undefined : selectedGender);
+    return getCategoryGenderLabel(catId, selectedGender === 'ALL' ? undefined : selectedGender, season, sport.id);
   };
 
   const getGenderLabel = (g: string) => {
@@ -330,12 +330,12 @@ export const ParticipationFormPdfModal: React.FC<ParticipationFormPdfModalProps>
   }
 
   return (
-    <div className="fixed inset-0 z-[150] overflow-y-auto bg-slate-900/70 backdrop-blur-xs" dir="rtl">
+    <div className="fixed inset-0 z-[150] overflow-y-auto bg-slate-950/80 backdrop-blur-sm" dir="rtl">
       <div className="min-h-full flex items-center justify-center p-2 sm:p-4 text-right">
-        <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-4xl w-full flex flex-col animate-in fade-in zoom-in-95 duration-150 relative">
+        <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 max-w-4xl w-full flex flex-col animate-in fade-in zoom-in-95 duration-150 relative overflow-hidden transition-colors">
           
           {/* Modal Header */}
-          <div className="p-4 bg-gradient-to-r from-sky-800 via-sky-700 to-sky-900 text-white flex items-center justify-between border-b border-sky-600/50 shrink-0 rounded-t-2xl">
+          <div className="p-4 bg-gradient-to-r from-sky-800 via-sky-700 to-sky-900 text-white flex items-center justify-between border-b border-sky-600/50 shrink-0">
           <div className="flex items-center gap-2.5">
             <div className="w-9 h-9 rounded-xl bg-white/10 flex items-center justify-center text-xl shadow-inner">
               📄
@@ -365,13 +365,13 @@ export const ParticipationFormPdfModal: React.FC<ParticipationFormPdfModalProps>
         </div>
 
         {/* Filter Controls Bar */}
-        <div className="p-3 bg-slate-50 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3 text-xs shrink-0">
+        <div className="p-3 bg-slate-50 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-700 flex flex-wrap items-center justify-between gap-3 text-xs shrink-0">
           <div className="flex flex-wrap items-center gap-3">
             {/* Category Filter */}
             <div className="flex items-center gap-1.5">
-              <span className="font-bold text-slate-600">الفئة العمرية:</span>
+              <span className="font-bold text-slate-600 dark:text-slate-400">الفئة العمرية:</span>
               <select
-                className="px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-700 shadow-3xs"
+                className="px-2.5 py-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-xs font-bold text-slate-700 dark:text-slate-200 shadow-3xs"
                 value={selectedCategory}
                 onChange={(e) => setSelectedCategory(e.target.value)}
               >
@@ -389,9 +389,9 @@ export const ParticipationFormPdfModal: React.FC<ParticipationFormPdfModalProps>
 
             {/* Gender Filter */}
             <div className="flex items-center gap-1.5">
-              <span className="font-bold text-slate-600">الجنس:</span>
+              <span className="font-bold text-slate-600 dark:text-slate-400">الجنس:</span>
               <select
-                className="px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-700 shadow-3xs"
+                className="px-2.5 py-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-xs font-bold text-slate-700 dark:text-slate-200 shadow-3xs"
                 value={selectedGender}
                 onChange={(e) => setSelectedGender(e.target.value as any)}
               >
@@ -403,9 +403,9 @@ export const ParticipationFormPdfModal: React.FC<ParticipationFormPdfModalProps>
 
             {/* Affiliation Filter */}
             <div className="flex items-center gap-1.5">
-              <span className="font-bold text-slate-600">الانتماء:</span>
+              <span className="font-bold text-slate-600 dark:text-slate-400">الانتماء:</span>
               <select
-                className="px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-700 shadow-3xs"
+                className="px-2.5 py-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-xs font-bold text-slate-700 dark:text-slate-200 shadow-3xs"
                 value={selectedAffiliation}
                 onChange={(e) => setSelectedAffiliation(e.target.value as any)}
               >
@@ -418,9 +418,9 @@ export const ParticipationFormPdfModal: React.FC<ParticipationFormPdfModalProps>
             {/* Coach Filter */}
             {availableCoaches.length > 0 && (
               <div className="flex items-center gap-1.5">
-                <span className="font-bold text-slate-600">الأستاذ المؤطر:</span>
+                <span className="font-bold text-slate-600 dark:text-slate-400">الأستاذ المؤطر:</span>
                 <select
-                  className="px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-700 shadow-3xs"
+                  className="px-2.5 py-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-xs font-bold text-slate-700 dark:text-slate-200 shadow-3xs"
                   value={selectedCoachFilter}
                   onChange={(e) => handleCoachFilterChange(e.target.value)}
                 >
@@ -439,77 +439,67 @@ export const ParticipationFormPdfModal: React.FC<ParticipationFormPdfModalProps>
           </div>
 
           <div className="flex items-center gap-2">
-            <span className="text-[11px] font-bold text-slate-500 bg-white px-2.5 py-1 rounded-lg border border-slate-200">
-              عدد المشاركين المحددين: <strong className="text-sky-700">{filteredStudents.length}</strong>
+            <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 bg-white dark:bg-slate-900 px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700">
+              عدد المشاركين المحددين: <strong className="text-sky-700 dark:text-sky-400">{filteredStudents.length}</strong>
             </span>
           </div>
         </div>
 
         {/* Dynamic Coach Editor Bar */}
-        <div className="p-3 bg-blue-50/70 border-b border-slate-200/80 flex flex-wrap items-center justify-between gap-3 text-xs shrink-0">
+        <div className="p-3 bg-blue-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700 flex flex-wrap items-center justify-between gap-3 text-xs shrink-0">
           <div className="flex items-center gap-1.5">
             <span className="text-base">👨‍🏫</span>
-            <span className="font-black text-slate-800">بيانات المؤطر على المطبوع:</span>
+            <span className="font-black text-slate-800 dark:text-slate-100">بيانات المؤطر على المطبوع:</span>
           </div>
           
           <div className="flex flex-wrap items-center gap-2.5 flex-1">
             <div className="flex items-center gap-1">
-              <span className="font-bold text-slate-600">الاسم:</span>
+              <span className="font-bold text-slate-600 dark:text-slate-400">الاسم:</span>
               <input
                 type="text"
                 placeholder="اسم المؤطر"
-                className="px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-800 w-36 sm:w-44 focus:ring-1 focus:ring-blue-500"
+                className="px-2.5 py-1.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-xs font-bold text-slate-800 dark:text-slate-100 w-36 sm:w-44 focus:ring-1 focus:ring-blue-500"
                 value={localCoachName}
                 onChange={(e) => setLocalCoachName(e.target.value)}
               />
             </div>
 
             <div className="flex items-center gap-1">
-              <span className="font-bold text-slate-600">رقم التأجير:</span>
+              <span className="font-bold text-slate-600 dark:text-slate-400">رقم التأجير:</span>
               <input
                 type="text"
                 placeholder="رقم التأجير"
-                className="px-2 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-800 w-28 font-mono focus:ring-1 focus:ring-blue-500"
+                className="px-2 py-1.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-xs font-bold text-slate-800 dark:text-slate-100 w-28 font-mono focus:ring-1 focus:ring-blue-500"
                 value={localCoachLease}
                 onChange={(e) => setLocalCoachLease(e.target.value)}
               />
             </div>
 
             <div className="flex items-center gap-1">
-              <span className="font-bold text-slate-600">الهاتف:</span>
+              <span className="font-bold text-slate-600 dark:text-slate-400">الهاتف:</span>
               <input
                 type="text"
                 placeholder="رقم الهاتف"
-                className="px-2 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-800 w-28 font-mono focus:ring-1 focus:ring-blue-500"
+                className="px-2 py-1.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-xs font-bold text-slate-800 dark:text-slate-100 w-28 font-mono focus:ring-1 focus:ring-blue-500"
                 value={localCoachPhone}
                 onChange={(e) => setLocalCoachPhone(e.target.value)}
               />
             </div>
 
             {/* Coach Photo Inline Upload/Preview */}
-            <div className="flex items-center gap-1.5 bg-white px-2 py-1 rounded-lg border border-slate-200">
-              <div className="w-6 h-7 rounded border border-slate-300 overflow-hidden bg-slate-50 flex items-center justify-center shrink-0">
+            <div className="flex items-center gap-1.5 bg-white dark:bg-slate-800 px-2 py-1 rounded-lg border border-slate-200 dark:border-slate-700">
+              <div className="w-6 h-7 rounded border border-slate-300 dark:border-slate-600 overflow-hidden bg-slate-50 dark:bg-slate-900 flex items-center justify-center shrink-0">
                 {effectiveCoachPhoto ? (
                   <img src={effectiveCoachPhoto} alt="Coach" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
                 ) : (
                   <span className="text-[9px] text-slate-400">👤</span>
                 )}
               </div>
-              <label className="text-[10px] font-bold text-sky-700 hover:text-sky-800 bg-sky-50 hover:bg-sky-100 px-2 py-1 rounded border border-sky-200 cursor-pointer flex items-center gap-1 transition-colors">
+              <label className="text-[10px] font-bold text-sky-700 dark:text-sky-400 hover:text-sky-800 dark:hover:text-sky-300 bg-sky-50 dark:bg-sky-900/30 px-2 py-1 rounded border border-sky-200 dark:border-sky-800 cursor-pointer flex items-center gap-1 transition-colors">
                 <Camera className="w-3 h-3" />
                 <span>{isCompressingPhoto ? '...' : effectiveCoachPhoto ? 'تغيير الصورة' : 'إضافة صورة المؤطر'}</span>
                 <input type="file" accept="image/*" className="hidden" onChange={handleCoachPhotoChange} disabled={isCompressingPhoto} />
               </label>
-              {localCoachPhoto && (
-                <button
-                  type="button"
-                  onClick={() => setLocalCoachPhoto('')}
-                  className="text-[10px] text-red-600 hover:text-red-700 font-bold px-1"
-                  title="استعادة الصورة الأصلية"
-                >
-                  إلغاء
-                </button>
-              )}
             </div>
 
             <button
@@ -558,18 +548,18 @@ export const ParticipationFormPdfModal: React.FC<ParticipationFormPdfModalProps>
         </div>
 
         {/* Zoom Controls Stage */}
-        <div className="bg-slate-200/60 border-y border-slate-300 flex items-center justify-center gap-4 py-2 px-4 shadow-inner shrink-0">
+        <div className="bg-slate-200/60 dark:bg-slate-800 border-y border-slate-300 dark:border-slate-700 flex items-center justify-center gap-4 py-2 px-4 shadow-inner shrink-0">
           <button 
             onClick={() => setZoomLevel(prev => Math.min(prev + 0.1, 1.5))} 
-            className="p-1.5 bg-white border border-slate-300 rounded-md hover:bg-slate-50 text-slate-700 shadow-sm transition-colors cursor-pointer"
+            className="p-1.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-md hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 shadow-sm transition-colors cursor-pointer"
             title="تكبير"
           >
             <ZoomIn className="w-4 h-4" />
           </button>
-          <span className="text-xs font-bold text-slate-700 w-12 text-center" dir="ltr">{Math.round(zoomLevel * 100)}%</span>
+          <span className="text-xs font-bold text-slate-700 dark:text-slate-300 w-12 text-center" dir="ltr">{Math.round(zoomLevel * 100)}%</span>
           <button 
             onClick={() => setZoomLevel(prev => Math.max(prev - 0.1, 0.4))} 
-            className="p-1.5 bg-white border border-slate-300 rounded-md hover:bg-slate-50 text-slate-700 shadow-sm transition-colors cursor-pointer"
+            className="p-1.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-md hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 shadow-sm transition-colors cursor-pointer"
             title="تصغير"
           >
             <ZoomOut className="w-4 h-4" />
@@ -577,7 +567,7 @@ export const ParticipationFormPdfModal: React.FC<ParticipationFormPdfModalProps>
         </div>
 
         {/* Document Preview Stage */}
-        <div className="p-2 sm:p-6 bg-slate-100/60 w-full overflow-x-auto flex justify-center">
+        <div className="p-2 sm:p-6 bg-slate-100/60 dark:bg-slate-950 w-full overflow-x-auto flex justify-center">
           <div
             ref={printAreaRef}
             className="bg-white min-w-[700px] max-w-[780px] p-6 sm:p-8 rounded-xl shadow-md border border-slate-200/90 text-slate-900 select-text origin-top"
@@ -656,7 +646,10 @@ export const ParticipationFormPdfModal: React.FC<ParticipationFormPdfModalProps>
                   الفئة العمرية والجنس:
                 </div>
                 <div className="col-span-3 bg-white p-1.5 font-bold text-slate-900">
-                  {getCategoryLabel(selectedCategory)} - {getGenderLabel(selectedGender)}
+                  {selectedCategory === 'ALL'
+                    ? `${getCategoryLabel(selectedCategory)} - ${getGenderLabel(selectedGender)}`
+                    : getCategoryLabel(selectedCategory)
+                  }
                 </div>
               </div>
               <div className="grid grid-cols-12">
@@ -718,7 +711,7 @@ export const ParticipationFormPdfModal: React.FC<ParticipationFormPdfModalProps>
                     <th className="p-1.5 border-l border-sky-500 w-28">رقم مسار</th>
                     <th className="p-1.5 border-l border-sky-500">الاسم والنسب</th>
                     <th className="p-1.5 border-l border-sky-500 w-24">تاريخ الازدياد</th>
-                    <th className="p-1.5 border-l border-sky-500 w-20">الفئة العمرية</th>
+                    <th className="p-1.5 border-l border-sky-500 w-32">الفئة العمرية (التاريخ)</th>
                     <th className="p-1.5 border-l border-sky-500 w-28">صنف المشاركة</th>
                     <th className="p-1.5 border-l border-sky-500">المؤسسة</th>
                     <th className="p-1.5 w-12">الصورة</th>
@@ -736,7 +729,9 @@ export const ParticipationFormPdfModal: React.FC<ParticipationFormPdfModalProps>
                           </td>
                           <td className="p-1.5 font-bold text-slate-900 text-center border-l border-slate-200">{st.fullName}</td>
                           <td className="p-1.5 font-mono text-slate-700 border-l border-slate-200">{st.birthDate}</td>
-                          <td className="p-1.5 font-bold text-slate-900 border-l border-slate-200">{st.category}</td>
+                          <td className="p-1.5 font-bold text-slate-900 border-l border-slate-200">
+                            {getCategoryGenderLabel(st.category, st.gender, season, sport.id)}
+                          </td>
                           <td className="p-1.5 font-bold text-slate-700 text-center border-l border-slate-200">
                             {st.affiliationType === 'club_affiliated' ? 'للمنتمين للأندية' : 'لا منتمين'}
                           </td>

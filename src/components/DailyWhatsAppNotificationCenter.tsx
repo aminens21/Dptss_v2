@@ -36,6 +36,7 @@ import {
   Eye,
   RefreshCw,
   Edit3,
+  BellRing,
   CheckCircle2,
   XCircle,
   Play,
@@ -849,34 +850,14 @@ export const DailyWhatsAppNotificationCenter: React.FC<DailyWhatsAppNotification
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pl-10">
             <div className="flex items-start gap-3">
               <div className="w-12 h-12 rounded-xl bg-emerald-500/20 border border-emerald-400/40 flex items-center justify-center shrink-0 text-emerald-300 shadow-xs">
-                <Zap className="w-6 h-6 text-amber-300 fill-amber-300" />
+                <BellRing className="w-6 h-6 text-emerald-400" />
               </div>
               <div>
-                <div className="flex flex-wrap items-center gap-2 mb-1">
-                  <span className="bg-emerald-500 text-slate-950 text-[10px] font-black px-2.5 py-0.5 rounded-full uppercase tracking-wider flex items-center gap-1 shadow-xs">
-                    <Zap className="w-3 h-3 fill-slate-950" />
-                    إرسال الإشعار الموحد بنقرة واحدة ⚡
-                  </span>
-                  {isTechCommitteeHead && (
-                    <span className="bg-amber-400/90 text-slate-950 text-[10px] font-black px-2.5 py-0.5 rounded-full flex items-center gap-1">
-                      <ShieldCheck className="w-3 h-3" />
-                      رئيس اللجنة التقنية: {authorizedSportsNames}
-                    </span>
-                  )}
-                  {isSportManager && (
-                    <span className="bg-blue-400/90 text-slate-950 text-[10px] font-black px-2.5 py-0.5 rounded-full flex items-center gap-1">
-                      <ShieldCheck className="w-3 h-3" />
-                      مسؤول رياضة: {authorizedSportsNames}
-                    </span>
-                  )}
-                </div>
                 <h3 className="text-base md:text-lg font-bold text-white">
-                  مركز الإشعارات اليومية والتذكير الموحد عبر الواتساب
+                  مركز الإشعارات اليومية والتذكير الفردي عبر الواتساب
                 </h3>
                 <p className="text-xs text-emerald-100/80 mt-1 max-w-2xl leading-relaxed">
-                  {isTechCommitteeHead || isSportManager
-                    ? `بصفتك مسؤولاً عن (${authorizedSportsNames})، يمكنك إرسال الإشعار الموحد بنقرة واحدة لجميع المعنيين برياضتك (المؤطران، الحكام، المدراء).`
-                    : 'إرسال الإشعار الموحد لكافة المعنيين (المؤطران، الحكام، ومدراء المؤسستين) بنقرة واحدة ومباشرة مع التحيين اللحظي لأرقام الهواتف.'}
+                  يمكنك إرسال إشعارات تذكيرية فردية لكل طرف معني بالمقابلة (الأستاذ، الحكم، أو المدير) مباشرة وبسهولة.
                 </p>
               </div>
             </div>
@@ -893,19 +874,6 @@ export const DailyWhatsAppNotificationCenter: React.FC<DailyWhatsAppNotification
               <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin text-emerald-300' : ''}`} />
               <span>{isRefreshing ? 'جاري التحيين...' : 'تحيين الأرقام'}</span>
             </button>
-
-            {/* Global Day Broadcast Trigger - Only for Tech Committee Heads, Regional Managers, or Central Admin */}
-            {canSendNotifications && (
-              <button
-                type="button"
-                onClick={() => setIsGlobalBroadcastOpen(true)}
-                className="bg-amber-400 hover:bg-amber-300 active:scale-95 text-slate-950 font-black px-3.5 py-2 rounded-xl text-xs flex items-center gap-1.5 shadow-md transition-all cursor-pointer"
-                title="إشعار جماعي موحد لكافة مباريات اليوم"
-              >
-                <Zap className="w-4 h-4 fill-slate-950" />
-                <span>إشعار جماعي لليوم ({tabCounts.today})</span>
-              </button>
-            )}
           </div>
         </div>
 
@@ -1096,24 +1064,6 @@ export const DailyWhatsAppNotificationCenter: React.FC<DailyWhatsAppNotification
 
                   {/* Primary Action: ONE-CLICK UNIFIED BROADCAST BUTTON */}
                   <div className="flex flex-wrap items-center gap-2 self-start md:self-auto">
-                    {canSendNotifications ? (
-                      <button
-                        type="button"
-                        onClick={() => handleOneClickUnifiedBroadcast(item)}
-                        disabled={isBroadcastingThis}
-                        className="px-3.5 py-2 bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 hover:from-emerald-700 hover:to-teal-800 active:scale-95 text-white text-xs font-black rounded-xl shadow-md flex items-center gap-2 transition-all cursor-pointer"
-                        title="إرسال الإشعار الموحد لجميع المعنيين (المؤطران، الحكام، المدراء) بنقرة واحدة"
-                      >
-                        <Zap className={`w-4 h-4 fill-amber-300 text-amber-300 ${isBroadcastingThis ? 'animate-bounce' : ''}`} />
-                        <span>إرسال موحد لجميع المعنيين ({registeredCount} أطراف) ⚡</span>
-                      </button>
-                    ) : (
-                      <div className="px-3 py-1.5 bg-slate-100 text-slate-500 text-xs font-semibold rounded-xl flex items-center gap-1.5 border border-slate-200">
-                        <Lock className="w-3.5 h-3.5 text-slate-400" />
-                        <span>للاطلاع (الإرسال مقتصر على اللجن والمسؤولين)</span>
-                      </div>
-                    )}
-
                     <button
                       type="button"
                       onClick={() => setSelectedMatchForBroadcast(item)}
@@ -1233,64 +1183,21 @@ export const DailyWhatsAppNotificationCenter: React.FC<DailyWhatsAppNotification
 
                       <div className="pt-2 border-t border-emerald-200/50 flex flex-col gap-1.5">
                         {canSendNotifications ? (
-                          <>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                if (!item.teacher1.phone) {
-                                  toast.error(`رقم هاتف أستاذ ${item.team1Name} غير مسجل`);
-                                  return;
-                                }
-                                openWhatsApp(item.teacher1.phone, unifiedMsg);
-                                setDispatchedIds((prev) => new Set(prev).add(`t1-${m.id}`));
-                              }}
-                              className="w-full bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white py-1.5 px-2.5 rounded-lg text-[11px] font-bold flex items-center justify-center gap-1.5 transition-all shadow-xs cursor-pointer"
-                            >
-                              <Send className="w-3 h-3" />
-                              <span>واتساب مؤطر 1</span>
-                            </button>
-
-                            <button
-                              type="button"
-                              onClick={() => {
-                                const teacherQueueItems = [
-                                  {
-                                    id: `t1-${m.id}`,
-                                    recipientName: item.teacher1.fullName,
-                                    roleLabel: `مؤطر ${item.team1Name}`,
-                                    phone: item.teacher1.phone || '',
-                                    text: unifiedMsg,
-                                    roleType: 'teacher1' as const,
-                                    schoolId: item.school1?.id,
-                                    schoolName: item.team1Name,
-                                    userId: item.teacher1.userId
-                                  },
-                                  {
-                                    id: `t2-${m.id}`,
-                                    recipientName: item.teacher2.fullName,
-                                    roleLabel: `مؤطر ${item.team2Name}`,
-                                    phone: item.teacher2.phone || '',
-                                    text: unifiedMsg,
-                                    roleType: 'teacher2' as const,
-                                    schoolId: item.school2?.id,
-                                    schoolName: item.team2Name,
-                                    userId: item.teacher2.userId
-                                  }
-                                ];
-
-                                setActiveBroadcastQueue({
-                                  title: `بث الإشعار الموحد للمؤطرين: ${item.team1Name} ضد ${item.team2Name}`,
-                                  items: teacherQueueItems,
-                                  currentIndex: 0,
-                                  matchSportId: item.sportId
-                                });
-                              }}
-                              className="w-full bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 active:scale-95 text-white py-1 px-2 rounded-lg text-[10px] font-black flex items-center justify-center gap-1 transition-all shadow-xs cursor-pointer"
-                            >
-                              <Zap className="w-2.5 h-2.5 fill-white shrink-0" />
-                              <span>بث للمؤطرين معاً ⚡</span>
-                            </button>
-                          </>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (!item.teacher1.phone) {
+                                toast.error(`رقم هاتف أستاذ ${item.team1Name} غير مسجل`);
+                                return;
+                              }
+                              openWhatsApp(item.teacher1.phone, unifiedMsg);
+                              setDispatchedIds((prev) => new Set(prev).add(`t1-${m.id}`));
+                            }}
+                            className="w-full bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white py-1.5 px-2.5 rounded-lg text-[11px] font-bold flex items-center justify-center gap-1.5 transition-all shadow-xs cursor-pointer"
+                          >
+                            <Send className="w-3 h-3" />
+                            <span>واتساب مؤطر 1</span>
+                          </button>
                         ) : (
                           <span className="text-[10px] text-slate-500 font-medium py-1">مؤطر معتمد للفريق الأول</span>
                         )}
@@ -1333,64 +1240,21 @@ export const DailyWhatsAppNotificationCenter: React.FC<DailyWhatsAppNotification
 
                       <div className="pt-2 border-t border-emerald-200/50 flex flex-col gap-1.5">
                         {canSendNotifications ? (
-                          <>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                if (!item.teacher2.phone) {
-                                  toast.error(`رقم هاتف أستاذ ${item.team2Name} غير مسجل`);
-                                  return;
-                                }
-                                openWhatsApp(item.teacher2.phone, unifiedMsg);
-                                setDispatchedIds((prev) => new Set(prev).add(`t2-${m.id}`));
-                              }}
-                              className="w-full bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white py-1.5 px-2.5 rounded-lg text-[11px] font-bold flex items-center justify-center gap-1.5 transition-all shadow-xs cursor-pointer"
-                            >
-                              <Send className="w-3 h-3" />
-                              <span>واتساب مؤطر 2</span>
-                            </button>
-
-                            <button
-                              type="button"
-                              onClick={() => {
-                                const teacherQueueItems = [
-                                  {
-                                    id: `t1-${m.id}`,
-                                    recipientName: item.teacher1.fullName,
-                                    roleLabel: `مؤطر ${item.team1Name}`,
-                                    phone: item.teacher1.phone || '',
-                                    text: unifiedMsg,
-                                    roleType: 'teacher1' as const,
-                                    schoolId: item.school1?.id,
-                                    schoolName: item.team1Name,
-                                    userId: item.teacher1.userId
-                                  },
-                                  {
-                                    id: `t2-${m.id}`,
-                                    recipientName: item.teacher2.fullName,
-                                    roleLabel: `مؤطر ${item.team2Name}`,
-                                    phone: item.teacher2.phone || '',
-                                    text: unifiedMsg,
-                                    roleType: 'teacher2' as const,
-                                    schoolId: item.school2?.id,
-                                    schoolName: item.team2Name,
-                                    userId: item.teacher2.userId
-                                  }
-                                ];
-
-                                setActiveBroadcastQueue({
-                                  title: `بث الإشعار الموحد للمؤطرين: ${item.team1Name} ضد ${item.team2Name}`,
-                                  items: teacherQueueItems,
-                                  currentIndex: 0,
-                                  matchSportId: item.sportId
-                                });
-                              }}
-                              className="w-full bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 active:scale-95 text-white py-1 px-2 rounded-lg text-[10px] font-black flex items-center justify-center gap-1 transition-all shadow-xs cursor-pointer"
-                            >
-                              <Zap className="w-2.5 h-2.5 fill-white shrink-0" />
-                              <span>بث للمؤطرين معاً ⚡</span>
-                            </button>
-                          </>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (!item.teacher2.phone) {
+                                toast.error(`رقم هاتف أستاذ ${item.team2Name} غير مسجل`);
+                                return;
+                              }
+                              openWhatsApp(item.teacher2.phone, unifiedMsg);
+                              setDispatchedIds((prev) => new Set(prev).add(`t2-${m.id}`));
+                            }}
+                            className="w-full bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white py-1.5 px-2.5 rounded-lg text-[11px] font-bold flex items-center justify-center gap-1.5 transition-all shadow-xs cursor-pointer"
+                          >
+                            <Send className="w-3 h-3" />
+                            <span>واتساب مؤطر 2</span>
+                          </button>
                         ) : (
                           <span className="text-[10px] text-slate-500 font-medium py-1">مؤطر معتمد للفريق الثاني</span>
                         )}
@@ -1448,35 +1312,6 @@ export const DailyWhatsAppNotificationCenter: React.FC<DailyWhatsAppNotification
                                   <span className="truncate">توجيه للحكم {idx + 1}: {ref.name.split(' ')[0]}</span>
                                 </button>
                               ))}
-
-                              {/* Multi-referee Broadcast button */}
-                              {item.assignedReferees.length > 1 && (
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    const refQueueItems = item.assignedReferees.map((ref, idx) => ({
-                                      id: `ref-${m.id}-${idx}`,
-                                      recipientName: ref.name,
-                                      roleLabel: ref.role || `حكم ${idx + 1}`,
-                                      phone: ref.phone || '',
-                                      text: unifiedMsg,
-                                      roleType: 'referee' as const,
-                                      refereeId: ref.id
-                                    }));
-
-                                    setActiveBroadcastQueue({
-                                      title: `إرسال الإشعار الموحد لطاقم التحكيم: ${item.team1Name} ضد ${item.team2Name}`,
-                                      items: refQueueItems,
-                                      currentIndex: 0,
-                                      matchSportId: item.sportId
-                                    });
-                                  }}
-                                  className="w-full bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 active:scale-95 text-slate-950 py-1.5 px-2 rounded-lg text-[10px] font-black flex items-center justify-center gap-1 transition-all shadow-xs cursor-pointer truncate"
-                                >
-                                  <Zap className="w-2.5 h-2.5 shrink-0 fill-slate-950" />
-                                  <span className="truncate">بث لطاقم التحكيم معاً (متتالي) ⚡</span>
-                                </button>
-                              )}
                             </div>
                           ) : (
                             <span className="text-[10px] text-slate-500 font-medium py-1">طاقم التحكيم الرسمي</span>
@@ -1499,8 +1334,10 @@ export const DailyWhatsAppNotificationCenter: React.FC<DailyWhatsAppNotification
                               م.1: {item.team1Name.split(' ')[0]}
                             </span>
                             <span className="text-[9px] font-mono">
-                              {item.school1?.principalPhone || item.school1?.phone ? (
-                                <span className="text-emerald-700 font-bold">{item.school1?.principalPhone || item.school1?.phone}</span>
+                              {((userProfile?.role === 'CENTRAL_ADMIN' || userProfile?.role === 'REGIONAL_ADMIN' || userProfile?.role === 'PROVINCIAL_ADMIN' || (userProfile?.schoolId && userProfile.schoolId === item.school1?.id) || (userProfile?.schoolName && userProfile.schoolName === item.school1?.name)) && item.school1?.principalPhone) || item.school1?.phone ? (
+                                <span className="text-emerald-700 font-bold">
+                                  {((userProfile?.role === 'CENTRAL_ADMIN' || userProfile?.role === 'REGIONAL_ADMIN' || userProfile?.role === 'PROVINCIAL_ADMIN' || (userProfile?.schoolId && userProfile.schoolId === item.school1?.id) || (userProfile?.schoolName && userProfile.schoolName === item.school1?.name)) && item.school1?.principalPhone) || item.school1?.phone}
+                                </span>
                               ) : (
                                 <span className="text-amber-600">غير مسجل</span>
                               )}
@@ -1511,8 +1348,10 @@ export const DailyWhatsAppNotificationCenter: React.FC<DailyWhatsAppNotification
                               م.2: {item.team2Name.split(' ')[0]}
                             </span>
                             <span className="text-[9px] font-mono">
-                              {item.school2?.principalPhone || item.school2?.phone ? (
-                                <span className="text-emerald-700 font-bold">{item.school2?.principalPhone || item.school2?.phone}</span>
+                              {((userProfile?.role === 'CENTRAL_ADMIN' || userProfile?.role === 'REGIONAL_ADMIN' || userProfile?.role === 'PROVINCIAL_ADMIN' || (userProfile?.schoolId && userProfile.schoolId === item.school2?.id) || (userProfile?.schoolName && userProfile.schoolName === item.school2?.name)) && item.school2?.principalPhone) || item.school2?.phone ? (
+                                <span className="text-emerald-700 font-bold">
+                                  {((userProfile?.role === 'CENTRAL_ADMIN' || userProfile?.role === 'REGIONAL_ADMIN' || userProfile?.role === 'PROVINCIAL_ADMIN' || (userProfile?.schoolId && userProfile.schoolId === item.school2?.id) || (userProfile?.schoolName && userProfile.schoolName === item.school2?.name)) && item.school2?.principalPhone) || item.school2?.phone}
+                                </span>
                               ) : (
                                 <span className="text-amber-600">غير مسجل</span>
                               )}
@@ -2225,7 +2064,7 @@ export const DailyWhatsAppNotificationCenter: React.FC<DailyWhatsAppNotification
                           const nextIndex = prev.currentIndex + 1;
                           if (nextIndex >= prev.items.length) {
                             setTimeout(() => {
-                              toast.success('🎉 تم بث الإشعارات لجميع المعنيين بالكامل بنجاح!');
+                              toast.success('🎉 تم إرسال الإشعارات بنجاح!');
                               setActiveBroadcastQueue(null);
                             }, 500);
                           }
@@ -2260,8 +2099,8 @@ export const DailyWhatsAppNotificationCenter: React.FC<DailyWhatsAppNotification
           </div>
         </div>
       )}
+          </div>
         </div>
       </div>
-    </div>
-  );
+    );
 };

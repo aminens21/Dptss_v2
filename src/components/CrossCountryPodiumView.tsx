@@ -8,9 +8,10 @@ import {
   exportQualifiedListExcel,
   exportFullResultsExcel,
   TeamRankingResult,
-  RegionalQualifiedIndividual
+  RegionalQualifiedIndividual,
+  getCrossCountryCategoryResultKey
 } from '../lib/crossCountryConfig';
-import { DataService } from '../lib/dataService';
+import { DataService, normalizeCategoryKey } from '../lib/dataService';
 import * as XLSX from 'xlsx';
 import {
   Trophy,
@@ -285,6 +286,9 @@ export const CrossCountryPodiumView: React.FC<CrossCountryPodiumViewProps> = ({
   const [editingVenue, setEditingVenue] = useState<string>('');
   const [isSaving, setIsSaving] = useState(false);
 
+  // Affiliation branch filter for Cross Country podium
+  const [selectedAffiliation, setSelectedAffiliation] = useState<'non_club' | 'club_affiliated'>('non_club');
+
   const selectedCategoryDef = useMemo(() => {
     return (
       CROSS_COUNTRY_CATEGORIES.find(c => c.id === selectedCatId) ||
@@ -292,18 +296,24 @@ export const CrossCountryPodiumView: React.FC<CrossCountryPodiumViewProps> = ({
     );
   }, [selectedCatId]);
 
+  const activeResultKey = useMemo(() => {
+    return getCrossCountryCategoryResultKey(selectedCatId, selectedAffiliation);
+  }, [selectedCatId, selectedAffiliation]);
+
   const currentCategoryResult = useMemo(() => {
     return (
-      results[selectedCatId] || {
-        categoryId: selectedCategoryDef.id,
+      results[activeResultKey] ||
+      (selectedAffiliation === 'non_club' ? results[selectedCatId] : undefined) || {
+        categoryId: activeResultKey,
         category: selectedCategoryDef.category,
         gender: selectedCategoryDef.gender,
         titleAr: selectedCategoryDef.titleAr,
         distance: selectedCategoryDef.distance,
+        affiliationType: selectedAffiliation,
         podium: []
       }
     );
-  }, [results, selectedCatId, selectedCategoryDef]);
+  }, [results, activeResultKey, selectedCatId, selectedCategoryDef, selectedAffiliation]);
 
   // Team Rankings Calculation for current category
   const teamRankings = useMemo(() => {
@@ -322,23 +332,42 @@ export const CrossCountryPodiumView: React.FC<CrossCountryPodiumViewProps> = ({
     );
   }, [currentCategoryResult.podium, winningTeam]);
 
-  // Students registered in cross country for the selected category
+  // Students registered in cross country for the selected category and affiliation
   const availableCategoryStudents = useMemo(() => {
-    const targetCat = selectedCategoryDef.category;
-    const targetGen = selectedCategoryDef.gender;
+    const targetCat = normalizeCategoryKey(selectedCategoryDef.category);
+    const isMale = selectedCategoryDef.gender === 'Male';
     return students.filter(
-      s =>
-        s &&
-        s.sportId === 'cross_country' &&
-        s.category === targetCat &&
-        s.gender === targetGen
+      s => {
+        if (!s || s.sportId !== 'cross_country') return false;
+        const sNormCat = normalizeCategoryKey(s.category);
+        if (sNormCat !== targetCat) return false;
+        const sIsMale = (s.gender === 'Male' || (s.gender as any) === 'ذكور' || (s.gender as any) === 'ذكر');
+        if (sIsMale !== isMale) return false;
+        const sAff = s.affiliationType || 'non_club';
+        return sAff === selectedAffiliation;
+      }
     );
-  }, [students, selectedCategoryDef]);
+  }, [students, selectedCategoryDef, selectedAffiliation]);
 
-  // All cross country students across categories
+  // All cross country students across categories for this affiliation
   const allCrossCountryStudents = useMemo(() => {
-    return students.filter(s => s && s.sportId === 'cross_country');
-  }, [students]);
+    return students.filter(s => s && s.sportId === 'cross_country' && (s.affiliationType || 'non_club') === selectedAffiliation);
+  }, [students, selectedAffiliation]);
+
+  // Count completed categories for both branches
+  const nonClubCompletedCount = useMemo(() => {
+    return CROSS_COUNTRY_CATEGORIES.filter(c => {
+      const res = results[c.id];
+      return res && res.podium && res.podium.length > 0;
+    }).length;
+  }, [results]);
+
+  const clubCompletedCount = useMemo(() => {
+    return CROSS_COUNTRY_CATEGORIES.filter(c => {
+      const res = results[`${c.id}_club`];
+      return res && res.podium && res.podium.length > 0;
+    }).length;
+  }, [results]);
 
   // Combined pool for quick-fill options
   const categoryStudents = useMemo(() => {
@@ -352,7 +381,8 @@ export const CrossCountryPodiumView: React.FC<CrossCountryPodiumViewProps> = ({
     if (!stud) return;
 
     const catDef = selectedCategoryDef;
-    const existing = results[selectedCatId];
+    const targetKey = getCrossCountryCategoryResultKey(catDef.id, selectedAffiliation);
+    const existing = results[targetKey] || (selectedAffiliation === 'non_club' ? results[selectedCatId] : undefined);
     const currentList = existing?.podium ? [...existing.podium] : [];
 
     // Check if runner already in list
@@ -365,7 +395,8 @@ export const CrossCountryPodiumView: React.FC<CrossCountryPodiumViewProps> = ({
       time: existingIndex >= 0 && currentList[existingIndex].time ? currentList[existingIndex].time : '',
       bibNumber: stud.crossCountryBibNumber ? String(stud.crossCountryBibNumber) : `${100 + rank}`,
       notes: rank === 1 ? 'بطل الفئة (الذهب) 🥇' : rank === 2 ? 'الوصيف (الفضة) 🥈' : rank === 3 ? 'المركز الثالث (البرونز) 🥉' : 'مشارك',
-      participationType: 'فردي'
+      participationType: 'فردي',
+      affiliationType: selectedAffiliation
     };
 
     if (existingIndex >= 0) {
@@ -378,12 +409,13 @@ export const CrossCountryPodiumView: React.FC<CrossCountryPodiumViewProps> = ({
     currentList.sort((a, b) => a.rank - b.rank);
 
     const updatedResult: CrossCountryCategoryResult = {
-      categoryId: catDef.id,
+      categoryId: targetKey,
       category: catDef.category,
       gender: catDef.gender,
-      titleAr: catDef.titleAr,
+      titleAr: `${catDef.titleAr} ${selectedAffiliation === 'club_affiliated' ? '(المنتمين للأندية)' : '(مدرسي)'}`,
       distance: catDef.distance,
       seasonId: activeSeason,
+      affiliationType: selectedAffiliation,
       venueName: existing?.venueName || 'مضمار حلبة ألعاب القوى بتاوريرت',
       podium: currentList,
       updatedBy: currentUser?.fullName || 'المشرف التقني'
@@ -408,7 +440,8 @@ export const CrossCountryPodiumView: React.FC<CrossCountryPodiumViewProps> = ({
     }
 
     const catDef = selectedCategoryDef;
-    const existing = results[selectedCatId];
+    const targetKey = getCrossCountryCategoryResultKey(catDef.id, selectedAffiliation);
+    const existing = results[targetKey] || (selectedAffiliation === 'non_club' ? results[selectedCatId] : undefined);
     const existingList = existing?.podium ? [...existing.podium] : [];
 
     // Fill ALL runners registered in this category who crossed the finish line
@@ -435,6 +468,7 @@ export const CrossCountryPodiumView: React.FC<CrossCountryPodiumViewProps> = ({
         bibNumber: existingEntry?.bibNumber || (stud.crossCountryBibNumber ? String(stud.crossCountryBibNumber) : (stud.bibNumber ? String(stud.bibNumber) : `${100 + i + 1}`)),
         notes: rank === 1 ? 'بطل الفئة (الذهب) 🥇' : rank === 2 ? 'الوصيف (الفضة) 🥈' : rank === 3 ? 'المركز الثالث (البرونز) 🥉' : (rank <= 6 ? 'مؤهل للمنتخب الإقليمي' : 'مشارك رسمي'),
         participationType: stud.participationType === 'school_team' ? 'فريق' : 'فردي',
+        affiliationType: selectedAffiliation,
         directorateName: stud.directorateName || 'مديرية تاوريرت',
         academyName: stud.academyName || 'الأكاديمية الجهوية',
         supervisorName: stud.coachName || '-'
@@ -442,12 +476,13 @@ export const CrossCountryPodiumView: React.FC<CrossCountryPodiumViewProps> = ({
     }
 
     const updatedResult: CrossCountryCategoryResult = {
-      categoryId: catDef.id,
+      categoryId: targetKey,
       category: catDef.category,
       gender: catDef.gender,
-      titleAr: catDef.titleAr,
+      titleAr: `${catDef.titleAr} ${selectedAffiliation === 'club_affiliated' ? '(المنتمين للأندية)' : '(مدرسي)'}`,
       distance: catDef.distance,
       seasonId: activeSeason,
+      affiliationType: selectedAffiliation,
       venueName: existing?.venueName || 'مضمار حلبة ألعاب القوى بتاوريرت',
       podium: newPodium,
       updatedBy: currentUser?.fullName || 'المشرف التقني'
@@ -465,8 +500,8 @@ export const CrossCountryPodiumView: React.FC<CrossCountryPodiumViewProps> = ({
   // Open edit modal
   const handleOpenEdit = (catId?: string) => {
     const targetId = catId || selectedCatId;
-    const catDef = CROSS_COUNTRY_CATEGORIES.find(c => c.id === targetId) || CROSS_COUNTRY_CATEGORIES[0];
-    const existing = results[targetId];
+    const targetKey = getCrossCountryCategoryResultKey(targetId, selectedAffiliation);
+    const existing = results[targetKey] || (selectedAffiliation === 'non_club' ? results[targetId] : undefined);
 
     setEditingCategoryId(targetId);
     setEditingVenue(existing?.venueName || 'مضمار حلبة ألعاب القوى بتاوريرت');
@@ -476,9 +511,9 @@ export const CrossCountryPodiumView: React.FC<CrossCountryPodiumViewProps> = ({
     } else {
       // Initialize with standard 3 podium places
       setEditingWinners([
-        { rank: 1, fullName: '', schoolName: '', time: '', bibNumber: '', notes: 'مؤهل(ة) للبطولة الجهوية 🥇' },
-        { rank: 2, fullName: '', schoolName: '', time: '', bibNumber: '', notes: 'مؤهل(ة) للبطولة الجهوية 🥈' },
-        { rank: 3, fullName: '', schoolName: '', time: '', bibNumber: '', notes: 'مؤهل(ة) للبطولة الجهوية 🥉' }
+        { rank: 1, fullName: '', schoolName: '', time: '', bibNumber: '', notes: 'مؤهل(ة) للبطولة الجهوية 🥇', affiliationType: selectedAffiliation },
+        { rank: 2, fullName: '', schoolName: '', time: '', bibNumber: '', notes: 'مؤهل(ة) للبطولة الجهوية 🥈', affiliationType: selectedAffiliation },
+        { rank: 3, fullName: '', schoolName: '', time: '', bibNumber: '', notes: 'مؤهل(ة) للبطولة الجهوية 🥉', affiliationType: selectedAffiliation }
       ]);
     }
     setIsEditModalOpen(true);
@@ -498,7 +533,8 @@ export const CrossCountryPodiumView: React.FC<CrossCountryPodiumViewProps> = ({
         schoolName: w.schoolName.trim() || 'مؤسسة تعليمية',
         time: w.time?.trim() || '',
         bibNumber: w.bibNumber?.trim() || '',
-        notes: w.notes?.trim() || (idx < 3 ? 'مؤهل للبطولة الجهوية' : 'مؤهل للمنتخب الإقليمي')
+        notes: w.notes?.trim() || (idx < 3 ? 'مؤهل للبطولة الجهوية' : 'مؤهل للمنتخب الإقليمي'),
+        affiliationType: selectedAffiliation
       }));
 
     if (cleanedPodium.length === 0) {
@@ -508,13 +544,15 @@ export const CrossCountryPodiumView: React.FC<CrossCountryPodiumViewProps> = ({
 
     setIsSaving(true);
     try {
+      const targetKey = getCrossCountryCategoryResultKey(catDef.id, selectedAffiliation);
       const updatedResult: CrossCountryCategoryResult = {
-        categoryId: catDef.id,
+        categoryId: targetKey,
         category: catDef.category,
         gender: catDef.gender,
-        titleAr: catDef.titleAr,
+        titleAr: `${catDef.titleAr} ${selectedAffiliation === 'club_affiliated' ? '(المنتمين للأندية)' : '(مدرسي)'}`,
         distance: catDef.distance,
         seasonId: activeSeason,
+        affiliationType: selectedAffiliation,
         venueName: editingVenue.trim() || 'مضمار حلبة ألعاب القوى',
         podium: cleanedPodium,
         updatedBy: currentUser?.fullName || 'المشرف التقني'
@@ -586,7 +624,8 @@ export const CrossCountryPodiumView: React.FC<CrossCountryPodiumViewProps> = ({
 
       // 1. Individual Category Sheets
       CROSS_COUNTRY_CATEGORIES.forEach(cat => {
-        const catRes = results[cat.id];
+        const resKey = getCrossCountryCategoryResultKey(cat.id, selectedAffiliation);
+        const catRes = results[resKey] || (selectedAffiliation === 'non_club' ? results[cat.id] : undefined);
         const podiumData = catRes?.podium || [];
 
         const sheetRows = podiumData.length > 0
@@ -622,7 +661,8 @@ export const CrossCountryPodiumView: React.FC<CrossCountryPodiumViewProps> = ({
       // 2. Summary Sheet: Team Rankings for all categories
       const allTeamRows: Record<string, any>[] = [];
       CROSS_COUNTRY_CATEGORIES.forEach(cat => {
-        const catRes = results[cat.id];
+        const resKey = getCrossCountryCategoryResultKey(cat.id, selectedAffiliation);
+        const catRes = results[resKey] || (selectedAffiliation === 'non_club' ? results[cat.id] : undefined);
         const teams = calculateTeamRankings(catRes?.podium || []);
         teams.forEach(t => {
           allTeamRows.push({
@@ -645,7 +685,8 @@ export const CrossCountryPodiumView: React.FC<CrossCountryPodiumViewProps> = ({
       // 3. Summary Sheet: Regional Qualification & Replacement Protocol
       const allRegionalRows: Record<string, any>[] = [];
       CROSS_COUNTRY_CATEGORIES.forEach(cat => {
-        const catRes = results[cat.id];
+        const resKey = getCrossCountryCategoryResultKey(cat.id, selectedAffiliation);
+        const catRes = results[resKey] || (selectedAffiliation === 'non_club' ? results[cat.id] : undefined);
         const teams = calculateTeamRankings(catRes?.podium || []);
         const winningTeamName = teams.length > 0 ? teams[0].schoolName : null;
         const quals = calculateRegionalQualifications(catRes?.podium || [], winningTeamName);
@@ -669,7 +710,8 @@ export const CrossCountryPodiumView: React.FC<CrossCountryPodiumViewProps> = ({
         XLSX.utils.book_append_sheet(wb, wsRegional, 'محضر_التأهل_الجهوي');
       }
 
-      XLSX.writeFile(wb, `محضر_نتائج_وترتيب_فرق_العدو_الريفي_${activeSeason.replace('/', '-')}.xlsx`);
+      const affLabel = selectedAffiliation === 'club_affiliated' ? 'المنتمين_للأندية' : 'مدرسي_غير_المنتمين';
+      XLSX.writeFile(wb, `محضر_نتائج_وترتيب_فرق_العدو_الريفي_${affLabel}_${activeSeason.replace('/', '-')}.xlsx`);
       toast.success('تم تحميل ملف إكسيل الشامل لنتائج البوديوم وترتيب الفرق والتأهل الجهوي بنجاح!');
     } catch (e) {
       console.error('Export error:', e);
@@ -898,6 +940,56 @@ export const CrossCountryPodiumView: React.FC<CrossCountryPodiumViewProps> = ({
         </div>
       )}
 
+      {/* Affiliation Branch Selector Toggle */}
+      <div className="bg-white rounded-2xl p-3 border border-slate-200 shadow-xs">
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <Trophy className="w-4 h-4 text-amber-500" />
+            <span className="text-xs sm:text-sm font-black text-slate-900">
+              صنف البطولة والنتائج للعدو الريفي:
+            </span>
+          </div>
+
+          <div className="flex items-center gap-2 w-full sm:w-auto">
+            <button
+              type="button"
+              onClick={() => setSelectedAffiliation('non_club')}
+              className={`flex-1 sm:flex-none py-2 px-4 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-2 border cursor-pointer ${
+                selectedAffiliation === 'non_club'
+                  ? 'bg-blue-600 text-white border-blue-700 shadow-md ring-2 ring-blue-300'
+                  : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+              }`}
+            >
+              <span>⚪</span>
+              <span>بطولة غير المنتمين (المدرسي)</span>
+              <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${
+                selectedAffiliation === 'non_club' ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-700'
+              }`}>
+                {nonClubCompletedCount}/8 فئات
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setSelectedAffiliation('club_affiliated')}
+              className={`flex-1 sm:flex-none py-2 px-4 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-2 border cursor-pointer ${
+                selectedAffiliation === 'club_affiliated'
+                  ? 'bg-amber-500 text-slate-950 border-amber-600 shadow-md ring-2 ring-amber-300'
+                  : 'bg-amber-50 text-amber-900 border-amber-200 hover:bg-amber-100'
+              }`}
+            >
+              <span>🟡</span>
+              <span>بطولة المنتمين للأندية</span>
+              <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${
+                selectedAffiliation === 'club_affiliated' ? 'bg-slate-950/20 text-slate-950' : 'bg-amber-200 text-amber-950'
+              }`}>
+                {clubCompletedCount}/8 فئات
+              </span>
+            </button>
+          </div>
+        </div>
+      </div>
+
       {/* Category selector strip */}
       <div className="bg-white rounded-2xl p-3 border border-slate-200 shadow-xs">
         <div className="flex items-center justify-between gap-3 mb-2 px-1">
@@ -925,7 +1017,8 @@ export const CrossCountryPodiumView: React.FC<CrossCountryPodiumViewProps> = ({
         <div className="flex items-center gap-2 overflow-x-auto pb-1 pt-1 scrollbar-thin">
           {CROSS_COUNTRY_CATEGORIES.map(cat => {
             const isSelected = !viewAllCategories && selectedCatId === cat.id;
-            const res = results[cat.id];
+            const resKey = getCrossCountryCategoryResultKey(cat.id, selectedAffiliation);
+            const res = results[resKey] || (selectedAffiliation === 'non_club' ? results[cat.id] : undefined);
             const hasResult = res && res.podium && res.podium.length > 0;
             const catTeams = res?.podium ? calculateTeamRankings(res.podium) : [];
             const catWinningTeam = catTeams.length > 0 ? catTeams[0] : null;
@@ -954,6 +1047,8 @@ export const CrossCountryPodiumView: React.FC<CrossCountryPodiumViewProps> = ({
                   <span className="inline-flex items-center gap-0.5 text-[10px] bg-amber-400/20 text-amber-600 px-1.5 py-0.2 rounded-full border border-amber-400/30 font-black" title={`الفريق الفائز: ${catWinningTeam.schoolName}`}>
                     🏆
                   </span>
+                ) : res?.status === 'running' ? (
+                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 ring-4 ring-emerald-400/30 animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.6)]" title="السباق جارٍ الآن... يتم تسجيل الواصلين"></span>
                 ) : hasResult ? (
                   <span className="w-2 h-2 rounded-full bg-emerald-500 ring-2 ring-emerald-200" title="تم تسجيل النتائج"></span>
                 ) : (
@@ -976,7 +1071,8 @@ export const CrossCountryPodiumView: React.FC<CrossCountryPodiumViewProps> = ({
 
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
             {CROSS_COUNTRY_CATEGORIES.map(cat => {
-              const res = results[cat.id];
+              const resKey = getCrossCountryCategoryResultKey(cat.id, selectedAffiliation);
+              const res = results[resKey] || (selectedAffiliation === 'non_club' ? results[cat.id] : undefined);
               const p1 = res?.podium ? getWinnerByRank(res.podium, 1) : null;
               const p2 = res?.podium ? getWinnerByRank(res.podium, 2) : null;
               const p3 = res?.podium ? getWinnerByRank(res.podium, 3) : null;
@@ -996,8 +1092,11 @@ export const CrossCountryPodiumView: React.FC<CrossCountryPodiumViewProps> = ({
                       <div className="flex items-center gap-2">
                         <span className="text-xl">{cat.icon}</span>
                         <div>
-                          <h3 className="text-xs font-black text-slate-900 group-hover:text-blue-600 transition-colors">
+                          <h3 className="text-xs font-black text-slate-900 group-hover:text-blue-600 transition-colors flex items-center gap-1.5">
                             {cat.shortLabel}
+                            {res?.status === 'running' && (
+                              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_4px_rgba(16,185,129,0.8)]" title="السباق جارٍ الآن"></span>
+                            )}
                           </h3>
                           <span className="text-[10px] text-slate-500 font-bold">{cat.distance}</span>
                         </div>
@@ -1135,6 +1234,14 @@ export const CrossCountryPodiumView: React.FC<CrossCountryPodiumViewProps> = ({
                   </p>
                 </div>
               </div>
+
+              {/* Race Status Badge */}
+              {currentCategoryResult.status === 'running' && (
+                <div className="bg-emerald-50 text-emerald-700 border border-emerald-200 px-3 py-1.5 rounded-xl flex items-center gap-2 animate-pulse shadow-sm">
+                  <div className="w-2 h-2 rounded-full bg-emerald-600 shadow-[0_0_8px_rgba(16,185,129,0.6)]"></div>
+                  <span className="text-xs font-black">السباق جارٍ الآن... مباشر 📡</span>
+                </div>
+              )}
 
               {canEdit && (
                 <button

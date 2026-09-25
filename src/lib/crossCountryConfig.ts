@@ -270,23 +270,38 @@ export function calculateRegionalQualifications(
   return result;
 }
 
+export function getCrossCountryCategoryResultKey(categoryId: string, affiliation: 'non_club' | 'club_affiliated' = 'non_club'): string {
+  const baseId = categoryId.replace(/_club(_affiliated)?$/, '');
+  if (affiliation === 'club_affiliated') {
+    return `${baseId}_club`;
+  }
+  return baseId;
+}
+
 export const INITIAL_CROSS_COUNTRY_RESULTS: Record<string, CrossCountryCategoryResult> = {
   u12_male: {
     categoryId: 'u12_male',
     category: 'U12',
     gender: 'Male',
-    titleAr: 'سباق البراعم ذكور (U12)',
+    titleAr: 'سباق البراعم ذكور (U12) - مدرسي',
     distance: '1500 م',
     venueName: 'مضمار حلبة ألعاب القوى بتاوريرت',
-    podium: []
+    affiliationType: 'non_club',
+    podium: [
+      { rank: 1, fullName: 'ياسين بونو', schoolName: 'م.م دبدو', bibNumber: '102', time: '04:12', affiliationType: 'non_club' },
+      { rank: 2, fullName: 'أشرف حكيمي', schoolName: 'إعدادية ابن سينا', bibNumber: '115', time: '04:15', affiliationType: 'club_affiliated' },
+      { rank: 3, fullName: 'سفيان أمرابط', schoolName: 'إعدادية سيدي لحسن', bibNumber: '108', time: '04:20', affiliationType: 'non_club' }
+    ],
+    status: 'completed'
   },
   u12_female: {
     categoryId: 'u12_female',
     category: 'U12',
     gender: 'Female',
-    titleAr: 'سباق البرعمات إناث (U12)',
+    titleAr: 'سباق البرعمات إناث (U12) - مدرسي',
     distance: '1000 م',
     venueName: 'مضمار حلبة ألعاب القوى بتاوريرت',
+    affiliationType: 'non_club',
     podium: []
   },
   u13_male: {
@@ -296,6 +311,7 @@ export const INITIAL_CROSS_COUNTRY_RESULTS: Record<string, CrossCountryCategoryR
     titleAr: 'سباق البراعم ذكور (U13/U12)',
     distance: '1500 م',
     venueName: 'مضمار حلبة ألعاب القوى بتاوريرت',
+    affiliationType: 'non_club',
     podium: []
   },
   u13_female: {
@@ -305,60 +321,148 @@ export const INITIAL_CROSS_COUNTRY_RESULTS: Record<string, CrossCountryCategoryR
     titleAr: 'سباق البرعمات إناث (U13/U12)',
     distance: '1000 م',
     venueName: 'مضمار حلبة ألعاب القوى بتاوريرت',
+    affiliationType: 'non_club',
     podium: []
   },
   u15_male: {
     categoryId: 'u15_male',
     category: 'U15',
     gender: 'Male',
-    titleAr: 'سباق الصغار ذكور (U15)',
+    titleAr: 'سباق الصغار ذكور (U15) - مدرسي',
     distance: '3000 م',
     venueName: 'مضمار حلبة ألعاب القوى بتاوريرت',
+    affiliationType: 'non_club',
     podium: []
   },
   u15_female: {
     categoryId: 'u15_female',
     category: 'U15',
     gender: 'Female',
-    titleAr: 'سباق الصغيرات إناث (U15)',
+    titleAr: 'سباق الصغيرات إناث (U15) - مدرسي',
     distance: '2000 م',
     venueName: 'مضمار حلبة ألعاب القوى بتاوريرت',
+    affiliationType: 'non_club',
     podium: []
   },
   u18_male: {
     categoryId: 'u18_male',
     category: 'U18',
     gender: 'Male',
-    titleAr: 'سباق الفتيان ذكور (U18)',
+    titleAr: 'سباق الفتيان ذكور (U18) - مدرسي',
     distance: '4000 م',
     venueName: 'مضمار حلبة ألعاب القوى بتاوريرت',
+    affiliationType: 'non_club',
     podium: []
   },
   u18_female: {
     categoryId: 'u18_female',
     category: 'U18',
     gender: 'Female',
-    titleAr: 'سباق الفتيات إناث (U18)',
+    titleAr: 'سباق الفتيات إناث (U18) - مدرسي',
     distance: '3000 م',
     venueName: 'مضمار حلبة ألعاب القوى بتاوريرت',
+    affiliationType: 'non_club',
     podium: []
   },
   u20_male: {
     categoryId: 'u20_male',
     category: 'U20',
     gender: 'Male',
-    titleAr: 'سباق الشبان ذكور (U20)',
+    titleAr: 'سباق الشبان ذكور (U20) - مدرسي',
     distance: '5000 م',
     venueName: 'مضمار حلبة ألعاب القوى بتاوريرت',
+    affiliationType: 'non_club',
     podium: []
   },
   u20_female: {
     categoryId: 'u20_female',
     category: 'U20',
     gender: 'Female',
-    titleAr: 'سباق الشابات إناث (U20)',
+    titleAr: 'سباق الشابات إناث (U20) - مدرسي',
     distance: '3000 م',
     venueName: 'مضمار حلبة ألعاب القوى بتاوريرت',
+    affiliationType: 'non_club',
+    podium: []
+  },
+  // Club affiliated branches (المنتمين للأندية)
+  u12_male_club: {
+    categoryId: 'u12_male_club',
+    category: 'U12',
+    gender: 'Male',
+    titleAr: 'سباق البراعم ذكور (U12) - المنتمين للأندية',
+    distance: '1500 م',
+    venueName: 'مضمار حلبة ألعاب القوى بتاوريرت',
+    affiliationType: 'club_affiliated',
+    podium: []
+  },
+  u12_female_club: {
+    categoryId: 'u12_female_club',
+    category: 'U12',
+    gender: 'Female',
+    titleAr: 'سباق البرعمات إناث (U12) - المنتمين للأندية',
+    distance: '1000 م',
+    venueName: 'مضمار حلبة ألعاب القوى بتاوريرت',
+    affiliationType: 'club_affiliated',
+    podium: []
+  },
+  u15_male_club: {
+    categoryId: 'u15_male_club',
+    category: 'U15',
+    gender: 'Male',
+    titleAr: 'سباق الصغار ذكور (U15) - المنتمين للأندية',
+    distance: '3000 م',
+    venueName: 'مضمار حلبة ألعاب القوى بتاوريرت',
+    affiliationType: 'club_affiliated',
+    podium: []
+  },
+  u15_female_club: {
+    categoryId: 'u15_female_club',
+    category: 'U15',
+    gender: 'Female',
+    titleAr: 'سباق الصغيرات إناث (U15) - المنتمين للأندية',
+    distance: '2000 م',
+    venueName: 'مضمار حلبة ألعاب القوى بتاوريرت',
+    affiliationType: 'club_affiliated',
+    podium: []
+  },
+  u18_male_club: {
+    categoryId: 'u18_male_club',
+    category: 'U18',
+    gender: 'Male',
+    titleAr: 'سباق الفتيان ذكور (U18) - المنتمين للأندية',
+    distance: '4000 م',
+    venueName: 'مضمار حلبة ألعاب القوى بتاوريرت',
+    affiliationType: 'club_affiliated',
+    podium: []
+  },
+  u18_female_club: {
+    categoryId: 'u18_female_club',
+    category: 'U18',
+    gender: 'Female',
+    titleAr: 'سباق الفتيات إناث (U18) - المنتمين للأندية',
+    distance: '3000 م',
+    venueName: 'مضمار حلبة ألعاب القوى بتاوريرت',
+    affiliationType: 'club_affiliated',
+    podium: []
+  },
+  u20_male_club: {
+    categoryId: 'u20_male_club',
+    category: 'U20',
+    gender: 'Male',
+    titleAr: 'سباق الشبان ذكور (U20) - المنتمين للأندية',
+    distance: '5000 م',
+    venueName: 'مضمار حلبة ألعاب القوى بتاوريرت',
+    affiliationType: 'club_affiliated',
+    podium: []
+  },
+  u20_female_club: {
+    categoryId: 'u20_female_club',
+    category: 'U20',
+    gender: 'Female',
+    titleAr: 'سباق الشابات إناث (U20) - المنتمين للأندية',
+    distance: '3000 م',
+    venueName: 'مضمار حلبة ألعاب القوى بتاوريرت',
+    affiliationType: 'club_affiliated',
     podium: []
   }
 };

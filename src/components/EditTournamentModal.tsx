@@ -110,7 +110,7 @@ export const EditTournamentModal: React.FC<EditTournamentModalProps> = ({
         ageCategory,
         gender,
         affiliationType,
-        level: selectedLevels.join(','),
+        level: ageCategory === 'U12' ? 'Primary' : ageCategory === 'U15' ? 'Middle' : (ageCategory === 'U18' || ageCategory === 'U20') ? 'High' : 'Primary,Middle,High',
         scope,
         status,
         startDate: startDate ? new Date(startDate) : tournament.startDate,
@@ -133,8 +133,8 @@ export const EditTournamentModal: React.FC<EditTournamentModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 overflow-y-auto dir-rtl">
-      <div className="w-full max-w-2xl bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden my-8">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 overflow-y-auto" dir="rtl">
+      <div className="w-full max-w-2xl bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden my-8 transition-colors">
         {/* Header */}
         <div className="px-6 py-4 bg-gradient-to-r from-blue-900 via-indigo-900 to-slate-900 text-white flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -142,108 +142,70 @@ export const EditTournamentModal: React.FC<EditTournamentModalProps> = ({
               <Trophy className="w-5 h-5 text-amber-400" />
             </div>
             <div>
-              <h3 className="text-base font-black">تعديل بيانات البطولة الإقليمية</h3>
+              <h3 className="text-base font-black text-white">تعديل بيانات البطولة الإقليمية</h3>
               <p className="text-xs text-blue-200">تعديل التسمية، الفئة، التواريخ ونوع المشاركة (مسؤول مركزي)</p>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="p-1.5 rounded-lg text-slate-300 hover:text-white hover:bg-white/10 transition-colors"
+            className="p-1.5 rounded-lg text-slate-300 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
         {/* Form */}
-        <form onSubmit={handleSubmit} className="p-6 space-y-4 max-h-[75vh] overflow-y-auto">
+        <form onSubmit={handleSubmit} className="p-6 space-y-4 max-h-[75vh] overflow-y-auto bg-white dark:bg-slate-900">
           {/* Tournament Name */}
           <div>
-            <label className="block text-xs font-bold text-slate-700 mb-1">اسم البطولة الإقليمية</label>
+            <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">اسم البطولة الإقليمية</label>
             <input
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              className="w-full px-3 py-2 text-xs font-bold border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full px-3 py-2 text-xs font-bold border border-slate-300 dark:border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100"
               required
             />
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {/* Sport selection */}
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">الرياضة المدرسية</label>
-              <select
-                value={sportId}
-                onChange={(e) => setSportId(e.target.value)}
-                className="w-full px-3 py-2 text-xs font-bold border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
-              >
-                {sportsConfig.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.icon || '🏆'} {s.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {/* Educational Cycles */}
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">
-                الأسلاك التعليمية المعنية *
-              </label>
-              <div className="flex flex-wrap gap-1.5 mt-1">
-                {[
-                  { id: 'Primary', label: 'ابتدائي' },
-                  { id: 'Middle', label: 'إعدادي' },
-                  { id: 'High', label: 'تأهيلي' }
-                ].map((item) => {
-                  const isSelected = selectedLevels.includes(item.id as any);
-                  return (
-                    <button
-                      type="button"
-                      key={item.id}
-                      onClick={() => {
-                        setSelectedLevels(prev =>
-                          prev.includes(item.id as any)
-                            ? (prev.length > 1 ? prev.filter(x => x !== item.id) : prev)
-                            : [...prev, item.id as any]
-                        );
-                      }}
-                      className={`px-2.5 py-1.5 rounded-lg text-[10px] font-bold border transition-all cursor-pointer ${
-                        isSelected
-                          ? 'bg-blue-600 border-blue-600 text-white shadow-3xs'
-                          : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
-                      }`}
-                    >
-                      {item.label}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
+          {/* Sport selection */}
+          <div>
+            <label className="block text-xs font-bold text-slate-700 mb-1">الرياضة المدرسية</label>
+            <select
+              value={sportId}
+              onChange={(e) => setSportId(e.target.value)}
+              className="w-full px-3 py-2 text-xs font-bold border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+            >
+              {sportsConfig.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.icon || '🏆'} {s.name}
+                </option>
+              ))}
+            </select>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {/* Affiliation Type */}
             <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">نوع البطولة والانتساب</label>
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1 transition-colors">نوع البطولة والانتساب</label>
               <select
                 value={affiliationType}
                 onChange={(e) => setAffiliationType(e.target.value as any)}
-                className="w-full px-3 py-2 text-xs font-bold border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                className="w-full px-3 py-2 text-xs font-bold border border-slate-300 dark:border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 transition-colors cursor-pointer"
               >
-                <option value="non_club">⚪ بطولة غير المنتمين للأندية (البطاقة البيضاء)</option>
-                <option value="club_affiliated">🟡 بطولة المنتمين للأندية والجمعيات (البطاقة الصفراء)</option>
+                <option value="non_club">⚪ بطولة غير المنتمين (بيضاء)</option>
+                <option value="club_affiliated">🟡 بطولة المنتمين (صفراء)</option>
                 <option value="open">🟢 بطولة مفتوحة (للجميع)</option>
               </select>
             </div>
 
             {/* Scope selection */}
             <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">نطاق البطولة</label>
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1 transition-colors">نطاق البطولة</label>
               <select
                 value={scope}
                 onChange={(e) => setScope(e.target.value)}
-                className="w-full px-3 py-2 text-xs font-bold border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                className="w-full px-3 py-2 text-xs font-bold border border-slate-300 dark:border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 transition-colors cursor-pointer"
               >
                 <option value="Provincial">إقليمية (المديرية)</option>
                 <option value="Regional">جهوية (الأكاديمية)</option>
@@ -255,75 +217,75 @@ export const EditTournamentModal: React.FC<EditTournamentModalProps> = ({
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             {/* Age Category */}
             <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">الفئة العمرية</label>
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">الفئة العمرية</label>
               <input
                 type="text"
                 value={ageCategory}
                 onChange={(e) => setAgeCategory(e.target.value)}
-                className="w-full px-3 py-2 text-xs font-bold border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder="مثال: U15 / الصغار"
+                className="w-full px-3 py-2 text-xs font-bold border border-slate-300 dark:border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100"
+                placeholder="مثال: U15"
               />
             </div>
 
             {/* Gender */}
             <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">الجنس</label>
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">الجنس</label>
               <select
                 value={gender}
                 onChange={(e) => setGender(e.target.value as any)}
-                className="w-full px-3 py-2 text-xs font-bold border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                className="w-full px-3 py-2 text-xs font-bold border border-slate-300 dark:border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 cursor-pointer"
               >
                 <option value="Male">👦 ذكور</option>
                 <option value="Female">👧 إناث</option>
-                <option value="Mixed">👥 مختلط / الجميع</option>
+                <option value="Mixed">👥 مختلط</option>
               </select>
             </div>
 
             {/* Status */}
             <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">حالة البطولة</label>
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">حالة البطولة</label>
               <select
                 value={status}
                 onChange={(e) => setStatus(e.target.value as any)}
-                className="w-full px-3 py-2 text-xs font-bold border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                className="w-full px-3 py-2 text-xs font-bold border border-slate-300 dark:border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 cursor-pointer"
               >
                 <option value="Scheduled">📅 مبرمجة</option>
-                <option value="Ongoing">🔴 جارية الآن</option>
+                <option value="Ongoing">🔴 جارية</option>
                 <option value="Completed">🏆 منتهية</option>
-                <option value="Draft">⚪ قيد الإعداد</option>
+                <option value="Draft">⚪ مسودة</option>
               </select>
             </div>
           </div>
 
           {/* Dates */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 bg-slate-50 p-3 rounded-xl border border-slate-200">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 bg-slate-50 dark:bg-slate-800/40 p-3 rounded-xl border border-slate-200 dark:border-slate-800 transition-colors">
             <div>
-              <label className="block text-[11px] font-bold text-slate-700 mb-1">تاريخ الإنطلاق</label>
+              <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">تاريخ الإنطلاق</label>
               <input
                 type="date"
                 value={startDate}
                 onChange={(e) => setStartDate(e.target.value)}
-                className="w-full px-2.5 py-1.5 text-xs font-bold border border-slate-300 rounded-lg focus:outline-none"
+                className="w-full px-2.5 py-1.5 text-xs font-bold border border-slate-300 dark:border-slate-700 rounded-lg focus:outline-none bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100"
               />
             </div>
 
             <div>
-              <label className="block text-[11px] font-bold text-slate-700 mb-1">تاريخ الاختتام</label>
+              <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">تاريخ الاختتام</label>
               <input
                 type="date"
                 value={endDate}
                 onChange={(e) => setEndDate(e.target.value)}
-                className="w-full px-2.5 py-1.5 text-xs font-bold border border-slate-300 rounded-lg focus:outline-none"
+                className="w-full px-2.5 py-1.5 text-xs font-bold border border-slate-300 dark:border-slate-700 rounded-lg focus:outline-none bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100"
               />
             </div>
 
             <div>
-              <label className="block text-[11px] font-bold text-amber-800 mb-1">آخر أجل للتسجيل</label>
+              <label className="block text-[11px] font-bold text-amber-800 dark:text-amber-400 mb-1">آخر أجل للتسجيل</label>
               <input
                 type="datetime-local"
                 value={registrationDeadline}
                 onChange={(e) => setRegistrationDeadline(e.target.value)}
-                className="w-full px-2.5 py-1.5 text-xs font-bold border border-amber-300 bg-amber-50 rounded-lg focus:outline-none text-amber-900"
+                className="w-full px-2.5 py-1.5 text-xs font-bold border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/20 rounded-lg focus:outline-none text-amber-900 dark:text-amber-100"
               />
             </div>
           </div>

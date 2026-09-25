@@ -27,7 +27,7 @@ import {
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useRolePermissions } from '../hooks/useRolePermissions';
-import { cn } from '../lib/utils';
+import { cn, formatMatchDate } from '../lib/utils';
 
 interface SportResultsModalProps {
   isOpen: boolean;
@@ -950,7 +950,7 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
                                       <MapPin className="w-3 h-3 text-slate-400 shrink-0" />
                                       <span className="truncate" title={vName}>{vName}</span>
                                       <span className="text-slate-300 shrink-0">•</span>
-                                      <span className="shrink-0">{m.date ? String(m.date).split('T')[0] : '--'}</span>
+                                      <span className="shrink-0">{formatMatchDate(m.date)}</span>
                                       {m.startTime && (
                                         <>
                                           <span className="text-slate-300 shrink-0">•</span>

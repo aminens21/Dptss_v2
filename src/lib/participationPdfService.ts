@@ -1,5 +1,5 @@
 import { Student, School, User, Sport, Directorate } from '../types';
-import { SPORTS_MAP, getAgeCategoriesForSeason, DataService } from './dataService';
+import { SPORTS_MAP, getAgeCategoriesForSeason, getCategoryGenderLabel, DataService } from './dataService';
 import toast from 'react-hot-toast';
 
 export interface ParticipationPdfOptions {
@@ -54,7 +54,7 @@ export function generateParticipationFormHtml(options: ParticipationPdfOptions):
     if (student) {
       const bDate = student.birthDate || '';
       const massar = student.massarNumber || '—';
-      const cat = student.category || '';
+      const catLabel = getCategoryGenderLabel(student.category, student.gender, season, sport.id);
       const affiliationLabel = student.affiliationType === 'club_affiliated' 
         ? 'منتمي لنادي' 
         : 'لا منتمي';
@@ -65,11 +65,11 @@ export function generateParticipationFormHtml(options: ParticipationPdfOptions):
       return `
         <tr style="border-bottom: 1px solid #cbd5e1; height: 42px; background-color: ${idx % 2 === 0 ? '#ffffff' : '#f8fafc'}; text-align: center; font-size: 11px;">
           <td style="border: 1px solid #cbd5e1; padding: 3px 4px; font-weight: bold; width: 35px; color: #1e293b;">${rowNum}</td>
-          <td style="border: 1px solid #cbd5e1; padding: 3px 4px; font-weight: bold; font-family: monospace; letter-spacing: 0.5px; color: #0369a1; width: 110px;">${massar}</td>
+          <td style="border: 1px solid #cbd5e1; padding: 3px 4px; font-weight: bold; font-family: monospace; letter-spacing: 0.5px; color: #0369a1; width: 100px;">${massar}</td>
           <td style="border: 1px solid #cbd5e1; padding: 3px 6px; font-weight: bold; text-align: center; color: #0f172a;">${student.fullName}</td>
-          <td style="border: 1px solid #cbd5e1; padding: 3px 4px; font-family: monospace; color: #334155; width: 85px;">${bDate}</td>
-          <td style="border: 1px solid #cbd5e1; padding: 3px 4px; font-weight: bold; color: #1e293b; width: 75px;">${cat}</td>
-          <td style="border: 1px solid #cbd5e1; padding: 3px 4px; font-weight: bold; color: #475569; width: 110px;">${affiliationLabel}</td>
+          <td style="border: 1px solid #cbd5e1; padding: 3px 4px; font-family: monospace; color: #334155; width: 80px;">${bDate}</td>
+          <td style="border: 1px solid #cbd5e1; padding: 3px 4px; font-weight: bold; color: #1e293b; width: 140px;">${catLabel}</td>
+          <td style="border: 1px solid #cbd5e1; padding: 3px 4px; font-weight: bold; color: #475569; width: 95px;">${affiliationLabel}</td>
           <td style="border: 1px solid #cbd5e1; padding: 3px 6px; text-align: center; color: #334155;">${student.schoolName || schoolName}</td>
           <td style="border: 1px solid #cbd5e1; padding: 2px; width: 45px;">
             ${photoHtml}
@@ -197,11 +197,11 @@ export function generateParticipationFormHtml(options: ParticipationPdfOptions):
         <thead>
           <tr style="background-color: #0284c7; color: #ffffff; text-align: center; font-size: 11px; font-weight: 900;">
             <th style="border: 1px solid #0284c7; padding: 6px 4px; width: 35px;">ر.ت</th>
-            <th style="border: 1px solid #0284c7; padding: 6px 4px; width: 110px;">رقم مسار</th>
+            <th style="border: 1px solid #0284c7; padding: 6px 4px; width: 100px;">رقم مسار</th>
             <th style="border: 1px solid #0284c7; padding: 6px 6px;">الاسم والنسب</th>
-            <th style="border: 1px solid #0284c7; padding: 6px 4px; width: 85px;">تاريخ الازدياد</th>
-            <th style="border: 1px solid #0284c7; padding: 6px 4px; width: 75px;">الفئة العمرية</th>
-            <th style="border: 1px solid #0284c7; padding: 6px 4px; width: 110px;">صنف المشاركة</th>
+            <th style="border: 1px solid #0284c7; padding: 6px 4px; width: 80px;">تاريخ الازدياد</th>
+            <th style="border: 1px solid #0284c7; padding: 6px 4px; width: 140px;">الفئة العمرية (التاريخ)</th>
+            <th style="border: 1px solid #0284c7; padding: 6px 4px; width: 95px;">صنف المشاركة</th>
             <th style="border: 1px solid #0284c7; padding: 6px 6px;">المؤسسة</th>
             <th style="border: 1px solid #0284c7; padding: 6px 4px; width: 45px;">الصورة</th>
           </tr>

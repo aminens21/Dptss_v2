@@ -30,7 +30,10 @@ import {
   Copy,
   KeyRound,
   Send,
-  Lock
+  Lock,
+  Eye,
+  EyeOff,
+  X
 } from 'lucide-react';
 import { CreateSchoolModal } from '../components/CreateSchoolModal';
 import { ConfirmDeleteModal } from '../components/ConfirmDeleteModal';
@@ -55,7 +58,16 @@ export const Schools: React.FC = () => {
   const [selectedSchoolFilter, setSelectedSchoolFilter] = useState<string>('ALL');
   const [schoolSelectQuery, setSchoolSelectQuery] = useState<string>('');
   const [isSchoolDropdownOpen, setIsSchoolDropdownOpen] = useState<boolean>(false);
-  const [viewMode, setViewMode] = useState<'cards' | 'table'>('cards');
+  const [viewMode, setViewMode] = useState<'cards' | 'table'>('table');
+  const [expandedSchoolIds, setExpandedSchoolIds] = useState<Record<string, boolean>>({});
+
+  const toggleSchoolExpand = (schoolId: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    setExpandedSchoolIds(prev => ({
+      ...prev,
+      [schoolId]: !prev[schoolId]
+    }));
+  };
 
   // Modals state
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -65,13 +77,39 @@ export const Schools: React.FC = () => {
   const [showDeleteAllModal, setShowDeleteAllModal] = useState(false);
   const [isDeletingAll, setIsDeletingAll] = useState(false);
   const [selectedSchoolForParticipants, setSelectedSchoolForParticipants] = useState<School | null>(null);
+  const [selectedSchoolForDetails, setSelectedSchoolForDetails] = useState<School | null>(null);
 
   // CENTRAL_ADMIN, SPORT_MANAGER, and Technical Committee Head can manage schools
   const isTechCommitteeHead = !!userProfile?.isTechCommitteeHead;
   const isTeacher = userProfile?.role === 'TEACHER';
-  const canManage = userProfile?.role === 'CENTRAL_ADMIN' || 
+  const isPrivilegedAdmin = userProfile?.role === 'CENTRAL_ADMIN' || 
+                            userProfile?.role === 'REGIONAL_ADMIN' || 
+                            userProfile?.role === 'PROVINCIAL_ADMIN';
+  const canManage = isPrivilegedAdmin || 
                     userProfile?.role === 'SPORT_MANAGER' || 
                     isTechCommitteeHead;
+
+  const isTeacherSchool = (s: School) => {
+    if (!userProfile?.workLocation && !userProfile?.schoolId) return false;
+    const cleanWorkLoc = (userProfile.workLocation || '').trim().toLowerCase();
+    const cleanSchoolName = (s.name || '').trim().toLowerCase();
+    return (
+      (userProfile.schoolId && s.id === userProfile.schoolId) ||
+      (cleanWorkLoc.length > 0 && (
+        cleanSchoolName === cleanWorkLoc ||
+        cleanSchoolName.includes(cleanWorkLoc) ||
+        cleanWorkLoc.includes(cleanSchoolName)
+      ))
+    );
+  };
+
+  const canEditSchool = (s: School) => {
+    return !!isPrivilegedAdmin;
+  };
+
+  const canDeleteSchool = (s: School) => {
+    return !!isPrivilegedAdmin;
+  };
 
   // Determine user's primary/preferred sport specialty for automatic focus on login
   const preferredSportId = useMemo(() => {
@@ -150,6 +188,10 @@ export const Schools: React.FC = () => {
   };
 
   const handleSaveSchool = async (schoolData: Omit<School, 'id'>) => {
+    if (editingSchool && !canEditSchool(editingSchool)) {
+      toast.error('عذراً، لا يحق لك تعديل بيانات هذه المؤسسة التعليمية.');
+      return;
+    }
     try {
       const activeDirId = DataService.getActiveDirectorateId();
       const fullSchoolData = { ...schoolData, directorateId: activeDirId };
@@ -170,6 +212,11 @@ export const Schools: React.FC = () => {
 
   const handleConfirmDelete = async () => {
     if (!schoolToDelete) return;
+    if (!canDeleteSchool(schoolToDelete)) {
+      toast.error('عذراً، لا يحق لك حذف هذه المؤسسة التعليمية.');
+      setSchoolToDelete(null);
+      return;
+    }
     setIsDeleting(true);
     try {
       await DataService.deleteSchool(schoolToDelete.id);
@@ -443,16 +490,20 @@ export const Schools: React.FC = () => {
 
   const handleExportCurrentSchools = () => {
     try {
-      const exportData = schools.map((s, idx) => ({
-        'الرقم': idx + 1,
-        'اسم المؤسسة التعليمية': s.name,
-        'السلك التعليمي': s.type === 'تأهيلي' ? 'ثانوي تأهيلي' : s.type === 'إعدادي' ? 'ثانوي إعدادي' : 'ابتدائي',
-        'الجماعة / الدائرة': s.commune,
-        'المنسق (أستاذ التربية البدنية)': s.coordinatorName || s.teacherName,
-        'هاتف المنسق': s.phone || '',
-        'اسم مدير المؤسسة': s.principalName || '',
-        'هاتف مدير المؤسسة': s.principalPhone || ''
-      }));
+      const exportData = schools.map((s, idx) => {
+        const isMine = isTeacherSchool(s);
+        const canSeeSecrets = isPrivilegedAdmin || isMine;
+        return {
+          'الرقم': idx + 1,
+          'اسم المؤسسة التعليمية': s.name,
+          'السلك التعليمي': s.type === 'تأهيلي' ? 'ثانوي تأهيلي' : s.type === 'إعدادي' ? 'ثانوي إعدادي' : 'ابتدائي',
+          'الجماعة / الدائرة': s.commune,
+          'المنسق (أستاذ التربية البدنية)': s.coordinatorName || s.teacherName,
+          'هاتف المنسق': s.phone || '',
+          'اسم مدير المؤسسة': s.principalName || '',
+          'هاتف مدير المؤسسة': canSeeSecrets ? (s.principalPhone || '') : 'غير متاح'
+        };
+      });
 
       const ws = XLSX.utils.json_to_sheet(exportData);
       ws['!cols'] = [
@@ -505,18 +556,6 @@ export const Schools: React.FC = () => {
     return ids;
   }, [selectedSport, matches, students, schools]);
 
-  const isTeacherSchool = (s: School) => {
-    if (!userProfile?.workLocation) return false;
-    const cleanWorkLoc = userProfile.workLocation.trim().toLowerCase();
-    const cleanSchoolName = (s.name || '').trim().toLowerCase();
-    return (
-      cleanSchoolName === cleanWorkLoc ||
-      cleanSchoolName.includes(cleanWorkLoc) ||
-      cleanWorkLoc.includes(cleanSchoolName) ||
-      (userProfile.schoolId && s.id === userProfile.schoolId)
-    );
-  };
-
   const filtered = useMemo(() => {
     const list = schools.filter(s => {
       const coordinatorStr = (s.coordinatorName || s.teacherName || '').toLowerCase();
@@ -537,7 +576,7 @@ export const Schools: React.FC = () => {
       return matchSearch && matchType && matchCommune && matchSport && matchSchool;
     });
 
-    if (userProfile?.workLocation) {
+    if (userProfile?.workLocation || userProfile?.schoolId) {
       list.sort((a, b) => {
         const aMine = isTeacherSchool(a);
         const bMine = isTeacherSchool(b);
@@ -869,32 +908,32 @@ export const Schools: React.FC = () => {
           </div>
 
           {/* Cards vs Table View Switcher */}
-          <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-lg border border-slate-200 shrink-0 mr-2">
+          <div className="flex items-center gap-1.5 bg-slate-200/80 p-1 rounded-xl border border-slate-300/80 shrink-0 mr-auto sm:mr-2">
             <button
               type="button"
               onClick={() => setViewMode('cards')}
-              title="عرض المؤسسات على شكل بطائق"
-              className={`p-1.5 rounded-md text-xs font-bold transition-all flex items-center gap-1 cursor-pointer ${
+              title="عرض المؤسسات التعليمية على شكل بطائق تفاعلية"
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
                 viewMode === 'cards'
-                  ? 'bg-white text-blue-700 shadow-xs border border-slate-200 font-black'
-                  : 'text-slate-600 hover:text-slate-900'
+                  ? 'bg-blue-600 text-white shadow-xs font-black'
+                  : 'bg-white text-slate-700 hover:text-blue-700 hover:bg-slate-50'
               }`}
             >
-              <LayoutGrid className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">بطائق 📇</span>
+              <LayoutGrid className="w-4 h-4" />
+              <span>بطائق 📇</span>
             </button>
             <button
               type="button"
               onClick={() => setViewMode('table')}
-              title="عرض المؤسسات على شكل جدول"
-              className={`p-1.5 rounded-md text-xs font-bold transition-all flex items-center gap-1 cursor-pointer ${
+              title="عرض المؤسسات التعليمية على شكل جدول منظم"
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
                 viewMode === 'table'
-                  ? 'bg-white text-blue-700 shadow-xs border border-slate-200 font-black'
-                  : 'text-slate-600 hover:text-slate-900'
+                  ? 'bg-blue-600 text-white shadow-xs font-black'
+                  : 'bg-white text-slate-700 hover:text-blue-700 hover:bg-slate-50'
               }`}
             >
-              <List className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">جدول 📊</span>
+              <List className="w-4 h-4" />
+              <span>جدول 📊</span>
             </button>
           </div>
         </div>
@@ -936,15 +975,11 @@ export const Schools: React.FC = () => {
 
           <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-x-auto">
             {filtered.length > 0 ? (
-              <table className="w-full text-right border-collapse min-w-[880px]">
+              <table className="w-full text-right border-collapse min-w-[800px]">
                 <thead>
                   <tr className="bg-slate-900 text-white text-xs font-black">
                     <th className="p-3 border-b border-slate-800 w-12 text-center">#</th>
                     <th className="p-3 border-b border-slate-800 min-w-[200px]">اسم المؤسسة التعليمية</th>
-                    <th className="p-3 border-b border-slate-800 w-24">السلك</th>
-                    <th className="p-3 border-b border-slate-800 min-w-[120px]">الجماعة</th>
-                    <th className="p-3 border-b border-slate-800 min-w-[140px]">الأستاذ المنسق</th>
-                    <th className="p-3 border-b border-slate-800 w-28">هاتف المنسق</th>
                     <th className="p-3 border-b border-slate-800 min-w-[150px]">مدير المؤسسة</th>
                     {canManage && <th className="p-3 border-b border-slate-800 w-28 text-center">رمز الأمان</th>}
                     <th className="p-3 border-b border-slate-800 text-center w-24">المشاركون</th>
@@ -985,54 +1020,46 @@ export const Schools: React.FC = () => {
                             )}
                           </div>
                         </td>
-                        <td className="p-3">
-                          <span className={`inline-block text-[10px] font-bold px-2 py-0.5 rounded border ${
-                            s.type === 'تأهيلي' ? 'bg-blue-50 text-blue-700 border-blue-200' :
-                            s.type === 'إعدادي' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
-                            'bg-amber-50 text-amber-700 border-amber-200'
-                          }`}>
-                            {s.type}
-                          </span>
-                        </td>
-                        <td className="p-3 text-slate-600 font-medium">{s.commune}</td>
-                        <td className="p-3 font-bold text-slate-800">{s.coordinatorName || s.teacherName || '—'}</td>
-                        <td className="p-3 font-mono text-slate-700" dir="ltr">{s.phone || '—'}</td>
                         <td className="p-3 font-medium text-amber-900">
                           {s.principalName || '—'}{' '}
-                          {s.principalPhone && (
+                          {s.principalPhone && (isPrivilegedAdmin || isMine) ? (
                             <span className="text-[10px] font-mono text-amber-800 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200 font-bold inline-block mt-0.5" dir="ltr">
                               {s.principalPhone}
                             </span>
-                          )}
+                          ) : null}
                         </td>
                         {canManage && (
                           <td className="p-3 text-center">
-                            <div className="inline-flex items-center gap-1 bg-slate-50 border border-slate-200 px-2 py-0.5 rounded-lg">
-                              <span className="font-mono font-black text-slate-800 tracking-wider">
-                                {s.accessCode || '—'}
-                              </span>
-                              <button
-                                onClick={() => {
-                                  if (s.accessCode) {
-                                    navigator.clipboard.writeText(s.accessCode);
-                                    toast.success('تم نسخ رمز الأمان!');
-                                  }
-                                }}
-                                className="p-1 hover:bg-slate-200 rounded text-slate-500 transition-colors cursor-pointer"
-                                title="نسخ رمز الأمان"
-                              >
-                                <Copy className="w-3 h-3" />
-                              </button>
-                              {(s.principalPhone || s.phone) && (
+                            {(isPrivilegedAdmin || isMine) ? (
+                              <div className="inline-flex items-center gap-1 bg-slate-50 border border-slate-200 px-2 py-0.5 rounded-lg">
+                                <span className="font-mono font-black text-slate-800 tracking-wider">
+                                  {s.accessCode || '—'}
+                                </span>
                                 <button
-                                  onClick={() => handleSendPinViaWhatsApp(s)}
-                                  className="p-1 hover:bg-green-100 rounded text-green-600 transition-colors cursor-pointer"
-                                  title="إرسال عبر WhatsApp إلى مدير المؤسسة"
+                                  onClick={() => {
+                                    if (s.accessCode) {
+                                      navigator.clipboard.writeText(s.accessCode);
+                                      toast.success('تم نسخ رمز الأمان!');
+                                    }
+                                  }}
+                                  className="p-1 hover:bg-slate-200 rounded text-slate-500 transition-colors cursor-pointer"
+                                  title="نسخ رمز الأمان"
                                 >
-                                  <Send className="w-3 h-3" />
+                                  <Copy className="w-3 h-3" />
                                 </button>
-                              )}
-                            </div>
+                                {(s.principalPhone || s.phone) && (
+                                  <button
+                                    onClick={() => handleSendPinViaWhatsApp(s)}
+                                    className="p-1 hover:bg-green-100 rounded text-green-600 transition-colors cursor-pointer"
+                                    title="إرسال عبر WhatsApp إلى مدير المؤسسة"
+                                  >
+                                    <Send className="w-3 h-3" />
+                                  </button>
+                                )}
+                              </div>
+                            ) : (
+                              <span className="text-slate-400 font-mono text-[10px]">—</span>
+                            )}
                           </td>
                         )}
                         <td className="p-3 text-center">
@@ -1043,6 +1070,14 @@ export const Schools: React.FC = () => {
                         </td>
                         <td className="p-3">
                           <div className="flex items-center justify-center gap-2">
+                            <button
+                              onClick={() => setSelectedSchoolForDetails(s)}
+                              className="px-2.5 py-1.5 font-bold rounded-lg text-[11px] bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors flex items-center gap-1 cursor-pointer shadow-3xs"
+                              title="عرض تفاصيل وبيانات المؤسسة بشكل مفصل ومنسق"
+                            >
+                              <Eye className="w-3.5 h-3.5 text-blue-600" />
+                              <span>التفاصيل</span>
+                            </button>
                             {isTeacher && !isMine ? (
                               <span 
                                 className="px-2.5 py-1.5 bg-slate-100 text-slate-500 font-bold rounded-lg text-[11px] border border-slate-200 inline-flex items-center gap-1.5 cursor-not-allowed select-none"
@@ -1065,26 +1100,30 @@ export const Schools: React.FC = () => {
                                 <FileText className="w-3.5 h-3.5" />
                               </button>
                             )}
-                            {canManage && (
-                              <>
-                                <button
-                                  onClick={() => {
-                                    setEditingSchool(s);
-                                    setIsModalOpen(true);
-                                  }}
-                                  className="p-1 text-slate-400 hover:text-blue-600 rounded hover:bg-blue-50 transition-colors cursor-pointer"
-                                  title="تعديل المؤسسة"
-                                >
-                                  <Edit3 className="h-3.5 w-3.5" />
-                                </button>
-                                <button
-                                  onClick={() => setSchoolToDelete(s)}
-                                  className="p-1 text-slate-400 hover:text-red-600 rounded hover:bg-red-50 transition-colors cursor-pointer"
-                                  title="حذف المؤسسة"
-                                >
-                                  <Trash2 className="h-3.5 w-3.5" />
-                                </button>
-                              </>
+                            {(canEditSchool(s) || canDeleteSchool(s)) && (
+                              <div className="flex items-center gap-1">
+                                {canEditSchool(s) && (
+                                  <button
+                                    onClick={() => {
+                                      setEditingSchool(s);
+                                      setIsModalOpen(true);
+                                    }}
+                                    className="p-1 text-slate-400 hover:text-blue-600 rounded hover:bg-blue-50 transition-colors cursor-pointer"
+                                    title="تعديل المؤسسة"
+                                  >
+                                    <Edit3 className="h-3.5 w-3.5" />
+                                  </button>
+                                )}
+                                {canDeleteSchool(s) && (
+                                  <button
+                                    onClick={() => setSchoolToDelete(s)}
+                                    className="p-1 text-slate-400 hover:text-red-600 rounded hover:bg-red-50 transition-colors cursor-pointer"
+                                    title="حذف المؤسسة"
+                                  >
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                  </button>
+                                )}
+                              </div>
                             )}
                           </div>
                         </td>
@@ -1110,49 +1149,44 @@ export const Schools: React.FC = () => {
               );
               const count = schoolStudentsForSport.length;
               const isMine = isTeacherSchool(s);
+              const canSeeSecrets = isPrivilegedAdmin || isMine;
+              const isExpanded = !!expandedSchoolIds[s.id];
 
               return (
                 <div
                   key={s.id}
-                  onClick={() => {
-                    if (isTeacher && !isMine) {
-                      toast('الاطلاع فقط: بصفتك أستاذاً، يحق لك الاطلاع على المؤسسات المشاركة دون إمكانية الولوج إلى لوائح وتفاصيل المؤسسات الأخرى.', {
-                        icon: '🔒',
-                        duration: 3500
-                      });
-                      return;
-                    }
-                    setSelectedSchoolForParticipants(s);
-                  }}
                   className={`flex flex-col justify-between rounded-2xl p-4 transition-all space-y-3 ${
                     isMine
-                      ? 'bg-gradient-to-br from-indigo-50/95 via-sky-50/30 to-white border-2 border-indigo-500 shadow-md ring-2 ring-indigo-500/20 cursor-pointer group'
-                      : isTeacher
-                        ? 'bg-white border border-slate-200 shadow-3xs cursor-default hover:border-slate-300'
-                        : 'bg-white border border-slate-200 shadow-xs hover:border-blue-400 hover:shadow-md cursor-pointer group'
+                      ? 'bg-gradient-to-br from-indigo-50/95 via-sky-50/30 to-white border-2 border-indigo-400 shadow-md ring-2 ring-indigo-500/10'
+                      : 'bg-white border border-slate-200/90 shadow-xs hover:border-blue-300 hover:shadow-md'
                   }`}
                 >
-                  <div>
+                  <div className="space-y-3">
+                    {/* Top Banner for user's primary school (matches image.png) */}
                     {isMine && (
-                      <div className="flex items-center justify-between text-[11px] font-black text-indigo-950 bg-indigo-100/90 px-2.5 py-1 rounded-lg border border-indigo-300 mb-2.5 shadow-3xs">
-                        <span className="flex items-center gap-1">
+                      <div className="flex items-center justify-between text-xs font-bold text-indigo-950 bg-indigo-100/90 border border-indigo-200 px-3 py-1.5 rounded-xl shadow-2xs">
+                        <span className="flex items-center gap-1.5">
                           <span>⭐</span>
                           <span>مؤسستك التعليمية ومقر عملك</span>
                         </span>
-                        <span className="text-[10px] bg-indigo-600 text-white px-2 py-0.5 rounded font-bold">المؤسسة رقم 1</span>
+                        <span className="text-[10px] bg-indigo-600 text-white px-2.5 py-0.5 rounded-md font-black">
+                          المؤسسة رقم 1
+                        </span>
                       </div>
                     )}
-                    <div className="flex items-start justify-between gap-2 mb-2">
-                      <div className="flex items-center gap-2.5">
-                        <div className={`w-9 h-9 rounded-xl flex items-center justify-center border shrink-0 font-bold transition-colors ${
+
+                    {/* Basic Header Info (Always Visible as per image.png) */}
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex items-start gap-3">
+                        <div className={`w-11 h-11 rounded-2xl flex items-center justify-center text-xl shrink-0 font-bold transition-all shadow-xs ${
                           isMine
-                            ? 'bg-indigo-600 text-white border-indigo-700 shadow-xs'
-                            : 'bg-blue-50 text-blue-700 border-blue-100 group-hover:bg-blue-600 group-hover:text-white'
+                            ? 'bg-indigo-600 text-white'
+                            : 'bg-blue-600 text-white'
                         }`}>
                           🏫
                         </div>
                         <div>
-                          <span className={`inline-block text-[10px] font-bold px-2 py-0.5 rounded border ${
+                          <span className={`inline-block text-[10px] font-bold px-2.5 py-0.5 rounded-lg border ${
                             s.type === 'تأهيلي'
                               ? 'bg-blue-50 text-blue-700 border-blue-200'
                               : s.type === 'إعدادي'
@@ -1161,246 +1195,227 @@ export const Schools: React.FC = () => {
                           }`}>
                             {s.type === 'تأهيلي' ? 'ثانوي تأهيلي' : s.type === 'إعدادي' ? 'ثانوي إعدادي' : 'ابتدائي'}
                           </span>
-                        </div>
-                      </div>
-
-                      {canManage && (
-                        <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setEditingSchool(s);
-                              setIsModalOpen(true);
-                            }}
-                            title="تعديل المؤسسة"
-                            className="p-1 text-slate-400 hover:text-blue-600 rounded hover:bg-blue-50 transition-colors cursor-pointer"
-                          >
-                            <Edit3 className="h-3.5 w-3.5" />
-                          </button>
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setSchoolToDelete(s);
-                            }}
-                            title="حذف المؤسسة"
-                            className="p-1 text-slate-400 hover:text-red-600 rounded hover:bg-red-50 transition-colors cursor-pointer"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </button>
-                        </div>
-                      )}
-                    </div>
-
-                    <h3 className="text-xs md:text-sm font-bold text-slate-800 leading-snug group-hover:text-blue-700 transition-colors">
-                      {s.name}
-                    </h3>
-
-                    <div className="mt-2 text-[11px] text-slate-500 space-y-1">
-                      <div className="flex items-center gap-1.5">
-                        <MapPin className="h-3.5 w-3.5 text-slate-400" />
-                        <span>{s.commune}</span>
-                      </div>
-                      <div className="flex items-center gap-1.5 font-medium text-slate-700">
-                        <User className="h-3.5 w-3.5 text-blue-600 shrink-0" />
-                        <span>المنسق: {s.coordinatorName || s.teacherName}</span>
-                      </div>
-                      <div className="flex items-center gap-1.5 font-medium text-amber-900">
-                        <ShieldCheck className="h-3.5 w-3.5 text-amber-600 shrink-0" />
-                        <span>المدير: {s.principalName || 'غير مسجل'}</span>
-                      </div>
-                    </div>
-
-                    {/* Participation Preview (البطولات والفئات والأصناف المشاركة فقط) */}
-                    {(() => {
-                      const schoolStudentsAll = students.filter(
-                        stud => stud.schoolId === s.id || stud.schoolName === s.name
-                      );
-                      const participatedSportKeys = Array.from(new Set(schoolStudentsAll.map(st => st.sportId).filter(Boolean)));
-                      const participatedCatKeys = Array.from(new Set(schoolStudentsAll.map(st => st.category).filter(Boolean)));
-                      const hasClub = schoolStudentsAll.some(st => st.affiliationType === 'club_affiliated');
-                      const hasSchoolOnly = schoolStudentsAll.some(st => st.affiliationType !== 'club_affiliated');
-
-                      if (participatedSportKeys.length === 0) {
-                        return (
-                          <div className="mt-2.5 px-2.5 py-1.5 bg-slate-50 rounded-lg border border-slate-200 text-[10px] text-slate-400 font-medium">
-                            لم تسجل هذه المؤسسة مشاركات بعد
-                          </div>
-                        );
-                      }
-
-                      return (
-                        <div className="mt-2.5 p-2 bg-blue-50/70 rounded-xl border border-blue-100 space-y-1 text-[11px]">
-                          {/* Sports */}
-                          <div className="flex items-center gap-1 flex-wrap">
-                            <span className="font-black text-blue-950 text-[10px]">البطولات:</span>
-                            {participatedSportKeys.map(sKey => {
-                              const sp = SPORTS_MAP[sKey as string];
-                              return (
-                                <span key={sKey} className="px-1.5 py-0.5 bg-white text-blue-900 font-bold border border-blue-200 rounded-md text-[10px] flex items-center gap-1 shadow-3xs">
-                                  <span>{sp?.icon || '🏆'}</span>
-                                  <span>{sp?.name || sKey}</span>
-                                </span>
-                              );
-                            })}
-                          </div>
-
-                          {/* Categories */}
-                          {participatedCatKeys.length > 0 && (
-                            <div className="flex items-center gap-1 flex-wrap pt-0.5">
-                              <span className="font-black text-slate-700 text-[10px]">الفئات:</span>
-                              {participatedCatKeys.map(cKey => {
-                                const cat = AGE_CATEGORIES.find(c => c.id === cKey);
-                                return (
-                                  <span key={cKey} className="px-1.5 py-0.5 bg-emerald-50 text-emerald-900 font-bold border border-emerald-200 rounded-md text-[10px]">
-                                    {cat ? cat.shortName : cKey}
-                                  </span>
-                                );
-                              })}
-                            </div>
-                          )}
-
-                          {/* Classes */}
-                          <div className="flex items-center gap-1 flex-wrap text-[10px] pt-0.5">
-                            <span className="font-black text-slate-700">الأصناف:</span>
-                            {hasSchoolOnly && (
-                              <span className="px-1.5 py-0.5 bg-white text-slate-800 font-bold border border-slate-300 rounded-md">
-                                ⚪ لا منتمين
-                              </span>
-                            )}
-                            {hasClub && (
-                              <span className="px-1.5 py-0.5 bg-amber-100 text-amber-950 font-bold border border-amber-300 rounded-md">
-                                🟡 منتمين للأندية
-                              </span>
-                            )}
+                          <h3 className="text-sm md:text-base font-black text-slate-900 leading-tight mt-1">
+                            {s.name}
+                          </h3>
+                          <div className="text-xs text-slate-500 font-medium flex items-center gap-1 mt-1">
+                            <MapPin className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+                            <span>{s.commune}</span>
                           </div>
                         </div>
-                      );
-                    })()}
-                  </div>
-
-                  <div className="space-y-1.5 pt-1">
-                    {/* Coordinator Phone */}
-                    {s.phone && (
-                      <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-[11px]">
-                        <span className="text-slate-500 font-medium flex items-center gap-1">
-                          <Phone className="h-3 w-3 text-blue-500" />
-                          <span>هاتف المنسق:</span>
-                        </span>
-                        <a
-                          href={`tel:${s.phone}`}
-                          onClick={(e) => e.stopPropagation()}
-                          className="font-mono text-slate-700 hover:text-blue-600 font-bold"
-                          dir="ltr"
-                        >
-                          {s.phone}
-                        </a>
                       </div>
-                    )}
 
-                    {/* Principal Phone (هاتف مدير المؤسسة) */}
-                    <div className={`pt-1.5 ${s.phone ? 'border-t border-slate-100/70' : 'pt-2 border-t border-slate-100'} flex items-center justify-between text-[11px]`}>
-                      <span className="text-amber-900 font-semibold flex items-center gap-1">
-                        <PhoneCall className="h-3 w-3 text-amber-600" />
-                        <span>هاتف المدير:</span>
-                      </span>
-                      {s.principalPhone ? (
-                        <a
-                          href={`tel:${s.principalPhone}`}
-                          onClick={(e) => e.stopPropagation()}
-                          className="font-mono text-amber-950 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded font-bold hover:bg-amber-100 transition-colors"
-                          dir="ltr"
-                          title="الاتصال بمدير المؤسسة"
-                        >
-                          {s.principalPhone}
-                        </a>
-                      ) : canManage ? (
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setEditingSchool(s);
-                            setIsModalOpen(true);
-                          }}
-                          className="text-[10px] text-amber-700 hover:text-amber-900 bg-amber-50 hover:bg-amber-100/80 border border-amber-200/80 px-2 py-0.5 rounded font-bold transition-colors cursor-pointer"
-                          title="إضافة رقم هاتف مدير المؤسسة"
-                        >
-                          + إضافة هاتف المدير
-                        </button>
-                      ) : (
-                        <span className="text-slate-400 text-[10px]">غير مسجل</span>
-                      )}
-                    </div>
-
-                    {/* School Access Code for authorized managers */}
-                    {canManage && (
-                      <div className="pt-1.5 border-t border-slate-100 flex items-center justify-between text-[11px]" onClick={(e) => e.stopPropagation()}>
-                        <span className="text-blue-900 font-bold flex items-center gap-1">
-                          <KeyRound className="h-3.5 w-3.5 text-blue-600" />
-                          <span>رمز الأمان (PIN):</span>
-                        </span>
-                        <div className="flex items-center gap-1.5 bg-blue-50/50 border border-blue-200 px-2 py-0.5 rounded font-bold">
-                          <span className="font-mono font-black text-blue-950 tracking-wider">
-                            {s.accessCode || '—'}
-                          </span>
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              if (s.accessCode) {
-                                navigator.clipboard.writeText(s.accessCode);
-                                toast.success('تم نسخ رمز الأمان!');
-                              }
-                            }}
-                            className="p-1 hover:bg-blue-100 rounded text-blue-600 transition-colors cursor-pointer"
-                            title="نسخ رمز الأمان"
-                          >
-                            <Copy className="w-3.5 h-3.5" />
-                          </button>
-                          {(s.principalPhone || s.phone) && (
+                      {/* Quick Action buttons */}
+                      {(canEditSchool(s) || canDeleteSchool(s)) && (
+                        <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
+                          {canEditSchool(s) && (
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
-                                handleSendPinViaWhatsApp(s);
+                                setEditingSchool(s);
+                                setIsModalOpen(true);
                               }}
-                              className="p-1 hover:bg-green-100 rounded text-green-600 transition-colors cursor-pointer"
-                              title="إرسال عبر WhatsApp إلى مدير المؤسسة"
+                              title="تعديل المؤسسة"
+                              className="p-1.5 text-slate-400 hover:text-blue-600 rounded-lg hover:bg-blue-50 transition-colors cursor-pointer"
                             >
-                              <Send className="w-3.5 h-3.5" />
+                              <Edit3 className="h-4 w-4" />
+                            </button>
+                          )}
+                          {canDeleteSchool(s) && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSchoolToDelete(s);
+                              }}
+                              title="حذف المؤسسة"
+                              className="p-1.5 text-slate-400 hover:text-red-600 rounded-lg hover:bg-red-50 transition-colors cursor-pointer"
+                            >
+                              <Trash2 className="h-4 w-4" />
                             </button>
                           )}
                         </div>
-                      </div>
-                    )}
-
-                    {/* Participant List Click Trigger Footer */}
-                    <div className="pt-2 border-t border-slate-100 flex items-center justify-between">
-                      <div className={`flex items-center gap-1.5 text-xs font-bold ${
-                        isTeacher && !isMine ? 'text-slate-500' : isMine ? 'text-indigo-700' : 'text-blue-600 group-hover:text-blue-700'
-                      }`}>
-                        <Users className={`h-3.5 w-3.5 ${isTeacher && !isMine ? 'text-slate-400' : isMine ? 'text-indigo-600' : 'text-blue-600'}`} />
-                        <span>
-                          {selectedSport !== 'ALL'
-                            ? `المشاركون (${count} ${count === 1 ? 'تلميذ' : 'تلاميذ'})`
-                            : `المشاركون المسجلون (${count})`}
-                        </span>
-                      </div>
-                      {isTeacher && !isMine ? (
-                        <span 
-                          className="text-[10px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded border border-slate-200 flex items-center gap-1 select-none"
-                          title="اطلاع فقط: لا يحق للأستاذ الولوج للوائح وتفاصيل المؤسسات الأخرى"
-                        >
-                          <Lock className="w-3 h-3 text-slate-400" />
-                          <span>اطلاع فقط</span>
-                        </span>
-                      ) : (
-                        <span className={`text-[11px] font-bold flex items-center gap-0.5 transition-all ${
-                          isMine
-                            ? 'text-indigo-700 hover:text-indigo-900 bg-indigo-50 px-2.5 py-1 rounded-lg border border-indigo-200'
-                            : 'text-blue-600 group-hover:text-blue-800 group-hover:translate-x-[-2px]'
-                        }`}>
-                          <span>{isMine ? 'عرض وإدارة لوائح مؤسستي' : 'عرض اللائحة'}</span>
-                          <span className="text-xs">←</span>
-                        </span>
                       )}
                     </div>
+
+                    {/* EXPANDED DETAILS SECTION (Visible when Eye toggled ON) */}
+                    {isExpanded && (
+                      <div className="pt-3 border-t border-slate-100 space-y-2.5 animate-fadeIn">
+                        {/* Coordinator & Principal Info */}
+                        <div className="bg-slate-50/80 p-2.5 rounded-xl border border-slate-200/70 text-[11px] space-y-1.5">
+                          <div className="flex items-center justify-between text-slate-700">
+                            <span className="font-semibold flex items-center gap-1">
+                              <User className="h-3.5 w-3.5 text-blue-600 shrink-0" />
+                              <span>المنسق: {s.coordinatorName || s.teacherName || '—'}</span>
+                            </span>
+                            {s.phone && (
+                              <a href={`tel:${s.phone}`} onClick={(e) => e.stopPropagation()} className="font-mono font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded border border-blue-200" dir="ltr">
+                                {s.phone}
+                              </a>
+                            )}
+                          </div>
+
+                          <div className="flex items-center justify-between text-amber-900 border-t border-slate-200/50 pt-1.5">
+                            <span className="font-semibold flex items-center gap-1">
+                              <ShieldCheck className="h-3.5 w-3.5 text-amber-600 shrink-0" />
+                              <span>المدير: {s.principalName || 'غير مسجل'}</span>
+                            </span>
+                            {s.principalPhone && canSeeSecrets ? (
+                              <a href={`tel:${s.principalPhone}`} onClick={(e) => e.stopPropagation()} className="font-mono font-bold text-amber-950 bg-amber-50 px-2 py-0.5 rounded border border-amber-200" dir="ltr">
+                                {s.principalPhone}
+                              </a>
+                            ) : null}
+                          </div>
+                        </div>
+
+                        {/* Participation Breakdown Preview */}
+                        {(() => {
+                          const schoolStudentsAll = students.filter(
+                            stud => stud.schoolId === s.id || stud.schoolName === s.name
+                          );
+                          const participatedSportKeys = Array.from(new Set(schoolStudentsAll.map(st => st.sportId).filter(Boolean)));
+                          const participatedCatKeys = Array.from(new Set(schoolStudentsAll.map(st => st.category).filter(Boolean)));
+                          const hasClub = schoolStudentsAll.some(st => st.affiliationType === 'club_affiliated');
+                          const hasSchoolOnly = schoolStudentsAll.some(st => st.affiliationType !== 'club_affiliated');
+
+                          if (participatedSportKeys.length === 0) {
+                            return (
+                              <div className="px-2.5 py-1.5 bg-slate-50 rounded-lg border border-slate-200 text-[10px] text-slate-400 font-medium text-center">
+                                لم تسجل هذه المؤسسة مشاركات بعد
+                              </div>
+                            );
+                          }
+
+                          return (
+                            <div className="p-2.5 bg-blue-50/70 rounded-xl border border-blue-100 space-y-1.5 text-[11px]">
+                              {/* Sports */}
+                              <div className="flex items-center gap-1 flex-wrap">
+                                <span className="font-black text-blue-950 text-[10px]">البطولات:</span>
+                                {participatedSportKeys.map(sKey => {
+                                  const sp = SPORTS_MAP[sKey as string];
+                                  return (
+                                    <span key={sKey} className="px-1.5 py-0.5 bg-white text-blue-900 font-bold border border-blue-200 rounded-md text-[10px] flex items-center gap-1 shadow-3xs">
+                                      <span>{sp?.icon || '🏆'}</span>
+                                      <span>{sp?.name || sKey}</span>
+                                    </span>
+                                  );
+                                })}
+                              </div>
+
+                              {/* Categories */}
+                              {participatedCatKeys.length > 0 && (
+                                <div className="flex items-center gap-1 flex-wrap pt-0.5">
+                                  <span className="font-black text-slate-700 text-[10px]">الفئات:</span>
+                                  {participatedCatKeys.map(cKey => {
+                                    const cat = AGE_CATEGORIES.find(c => c.id === cKey);
+                                    return (
+                                      <span key={cKey} className="px-1.5 py-0.5 bg-emerald-50 text-emerald-900 font-bold border border-emerald-200 rounded-md text-[10px]">
+                                        {cat ? cat.shortName : cKey}
+                                      </span>
+                                    );
+                                  })}
+                                </div>
+                              )}
+
+                              {/* Classes */}
+                              <div className="flex items-center gap-1 flex-wrap text-[10px] pt-0.5">
+                                <span className="font-black text-slate-700">الأصناف:</span>
+                                {hasSchoolOnly && (
+                                  <span className="px-1.5 py-0.5 bg-white text-slate-800 font-bold border border-slate-300 rounded-md">
+                                    ⚪ لا منتمين
+                                  </span>
+                                )}
+                                {hasClub && (
+                                  <span className="px-1.5 py-0.5 bg-amber-100 text-amber-950 font-bold border border-amber-300 rounded-md">
+                                    🟡 منتمين للأندية
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })()}
+
+                        {/* Security Access PIN Code */}
+                        {canSeeSecrets && (
+                          <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-[11px]" onClick={(e) => e.stopPropagation()}>
+                            <span className="text-blue-900 font-bold flex items-center gap-1">
+                              <KeyRound className="h-3.5 w-3.5 text-blue-600" />
+                              <span>رمز الأمان (PIN):</span>
+                            </span>
+                            <div className="flex items-center gap-1.5 bg-blue-50/50 border border-blue-200 px-2 py-0.5 rounded font-bold">
+                              <span className="font-mono font-black text-blue-950 tracking-wider">
+                                {s.accessCode || '—'}
+                              </span>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  if (s.accessCode) {
+                                    navigator.clipboard.writeText(s.accessCode);
+                                    toast.success('تم نسخ رمز الأمان!');
+                                  }
+                                }}
+                                className="p-1 hover:bg-blue-100 rounded text-blue-600 transition-colors cursor-pointer"
+                                title="نسخ رمز الأمان"
+                              >
+                                <Copy className="w-3.5 h-3.5" />
+                              </button>
+                              {(s.principalPhone || s.phone) && (
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleSendPinViaWhatsApp(s);
+                                  }}
+                                  className="p-1 hover:bg-green-100 rounded text-green-600 transition-colors cursor-pointer"
+                                  title="إرسال عبر WhatsApp إلى مدير المؤسسة"
+                                >
+                                  <Send className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Button to view participant modal */}
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (isTeacher && !isMine) {
+                              toast('الاطلاع فقط: بصفتك أستاذاً، يحق لك الاطلاع على المؤسسات المشاركة دون إمكانية الولوج إلى لوائح وتفاصيل المؤسسات الأخرى.', {
+                                icon: '🔒',
+                                duration: 3500
+                              });
+                              return;
+                            }
+                            setSelectedSchoolForParticipants(s);
+                          }}
+                          className="w-full mt-1 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-800 font-bold rounded-xl border border-blue-200 text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                        >
+                          <Users className="w-3.5 h-3.5 text-blue-600" />
+                          <span>عرض لائحة المشاركين التفصيلية</span>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* BOTTOM FOOTER BAR (Always Visible) */}
+                  <div className="pt-3 mt-3 border-t border-slate-100 flex items-center justify-between gap-2">
+                    {/* Right side: Participant count badge */}
+                    <span className="inline-flex items-center gap-1.5 font-mono font-black text-xs text-blue-800 bg-blue-50 px-2.5 py-1 rounded-lg border border-blue-200/80">
+                      <Users className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                      <span>{count} مشارك</span>
+                    </span>
+
+                    {/* Left side (Bottom Left): Eye button for opening details modal */}
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSelectedSchoolForDetails(s);
+                      }}
+                      className="px-3 py-1.5 rounded-xl border border-slate-200 bg-slate-50 hover:bg-blue-50 text-slate-700 hover:text-blue-700 transition-all flex items-center gap-1.5 text-xs font-bold cursor-pointer shadow-3xs"
+                      title="عرض تفاصيل وبيانات المؤسسة بشكل مفصل ومنسق"
+                    >
+                      <Eye className="w-4 h-4 shrink-0 text-blue-600" />
+                      <span>التفاصيل</span>
+                    </button>
                   </div>
                 </div>
               );
@@ -1466,6 +1481,277 @@ export const Schools: React.FC = () => {
         sportId={selectedSport}
         allStudents={students}
       />
+
+      {/* Detailed School Information Modal */}
+      {selectedSchoolForDetails && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs overflow-y-auto" dir="rtl">
+          <div className="relative w-full max-w-2xl bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden animate-in fade-in zoom-in duration-200">
+            {/* Modal Header */}
+            <div className="p-4 bg-gradient-to-r from-slate-900 via-blue-950 to-slate-900 text-white flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-white/10 border border-white/20 flex items-center justify-center text-lg shadow-sm">
+                  🏫
+                </div>
+                <div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h3 className="text-sm sm:text-base font-black text-white leading-tight">
+                      {selectedSchoolForDetails.name}
+                    </h3>
+                    <span className={`text-[10px] font-black px-2 py-0.5 rounded-full border ${
+                      selectedSchoolForDetails.type === 'تأهيلي' ? 'bg-blue-500/20 text-blue-300 border-blue-500/30' :
+                      selectedSchoolForDetails.type === 'إعدادي' ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' :
+                      'bg-amber-500/20 text-amber-300 border-amber-500/30'
+                    }`}>
+                      {selectedSchoolForDetails.type === 'تأهيلي' ? 'ثانوي تأهيلي' : selectedSchoolForDetails.type === 'إعدادي' ? 'ثانوي إعدادي' : 'ابتدائي'}
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-slate-300 font-medium mt-0.5">
+                    المديرية الإقليمية تاوريرت • جماعة {selectedSchoolForDetails.commune}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedSchoolForDetails(null)}
+                className="p-1.5 rounded-lg hover:bg-white/10 text-slate-300 hover:text-white transition-colors cursor-pointer"
+                title="إغلاق"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Content */}
+            <div className="p-5 space-y-4 max-h-[75vh] overflow-y-auto">
+              {/* Main School Info Grid */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {/* School Coordinator Card */}
+                <div className="bg-slate-50 border border-slate-200/60 rounded-xl p-4 space-y-2.5 hover:shadow-xs transition-shadow">
+                  <div className="flex items-center gap-2 border-b border-slate-200/50 pb-2">
+                    <div className="p-1.5 bg-blue-100 text-blue-700 rounded-lg">
+                      <User className="w-4 h-4" />
+                    </div>
+                    <span className="text-xs font-black text-slate-800">الأستاذ المنسق المؤطر</span>
+                  </div>
+                  <div className="space-y-1.5 text-xs">
+                    <p className="font-bold text-slate-950 text-sm">{selectedSchoolForDetails.coordinatorName || selectedSchoolForDetails.teacherName || '—'}</p>
+                    {selectedSchoolForDetails.phone ? (
+                      <div className="flex items-center gap-2 pt-1">
+                        <span className="text-slate-500">رقم الهاتف:</span>
+                        <a 
+                          href={`tel:${selectedSchoolForDetails.phone}`} 
+                          className="font-mono font-black text-blue-700 hover:underline bg-blue-50 px-2 py-0.5 rounded border border-blue-200 inline-flex items-center gap-1"
+                          dir="ltr"
+                        >
+                          <Phone className="w-3 h-3" />
+                          {selectedSchoolForDetails.phone}
+                        </a>
+                      </div>
+                    ) : (
+                      <p className="text-slate-400">لا يوجد هاتف مسجل للأساتذة المنسقين</p>
+                    )}
+                  </div>
+                </div>
+
+                {/* School Principal Card */}
+                <div className="bg-slate-50 border border-slate-200/60 rounded-xl p-4 space-y-2.5 hover:shadow-xs transition-shadow">
+                  <div className="flex items-center gap-2 border-b border-slate-200/50 pb-2">
+                    <div className="p-1.5 bg-amber-100 text-amber-700 rounded-lg">
+                      <ShieldCheck className="w-4 h-4" />
+                    </div>
+                    <span className="text-xs font-black text-slate-800">مدير المؤسسة التعليمية</span>
+                  </div>
+                  <div className="space-y-1.5 text-xs">
+                    <p className="font-bold text-slate-950 text-sm">{selectedSchoolForDetails.principalName || 'غير مسجل'}</p>
+                    {selectedSchoolForDetails.principalPhone ? (
+                      (isPrivilegedAdmin || isTeacherSchool(selectedSchoolForDetails)) ? (
+                        <div className="flex items-center gap-2 pt-1">
+                          <span className="text-slate-500">رقم الهاتف:</span>
+                          <a 
+                            href={`tel:${selectedSchoolForDetails.principalPhone}`} 
+                            className="font-mono font-black text-amber-950 hover:underline bg-amber-50 px-2 py-0.5 rounded border border-amber-200 inline-flex items-center gap-1"
+                            dir="ltr"
+                          >
+                            <PhoneCall className="w-3 h-3" />
+                            {selectedSchoolForDetails.principalPhone}
+                          </a>
+                        </div>
+                      ) : (
+                        <div className="pt-1 text-slate-500 flex items-center gap-1.5 bg-amber-500/5 border border-amber-200/60 px-2.5 py-1 rounded-lg">
+                          <Lock className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                          <span className="text-[10px] font-bold text-amber-900 leading-tight">هاتف المدير محجوب للخصوصية</span>
+                        </div>
+                      )
+                    ) : (
+                      <p className="text-slate-400">لا يوجد رقم هاتف مسجل للمدير</p>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Safety Code Card / PIN (Strictly Protected) */}
+              <div className="bg-slate-50 border border-slate-200/60 rounded-xl p-4 space-y-3">
+                <div className="flex items-center justify-between border-b border-slate-200/50 pb-2">
+                  <div className="flex items-center gap-2">
+                    <div className="p-1.5 bg-violet-100 text-violet-700 rounded-lg">
+                      <KeyRound className="w-4 h-4" />
+                    </div>
+                    <span className="text-xs font-black text-slate-800">رمز الأمان والولوج الخاص بالمؤسسة (PIN Code)</span>
+                  </div>
+                </div>
+                
+                {(isPrivilegedAdmin || isTeacherSchool(selectedSchoolForDetails)) ? (
+                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-violet-50 border border-violet-100 p-3 rounded-xl">
+                    <div className="flex items-center gap-2.5">
+                      <span className="text-[11px] font-bold text-violet-950">رمز الأمان:</span>
+                      <span className="font-mono font-black text-violet-900 text-base tracking-wider bg-white px-3 py-1 rounded-lg border border-violet-200 shadow-3xs">
+                        {selectedSchoolForDetails.accessCode || '—'}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        onClick={() => {
+                          if (selectedSchoolForDetails.accessCode) {
+                            navigator.clipboard.writeText(selectedSchoolForDetails.accessCode);
+                            toast.success('تم نسخ رمز الأمان الموحد!');
+                          }
+                        }}
+                        className="px-2.5 py-1.5 bg-white border border-violet-200 hover:bg-violet-100 text-violet-700 font-bold text-xs rounded-lg transition-colors cursor-pointer flex items-center gap-1 shadow-3xs"
+                        title="نسخ رمز الأمان"
+                      >
+                        <Copy className="w-3.5 h-3.5" />
+                        <span>نسخ الرمز</span>
+                      </button>
+                      {(selectedSchoolForDetails.principalPhone || selectedSchoolForDetails.phone) && (
+                        <button
+                          onClick={() => handleSendPinViaWhatsApp(selectedSchoolForDetails)}
+                          className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-lg transition-colors cursor-pointer flex items-center gap-1 shadow-2xs"
+                          title="إرسال عبر WhatsApp إلى مدير أو منسق المؤسسة"
+                        >
+                          <Send className="w-3.5 h-3.5" />
+                          <span>إرسال الرمز</span>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="p-3 bg-slate-100 border border-slate-200 text-slate-600 rounded-xl flex items-center gap-2.5">
+                    <Lock className="w-4 h-4 text-slate-400 shrink-0" />
+                    <span className="text-xs font-bold text-slate-700">الرمز السري متاح حصرياً لمدير ومؤطري هذه المؤسسة وللإدارة الإقليمية فقط.</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Institution Participation Stats Card */}
+              {(() => {
+                const schoolStudentsAll = students.filter(
+                  stud => stud.schoolId === selectedSchoolForDetails.id || stud.schoolName === selectedSchoolForDetails.name
+                );
+                const count = schoolStudentsAll.length;
+                const boysCount = schoolStudentsAll.filter(st => st.gender === 'Male').length;
+                const girlsCount = schoolStudentsAll.filter(st => st.gender === 'Female').length;
+                const participatedSportKeys = Array.from(new Set(schoolStudentsAll.map(st => st.sportId).filter(Boolean)));
+                const participatedCatKeys = Array.from(new Set(schoolStudentsAll.map(st => st.category).filter(Boolean)));
+
+                return (
+                  <div className="bg-slate-50 border border-slate-200/60 rounded-xl p-4 space-y-3.5">
+                    <div className="flex items-center gap-2 border-b border-slate-200/50 pb-2">
+                      <div className="p-1.5 bg-indigo-100 text-indigo-700 rounded-lg">
+                        <Users className="w-4 h-4" />
+                      </div>
+                      <span className="text-xs font-black text-slate-800">إحصائيات وحصيلة المشاركة الرياضية بالمؤسسة</span>
+                    </div>
+
+                    <div className="grid grid-cols-3 gap-2.5 text-center">
+                      <div className="bg-white border border-slate-100 rounded-xl p-2.5">
+                        <p className="text-[10px] text-slate-400 font-bold mb-0.5">مجموع العدائين/المشاركين</p>
+                        <p className="text-sm font-black text-slate-900">{count} تلميذ(ة)</p>
+                      </div>
+                      <div className="bg-white border border-slate-100 rounded-xl p-2.5">
+                        <p className="text-[10px] text-slate-400 font-bold mb-0.5">👦 الذكور</p>
+                        <p className="text-sm font-black text-blue-600">{boysCount} مشارك</p>
+                      </div>
+                      <div className="bg-white border border-slate-100 rounded-xl p-2.5">
+                        <p className="text-[10px] text-slate-400 font-bold mb-0.5">👧 الإناث</p>
+                        <p className="text-sm font-black text-pink-600">{girlsCount} مشاركة</p>
+                      </div>
+                    </div>
+
+                    {/* Sports Pill List */}
+                    {participatedSportKeys.length > 0 ? (
+                      <div className="space-y-2">
+                        <p className="text-xs font-bold text-slate-700">البطولات والمسابقات الرياضية المسجلة:</p>
+                        <div className="flex flex-wrap gap-1.5">
+                          {participatedSportKeys.map(sKey => {
+                            const sp = SPORTS_MAP[sKey as string];
+                            return (
+                              <span key={sKey} className="px-2.5 py-1 bg-white text-blue-900 font-black border border-blue-200 rounded-lg text-xs flex items-center gap-1.5 shadow-3xs">
+                                <span>{sp?.icon || '🏆'}</span>
+                                <span>{sp?.name || sKey}</span>
+                              </span>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="text-xs text-slate-400 text-center py-2">لا توجد مسابقات أو بطولات مسجلة لهذه المؤسسة حالياً.</p>
+                    )}
+
+                    {/* Age categories Pill List */}
+                    {participatedCatKeys.length > 0 && (
+                      <div className="space-y-1.5">
+                        <p className="text-xs font-bold text-slate-700">الفئات العمرية الممثلة بالمؤسسة:</p>
+                        <div className="flex flex-wrap gap-1.5">
+                          {participatedCatKeys.map(cKey => {
+                            const cat = AGE_CATEGORIES.find(c => c.id === cKey);
+                            return (
+                              <span key={cKey} className="px-2 py-0.5 bg-emerald-50 text-emerald-900 font-black border border-emerald-200 rounded-md text-[11px]">
+                                {cat ? cat.shortName : cKey}
+                              </span>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Action button to show school participants */}
+                    <div className="pt-2">
+                      {isTeacher && !isTeacherSchool(selectedSchoolForDetails) ? (
+                        <div className="p-2.5 bg-amber-50 border border-amber-200/60 rounded-xl text-[11px] text-amber-900 font-bold flex items-center gap-1.5">
+                          <Lock className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                          <span>بصفتك أستاذاً لمؤسسة أخرى، لا يحق لك الاطلاع الاسمية التفصيلية لتلاميذ هذه المؤسسة.</span>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => {
+                            const s = selectedSchoolForDetails;
+                            setSelectedSchoolForDetails(null);
+                            setSelectedSchoolForParticipants(s);
+                          }}
+                          className="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white font-black rounded-xl border border-blue-500 text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer shadow-xs"
+                        >
+                          <FileText className="w-4 h-4 text-white" />
+                          <span>عرض لائحة المشاركين التفصيلية للمؤسسة 📂</span>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-4 bg-slate-50 border-t border-slate-100 flex items-center justify-end">
+              <button
+                type="button"
+                onClick={() => setSelectedSchoolForDetails(null)}
+                className="px-4 py-2 bg-white hover:bg-slate-100 text-slate-700 font-black text-xs rounded-xl border border-slate-200 transition-colors cursor-pointer"
+              >
+                إغلاق النافذة
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
