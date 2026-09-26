@@ -344,17 +344,17 @@ export const TeacherProfileModal: React.FC = () => {
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="bg-gradient-to-r from-blue-700 to-indigo-800 p-5 text-white relative shrink-0">
+        <div className="bg-linear-to-r from-emerald-800 via-teal-800 to-slate-900 p-5 text-white relative shrink-0">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <div className="p-2.5 bg-white/10 rounded-lg">
+              <div className="p-2.5 bg-white/10 rounded-xl">
                 <UserIcon className="h-6 w-6" />
               </div>
               <div>
                 <h3 className="text-base font-bold">
                   {isIncomplete ? 'استكمال البيانات الشخصية للأستاذ' : 'الملف الشخصي وتعديل البيانات'}
                 </h3>
-                <p className="text-xs text-blue-100/80 mt-0.5">
+                <p className="text-xs text-emerald-100/80 mt-0.5">
                   {isIncomplete
                     ? 'يرجى ملء الاستمارة لتفعيل حسابكم وتسهيل تواصل الإدارة معكم'
                     : 'يمكنك تعديل معلوماتك الشخصية وصورتك ومقر عملك وتخصصاتك في التحكيم'}
@@ -375,7 +375,7 @@ export const TeacherProfileModal: React.FC = () => {
         {/* Form */}
         <form onSubmit={handleSubmit} className="p-6 space-y-4 overflow-y-auto flex-1">
           {isIncomplete && (
-            <div className="p-3 bg-amber-50 border border-amber-100 rounded-lg flex gap-2.5 text-amber-800 text-[11px] leading-relaxed">
+            <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl flex gap-2.5 text-amber-800 text-[11px] leading-relaxed">
               <AlertCircle className="h-4 w-4 shrink-0 mt-0.5 text-amber-600" />
               <span>
                 مرحباً بك! لإتمام إعداد حسابكم الرياضي وتعيينكم في لجان التحكيم، يرجى استكمال رقم التأجير، مقر العمل، ورقم الهاتف وتخصص التحكيم.
@@ -384,14 +384,14 @@ export const TeacherProfileModal: React.FC = () => {
           )}
 
           {/* Teacher Photo Upload Box (Compressed & Mobile Camera) */}
-          <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
+          <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 space-y-3">
             <div className="flex items-center gap-4">
               <div className="relative shrink-0">
                 {photoUrl ? (
                   <img
                     src={photoUrl}
                     alt={fullName || 'Teacher photo'}
-                    className="w-16 h-16 rounded-full object-cover border-2 border-blue-500 shadow-sm"
+                    className="w-16 h-16 rounded-full object-cover border-2 border-emerald-500 shadow-sm"
                   />
                 ) : (
                   <div className="w-16 h-16 rounded-full bg-slate-200 border-2 border-slate-300 flex items-center justify-center text-slate-400">
@@ -414,7 +414,7 @@ export const TeacherProfileModal: React.FC = () => {
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-bold text-slate-800">صورة الأستاذ(ة) المؤطر(ة)</span>
                   {photoUrl && (
-                    <span className="text-[10px] text-emerald-600 font-bold bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                    <span className="text-[10px] text-emerald-700 font-bold bg-emerald-50 px-2 py-0.5 rounded border border-emerald-300">
                       ✓ تم تسجيل الصورة
                     </span>
                   )}
@@ -423,7 +423,7 @@ export const TeacherProfileModal: React.FC = () => {
                   يمكنك التقاط صورتك مباشرة عبر كاميرا هاتفك المحمول أو رفع صورة من جهازك.
                 </p>
                 {isProcessingPhoto && (
-                  <span className="text-[10px] text-blue-600 font-bold animate-pulse block mt-1">
+                  <span className="text-[10px] text-emerald-600 font-bold animate-pulse block mt-1">
                     جاري ضغط ومعالجة الصورة...
                   </span>
                 )}
@@ -435,7 +435,7 @@ export const TeacherProfileModal: React.FC = () => {
               <button
                 type="button"
                 onClick={() => mobileCameraInputRef.current?.click()}
-                className="py-2 px-3 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm transition-all cursor-pointer"
+                className="py-2 px-3 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm shadow-emerald-600/20 transition-all cursor-pointer"
               >
                 <Camera className="w-3.5 h-3.5" />
                 <span>التقاط بالكاميرا مباشرة 📸</span>
@@ -444,9 +444,9 @@ export const TeacherProfileModal: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setIsCameraModalOpen(true)}
-                className="py-2 px-3 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 text-indigo-700 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                className="py-2 px-3 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-800 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
               >
-                <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
+                <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
                 <span>فتح الكاميرا المباشرة 📷</span>
               </button>
 
@@ -626,11 +626,11 @@ export const TeacherProfileModal: React.FC = () => {
 
             {/* Secure Directorate Transfer Request Section (when no transfer is pending) */}
             {!hasPendingTransfer && (
-              <div className="border border-blue-100 bg-blue-50/40 rounded-xl p-3.5 space-y-3">
+              <div className="border border-emerald-100 bg-emerald-50/40 rounded-2xl p-3.5 space-y-3">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <ArrowRightLeft className="w-4 h-4 text-blue-700" />
-                    <span className="text-xs font-bold text-blue-950">الانتقال إلى مديرية إقليمية أخرى</span>
+                    <ArrowRightLeft className="w-4 h-4 text-emerald-700" />
+                    <span className="text-xs font-bold text-emerald-950">الانتقال إلى مديرية إقليمية أخرى</span>
                   </div>
                   <button
                     type="button"
@@ -641,10 +641,10 @@ export const TeacherProfileModal: React.FC = () => {
                         setTargetDirectoratePin('');
                       }
                     }}
-                    className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
                       wantTransfer
-                        ? 'bg-blue-600 text-white shadow-xs'
-                        : 'bg-white text-blue-700 border border-blue-300 hover:bg-blue-100'
+                        ? 'bg-emerald-600 text-white shadow-xs'
+                        : 'bg-white text-emerald-700 border border-emerald-300 hover:bg-emerald-50'
                     }`}
                   >
                     {wantTransfer ? 'إلغاء الطلب' : 'طلب انتقال +'}
@@ -652,8 +652,8 @@ export const TeacherProfileModal: React.FC = () => {
                 </div>
 
                 {wantTransfer && (
-                  <div className="pt-2 border-t border-blue-200/60 space-y-3 animate-in slide-in-from-top-1 duration-200">
-                    <div className="bg-amber-50 border border-amber-200 rounded-lg p-2.5 text-[11px] text-amber-900 leading-relaxed font-medium flex items-start gap-2">
+                  <div className="pt-2 border-t border-emerald-200/60 space-y-3 animate-in slide-in-from-top-1 duration-200">
+                    <div className="bg-amber-50 border border-amber-200 rounded-xl p-2.5 text-[11px] text-amber-900 leading-relaxed font-medium flex items-start gap-2">
                       <ShieldCheck className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
                       <span>
                         <strong>إجراء احترازي وأمني:</strong> يتطلب الانتقال إدخال القن السري الخاص بالمديرية المستهدفة. لن يتم نقلك مباشرة إلى المديرية الجديدة، بل سيتم إرسال طلب رسمي ينتظر موافقة ومصادقة المسير الإقليمي لتلك المديرية.
@@ -667,7 +667,7 @@ export const TeacherProfileModal: React.FC = () => {
                       <select
                         value={targetDirectorateId}
                         onChange={(e) => setTargetDirectorateId(e.target.value)}
-                        className="w-full text-xs px-3 py-2 bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 font-bold text-slate-800 cursor-pointer"
+                        className="w-full text-xs px-3 py-2 bg-white border border-slate-300 rounded-xl focus:ring-2 focus:ring-emerald-500 font-bold text-slate-800 cursor-pointer"
                         required={wantTransfer}
                       >
                         <option value="">-- حدد المديرية الإقليمية المراد الانتقال إليها --</option>
@@ -697,7 +697,7 @@ export const TeacherProfileModal: React.FC = () => {
                             value={targetDirectoratePin}
                             onChange={(e) => setTargetDirectoratePin(e.target.value)}
                             placeholder="أدخل القن السري للمديرية الجديدة"
-                            className="w-full pl-10 pr-3 py-2 bg-white border border-amber-300 rounded-lg text-xs font-mono font-bold text-center tracking-wider text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-500"
+                            className="w-full pl-10 pr-3 py-2 bg-white border border-amber-300 rounded-xl text-xs font-mono font-bold text-center tracking-wider text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-500"
                           />
                           <button
                             type="button"
@@ -739,10 +739,10 @@ export const TeacherProfileModal: React.FC = () => {
                       setTeachingCadre(cycle.id);
                       setWorkLocation('');
                     }}
-                    className={`flex flex-col items-center justify-center p-2 rounded-xl border text-xs font-bold transition-all cursor-pointer ${
+                    className={`flex flex-col items-center justify-center p-2.5 rounded-xl border text-xs font-bold transition-all cursor-pointer ${
                       teachingCadre === cycle.id
-                        ? 'bg-blue-50 border-blue-500 text-blue-900 ring-2 ring-blue-500/20 shadow-xs'
-                        : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                        ? 'bg-emerald-50 border-emerald-500 text-emerald-900 ring-2 ring-emerald-500/20 shadow-xs'
+                        : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50 hover:border-slate-300'
                     }`}
                   >
                     <span className="text-sm mb-0.5">{cycle.icon}</span>
@@ -850,9 +850,9 @@ export const TeacherProfileModal: React.FC = () => {
                         setRefereeSpecialty([...refereeSpecialty, key]);
                       }
                     }}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-[11px] font-bold transition-colors cursor-pointer ${
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-[11px] font-bold transition-all cursor-pointer ${
                       refereeSpecialty.includes(key)
-                        ? 'bg-blue-50 border-blue-200 text-blue-700 shadow-2xs'
+                        ? 'bg-emerald-50 border-emerald-300 text-emerald-800 shadow-2xs ring-1 ring-emerald-400/40'
                         : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-white hover:border-slate-300'
                     }`}
                   >
@@ -876,7 +876,7 @@ export const TeacherProfileModal: React.FC = () => {
             <button
               type="submit"
               disabled={loading}
-              className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs px-5 py-2.5 rounded-xl shadow-sm hover:shadow transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+              className="w-full sm:w-auto bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-bold text-xs px-5 py-2.5 rounded-xl shadow-md shadow-emerald-600/20 hover:shadow-lg transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
             >
               <Save className="h-4 w-4" />
               <span>{loading ? 'جاري حفظ البيانات...' : (isIncomplete ? 'حفظ البيانات والاستمرار' : 'حفظ التعديلات')}</span>

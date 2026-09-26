@@ -137,17 +137,17 @@ export const EditTournamentScheduleModal: React.FC<EditTournamentScheduleModalPr
       <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-2xl max-w-lg w-full flex flex-col overflow-hidden my-auto animate-in fade-in zoom-in-95 duration-150 relative z-[101] text-slate-900 dark:text-slate-100">
         
         {/* Header */}
-        <div className="p-4 sm:p-5 bg-gradient-to-r from-slate-900 via-blue-950 to-slate-900 text-white flex items-center justify-between gap-3">
+        <div className="p-4 sm:p-5 bg-gradient-to-r from-emerald-800 via-teal-900 to-slate-900 text-white flex items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             <div className="w-11 h-11 rounded-2xl bg-white/10 border border-white/20 text-white flex items-center justify-center text-xl font-black shrink-0 shadow-inner">
               {sportIcon}
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-blue-500/30 text-blue-200 border border-blue-400/30">
+                <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-emerald-500/30 text-emerald-200 border border-emerald-400/30">
                   تعديل وبرمجة التواريخ
                 </span>
-                <span className="text-[10px] text-slate-300 font-bold">
+                <span className="text-[10px] text-emerald-100 font-bold">
                   {status === 'Scheduled' ? 'مبرمجة ومجدولة' : status === 'Ongoing' ? 'جارية حالياً' : 'مكتملة'}
                 </span>
               </div>
@@ -170,12 +170,12 @@ export const EditTournamentScheduleModal: React.FC<EditTournamentScheduleModalPr
         <form onSubmit={handleSubmit} className="p-5 space-y-4 max-h-[78vh] overflow-y-auto bg-slate-50/50">
           
           {/* Permissions note */}
-          <div className="bg-blue-50/80 border border-blue-200/80 rounded-2xl p-3.5 text-xs text-blue-950 space-y-1 shadow-3xs">
-            <div className="flex items-center gap-2 font-bold text-blue-900">
-              <ShieldCheck className="w-4 h-4 text-blue-700 shrink-0" />
+          <div className="bg-emerald-50/80 border border-emerald-200/80 rounded-2xl p-3.5 text-xs text-emerald-950 space-y-1 shadow-3xs">
+            <div className="flex items-center gap-2 font-bold text-emerald-900">
+              <ShieldCheck className="w-4 h-4 text-emerald-700 shrink-0" />
               <span>صلاحيات رئيس اللجنة التقنية والمسؤول المركزي</span>
             </div>
-            <p className="text-[11px] text-blue-800 leading-relaxed">
+            <p className="text-[11px] text-emerald-800 leading-relaxed">
               تتيح لك هذه النافذة ضبط وتعديل المواعيد الرسمية لانطلاق واختتام البطولة، وتحديد الأجل الأقصى لاستقبال تراخيص وتسجيلات المؤسسات التعليمية والتلاميذ مع تحديث العداد التفاعلي.
             </p>
           </div>
@@ -338,7 +338,7 @@ export const EditTournamentScheduleModal: React.FC<EditTournamentScheduleModalPr
             <button
               type="submit"
               disabled={isSubmitting}
-              className="px-5 py-2.5 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl transition-all shadow-md hover:scale-102 active:scale-98 disabled:opacity-50 cursor-pointer flex items-center gap-2"
+              className="px-5 py-2.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl transition-all shadow-md shadow-emerald-600/20 active:scale-98 disabled:opacity-50 cursor-pointer flex items-center gap-2"
             >
               <Check className="w-4 h-4" />
               <span>{isSubmitting ? 'جاري الحفظ...' : 'حفظ وتطبيق التواريخ والبرمجة'}</span>

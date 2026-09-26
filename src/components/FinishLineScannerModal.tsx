@@ -284,10 +284,10 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
       rawGen.includes('إناث') ||
       rawGen.includes('اناث') ||
       rawGen.includes('بنت') ||
-      rawCat.includes('برعمات') ||
-      rawCat.includes('صغيرات') ||
-      rawCat.includes('فتيات') ||
-      rawCat.includes('شابات') ||
+      (rawCat.includes('برعمات') && !rawCat.includes('البراعم')) ||
+      (rawCat.includes('صغيرات') && !rawCat.includes('الصغار')) ||
+      (rawCat.includes('فتيات') && !rawCat.includes('الفتيان')) ||
+      (rawCat.includes('شابات') && !rawCat.includes('الشبان')) ||
       rawCat.includes('female');
 
     const isMale = !isFemale && (
@@ -296,8 +296,10 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
       rawGen.includes('ذكر') ||
       rawGen.includes('ذكور') ||
       rawGen.includes('ولد') ||
-      rawCat.includes('فتيان') ||
-      rawCat.includes('شبان') ||
+      (rawCat.includes('براعم') && !rawCat.includes('برعمات')) ||
+      (rawCat.includes('صغار') && !rawCat.includes('صغيرات')) ||
+      (rawCat.includes('فتيان') && !rawCat.includes('فتيات')) ||
+      (rawCat.includes('شبان') && !rawCat.includes('شابات')) ||
       rawCat.includes('male')
     );
 
@@ -1130,13 +1132,9 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
           const catDef = CROSS_COUNTRY_CATEGORIES.find(c => c.id === raceId);
           if (catDef) {
             const catArrivals = updatedArrivals.filter(a => (a.categoryId || '').replace(/_club(_affiliated)?$/, '') === raceId);
-            const existing = resultsMap[targetPropKey];
             
-            // If it's completed, we force the update. 
-            // If it's running, we only update if it doesn't already have results to avoid wiping them
-            const shouldUpdate = finalStatus === 'completed' || (!existing || !existing.podium || existing.podium.length === 0);
-            
-            if (shouldUpdate) {
+            // Only update if there are actual arrivals matching this category to avoid creating false duplicates
+            if (catArrivals.length > 0) {
               await DataService.saveCrossCountryCategoryResult({
                 categoryId: targetPropKey,
                 category: catDef.category,
@@ -1145,7 +1143,7 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
                 distance: catDef.distance,
                 seasonId: activeSeason,
                 affiliationType: raceAffiliation,
-                podium: catArrivals.length > 0 ? catArrivals.map((arr, i) => ({ ...arr, rank: i + 1 })) : (existing?.podium || []),
+                podium: catArrivals.map((arr, i) => ({ ...arr, rank: i + 1 })),
                 status: finalStatus,
                 updatedAt: new Date().toISOString()
               });
@@ -1160,7 +1158,7 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
                   distance: catDef.distance,
                   seasonId: activeSeason,
                   affiliationType: raceAffiliation,
-                  podium: catArrivals.length > 0 ? catArrivals.map((arr, i) => ({ ...arr, rank: i + 1 })) : (existing?.podium || []),
+                  podium: catArrivals.map((arr, i) => ({ ...arr, rank: i + 1 })),
                   status: finalStatus,
                   updatedAt: new Date().toISOString()
                 }
@@ -1305,22 +1303,22 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-2 sm:p-4 overflow-y-auto">
-      <div className="bg-white rounded-3xl shadow-2xl border border-slate-200 w-full max-w-5xl overflow-hidden flex flex-col max-h-[95vh] my-auto">
+      <div className="bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 w-full max-w-5xl overflow-hidden flex flex-col max-h-[95vh] my-auto">
         
         {/* Modal Main Header */}
-        <div className="bg-gradient-to-r from-slate-900 via-blue-950 to-slate-900 text-white p-3 sm:p-5 flex items-center justify-between gap-2 shrink-0 relative">
+        <div className="bg-gradient-to-r from-emerald-800 via-teal-900 to-slate-900 dark:from-emerald-950 dark:via-teal-950 dark:to-slate-950 text-white p-3 sm:p-5 flex items-center justify-between gap-2 shrink-0 relative border-b border-emerald-900/50">
           <div className="flex items-center gap-2 sm:gap-3 min-w-0">
-            <div className="w-9 h-9 sm:w-11 sm:h-11 rounded-xl sm:rounded-2xl bg-amber-500/20 border border-amber-400/30 flex items-center justify-center text-xl sm:text-2xl shrink-0 shadow-xs">
+            <div className="w-9 h-9 sm:w-11 sm:h-11 rounded-xl sm:rounded-2xl bg-white/15 border border-white/20 flex items-center justify-center text-xl sm:text-2xl shrink-0 shadow-inner">
               🏁
             </div>
             <div className="min-w-0">
               <div className="flex items-center gap-1.5 flex-wrap">
-                <h2 className="text-sm sm:text-lg font-black truncate">مدير توقيت العدو الريفي</h2>
+                <h2 className="text-sm sm:text-lg font-black truncate text-white">مدير توقيت العدو الريفي</h2>
                 <span className="px-1.5 py-0.5 rounded-full text-[8px] sm:text-[10px] font-extrabold bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 whitespace-nowrap">
                   تحديث فوري ⚡
                 </span>
               </div>
-              <p className="text-[10px] sm:text-xs text-slate-300 mt-0.5 line-clamp-1 sm:line-clamp-none hidden xs:block">
+              <p className="text-[10px] sm:text-xs text-emerald-100 dark:text-emerald-200/90 mt-0.5 line-clamp-1 sm:line-clamp-none hidden xs:block">
                 استيراد المشاركين، ضبط السباقات والتوثيق الآني للنتائج
               </p>
             </div>
@@ -1380,13 +1378,13 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
               
               {/* Excel Import Panel (7 cols) */}
-              <div className="lg:col-span-7 bg-slate-50 p-3 sm:p-5 rounded-2xl border border-slate-200 space-y-3 sm:space-y-4">
+              <div className="lg:col-span-7 bg-slate-50 dark:bg-slate-800/60 p-3 sm:p-5 rounded-2xl border border-slate-200 dark:border-slate-700/60 space-y-3 sm:space-y-4">
                 <div className="flex items-center justify-between">
-                  <h3 className="text-xs sm:text-sm font-black text-slate-900 flex items-center gap-1.5 sm:gap-2">
-                    <FileSpreadsheet className="w-4 h-4 sm:w-5 sm:h-5 text-emerald-600" />
+                  <h3 className="text-xs sm:text-sm font-black text-slate-900 dark:text-slate-100 flex items-center gap-1.5 sm:gap-2">
+                    <FileSpreadsheet className="w-4 h-4 sm:w-5 sm:h-5 text-emerald-600 dark:text-emerald-400" />
                     <span>خطوة 1: استيراد المشاركين (Excel)</span>
                   </h3>
-                  <span className="text-[8px] sm:text-[10px] bg-emerald-100 text-emerald-800 font-extrabold px-2 py-0.5 rounded-full border border-emerald-200 whitespace-nowrap">
+                  <span className="text-[8px] sm:text-[10px] bg-emerald-100 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300 font-extrabold px-2 py-0.5 rounded-full border border-emerald-200 dark:border-emerald-800 whitespace-nowrap">
                     نموذج معتمد
                   </span>
                 </div>
@@ -1398,16 +1396,16 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
                   onClick={() => fileInputRef.current?.click()}
                   className={`border-2 border-dashed rounded-2xl p-4 sm:p-6 text-center cursor-pointer transition-all flex flex-col items-center justify-center space-y-2 sm:space-y-3 ${
                     isDragging
-                      ? 'border-blue-500 bg-blue-50/50'
-                      : 'border-slate-300 bg-white hover:border-blue-500 hover:bg-slate-50/30'
+                      ? 'border-blue-500 bg-blue-50/50 dark:bg-blue-950/40'
+                      : 'border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 hover:border-blue-500 dark:hover:border-blue-400 hover:bg-slate-50/50 dark:hover:bg-slate-750'
                   }`}
                 >
-                  <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-emerald-50 border border-emerald-200 flex items-center justify-center text-emerald-600">
+                  <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800 flex items-center justify-center text-emerald-600 dark:text-emerald-400">
                     <Upload className="w-5 h-5 sm:w-6 sm:h-6" />
                   </div>
                   <div>
-                    <p className="text-[11px] sm:text-xs font-black text-slate-800">اسحب ملف إكسل أو اضغط للاستيراد</p>
-                    <p className="text-[9px] sm:text-[10px] text-slate-400 mt-0.5">يدعم .xlsx أو .xls</p>
+                    <p className="text-[11px] sm:text-xs font-black text-slate-800 dark:text-slate-200">اسحب ملف إكسل أو اضغط للاستيراد</p>
+                    <p className="text-[9px] sm:text-[10px] text-slate-400 dark:text-slate-400 mt-0.5">يدعم .xlsx أو .xls</p>
                   </div>
                   <input
                     ref={fileInputRef}
@@ -1419,9 +1417,9 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
                 </div>
 
                 {/* Info about column names */}
-                <div className="p-2.5 sm:p-3 bg-amber-50/60 border border-amber-200 rounded-xl space-y-1 text-[10px] sm:text-[11px] text-amber-900 hidden xs:block">
+                <div className="p-2.5 sm:p-3 bg-amber-50/60 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60 rounded-xl space-y-1 text-[10px] sm:text-[11px] text-amber-900 dark:text-amber-200 hidden xs:block">
                   <p className="font-bold flex items-center gap-1">
-                    <AlertCircle className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-amber-600" />
+                    <AlertCircle className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-amber-600 dark:text-amber-400" />
                     <span>الأعمدة المطلوبة:</span>
                   </p>
                   <p className="leading-relaxed opacity-80">
@@ -1430,10 +1428,10 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
                 </div>
 
                 {/* Loaded Statistics */}
-                <div className="bg-white p-3 rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+                <div className="bg-white dark:bg-slate-800 p-3 rounded-xl border border-slate-200 dark:border-slate-700 flex items-center justify-between gap-2">
                   <div className="min-w-0">
-                    <span className="text-[9px] sm:text-[10px] font-bold text-slate-500 block truncate">إجمالي المسجلين:</span>
-                    <span className="text-base sm:text-xl font-black text-blue-900 font-mono">{allStudents.length}</span>
+                    <span className="text-[9px] sm:text-[10px] font-bold text-slate-500 dark:text-slate-400 block truncate">إجمالي المسجلين:</span>
+                    <span className="text-base sm:text-xl font-black text-blue-900 dark:text-blue-400 font-mono">{allStudents.length}</span>
                   </div>
                   <div className="flex items-center gap-1.5 shrink-0">
                     {allStudents.length > 0 && (
@@ -1443,15 +1441,15 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
                           setClearScope('participants');
                           setShowClearModal(true);
                         }}
-                        className="p-1.5 bg-red-50 hover:bg-red-100 text-red-700 rounded-lg transition-colors cursor-pointer border border-red-200"
+                        className="p-1.5 bg-red-50 dark:bg-red-950/50 hover:bg-red-100 dark:hover:bg-red-900/50 text-red-700 dark:text-red-300 rounded-lg transition-colors cursor-pointer border border-red-200 dark:border-red-800"
                         title="تفريغ لائحة المشاركين"
                       >
-                        <Trash2 className="w-4 h-4 text-red-600" />
+                        <Trash2 className="w-4 h-4 text-red-600 dark:text-red-400" />
                       </button>
                     )}
                     <button
                       onClick={fetchStudents}
-                      className="p-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg transition-colors cursor-pointer border border-slate-200"
+                      className="p-1.5 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 rounded-lg transition-colors cursor-pointer border border-slate-200 dark:border-slate-600"
                       title="تحديث القائمة"
                     >
                       <RefreshCw className="w-4 h-4" />
@@ -1461,25 +1459,25 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
               </div>
 
               {/* Race Setup and Category Selection Panel (5 cols) */}
-              <div className="lg:col-span-5 bg-blue-50/50 p-5 rounded-2xl border border-blue-200/60 flex flex-col justify-between space-y-4">
+              <div className="lg:col-span-5 bg-blue-50/50 dark:bg-slate-800/80 p-5 rounded-2xl border border-blue-200/60 dark:border-slate-700 flex flex-col justify-between space-y-4">
                 <div className="space-y-4">
-                  <h3 className="text-sm font-black text-slate-900 flex items-center gap-2">
-                    <Settings className="w-5 h-5 text-blue-700" />
+                  <h3 className="text-sm font-black text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                    <Settings className="w-5 h-5 text-blue-700 dark:text-blue-400" />
                     <span>خطوة 2: تحديد السباق وتفعيله</span>
                   </h3>
 
                   <div className="space-y-3">
                     {/* Race Affiliation Selector */}
                     <div>
-                      <label className="text-xs font-black text-slate-700 block mb-1.5">صنف المشاركة للسباق:</label>
+                      <label className="text-xs font-black text-slate-700 dark:text-slate-300 block mb-1.5">صنف المشاركة للسباق:</label>
                       <div className="grid grid-cols-2 gap-2 mb-3">
                         <button
                           type="button"
                           onClick={() => setRaceAffiliation('non_club')}
                           className={`py-2 px-3 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-1.5 border cursor-pointer ${
                             raceAffiliation === 'non_club'
-                              ? 'bg-blue-600 text-white border-blue-700 shadow-xs'
-                              : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                              ? 'bg-blue-600 dark:bg-blue-600 text-white border-blue-700 dark:border-blue-500 shadow-xs'
+                              : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800'
                           }`}
                         >
                           <span>⚪</span>
@@ -1490,8 +1488,8 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
                           onClick={() => setRaceAffiliation('club_affiliated')}
                           className={`py-2 px-3 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-1.5 border cursor-pointer ${
                             raceAffiliation === 'club_affiliated'
-                              ? 'bg-amber-500 text-slate-950 border-amber-600 shadow-xs ring-2 ring-amber-300'
-                              : 'bg-white text-amber-900 border-amber-200 hover:bg-amber-50'
+                              ? 'bg-amber-500 dark:bg-amber-500 text-slate-950 border-amber-600 shadow-xs ring-2 ring-amber-300'
+                              : 'bg-white dark:bg-slate-900 text-amber-900 dark:text-amber-300 border-amber-200 dark:border-amber-800/60 hover:bg-amber-50 dark:hover:bg-amber-950/30'
                           }`}
                         >
                           <span>🟡</span>
@@ -1501,7 +1499,7 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
                     </div>
 
                     <div>
-                      <label className="text-xs font-black text-slate-700 block mb-1.5">اختر الفئة والعمر والجنس للسباق:</label>
+                      <label className="text-xs font-black text-slate-700 dark:text-slate-300 block mb-1.5">اختر الفئة والعمر والجنس للسباق:</label>
                       <div className="grid grid-cols-1 gap-2 max-h-[260px] overflow-y-auto pr-1">
                         {CROSS_COUNTRY_CATEGORIES.map((cat) => {
                           const isSelected = selectedRaceId === cat.id;
@@ -1517,12 +1515,12 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
                               onClick={() => setSelectedRaceId(cat.id)}
                               className={`p-2.5 rounded-xl text-right text-xs transition-all flex items-center justify-between border cursor-pointer group ${
                                 isSelected
-                                  ? 'bg-blue-600 border-blue-700 text-white font-black shadow-sm ring-2 ring-blue-400/40'
+                                  ? 'bg-blue-600 border-blue-700 dark:border-blue-500 text-white font-black shadow-sm ring-2 ring-blue-400/40'
                                   : isCompleted
-                                  ? 'bg-emerald-600 border-emerald-700 text-white shadow-md'
+                                  ? 'bg-emerald-600 border-emerald-700 dark:border-emerald-500 text-white shadow-md'
                                   : isRunning
                                   ? 'bg-emerald-500 border-emerald-400 text-white animate-pulse shadow-[0_0_10px_rgba(16,185,129,0.5)]'
-                                  : 'bg-white hover:bg-slate-50 border-slate-200 text-slate-800'
+                                  : 'bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200'
                               }`}
                             >
                               <div className="flex items-center gap-2.5">
@@ -1543,7 +1541,7 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
                                       </span>
                                     )}
                                   </div>
-                                  <span className={`text-[9px] font-bold ${isSelected || isCompleted || isRunning ? 'text-white/80' : 'text-slate-500'}`}>
+                                  <span className={`text-[9px] font-bold ${isSelected || isCompleted || isRunning ? 'text-white/80' : 'text-slate-500 dark:text-slate-400'}`}>
                                     مسافة: {cat.distance}
                                   </span>
                                 </div>
@@ -1554,8 +1552,8 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
                                   isSelected || isCompleted || isRunning
                                     ? 'bg-white/20 text-white border border-white/30'
                                     : count > 0
-                                    ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                                    : 'bg-slate-100 text-slate-500 border border-slate-200'
+                                    ? 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800'
+                                    : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-slate-700'
                                 }`}>
                                   <span>{count}</span>
                                   <span className="text-[9px]">عداء(ة)</span>
@@ -1573,9 +1571,9 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
 
                   {/* Existing arrivals alert with quick clear */}
                   {arrivals.length > 0 && (
-                    <div className="bg-amber-50 border border-amber-200 p-2.5 rounded-xl flex items-center justify-between gap-2 text-xs">
-                      <div className="flex items-center gap-2 text-amber-950">
-                        <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+                    <div className="bg-amber-50 dark:bg-amber-950/50 border border-amber-200 dark:border-amber-800 p-2.5 rounded-xl flex items-center justify-between gap-2 text-xs">
+                      <div className="flex items-center gap-2 text-amber-950 dark:text-amber-200">
+                        <AlertCircle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
                         <span>يتوفر هذا السباق على <strong>{arrivals.length}</strong> واصل(ة) مسجل(ة) مسبقاً.</span>
                       </div>
                       <button
@@ -1593,9 +1591,9 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
                   )}
 
                   {/* Registered Count Banner */}
-                  <div className="bg-white p-3 rounded-xl border border-blue-200 flex items-center justify-between text-xs">
-                    <span className="font-bold text-slate-600">المسجلين المؤهلين لهذه الفئة:</span>
-                    <span className="px-2.5 py-1 bg-blue-100 text-blue-900 rounded-lg font-black">{filteredStudentsCount} عداء(ة)</span>
+                  <div className="bg-white dark:bg-slate-900 p-3 rounded-xl border border-blue-200 dark:border-slate-700 flex items-center justify-between text-xs">
+                    <span className="font-bold text-slate-600 dark:text-slate-400">المسجلين المؤهلين لهذه الفئة:</span>
+                    <span className="px-2.5 py-1 bg-blue-100 dark:bg-blue-950/80 text-blue-900 dark:text-blue-300 rounded-lg font-black">{filteredStudentsCount} عداء(ة)</span>
                   </div>
                 </div>
 
@@ -1610,9 +1608,9 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
                     </button>
                     <button
                       onClick={() => handleStartRace(true)}
-                      className="w-full py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition-all active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer border border-slate-300"
+                      className="w-full py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-bold text-xs rounded-xl transition-all active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer border border-slate-300 dark:border-slate-700"
                     >
-                      <RotateCcw className="w-4 h-4 text-slate-500" />
+                      <RotateCcw className="w-4 h-4 text-slate-500 dark:text-slate-400" />
                       <span>بدء سباق جديد وتصفير الواصلين والتوقيت 🔄</span>
                     </button>
                   </div>
@@ -1634,29 +1632,29 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
         {phase === 'running' && (
           <>
             {/* Race & Stopwatch Bar */}
-            <div className="bg-slate-100 p-2.5 sm:p-4 border-b border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-2 sm:gap-3 shrink-0">
+            <div className="bg-slate-100 dark:bg-slate-800/90 p-2.5 sm:p-4 border-b border-slate-200 dark:border-slate-700 flex flex-col sm:flex-row items-center justify-between gap-2 sm:gap-3 shrink-0">
               <div className="flex items-center gap-2 w-full sm:w-auto">
-                <span className="text-[10px] sm:text-xs font-bold text-slate-600 shrink-0 hidden xs:inline">السباق المفعل:</span>
+                <span className="text-[10px] sm:text-xs font-bold text-slate-600 dark:text-slate-300 shrink-0 hidden xs:inline">السباق المفعل:</span>
                 <span className="px-2.5 py-1 bg-blue-600 text-white rounded-lg text-[10px] sm:text-xs font-black truncate flex-1 sm:flex-none">
                   {activeCategory.icon} {activeCategory.titleAr} ({activeCategory.distance})
                 </span>
                 <span className={`px-2.5 py-0.5 rounded-full text-[9px] sm:text-[10px] font-black whitespace-nowrap border shadow-xs ${
                   raceAffiliation === 'club_affiliated'
                     ? 'bg-amber-400 text-slate-950 border-amber-500 ring-1 ring-amber-300'
-                    : 'bg-white text-slate-800 border-slate-300'
+                    : 'bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 border-slate-300 dark:border-slate-700'
                 }`}>
                   {raceAffiliation === 'club_affiliated' ? '🟡 المنتمين للأندية' : '⚪ غير المنتمين (مدرسي)'}
                 </span>
-                <span className="px-2 py-0.5 rounded-full text-[9px] sm:text-[10px] bg-red-100 text-red-700 border border-red-200 font-extrabold animate-pulse whitespace-nowrap">
+                <span className="px-2 py-0.5 rounded-full text-[9px] sm:text-[10px] bg-red-100 dark:bg-red-950/80 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800 font-extrabold animate-pulse whitespace-nowrap">
                   جارٍ 🏃‍♂️
                 </span>
               </div>
 
               {/* Master Race Stopwatch */}
-              <div className="flex items-center gap-2 sm:gap-3 bg-white px-3 sm:px-4 py-1.5 sm:py-2 rounded-xl sm:rounded-2xl border border-slate-200 shadow-3xs w-full sm:w-auto justify-between sm:justify-end">
+              <div className="flex items-center gap-2 sm:gap-3 bg-white dark:bg-slate-900 px-3 sm:px-4 py-1.5 sm:py-2 rounded-xl sm:rounded-2xl border border-slate-200 dark:border-slate-700 shadow-3xs w-full sm:w-auto justify-between sm:justify-end">
                 <div className="flex items-center gap-1.5 sm:gap-2">
-                  <span className="text-[9px] sm:text-[10px] font-extrabold text-slate-500 uppercase tracking-wider">الساعة:</span>
-                  <span className="font-mono text-sm sm:text-lg font-black text-blue-900 tracking-wider">
+                  <span className="text-[9px] sm:text-[10px] font-extrabold text-slate-500 dark:text-slate-400 uppercase tracking-wider">الساعة:</span>
+                  <span className="font-mono text-sm sm:text-lg font-black text-blue-900 dark:text-blue-400 tracking-wider">
                     {formatElapsedTime(elapsedMs)}
                   </span>
                 </div>
@@ -1666,7 +1664,7 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
                     onClick={() => setTimerRunning(!timerRunning)}
                     className={`p-1 sm:p-1.5 rounded-lg sm:rounded-xl font-bold text-[10px] sm:text-xs flex items-center gap-1 transition-all cursor-pointer ${
                       timerRunning
-                        ? 'bg-amber-100 text-amber-900 border border-amber-300'
+                        ? 'bg-amber-100 dark:bg-amber-950/80 text-amber-900 dark:text-amber-200 border border-amber-300 dark:border-amber-700'
                         : 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-2xs'
                     }`}
                   >
@@ -1680,7 +1678,7 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
                       setElapsedMs(0);
                     }}
                     title="تصفير الساعة"
-                    className="p-1 sm:p-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg sm:rounded-xl transition-colors cursor-pointer"
+                    className="p-1 sm:p-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-lg sm:rounded-xl transition-colors cursor-pointer"
                   >
                     <RotateCcw className="w-3 sm:w-3.5 h-3 sm:h-3.5" />
                   </button>
@@ -1695,14 +1693,14 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
               <div className="lg:col-span-5 space-y-4">
                 
                 {/* Toggle Input Mode */}
-                <div className="flex items-center gap-2 p-1 bg-slate-100 rounded-2xl border border-slate-200">
+                <div className="flex items-center gap-2 p-1 bg-slate-100 dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700">
                   <button
                     type="button"
                     onClick={() => setInputMode('manual')}
                     className={`flex-1 py-2 px-3 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
                       inputMode === 'manual'
                         ? 'bg-blue-600 text-white shadow-xs'
-                        : 'text-slate-600 hover:text-slate-900'
+                        : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100'
                     }`}
                   >
                     <Keyboard className="w-4 h-4" />
@@ -1715,7 +1713,7 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
                     className={`flex-1 py-2 px-3 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
                       inputMode === 'camera'
                         ? 'bg-blue-600 text-white shadow-xs'
-                        : 'text-slate-600 hover:text-slate-900'
+                        : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100'
                     }`}
                   >
                     <QrCode className="w-4 h-4" />
@@ -1725,13 +1723,13 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
 
                 {/* Input Mode A: Manual Bib Entry Form & Touch Numpad */}
                 {inputMode === 'manual' && (
-                  <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-3.5 shadow-xs">
+                  <div className="bg-slate-50 dark:bg-slate-800/80 p-4 rounded-2xl border border-slate-200 dark:border-slate-700 space-y-3.5 shadow-xs">
                     <div className="flex items-center justify-between">
-                      <label className="text-[10px] sm:text-xs font-black text-slate-800 flex items-center gap-1.5 min-w-0">
+                      <label className="text-[10px] sm:text-xs font-black text-slate-800 dark:text-slate-200 flex items-center gap-1.5 min-w-0">
                         <Zap className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-amber-500 shrink-0" />
                         <span className="truncate">كود الصدرية الواصلة:</span>
                       </label>
-                      <span className="text-[9px] sm:text-[10px] font-extrabold text-blue-700 bg-blue-50 px-2 py-0.5 rounded-full border border-blue-200 whitespace-nowrap">
+                      <span className="text-[9px] sm:text-[10px] font-extrabold text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-950/60 px-2 py-0.5 rounded-full border border-blue-200 dark:border-blue-800 whitespace-nowrap">
                         المرتبة القادمة: #{arrivals.length + 1}
                       </span>
                     </div>
@@ -1754,7 +1752,7 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
                         }}
                         placeholder="رقم الصدرية (104)"
                         autoFocus
-                        className="flex-1 bg-white border-2 border-blue-500 rounded-xl sm:rounded-2xl px-3 sm:px-4 py-2 sm:py-3 text-base sm:text-lg font-mono font-black text-slate-900 shadow-inner focus:outline-none focus:ring-4 focus:ring-blue-200 placeholder:text-slate-400 placeholder:font-sans placeholder:text-[10px]"
+                        className="flex-1 bg-white dark:bg-slate-900 border-2 border-blue-500 dark:border-blue-500 rounded-xl sm:rounded-2xl px-3 sm:px-4 py-2 sm:py-3 text-base sm:text-lg font-mono font-black text-slate-900 dark:text-white shadow-inner focus:outline-none focus:ring-4 focus:ring-blue-200 dark:focus:ring-blue-900 placeholder:text-slate-400 dark:placeholder:text-slate-500 placeholder:font-sans placeholder:text-[10px]"
                       />
 
                       <button
@@ -1767,44 +1765,44 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
                       </button>
                     </div>
 
-                    <div className="text-[10px] text-slate-500 font-bold flex items-center justify-between">
+                    <div className="text-[10px] text-slate-500 dark:text-slate-400 font-bold flex items-center justify-between">
                       <span>💡 كود المسح هو رقم الصدرية مباشرة (يدعم قارئ الباركود اليدوي USB/Bluetooth أو الكاميرا)</span>
                     </div>
 
                     {/* Optional Custom Name / School override */}
-                    <div className="grid grid-cols-2 gap-2 pt-2 border-t border-slate-200 text-xs">
+                    <div className="grid grid-cols-2 gap-2 pt-2 border-t border-slate-200 dark:border-slate-700 text-xs">
                       <div>
-                        <label className="text-[10px] font-bold text-slate-500 block mb-1">اسم العداء (اختياري للعداء غير المسجل):</label>
+                        <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block mb-1">اسم العداء (اختياري للعداء غير المسجل):</label>
                         <input
                           type="text"
                           value={manualName}
                           onChange={(e) => setManualName(e.target.value)}
                           placeholder="اسم التلميذ(ة)"
-                          className="w-full bg-white border border-slate-300 rounded-xl px-2.5 py-1.5 text-xs text-slate-800"
+                          className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-2.5 py-1.5 text-xs text-slate-800 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500"
                         />
                       </div>
                       <div>
-                        <label className="text-[10px] font-bold text-slate-500 block mb-1">المؤسسة التعليمية (اختياري):</label>
+                        <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block mb-1">المؤسسة التعليمية (اختياري):</label>
                         <input
                           type="text"
                           value={manualSchool}
                           onChange={(e) => setManualSchool(e.target.value)}
                           placeholder="اسم المدرسة"
-                          className="w-full bg-white border border-slate-300 rounded-xl px-2.5 py-1.5 text-xs text-slate-800"
+                          className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-2.5 py-1.5 text-xs text-slate-800 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500"
                         />
                       </div>
                     </div>
 
                     {/* Touch Onscreen Keypad for Quick Mobile / Tablet Use */}
                     <div className="pt-2">
-                      <span className="text-[10px] font-bold text-slate-500 block mb-1.5">لوحة لمسية سريعة:</span>
+                      <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block mb-1.5">لوحة لمسية سريعة:</span>
                       <div className="grid grid-cols-3 gap-1.5 sm:gap-2">
                         {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((num) => (
                           <button
                             key={num}
                             type="button"
                             onClick={() => setManualBib(prev => prev + String(num))}
-                            className="py-2 sm:py-2.5 bg-white hover:bg-slate-100 text-slate-900 font-black text-sm sm:text-base rounded-lg sm:rounded-xl border border-slate-200 shadow-3xs active:bg-blue-100 cursor-pointer touch-manipulation"
+                            className="py-2 sm:py-2.5 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-900 dark:text-slate-100 font-black text-sm sm:text-base rounded-lg sm:rounded-xl border border-slate-200 dark:border-slate-700 shadow-3xs active:bg-blue-100 dark:active:bg-blue-900 cursor-pointer touch-manipulation"
                           >
                             {num}
                           </button>
@@ -1813,7 +1811,7 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
                           key="clear"
                           type="button"
                           onClick={() => setManualBib('')}
-                          className="py-2 sm:py-2.5 bg-amber-50 hover:bg-amber-100 text-amber-900 font-bold text-[10px] sm:text-xs rounded-lg sm:rounded-xl border border-amber-200 shadow-3xs active:scale-95 cursor-pointer touch-manipulation"
+                          className="py-2 sm:py-2.5 bg-amber-50 dark:bg-amber-950/60 hover:bg-amber-100 dark:hover:bg-amber-900/60 text-amber-900 dark:text-amber-200 font-bold text-[10px] sm:text-xs rounded-lg sm:rounded-xl border border-amber-200 dark:border-amber-800 shadow-3xs active:scale-95 cursor-pointer touch-manipulation"
                         >
                           مسح 🗑️
                         </button>
@@ -1821,7 +1819,7 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
                           key="zero"
                           type="button"
                           onClick={() => setManualBib(prev => prev + '0')}
-                          className="py-2 sm:py-2.5 bg-white hover:bg-slate-100 text-slate-900 font-black text-sm sm:text-base rounded-lg sm:rounded-xl border border-slate-200 shadow-3xs active:bg-blue-100 cursor-pointer touch-manipulation"
+                          className="py-2 sm:py-2.5 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-900 dark:text-slate-100 font-black text-sm sm:text-base rounded-lg sm:rounded-xl border border-slate-200 dark:border-slate-700 shadow-3xs active:bg-blue-100 dark:active:bg-blue-900 cursor-pointer touch-manipulation"
                         >
                           0
                         </button>
@@ -1829,7 +1827,7 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
                           key="backspace"
                           type="button"
                           onClick={() => setManualBib(prev => prev.slice(0, -1))}
-                          className="py-2 sm:py-2.5 bg-slate-200 hover:bg-slate-300 text-slate-800 font-bold text-[10px] sm:text-xs rounded-lg sm:rounded-xl border border-slate-300 shadow-3xs active:scale-95 cursor-pointer touch-manipulation"
+                          className="py-2 sm:py-2.5 bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 text-slate-800 dark:text-slate-200 font-bold text-[10px] sm:text-xs rounded-lg sm:rounded-xl border border-slate-300 dark:border-slate-600 shadow-3xs active:scale-95 cursor-pointer touch-manipulation"
                         >
                           تراجع ⌫
                         </button>
@@ -1889,14 +1887,14 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
 
                 {/* Live Team Progress Summary Card */}
                 {showWinningTeams && (
-                  <div className="bg-blue-50/80 p-3.5 rounded-2xl border border-blue-200 space-y-2">
-                    <h4 className="text-xs font-black text-blue-950 flex items-center gap-1.5">
-                      <Users className="w-4 h-4 text-blue-600" />
+                  <div className="bg-blue-50/80 dark:bg-slate-800/80 p-3.5 rounded-2xl border border-blue-200 dark:border-slate-700 space-y-2">
+                    <h4 className="text-xs font-black text-blue-950 dark:text-blue-200 flex items-center gap-1.5">
+                      <Users className="w-4 h-4 text-blue-600 dark:text-blue-400" />
                       <span>متابعة وصول عداءي المؤسسات المباشرة:</span>
                     </h4>
 
                     {liveTeamRankings.length === 0 ? (
-                      <p className="text-[11px] text-slate-500">في انتظار وصول 4 عداءين على الأقل لتحديد ترتيب الفرق المكتملة.</p>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400">في انتظار وصول 4 عداءين على الأقل لتحديد ترتيب الفرق المكتملة.</p>
                     ) : (
                       <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
                         {liveTeamRankings.map((team, idx) => (
@@ -1904,20 +1902,20 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
                             key={team.schoolName}
                             className={`p-2 rounded-xl text-xs flex items-center justify-between border ${
                               team.isWinnerTeam
-                                ? 'bg-amber-100 border-amber-300 font-bold text-amber-950 shadow-2xs'
-                                : 'bg-white border-slate-200 text-slate-800'
+                                ? 'bg-amber-100 dark:bg-amber-950/80 border-amber-300 dark:border-amber-700 font-bold text-amber-950 dark:text-amber-200 shadow-2xs'
+                                : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200'
                             }`}
                           >
                             <div className="flex items-center gap-2">
-                              <span className="font-black text-slate-900">#{idx + 1}</span>
-                              <span className="font-bold truncate max-w-[150px]">{team.schoolName}</span>
+                              <span className="font-black text-slate-900 dark:text-slate-100">#{idx + 1}</span>
+                              <span className="font-bold truncate max-w-[150px] text-slate-800 dark:text-slate-200">{team.schoolName}</span>
                             </div>
 
                             <div className="flex items-center gap-2">
-                              <span className="text-[10px] bg-slate-100 px-2 py-0.5 rounded-full text-slate-700 font-mono">
+                              <span className="text-[10px] bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-full text-slate-700 dark:text-slate-300 font-mono">
                                 {team.runners.length} واصلين
                               </span>
-                              <span className="font-black text-blue-900">
+                              <span className="font-black text-blue-900 dark:text-blue-400">
                                 {team.isValidTeam ? `${team.totalPoints} ن` : 'غ.مكتمل'}
                               </span>
                             </div>
@@ -1930,14 +1928,14 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
               </div>
 
               {/* Right Panel: Live Arrivals Stream Table (7 cols) */}
-              <div className="lg:col-span-7 bg-slate-50 p-4 rounded-2xl border border-slate-200 flex flex-col justify-between space-y-4">
+              <div className="lg:col-span-7 bg-slate-50 dark:bg-slate-800/60 p-4 rounded-2xl border border-slate-200 dark:border-slate-700 flex flex-col justify-between space-y-4">
                 <div>
                   <div className="flex items-center justify-between mb-3">
                     <div className="flex items-center gap-2">
-                      <h3 className="text-sm font-black text-slate-900">
+                      <h3 className="text-sm font-black text-slate-900 dark:text-slate-100">
                         جدول خط الوصول الحية ({arrivals.length} عداء)
                       </h3>
-                      <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-100 text-emerald-900 border border-emerald-300">
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-100 dark:bg-emerald-950/80 text-emerald-900 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800">
                         مباشر 🔴
                       </span>
                     </div>
@@ -1961,7 +1959,7 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
                             setClearScope('current');
                             setShowClearModal(true);
                           }}
-                          className="text-[11px] font-bold text-red-600 hover:text-red-800 hover:underline cursor-pointer flex items-center gap-1 bg-red-50 hover:bg-red-100 px-2 py-1 rounded-lg border border-red-200 transition-colors"
+                          className="text-[11px] font-bold text-red-600 dark:text-red-400 hover:text-red-800 hover:underline cursor-pointer flex items-center gap-1 bg-red-50 dark:bg-red-950/50 hover:bg-red-100 dark:hover:bg-red-900/50 px-2 py-1 rounded-lg border border-red-200 dark:border-red-800 transition-colors"
                           title="تفريغ جميع الواصلين في هذا السباق"
                         >
                           <Trash2 className="w-3 h-3" />
@@ -1972,25 +1970,25 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
                   </div>
 
                   {/* Toggles and Stats Selector Bar */}
-                  <div className="flex flex-wrap items-center gap-4 bg-white/80 border border-slate-200 p-2.5 rounded-xl mb-3 text-[11px] shadow-3xs">
-                    <div className="text-[10px] font-black text-slate-400 uppercase tracking-wider pl-1.5 border-l border-slate-200">خيارات العرض الحية:</div>
+                  <div className="flex flex-wrap items-center gap-4 bg-white/80 dark:bg-slate-900/80 border border-slate-200 dark:border-slate-700 p-2.5 rounded-xl mb-3 text-[11px] shadow-3xs">
+                    <div className="text-[10px] font-black text-slate-400 dark:text-slate-400 uppercase tracking-wider pl-1.5 border-l border-slate-200 dark:border-slate-700">خيارات العرض الحية:</div>
                     
-                    <label className="flex items-center gap-1.5 cursor-pointer select-none font-bold text-slate-700 hover:text-slate-900">
+                    <label className="flex items-center gap-1.5 cursor-pointer select-none font-bold text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-slate-100">
                       <input
                         type="checkbox"
                         checked={showWinningTeams}
                         onChange={(e) => setShowWinningTeams(e.target.checked)}
-                        className="h-3.5 w-3.5 rounded text-blue-600 border-slate-300 focus:ring-blue-500 cursor-pointer"
+                        className="h-3.5 w-3.5 rounded text-blue-600 border-slate-300 dark:border-slate-600 focus:ring-blue-500 cursor-pointer"
                       />
                       <span className="flex items-center gap-1">🏆 <span>إظهار الفرق الفائزة</span></span>
                     </label>
 
-                    <label className="flex items-center gap-1.5 cursor-pointer select-none font-bold text-slate-700 hover:text-slate-900">
+                    <label className="flex items-center gap-1.5 cursor-pointer select-none font-bold text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-slate-100">
                       <input
                         type="checkbox"
                         checked={showParticipantStats}
                         onChange={(e) => setShowParticipantStats(e.target.checked)}
-                        className="h-3.5 w-3.5 rounded text-blue-600 border-slate-300 focus:ring-blue-500 cursor-pointer"
+                        className="h-3.5 w-3.5 rounded text-blue-600 border-slate-300 dark:border-slate-600 focus:ring-blue-500 cursor-pointer"
                       />
                       <span className="flex items-center gap-1">📊 <span>إحصاءات المشاركين</span></span>
                     </label>
@@ -1998,58 +1996,58 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
 
                   {/* Live Participant Stats Dashboard */}
                   {showParticipantStats && (
-                    <div className="bg-blue-50/40 border border-blue-100/50 p-2.5 rounded-xl mb-3 grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-right shadow-3xs">
-                      <div className="bg-white p-2 rounded-lg border border-slate-100 shadow-3xs">
-                        <span className="text-[9px] font-black text-slate-400 block">إجمالي المسجلين</span>
-                        <span className="text-xs font-black text-blue-950 font-mono">{filteredStudentsCount}</span>
-                        <span className="text-[9px] text-slate-400 font-medium mr-1">عداء</span>
+                    <div className="bg-blue-50/40 dark:bg-slate-900/50 border border-blue-100/50 dark:border-slate-700 p-2.5 rounded-xl mb-3 grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-right shadow-3xs">
+                      <div className="bg-white dark:bg-slate-800 p-2 rounded-lg border border-slate-100 dark:border-slate-700 shadow-3xs">
+                        <span className="text-[9px] font-black text-slate-400 dark:text-slate-400 block">إجمالي المسجلين</span>
+                        <span className="text-xs font-black text-blue-950 dark:text-blue-300 font-mono">{filteredStudentsCount}</span>
+                        <span className="text-[9px] text-slate-400 dark:text-slate-400 font-medium mr-1">عداء</span>
                       </div>
-                      <div className="bg-white p-2 rounded-lg border border-slate-100 shadow-3xs">
-                        <span className="text-[9px] font-black text-slate-400 block">الواصلين حالياً</span>
-                        <span className="text-xs font-black text-emerald-700 font-mono">{arrivals.length}</span>
-                        <span className="text-[9px] text-emerald-600/80 font-bold mr-1 font-mono">
+                      <div className="bg-white dark:bg-slate-800 p-2 rounded-lg border border-slate-100 dark:border-slate-700 shadow-3xs">
+                        <span className="text-[9px] font-black text-slate-400 dark:text-slate-400 block">الواصلين حالياً</span>
+                        <span className="text-xs font-black text-emerald-700 dark:text-emerald-400 font-mono">{arrivals.length}</span>
+                        <span className="text-[9px] text-emerald-600/80 dark:text-emerald-400/80 font-bold mr-1 font-mono">
                           ({filteredStudentsCount > 0 ? Math.min(100, Math.round((arrivals.length / filteredStudentsCount) * 100)) : 0}%)
                         </span>
                       </div>
-                      <div className="bg-white p-2 rounded-lg border border-slate-100 shadow-3xs">
-                        <span className="text-[9px] font-black text-slate-400 block">المتبقي في السباق</span>
-                        <span className="text-xs font-black text-amber-700 font-mono">
+                      <div className="bg-white dark:bg-slate-800 p-2 rounded-lg border border-slate-100 dark:border-slate-700 shadow-3xs">
+                        <span className="text-[9px] font-black text-slate-400 dark:text-slate-400 block">المتبقي في السباق</span>
+                        <span className="text-xs font-black text-amber-700 dark:text-amber-400 font-mono">
                           {Math.max(0, filteredStudentsCount - arrivals.length)}
                         </span>
-                        <span className="text-[9px] text-slate-400 font-medium mr-1">عداء</span>
+                        <span className="text-[9px] text-slate-400 dark:text-slate-400 font-medium mr-1">عداء</span>
                       </div>
-                      <div className="bg-white p-2 rounded-lg border border-slate-100 shadow-3xs">
-                        <span className="text-[9px] font-black text-slate-400 block">المؤسسات المشاركة</span>
-                        <span className="text-xs font-black text-indigo-950 font-mono font-bold">
+                      <div className="bg-white dark:bg-slate-800 p-2 rounded-lg border border-slate-100 dark:border-slate-700 shadow-3xs">
+                        <span className="text-[9px] font-black text-slate-400 dark:text-slate-400 block">المؤسسات المشاركة</span>
+                        <span className="text-xs font-black text-indigo-950 dark:text-indigo-300 font-mono font-bold">
                           {new Set(arrivals.map(r => r.schoolName).filter(Boolean)).size}
                         </span>
-                        <span className="text-[9px] text-slate-400 font-medium mr-1">مؤسسة</span>
+                        <span className="text-[9px] text-slate-400 dark:text-slate-400 font-medium mr-1">مؤسسة</span>
                       </div>
                     </div>
                   )}
 
                   {/* Live Winning Teams Dashboard */}
                   {showWinningTeams && (
-                    <div className="bg-amber-50/50 border border-amber-200/50 p-2.5 rounded-xl mb-3 space-y-1.5 shadow-3xs">
-                      <div className="flex items-center gap-1 text-[10px] font-black text-amber-950">
+                    <div className="bg-amber-50/50 dark:bg-amber-950/30 border border-amber-200/50 dark:border-amber-800/50 p-2.5 rounded-xl mb-3 space-y-1.5 shadow-3xs">
+                      <div className="flex items-center gap-1 text-[10px] font-black text-amber-950 dark:text-amber-200">
                         <span>🏆</span>
                         <span>الترتيب المؤقت للفرق الفائزة (اكتمال 4 عداءين):</span>
                       </div>
                       {liveTeamRankings.filter(t => t.isValidTeam).length === 0 ? (
-                        <p className="text-[10px] text-amber-800/70 font-medium">في انتظار وصول 4 عداءين من أي مؤسسة لاحتساب ترتيب الفرق.</p>
+                        <p className="text-[10px] text-amber-800/70 dark:text-amber-300/70 font-medium">في انتظار وصول 4 عداءين من أي مؤسسة لاحتساب ترتيب الفرق.</p>
                       ) : (
                         <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                           {liveTeamRankings.filter(t => t.isValidTeam).slice(0, 3).map((team, idx) => (
-                            <div key={team.schoolName} className="bg-white border border-amber-200/80 p-2 rounded-lg flex items-center justify-between text-[11px] shadow-3xs">
+                            <div key={team.schoolName} className="bg-white dark:bg-slate-800 border border-amber-200/80 dark:border-amber-800/60 p-2 rounded-lg flex items-center justify-between text-[11px] shadow-3xs">
                               <div className="flex items-center gap-1 overflow-hidden">
                                 <span className="font-extrabold text-xs">
                                   {idx === 0 ? '🥇' : idx === 1 ? '🥈' : '🥉'}
                                 </span>
-                                <span className="font-extrabold text-slate-800 truncate max-w-[110px]" title={team.schoolName}>
+                                <span className="font-extrabold text-slate-800 dark:text-slate-200 truncate max-w-[110px]" title={team.schoolName}>
                                   {team.schoolName}
                                 </span>
                               </div>
-                              <span className="font-black text-amber-950 bg-amber-100 px-1.5 py-0.5 rounded-md text-[9px] shrink-0 font-mono">
+                              <span className="font-black text-amber-950 dark:text-amber-200 bg-amber-100 dark:bg-amber-900/60 px-1.5 py-0.5 rounded-md text-[9px] shrink-0 font-mono">
                                 {team.totalPoints} ن
                               </span>
                             </div>
@@ -2060,15 +2058,15 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
                   )}
 
                   {arrivals.length === 0 ? (
-                    <div className="p-8 text-center bg-white rounded-2xl border-2 border-dashed border-slate-200 text-slate-400 space-y-2">
-                      <Trophy className="w-10 h-10 mx-auto text-slate-300" />
-                      <p className="text-xs font-bold text-slate-600">لم يتم تسجيل أي وصول عند خط النهاية بعد</p>
-                      <p className="text-[11px] text-slate-400">امسح كود الصدرية بالكاميرا أو اكتب رقم الصدرية يدوياً بالجانب الأيمن.</p>
+                    <div className="p-8 text-center bg-white dark:bg-slate-900 rounded-2xl border-2 border-dashed border-slate-200 dark:border-slate-700 text-slate-400 dark:text-slate-400 space-y-2">
+                      <Trophy className="w-10 h-10 mx-auto text-slate-300 dark:text-slate-600" />
+                      <p className="text-xs font-bold text-slate-600 dark:text-slate-300">لم يتم تسجيل أي وصول عند خط النهاية بعد</p>
+                      <p className="text-[11px] text-slate-400 dark:text-slate-400">امسح كود الصدرية بالكاميرا أو اكتب رقم الصدرية يدوياً بالجانب الأيمن.</p>
                     </div>
                   ) : (
-                    <div className="overflow-x-auto max-h-[420px] overflow-y-auto rounded-xl border border-slate-200 bg-white">
+                    <div className="overflow-x-auto max-h-[420px] overflow-y-auto rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900">
                       <table className="w-full text-right text-xs">
-                        <thead className="bg-slate-100 text-slate-700 font-black text-[10px] sm:text-[11px] sticky top-0 z-10 border-b border-slate-200">
+                        <thead className="bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-black text-[10px] sm:text-[11px] sticky top-0 z-10 border-b border-slate-200 dark:border-slate-700">
                           <tr>
                             <th className="p-2 sm:p-2.5 text-center">الرتبة</th>
                             <th className="p-2 sm:p-2.5">الصدرية</th>
@@ -2078,37 +2076,37 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
                             <th className="p-2 sm:p-2.5 text-center">تعديل</th>
                           </tr>
                         </thead>
-                        <tbody className="divide-y divide-slate-100">
+                        <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                           {arrivals.map((runner, index) => (
                             <tr
                               key={index}
-                              className={`hover:bg-slate-50 transition-colors ${
+                              className={`transition-colors ${
                                 index === 0
-                                  ? 'bg-amber-50/60 font-bold'
+                                  ? 'bg-amber-50/60 dark:bg-amber-950/40 hover:bg-amber-100/60 dark:hover:bg-amber-900/50 font-bold'
                                   : index === 1
-                                  ? 'bg-slate-50/80 font-bold'
+                                  ? 'bg-slate-50/80 dark:bg-slate-800/60 hover:bg-slate-100/80 dark:hover:bg-slate-700/60 font-bold'
                                   : index === 2
-                                  ? 'bg-amber-50/30'
-                                  : ''
+                                  ? 'bg-amber-50/30 dark:bg-amber-950/20 hover:bg-amber-100/30 dark:hover:bg-amber-900/30'
+                                  : 'hover:bg-slate-50 dark:hover:bg-slate-800/50'
                               }`}
                             >
-                              <td className="p-2 sm:p-2.5 text-center font-black">
+                              <td className="p-2 sm:p-2.5 text-center font-black text-slate-800 dark:text-slate-200">
                                 {index === 0 ? '🥇 1' : index === 1 ? '🥈 2' : index === 2 ? '🥉 3' : `#${index + 1}`}
                               </td>
 
-                              <td className="p-2 sm:p-2.5 font-mono font-black text-blue-900">
+                              <td className="p-2 sm:p-2.5 font-mono font-black text-blue-900 dark:text-blue-400">
                                 #{runner.bibNumber || '-'}
                               </td>
 
-                              <td className="p-2 sm:p-2.5 font-bold text-slate-900 truncate max-w-[80px] sm:max-w-none">
+                              <td className="p-2 sm:p-2.5 font-bold text-slate-900 dark:text-slate-100 truncate max-w-[80px] sm:max-w-none">
                                 {runner.fullName}
                               </td>
 
-                              <td className="p-2 sm:p-2.5 text-slate-600 text-[10px] sm:text-[11px] hidden xs:table-cell truncate max-w-[100px]">
+                              <td className="p-2 sm:p-2.5 text-slate-600 dark:text-slate-400 text-[10px] sm:text-[11px] hidden xs:table-cell truncate max-w-[100px]">
                                 {runner.schoolName}
                               </td>
 
-                              <td className="p-2 sm:p-2.5 font-mono text-[10px] sm:text-[11px] font-bold text-slate-800">
+                              <td className="p-2 sm:p-2.5 font-mono text-[10px] sm:text-[11px] font-bold text-slate-800 dark:text-slate-200">
                                 {runner.time || '-'}
                               </td>
 
@@ -2118,7 +2116,7 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
                                     onClick={() => handleMoveArrival(index, 'up')}
                                     disabled={index === 0}
                                     title="تقديم مرتبة"
-                                    className="p-1 hover:bg-slate-200 rounded text-slate-600 disabled:opacity-20 cursor-pointer"
+                                    className="p-1 hover:bg-slate-200 dark:hover:bg-slate-700 rounded text-slate-600 dark:text-slate-400 disabled:opacity-20 cursor-pointer"
                                   >
                                     <ArrowUp className="w-3 sm:w-3.5 h-3 sm:h-3.5" />
                                   </button>
@@ -2127,7 +2125,7 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
                                     onClick={() => handleMoveArrival(index, 'down')}
                                     disabled={index === arrivals.length - 1}
                                     title="تأخير مرتبة"
-                                    className="p-1 hover:bg-slate-200 rounded text-slate-600 disabled:opacity-20 cursor-pointer"
+                                    className="p-1 hover:bg-slate-200 dark:hover:bg-slate-700 rounded text-slate-600 dark:text-slate-400 disabled:opacity-20 cursor-pointer"
                                   >
                                     <ArrowDown className="w-3 sm:w-3.5 h-3 sm:h-3.5" />
                                   </button>
@@ -2135,7 +2133,7 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
                                   <button
                                     onClick={() => handleRemoveArrival(index)}
                                     title="حذف"
-                                    className="p-1 hover:bg-red-100 text-red-600 rounded transition-colors cursor-pointer"
+                                    className="p-1 hover:bg-red-100 dark:hover:bg-red-900/50 text-red-600 dark:text-red-400 rounded transition-colors cursor-pointer"
                                   >
                                     <Trash2 className="w-3 sm:w-3.5 h-3 sm:h-3.5" />
                                   </button>
@@ -2150,11 +2148,11 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
                 </div>
 
                 {/* Bottom Final Action Bar with live-save indicator */}
-                <div className="pt-3 border-t border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-3">
-                  <div className="flex items-center gap-2 text-xs font-bold text-slate-500">
-                    <span>الواصلين: <span className="text-blue-900 font-black">{arrivals.length}</span></span>
-                    <span className="text-slate-300">•</span>
-                    <span className="text-emerald-600 flex items-center gap-1">
+                <div className="pt-3 border-t border-slate-200 dark:border-slate-700 flex flex-col sm:flex-row items-center justify-between gap-3">
+                  <div className="flex items-center gap-2 text-xs font-bold text-slate-500 dark:text-slate-400">
+                    <span>الواصلين: <span className="text-blue-900 dark:text-blue-400 font-black">{arrivals.length}</span></span>
+                    <span className="text-slate-300 dark:text-slate-600">•</span>
+                    <span className="text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
                       <span className="inline-block w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
                       <span>تم الحفظ تلقائياً في قاعدة البيانات</span>
                     </span>
@@ -2175,7 +2173,7 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
                     <button
                       type="button"
                       onClick={() => setPhase('setup')}
-                      className="px-3.5 py-2 text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl text-xs font-bold flex items-center gap-1 transition-all cursor-pointer border border-slate-300/30"
+                      className="px-3.5 py-2 text-slate-700 dark:text-slate-200 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-xl text-xs font-bold flex items-center gap-1 transition-all cursor-pointer border border-slate-300/30 dark:border-slate-700"
                     >
                       <ArrowLeft className="w-3.5 h-3.5" />
                       <span>رجوع للإعداد</span>
@@ -2199,20 +2197,20 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
         {phase === 'summary' && (
           <div className="p-4 sm:p-6 overflow-y-auto flex-1 space-y-6">
             <div className="text-center space-y-2 max-w-lg mx-auto">
-              <div className="w-16 h-16 bg-amber-100 border border-amber-300 rounded-full flex items-center justify-center text-3xl mx-auto shadow-md">
+              <div className="w-16 h-16 bg-amber-100 dark:bg-amber-950/80 border border-amber-300 dark:border-amber-700 rounded-full flex items-center justify-center text-3xl mx-auto shadow-md">
                 🏆
               </div>
-              <h3 className="text-lg font-black text-slate-900">انتهى السباق وتم توثيق البوديوم والترتيب</h3>
-              <p className="text-xs text-slate-500">
-                لقد تم حفظ نتائج فئة (<strong className="text-slate-800">{activeCategory.titleAr}</strong>) بنجاح وبشكل فوري داخل قاعدة البيانات المركزية لوزارة التربية الوطنية والتعليم الأولي والرياضة.
+              <h3 className="text-lg font-black text-slate-900 dark:text-slate-100">انتهى السباق وتم توثيق البوديوم والترتيب</h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                لقد تم حفظ نتائج فئة (<strong className="text-slate-800 dark:text-slate-200">{activeCategory.titleAr}</strong>) بنجاح وبشكل فوري داخل قاعدة البيانات المركزية لوزارة التربية الوطنية والتعليم الأولي والرياضة.
               </p>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               
               {/* Podium podium visual (Individual) */}
-              <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-3">
-                <h4 className="text-xs font-black text-slate-900 flex items-center gap-1.5 border-b border-slate-200 pb-2">
+              <div className="bg-slate-50 dark:bg-slate-800/80 p-4 rounded-2xl border border-slate-200 dark:border-slate-700 space-y-3">
+                <h4 className="text-xs font-black text-slate-900 dark:text-slate-100 flex items-center gap-1.5 border-b border-slate-200 dark:border-slate-700 pb-2">
                   <Trophy className="w-4 h-4 text-amber-500" />
                   <span>منصة التتويج الفردي المعتمدة (Top 3):</span>
                 </h4>
@@ -2224,16 +2222,16 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
                     {arrivals.slice(0, 3).map((runner, index) => (
                       <div
                         key={index}
-                        className="bg-white p-3 rounded-xl border border-slate-200 flex items-center justify-between text-xs font-bold"
+                        className="bg-white dark:bg-slate-900 p-3 rounded-xl border border-slate-200 dark:border-slate-700 flex items-center justify-between text-xs font-bold"
                       >
                         <div className="flex items-center gap-2">
                           <span className="text-base">{index === 0 ? '🥇' : index === 1 ? '🥈' : '🥉'}</span>
                           <div>
-                            <span className="text-slate-900 block">{runner.fullName}</span>
-                            <span className="text-[10px] text-slate-500 font-medium">{runner.schoolName}</span>
+                            <span className="text-slate-900 dark:text-slate-100 block">{runner.fullName}</span>
+                            <span className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">{runner.schoolName}</span>
                           </div>
                         </div>
-                        <span className="font-mono text-blue-900">{runner.time || '-'}</span>
+                        <span className="font-mono text-blue-900 dark:text-blue-400">{runner.time || '-'}</span>
                       </div>
                     ))}
                   </div>
@@ -2241,9 +2239,9 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
               </div>
 
               {/* Live Team rankings visual */}
-              <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-3">
-                <h4 className="text-xs font-black text-slate-900 flex items-center gap-1.5 border-b border-slate-200 pb-2">
-                  <Users className="w-4 h-4 text-blue-600" />
+              <div className="bg-slate-50 dark:bg-slate-800/80 p-4 rounded-2xl border border-slate-200 dark:border-slate-700 space-y-3">
+                <h4 className="text-xs font-black text-slate-900 dark:text-slate-100 flex items-center gap-1.5 border-b border-slate-200 dark:border-slate-700 pb-2">
+                  <Users className="w-4 h-4 text-blue-600 dark:text-blue-400" />
                   <span>ترتيب فرق المؤسسات (تأهيل الجهوية):</span>
                 </h4>
 
@@ -2254,13 +2252,13 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
                     {liveTeamRankings.slice(0, 3).map((team, idx) => (
                       <div
                         key={team.schoolName}
-                        className="bg-white p-3 rounded-xl border border-slate-200 flex items-center justify-between text-xs font-bold"
+                        className="bg-white dark:bg-slate-900 p-3 rounded-xl border border-slate-200 dark:border-slate-700 flex items-center justify-between text-xs font-bold"
                       >
                         <div className="flex items-center gap-2">
-                          <span className="text-slate-500">#{idx + 1}</span>
-                          <span>{team.schoolName}</span>
+                          <span className="text-slate-500 dark:text-slate-400">#{idx + 1}</span>
+                          <span className="text-slate-900 dark:text-slate-100">{team.schoolName}</span>
                         </div>
-                        <span className="text-blue-900 font-black">{team.totalPoints} نقطة</span>
+                        <span className="text-blue-900 dark:text-blue-400 font-black">{team.totalPoints} نقطة</span>
                       </div>
                     ))}
                   </div>
@@ -2269,17 +2267,17 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
             </div>
 
             {/* Bottom Actions */}
-            <div className="pt-4 border-t border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-3">
+            <div className="pt-4 border-t border-slate-200 dark:border-slate-700 flex flex-col sm:flex-row items-center justify-between gap-3">
               <button
                 type="button"
                 onClick={() => {
                   setClearScope('current');
                   setShowClearModal(true);
                 }}
-                className="px-4 py-2.5 bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5"
+                className="px-4 py-2.5 bg-red-50 dark:bg-red-950/50 hover:bg-red-100 dark:hover:bg-red-900/50 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5"
                 title="تفريغ نتائج هذا السباق وإعادة إطلاقه"
               >
-                <Trash2 className="w-3.5 h-3.5 text-red-600" />
+                <Trash2 className="w-3.5 h-3.5 text-red-600 dark:text-red-400" />
                 <span>تفريغ نتائج هذا السباق 🗑️</span>
               </button>
 
@@ -2296,7 +2294,7 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
                 <button
                   type="button"
                   onClick={onClose}
-                  className="flex-1 sm:flex-initial px-5 py-2.5 bg-slate-200 hover:bg-slate-300 text-slate-800 font-bold text-xs rounded-xl transition-colors cursor-pointer"
+                  className="flex-1 sm:flex-initial px-5 py-2.5 bg-slate-200 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold text-xs rounded-xl transition-colors cursor-pointer"
                 >
                   إغلاق النافذة
                 </button>
@@ -2309,7 +2307,7 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
       {/* Clear Application Data Confirmation & Scope Modal */}
       {showClearModal && (
         <div className="fixed inset-0 z-[60] bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4">
-          <div className="bg-white rounded-3xl shadow-2xl border border-red-200 w-full max-w-lg overflow-hidden flex flex-col animate-in fade-in zoom-in-95 duration-200">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border border-red-200 dark:border-red-900/50 w-full max-w-lg overflow-hidden flex flex-col animate-in fade-in zoom-in-95 duration-200">
             {/* Header */}
             <div className="bg-gradient-to-r from-red-600 via-rose-600 to-red-700 text-white p-4 sm:p-5 flex items-center justify-between">
               <div className="flex items-center gap-3">
@@ -2333,7 +2331,7 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
 
             {/* Scope Selection */}
             <div className="p-4 sm:p-6 space-y-3 max-h-[70vh] overflow-y-auto">
-              <label className="text-xs font-black text-slate-800 block">
+              <label className="text-xs font-black text-slate-800 dark:text-slate-200 block">
                 اختر نوع ونطاق التفريغ المطلوب:
               </label>
 
@@ -2342,8 +2340,8 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
                 onClick={() => setClearScope('current')}
                 className={`p-3.5 rounded-2xl border transition-all cursor-pointer flex items-start gap-3 ${
                   clearScope === 'current'
-                    ? 'bg-red-50/70 border-red-400 ring-2 ring-red-300'
-                    : 'bg-slate-50 hover:bg-slate-100 border-slate-200'
+                    ? 'bg-red-50/70 dark:bg-red-950/50 border-red-400 dark:border-red-700 ring-2 ring-red-300 dark:ring-red-900'
+                    : 'bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 border-slate-200 dark:border-slate-700'
                 }`}
               >
                 <div className={`w-5 h-5 rounded-full border flex items-center justify-center mt-0.5 shrink-0 ${
@@ -2353,14 +2351,14 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
                 </div>
                 <div className="flex-1 text-right">
                   <div className="flex items-center justify-between">
-                    <span className="text-xs font-black text-slate-900">
+                    <span className="text-xs font-black text-slate-900 dark:text-slate-100">
                       تفريغ نتائج السباق الحالي فقط ({activeCategory.titleAr})
                     </span>
-                    <span className="text-[10px] bg-red-100 text-red-800 font-bold px-2 py-0.5 rounded-full font-mono">
+                    <span className="text-[10px] bg-red-100 dark:bg-red-950/80 text-red-800 dark:text-red-300 font-bold px-2 py-0.5 rounded-full font-mono">
                       {arrivals.length} واصلين
                     </span>
                   </div>
-                  <p className="text-[11px] text-slate-500 mt-1 leading-relaxed">
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
                     يمسح جدول واصلي خط النهاية للفئة الحالية فقط، يصفر ساعة التوقيت، ويسجل نتيجة فارغة في قاعدة البيانات المركزية.
                   </p>
                 </div>
@@ -2371,8 +2369,8 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
                 onClick={() => setClearScope('all_races')}
                 className={`p-3.5 rounded-2xl border transition-all cursor-pointer flex items-start gap-3 ${
                   clearScope === 'all_races'
-                    ? 'bg-red-50/70 border-red-400 ring-2 ring-red-300'
-                    : 'bg-slate-50 hover:bg-slate-100 border-slate-200'
+                    ? 'bg-red-50/70 dark:bg-red-950/50 border-red-400 dark:border-red-700 ring-2 ring-red-300 dark:ring-red-900'
+                    : 'bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 border-slate-200 dark:border-slate-700'
                 }`}
               >
                 <div className={`w-5 h-5 rounded-full border flex items-center justify-center mt-0.5 shrink-0 ${
@@ -2382,14 +2380,14 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
                 </div>
                 <div className="flex-1 text-right">
                   <div className="flex items-center justify-between">
-                    <span className="text-xs font-black text-slate-900">
+                    <span className="text-xs font-black text-slate-900 dark:text-slate-100">
                       تفريغ جميع سباقات العدو الريفي الـ 8 بالكامل
                     </span>
-                    <span className="text-[10px] bg-amber-100 text-amber-800 font-bold px-2 py-0.5 rounded-full">
+                    <span className="text-[10px] bg-amber-100 dark:bg-amber-950/80 text-amber-800 dark:text-amber-300 font-bold px-2 py-0.5 rounded-full">
                       كافة الفئات 8
                     </span>
                   </div>
-                  <p className="text-[11px] text-slate-500 mt-1 leading-relaxed">
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
                     يمسح كافة النتائج والوصولات ومنصات التتويج المسجلة لجميع الفئات، مع الإبقاء على لائحة المشاركين المسجلين.
                   </p>
                 </div>
@@ -2400,8 +2398,8 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
                 onClick={() => setClearScope('participants')}
                 className={`p-3.5 rounded-2xl border transition-all cursor-pointer flex items-start gap-3 ${
                   clearScope === 'participants'
-                    ? 'bg-red-50/70 border-red-400 ring-2 ring-red-300'
-                    : 'bg-slate-50 hover:bg-slate-100 border-slate-200'
+                    ? 'bg-red-50/70 dark:bg-red-950/50 border-red-400 dark:border-red-700 ring-2 ring-red-300 dark:ring-red-900'
+                    : 'bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 border-slate-200 dark:border-slate-700'
                 }`}
               >
                 <div className={`w-5 h-5 rounded-full border flex items-center justify-center mt-0.5 shrink-0 ${
@@ -2411,14 +2409,14 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
                 </div>
                 <div className="flex-1 text-right">
                   <div className="flex items-center justify-between">
-                    <span className="text-xs font-black text-slate-900">
+                    <span className="text-xs font-black text-slate-900 dark:text-slate-100">
                       تفريغ لائحة المشاركين المسجلين (Excel)
                     </span>
-                    <span className="text-[10px] bg-blue-100 text-blue-800 font-bold px-2 py-0.5 rounded-full font-mono">
+                    <span className="text-[10px] bg-blue-100 dark:bg-blue-950/80 text-blue-800 dark:text-blue-300 font-bold px-2 py-0.5 rounded-full font-mono">
                       {allStudents.length} مشارك
                     </span>
                   </div>
-                  <p className="text-[11px] text-slate-500 mt-1 leading-relaxed">
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
                     يحذف المشاركين والعدائين المستوردين من ملف Excel، لتتمكن من استيراد ملف جديد ونظيف دون تكرار.
                   </p>
                 </div>
@@ -2429,8 +2427,8 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
                 onClick={() => setClearScope('everything')}
                 className={`p-3.5 rounded-2xl border transition-all cursor-pointer flex items-start gap-3 ${
                   clearScope === 'everything'
-                    ? 'bg-rose-100/80 border-rose-500 ring-2 ring-rose-400'
-                    : 'bg-slate-50 hover:bg-slate-100 border-slate-200'
+                    ? 'bg-rose-100/80 dark:bg-rose-950/80 border-rose-500 dark:border-rose-600 ring-2 ring-rose-400 dark:ring-rose-800'
+                    : 'bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 border-slate-200 dark:border-slate-700'
                 }`}
               >
                 <div className={`w-5 h-5 rounded-full border flex items-center justify-center mt-0.5 shrink-0 ${
@@ -2440,22 +2438,22 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
                 </div>
                 <div className="flex-1 text-right">
                   <div className="flex items-center justify-between">
-                    <span className="text-xs font-black text-red-900">
+                    <span className="text-xs font-black text-red-900 dark:text-red-200">
                       تفريغ شامل لكافة بيانات تطبيق المسح (السباقات + المشاركين)
                     </span>
-                    <span className="text-[10px] bg-red-200 text-red-900 font-extrabold px-2 py-0.5 rounded-full">
+                    <span className="text-[10px] bg-red-200 dark:bg-red-950/80 text-red-900 dark:text-red-200 font-extrabold px-2 py-0.5 rounded-full">
                       إعادة ضبط كامل ⚠️
                     </span>
                   </div>
-                  <p className="text-[11px] text-red-700 mt-1 leading-relaxed">
+                  <p className="text-[11px] text-red-700 dark:text-red-300 mt-1 leading-relaxed">
                     إعادة ضبط مصنعي كامل لتطبيق مسح خط الوصول، يمسح كافة نتائج السباقات الـ 8 ولائحة المشاركين المستوردين بالكامل.
                   </p>
                 </div>
               </div>
 
               {/* Danger Warning Box */}
-              <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl flex items-center gap-2.5 text-xs text-amber-900">
-                <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+              <div className="p-3 bg-amber-50 dark:bg-amber-950/50 border border-amber-200 dark:border-amber-800 rounded-xl flex items-center gap-2.5 text-xs text-amber-900 dark:text-amber-200">
+                <AlertCircle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
                 <span className="leading-relaxed">
                   تنبيه: هذا الإجراء سيتم مزامنته وتطبيقه فورياً في قاعدة البيانات السحابية المركزية.
                 </span>
@@ -2463,12 +2461,12 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
             </div>
 
             {/* Actions */}
-            <div className="p-4 bg-slate-50 border-t border-slate-200 flex items-center justify-end gap-2.5">
+            <div className="p-4 bg-slate-50 dark:bg-slate-800 border-t border-slate-200 dark:border-slate-700 flex items-center justify-end gap-2.5">
               <button
                 type="button"
                 onClick={() => setShowClearModal(false)}
                 disabled={isClearing}
-                className="px-4 py-2.5 bg-white hover:bg-slate-100 text-slate-700 rounded-xl text-xs font-bold border border-slate-300 transition-colors cursor-pointer disabled:opacity-50"
+                className="px-4 py-2.5 bg-white dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-bold border border-slate-300 dark:border-slate-700 transition-colors cursor-pointer disabled:opacity-50"
               >
                 إلغاء وتراجع
               </button>

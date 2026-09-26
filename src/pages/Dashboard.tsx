@@ -280,21 +280,22 @@ export const Dashboard: React.FC = () => {
 
   return (
     <div className="space-y-6" dir="rtl">
-      {/* Welcome Banner */}
-      <div className="bg-gradient-to-r from-slate-900 via-slate-850 to-slate-900 rounded-2xl p-4 sm:p-5 md:p-6 text-white shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4 border border-slate-800 relative overflow-hidden">
-        <div className="flex items-start gap-3.5 min-w-0">
+      {/* Welcome Banner - Coordinated with Homepage Day Mode */}
+      <div className="bg-linear-to-r from-emerald-800 via-teal-900 to-slate-900 rounded-3xl p-5 sm:p-6 text-white shadow-xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 border border-emerald-700/40 relative overflow-hidden">
+        <div className="absolute -left-10 -bottom-10 w-48 h-48 bg-emerald-500/10 rounded-full blur-2xl pointer-events-none"></div>
+        <div className="flex items-start gap-3.5 min-w-0 relative z-10">
           <AppLogo size={56} className="shrink-0 drop-shadow-md" />
           <div className="min-w-0">
             <div className="flex items-center gap-2 mb-1.5 flex-wrap">
-              <span className="bg-blue-600 text-white text-[10px] font-extrabold px-2 py-0.5 rounded uppercase">
+              <span className="bg-emerald-500/20 border border-emerald-400/30 text-emerald-300 text-[10px] font-black px-2.5 py-0.5 rounded-full uppercase">
                 {isTeacher ? 'فضاء أستاذ التربية البدنية' : isSportManager ? 'فضاء مسؤول النشاط الرياضي' : 'لوحة الإدارة الإقليمية'}
               </span>
-              <span className="text-slate-400 text-xs font-medium">| الفرع الإقليمي للرياضة المدرسية</span>
+              <span className="text-emerald-200/70 text-xs font-bold">| الفرع الإقليمي للرياضة المدرسية</span>
             </div>
-            <h2 className="text-base sm:text-lg md:text-xl font-bold text-white">
+            <h2 className="text-base sm:text-lg md:text-xl font-black text-white">
               مرحباً بك، {userProfile?.fullName || (isTeacher ? 'الأستاذ' : isSportManager ? 'مسؤول النشاط' : 'المسير المركزي')} 👋
             </h2>
-            <p className="text-xs text-slate-300 mt-1 max-w-xl leading-relaxed">
+            <p className="text-xs text-emerald-100/80 mt-1 max-w-xl leading-relaxed">
               {isTeacher
                 ? 'متابعة فورية للمقابلات المبرمجة، ملاعب وقاعات التباري، وجداول النتائج الرسمية المحينة أولاً بأول.'
                 : isSportManager
@@ -304,20 +305,20 @@ export const Dashboard: React.FC = () => {
           </div>
         </div>
 
-        <div className="flex items-center gap-2 self-start sm:self-auto flex-wrap">
+        <div className="flex items-center gap-2 self-start sm:self-auto flex-wrap relative z-10">
           <button
             type="button"
             onClick={() => navigate('/statistics')}
             className="bg-white/10 hover:bg-white/20 text-white border border-white/20 px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer shrink-0"
           >
-            <BarChart3 className="w-3.5 h-3.5" />
+            <BarChart3 className="w-3.5 h-3.5 text-amber-300" />
             <span>لوحة الإحصائيات</span>
           </button>
 
           {isCentralAdmin ? (
             <button
               onClick={() => setIsTournamentModalOpen(true)}
-              className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 shadow-sm transition-all cursor-pointer shrink-0"
+              className="bg-emerald-500 hover:bg-emerald-600 text-white px-4 py-2 rounded-xl text-xs font-black flex items-center gap-2 shadow-md shadow-emerald-500/20 active:scale-98 transition-all cursor-pointer shrink-0"
             >
               <Plus className="h-4 w-4" />
               <span>إضافة بطولة جديدة</span>
@@ -325,7 +326,7 @@ export const Dashboard: React.FC = () => {
           ) : isSportManager ? (
             <button
               onClick={() => navigate('/matches')}
-              className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 shadow-sm transition-all cursor-pointer shrink-0"
+              className="bg-emerald-500 hover:bg-emerald-600 text-white px-4 py-2 rounded-xl text-xs font-black flex items-center gap-2 shadow-md shadow-emerald-500/20 active:scale-98 transition-all cursor-pointer shrink-0"
             >
               <Plus className="h-4 w-4" />
               <span>برمجة مباراة جديدة</span>
@@ -333,7 +334,7 @@ export const Dashboard: React.FC = () => {
           ) : (
             <button
               onClick={() => navigate('/matches')}
-              className="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 shadow-sm transition-all cursor-pointer shrink-0"
+              className="bg-emerald-500 hover:bg-emerald-600 text-white px-4 py-2 rounded-xl text-xs font-black flex items-center gap-2 shadow-md shadow-emerald-500/20 active:scale-98 transition-all cursor-pointer shrink-0"
             >
               <CalendarDays className="h-4 w-4" />
               <span>استعراض جدول المقابلات</span>
@@ -387,14 +388,14 @@ export const Dashboard: React.FC = () => {
         {/* Card 1 */}
         <div
           onClick={() => navigate('/tournaments')}
-          className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs hover:border-blue-300 transition-all cursor-pointer"
+          className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs hover:border-emerald-300 dark:hover:border-emerald-700 hover:shadow-sm transition-all cursor-pointer"
         >
-          <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider mb-1">إجمالي البطولات</p>
+          <p className="text-[10px] text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider mb-1">إجمالي البطولات</p>
           <div className="flex items-end justify-between">
-            <h3 className="text-2xl font-bold text-slate-800 tracking-tight">
+            <h3 className="text-2xl font-black text-slate-800 dark:text-white tracking-tight">
               {stats.tournaments}
             </h3>
-            <span className="text-blue-600 text-[10px] font-bold bg-blue-50 px-2 py-0.5 rounded border border-blue-100">
+            <span className="text-emerald-700 dark:text-emerald-400 text-[10px] font-bold bg-emerald-50 dark:bg-emerald-950/50 px-2 py-0.5 rounded border border-emerald-200 dark:border-emerald-800">
               عرض البطولات ←
             </span>
           </div>
@@ -403,14 +404,14 @@ export const Dashboard: React.FC = () => {
         {/* Card 2 */}
         <div
           onClick={() => navigate('/matches')}
-          className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs hover:border-blue-300 transition-all cursor-pointer"
+          className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs hover:border-emerald-300 dark:hover:border-emerald-700 hover:shadow-sm transition-all cursor-pointer"
         >
-          <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider mb-1">المباريات المبرمجة</p>
+          <p className="text-[10px] text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider mb-1">المباريات المبرمجة</p>
           <div className="flex items-end justify-between">
-            <h3 className="text-2xl font-bold text-slate-800 tracking-tight">
+            <h3 className="text-2xl font-black text-slate-800 dark:text-white tracking-tight">
               {stats.matches}
             </h3>
-            <span className="text-emerald-600 text-[10px] font-bold bg-emerald-50 px-2 py-0.5 rounded border border-emerald-100">
+            <span className="text-emerald-700 dark:text-emerald-400 text-[10px] font-bold bg-emerald-50 dark:bg-emerald-950/50 px-2 py-0.5 rounded border border-emerald-200 dark:border-emerald-800">
               برنامج المباريات ←
             </span>
           </div>
@@ -419,14 +420,14 @@ export const Dashboard: React.FC = () => {
         {/* Card 3 */}
         <div
           onClick={() => navigate('/schools')}
-          className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs hover:border-blue-300 transition-all cursor-pointer"
+          className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs hover:border-slate-300 dark:hover:border-slate-700 hover:shadow-sm transition-all cursor-pointer"
         >
-          <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider mb-1">المؤسسات المشاركة</p>
+          <p className="text-[10px] text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider mb-1">المؤسسات المشاركة</p>
           <div className="flex items-end justify-between">
-            <h3 className="text-2xl font-bold text-slate-800 tracking-tight">
+            <h3 className="text-2xl font-black text-slate-800 dark:text-white tracking-tight">
               {stats.schools}
             </h3>
-            <span className="text-slate-600 text-[10px] font-bold bg-slate-100 px-2 py-0.5 rounded">
+            <span className="text-slate-700 dark:text-slate-300 text-[10px] font-bold bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded border border-slate-200 dark:border-slate-700">
               دليل المؤسسات
             </span>
           </div>
@@ -435,14 +436,14 @@ export const Dashboard: React.FC = () => {
         {/* Card 4 */}
         <div
           onClick={() => navigate('/statistics')}
-          className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs hover:border-blue-300 transition-all cursor-pointer"
+          className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs hover:border-amber-300 dark:hover:border-amber-700 hover:shadow-sm transition-all cursor-pointer"
         >
-          <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider mb-1">المباريات المنجزة والإحصائيات</p>
+          <p className="text-[10px] text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider mb-1">المباريات المنجزة والإحصائيات</p>
           <div className="flex items-end justify-between">
-            <h3 className="text-2xl font-bold text-slate-800 tracking-tight">
+            <h3 className="text-2xl font-black text-slate-800 dark:text-white tracking-tight">
               {stats.completedMatches}
             </h3>
-            <span className="text-amber-600 text-[10px] font-bold bg-amber-50 px-2 py-0.5 rounded border border-amber-100">
+            <span className="text-amber-800 dark:text-amber-300 text-[10px] font-bold bg-amber-50 dark:bg-amber-950/50 px-2 py-0.5 rounded border border-amber-200 dark:border-amber-800">
               النتائج والترتيب 🏆
             </span>
           </div>
@@ -457,9 +458,9 @@ export const Dashboard: React.FC = () => {
           
           {/* Teacher Refereeing Matches */}
           {isTeacher && teacherMatches.length > 0 && (
-            <div className="flex flex-col bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
-              <div className="p-4 border-b border-slate-100 flex items-center justify-between bg-blue-50/50">
-                <h4 className="text-xs md:text-sm font-bold text-blue-800 flex items-center gap-2">
+            <div className="flex flex-col bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs overflow-hidden">
+              <div className="p-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-emerald-50/60 dark:bg-emerald-950/30">
+                <h4 className="text-xs md:text-sm font-black text-emerald-900 dark:text-emerald-200 flex items-center gap-2">
                   <span className="text-xl">哨</span>
                   <span>المباريات التي تم تعييني كحكم فيها</span>
                 </h4>
@@ -469,20 +470,20 @@ export const Dashboard: React.FC = () => {
                   <div
                     key={m.id}
                     onClick={() => navigate('/matches')}
-                    className="flex items-center gap-3 p-3 border border-blue-100 rounded-lg hover:border-blue-300 hover:bg-blue-50/50 transition-all cursor-pointer bg-blue-50/20"
+                    className="flex items-center gap-3 p-3 border border-emerald-100 dark:border-emerald-900/40 rounded-xl hover:border-emerald-300 hover:bg-emerald-50/50 dark:hover:bg-emerald-950/20 transition-all cursor-pointer bg-emerald-50/20 dark:bg-emerald-950/10"
                   >
-                    <div className="w-20 text-center border-l border-blue-100 pl-2">
-                      <p className="text-[10px] font-bold text-slate-500 mb-0.5">{formatMatchDate(m.date)}</p>
-                      <p className="text-sm font-black text-blue-700">{m.startTime}</p>
-                      <p className="text-[10px] text-blue-600/80 font-bold mt-0.5">
+                    <div className="w-20 text-center border-l border-emerald-100 dark:border-emerald-900/50 pl-2">
+                      <p className="text-[10px] font-bold text-slate-500 dark:text-slate-400 mb-0.5">{formatMatchDate(m.date)}</p>
+                      <p className="text-sm font-black text-emerald-700 dark:text-emerald-400">{m.startTime}</p>
+                      <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold mt-0.5">
                         {m.status === 'Ongoing' ? 'جارية الآن' : 'في الانتظار'}
                       </p>
                     </div>
                     <div className="flex-1 flex flex-col px-2 gap-1.5">
-                      <span className="font-bold text-sm text-slate-800">
+                      <span className="font-bold text-sm text-slate-800 dark:text-white">
                         {m.stage || 'مباراة'}
                       </span>
-                      <div className="flex items-center gap-1.5 text-xs text-slate-500 font-medium">
+                      <div className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400 font-medium">
                         <CalendarDays className="h-3.5 w-3.5 text-slate-400" />
                         <span>يوم: {formatMatchDate(m.date)}</span>
                       </div>
@@ -493,15 +494,15 @@ export const Dashboard: React.FC = () => {
             </div>
           )}
 
-          <div className="flex flex-col bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
-            <div className="p-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
-              <h4 className="text-xs md:text-sm font-bold text-slate-700 flex items-center gap-2">
-                <CalendarDays className="h-4 w-4 text-blue-600" />
+          <div className="flex flex-col bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs overflow-hidden">
+            <div className="p-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-slate-50/60 dark:bg-slate-800/40">
+              <h4 className="text-xs md:text-sm font-black text-slate-800 dark:text-white flex items-center gap-2">
+                <CalendarDays className="h-4 w-4 text-emerald-600" />
                 <span>أحدث المباريات والبرمجة الإقليمية</span>
               </h4>
               <button
                 onClick={() => navigate('/matches')}
-                className="text-blue-600 text-xs font-bold hover:underline flex items-center gap-1 cursor-pointer"
+                className="text-emerald-600 hover:text-emerald-700 dark:text-emerald-400 text-xs font-bold hover:underline flex items-center gap-1 cursor-pointer"
               >
                 <span>البرنامج الكامل</span>
                 <ChevronLeft className="h-3.5 w-3.5" />
@@ -513,20 +514,20 @@ export const Dashboard: React.FC = () => {
                 <div
                   key={m.id}
                   onClick={() => navigate('/matches')}
-                  className="flex items-center gap-3 p-3 border border-slate-100 rounded-lg hover:border-blue-200 hover:bg-blue-50/20 transition-all cursor-pointer"
+                  className="flex items-center gap-3 p-3 border border-slate-100 dark:border-slate-800 rounded-xl hover:border-emerald-200 dark:hover:border-emerald-800 hover:bg-emerald-50/20 dark:hover:bg-emerald-950/20 transition-all cursor-pointer"
                 >
-                  <div className="w-20 text-center border-l border-slate-100 pl-2 shrink-0">
-                    <p className="text-[10px] font-bold text-slate-500 mb-0.5">{formatMatchDate(m.date)}</p>
-                    <p className="text-xs font-bold text-blue-600">{m.startTime || '10:00'}</p>
+                  <div className="w-20 text-center border-l border-slate-100 dark:border-slate-800 pl-2 shrink-0">
+                    <p className="text-[10px] font-bold text-slate-500 dark:text-slate-400 mb-0.5">{formatMatchDate(m.date)}</p>
+                    <p className="text-xs font-bold text-emerald-600 dark:text-emerald-400">{m.startTime || '10:00'}</p>
                     <p className="text-[10px] text-slate-400 font-medium">
                       {m.status === 'Completed' ? 'انتهت' : m.status === 'Ongoing' ? 'مباشر' : 'مبرمجة'}
                     </p>
                   </div>
                   <div className="flex-1 flex items-center justify-between px-2">
-                    <span className="font-bold text-xs text-slate-800">
+                    <span className="font-bold text-xs text-slate-800 dark:text-slate-200">
                       {m.stage || 'مباراة إقليمية'}
                     </span>
-                    <div className="font-black text-xs px-2.5 py-1 bg-slate-100 rounded-md border border-slate-200">
+                    <div className="font-black text-xs px-2.5 py-1 bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 rounded-md border border-slate-200 dark:border-slate-700">
                       {m.status === 'Completed' ? `${m.score1 || 0} - ${m.score2 || 0}` : 'مقابلة مبرمجة'}
                     </div>
                   </div>
@@ -538,8 +539,8 @@ export const Dashboard: React.FC = () => {
 
         {/* Side Panel: Quick Actions & Alerts */}
         <div className="space-y-4">
-          <div className="bg-white rounded-xl p-4 border border-slate-200 shadow-xs">
-            <h4 className="text-xs font-bold text-slate-700 mb-3 flex items-center gap-2">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl p-4 border border-slate-200 dark:border-slate-800 shadow-xs">
+            <h4 className="text-xs font-black text-slate-800 dark:text-white mb-3 flex items-center gap-2">
               <Trophy className="h-4 w-4 text-amber-500" />
               <span>{userProfile?.role === 'TEACHER' ? 'روابط سريعة للأستاذ' : 'إجراءات سريعة للمسير'}</span>
             </h4>
@@ -547,7 +548,7 @@ export const Dashboard: React.FC = () => {
               {isTeacher && (
                 <button
                   onClick={openProfileModal}
-                  className="w-full text-right p-2.5 bg-blue-50 hover:bg-blue-100/80 text-blue-800 rounded-lg text-xs font-bold flex items-center justify-between transition-colors cursor-pointer border border-blue-200/70"
+                  className="w-full text-right p-2.5 bg-emerald-50 hover:bg-emerald-100/90 text-emerald-900 rounded-xl text-xs font-bold flex items-center justify-between transition-colors cursor-pointer border border-emerald-200/80"
                 >
                   <span className="flex items-center gap-1.5">
                     <span>👤</span>
@@ -559,7 +560,7 @@ export const Dashboard: React.FC = () => {
               {isCentralAdmin && (
                 <button
                   onClick={() => setIsTournamentModalOpen(true)}
-                  className="w-full text-right p-2.5 bg-blue-50/60 hover:bg-blue-100/60 text-blue-700 rounded-lg text-xs font-bold flex items-center justify-between transition-colors cursor-pointer"
+                  className="w-full text-right p-2.5 bg-emerald-50 hover:bg-emerald-100/90 text-emerald-900 rounded-xl text-xs font-bold flex items-center justify-between transition-colors cursor-pointer border border-emerald-200/80"
                 >
                   <span>➕ برمجة بطولة إقليمية جديدة</span>
                   <span>←</span>
@@ -567,28 +568,28 @@ export const Dashboard: React.FC = () => {
               )}
               <button
                 onClick={() => navigate('/statistics')}
-                className="w-full text-right p-2.5 bg-indigo-50 hover:bg-indigo-100/80 text-indigo-800 rounded-lg text-xs font-bold flex items-center justify-between transition-colors cursor-pointer border border-indigo-200/70"
+                className="w-full text-right p-2.5 bg-amber-50 hover:bg-amber-100/90 text-amber-900 rounded-xl text-xs font-bold flex items-center justify-between transition-colors cursor-pointer border border-amber-200/80"
               >
                 <span>📊 إحصائيات وترتيب المؤسسات</span>
                 <span>←</span>
               </button>
               <button
                 onClick={() => navigate('/matches')}
-                className="w-full text-right p-2.5 bg-emerald-50/60 hover:bg-emerald-100/60 text-emerald-800 rounded-lg text-xs font-bold flex items-center justify-between transition-colors cursor-pointer"
+                className="w-full text-right p-2.5 bg-slate-50 hover:bg-slate-100 text-slate-700 rounded-xl text-xs font-bold flex items-center justify-between transition-colors cursor-pointer border border-slate-200"
               >
                 <span>📅 جدول المقابلات والنتائج</span>
                 <span>←</span>
               </button>
               <button
                 onClick={() => navigate('/tournaments')}
-                className="w-full text-right p-2.5 bg-slate-50 hover:bg-slate-100 text-slate-700 rounded-lg text-xs font-bold flex items-center justify-between transition-colors cursor-pointer"
+                className="w-full text-right p-2.5 bg-slate-50 hover:bg-slate-100 text-slate-700 rounded-xl text-xs font-bold flex items-center justify-between transition-colors cursor-pointer border border-slate-200"
               >
                 <span>🏆 البطولات الإقليمية المبرمجة</span>
                 <span>←</span>
               </button>
               <button
                 onClick={() => navigate('/schools')}
-                className="w-full text-right p-2.5 bg-slate-50 hover:bg-slate-100 text-slate-700 rounded-lg text-xs font-bold flex items-center justify-between transition-colors cursor-pointer"
+                className="w-full text-right p-2.5 bg-slate-50 hover:bg-slate-100 text-slate-700 rounded-xl text-xs font-bold flex items-center justify-between transition-colors cursor-pointer border border-slate-200"
               >
                 <span>🏫 المؤسسات والفرق المشاركة</span>
                 <span>←</span>

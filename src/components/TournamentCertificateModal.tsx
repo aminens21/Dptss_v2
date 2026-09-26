@@ -83,7 +83,7 @@ export const TournamentCertificateModal: React.FC<TournamentCertificateModalProp
 
   // Form states
   const [championshipTitle, setChampionshipTitle] = useState(`البطولة الإقليمية المدرسية لـ ${sportName}`);
-  const [headerOrganization, setHeaderOrganization] = useState(`الفرع الإقليمي للجامعة الملكية المغربية للرياضة المدرسية للمديرية الإقليمية ب${cleanDirCity}`);
+  const [headerOrganization, setHeaderOrganization] = useState(`المنظومة الرقمية لتتبع نتائج البطولات المدرسية الاقليمية 2026`);
   const [seasonText, setSeasonText] = useState(activeSeason);
   const [theme, setTheme] = useState<CertificateTheme>('crimson_gold');
   const [selectedFont, setSelectedFont] = useState<string>('Amiri');
@@ -96,7 +96,7 @@ export const TournamentCertificateModal: React.FC<TournamentCertificateModalProp
   const [frmssLogoSize, setFrmssLogoSize] = useState<number>(48);
 
   // Certificate intro/honorific sentence (fully customizable)
-  const defaultHonorific = `يتشرف رئيس الفرع الإقليمي للجامعة الملكية المغربية للرياضة المدرسية بالمديرية الإقليمية ب${cleanDirCity}`;
+  const defaultHonorific = `يتشرف المسؤول عن المنظومة الرقمية لتتبع نتائج البطولات المدرسية الاقليمية 2026 بالمديرية الإقليمية ب${cleanDirCity}`;
   const [honorificText, setHonorificText] = useState(defaultHonorific);
 
   // Medal rank/number (controllable)
@@ -104,7 +104,7 @@ export const TournamentCertificateModal: React.FC<TournamentCertificateModalProp
   const [showMedal, setShowMedal] = useState<boolean>(true);
 
   // Signatory role (controllable)
-  const [signatoryRole, setSignatoryRole] = useState<string>('رئيس الفرع الإقليمي');
+  const [signatoryRole, setSignatoryRole] = useState<string>('رئيس المنظومة الرقمية');
   const [signatorySubRole, setSignatorySubRole] = useState<string>('المدير الإقليمي');
 
   // Mode: Blank (فارغة للملء اليدوي) or Filled (بيانات محددة)
@@ -929,7 +929,7 @@ export const TournamentCertificateModal: React.FC<TournamentCertificateModalProp
                     <span className="text-[10px] font-bold text-slate-400 block">نماذج وصيغ ديباجة جاهزة (انقر للتطبيق):</span>
                     <div className="flex flex-col gap-1">
                       {[
-                        `يتشرف رئيس الفرع الإقليمي للجامعة الملكية المغربية للرياضة المدرسية بالمديرية الإقليمية ب${cleanDirCity}`,
+                        `يتشرف المسؤول عن المنظومة الرقمية لتتبع نتائج البطولات المدرسية الاقليمية 2026 بالمديرية الإقليمية ب${cleanDirCity}`,
                         `تتشرف اللجنة المنظمة للبطولة الإقليمية المدرسية بالمديرية الإقليمية ب${cleanDirCity}`,
                         `يتشرف السيد المدير الإقليمي لوزارة التربية الوطنية والتعليم الأولي والرياضة ب${cleanDirCity}`,
                         `يتشرف مكتب فرع الجامعة الملكية المغربية للرياضة المدرسية ب${cleanDirCity}`,
@@ -979,13 +979,13 @@ export const TournamentCertificateModal: React.FC<TournamentCertificateModalProp
                       type="text"
                       value={signatoryRole}
                       onChange={(e) => setSignatoryRole(e.target.value)}
-                      placeholder="مثال: رئيس الفرع الإقليمي"
+                      placeholder="مثال: رئيس المنظومة الرقمية"
                       className="w-full text-xs font-bold px-2.5 py-1.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:outline-hidden"
                     />
                   </div>
                   <div className="flex items-center gap-1 flex-wrap">
                     <span className="text-[9px] font-bold text-slate-400">خيارات جاهزة:</span>
-                    {['رئيس الفرع الإقليمي', 'المدير الإقليمي', 'رئيس مصلحة الارتقاء بالرياضة المدرسية', 'الكاتب العام'].map((role) => (
+                    {['رئيس المنظومة الرقمية', 'المدير الإقليمي', 'رئيس مصلحة الارتقاء بالرياضة المدرسية', 'الكاتب العام'].map((role) => (
                       <button
                         key={role}
                         type="button"

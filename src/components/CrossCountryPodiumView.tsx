@@ -97,29 +97,49 @@ const PodiumRunnerCard: React.FC<PodiumRunnerCardProps> = ({
   const discInnerColor = rank === 1 ? '#FDE047' : rank === 2 ? '#E2E8F0' : '#D97706';
   const numColor = rank === 1 ? '#713F12' : rank === 2 ? '#0F172A' : '#451A03';
 
+  const [zoomedPhoto, setZoomedPhoto] = useState<{ url: string; name: string; school: string; rank: number } | null>(null);
+
+  const matchedStudent = categoryStudents.find(s => 
+    (winner?.studentId && s.id === winner.studentId) ||
+    (winner?.fullName && s.fullName.trim().toLowerCase() === winner.fullName.trim().toLowerCase())
+  );
+  const participantPhoto = winner?.photoUrl || matchedStudent?.photoUrl;
+
   return (
     <div className="w-full flex flex-col items-center">
-      {/* Circular Medal Badge at top (overlapping card) */}
+      {/* Circular Medal/Photo Badge at top (overlapping card) */}
       <div className="relative z-10 -mb-6 sm:-mb-10 md:-mb-12">
         <div className="w-12 h-12 sm:w-20 sm:h-20 md:w-24 md:h-24 rounded-full border-[2px] sm:border-[3.5px] border-black bg-gradient-to-b from-[#ffea79] via-[#fbc02d] to-[#f59e0b] shadow-md sm:shadow-2xl flex flex-col items-center justify-center relative overflow-hidden shrink-0 select-none">
-          {/* Crown at top */}
-          <span className="text-[9px] sm:text-xs md:text-sm -mb-0.5 select-none leading-none">👑</span>
-
-          {/* Medal Graphic with Blue Ribbon and Number */}
-          <svg viewBox="0 0 54 54" className="w-6 h-6 sm:w-10 sm:h-10 md:w-12 md:h-12 drop-shadow-sm" fill="none">
-            {/* Blue Ribbon folded */}
-            <path d="M17 6L27 20L37 6L31 4L27 8L23 4L17 6Z" fill="#3B82F6" />
-            <path d="M20 10L27 20L17 22L20 10Z" fill="#2563EB" />
-            <path d="M34 10L27 20L37 22L34 10Z" fill="#1D4ED8" />
-            {/* Outer disc */}
-            <circle cx="27" cy="31" r="14.5" fill={discOuterColor} />
-            <circle cx="27" cy="31" r="12" fill={discMidColor} />
-            <circle cx="27" cy="31" r="9.5" fill={discInnerColor} />
-            {/* Number */}
-            <text x="27" y="36.5" textAnchor="middle" fill={numColor} fontSize="16" fontWeight="900" fontFamily="sans-serif">
-              {rank}
-            </text>
-          </svg>
+          {participantPhoto ? (
+            <>
+              <img 
+                src={participantPhoto} 
+                alt={winner?.fullName || ''} 
+                className="absolute inset-0 w-full h-full object-cover z-10 cursor-pointer hover:scale-110 transition-transform" 
+                onClick={() => setZoomedPhoto({ url: participantPhoto, name: winner?.fullName || '', school: winner?.schoolName || '', rank })}
+                title="اضغط لتكبير الصورة للتعرف على المتسابق"
+              />
+              <div className="absolute top-0 right-0 z-20 bg-amber-500 text-slate-950 font-black text-[10px] sm:text-xs px-1.5 py-0.5 rounded-bl-lg border-b border-l border-black/20 shadow-sm">
+                #{rank}
+              </div>
+            </>
+          ) : (
+            /* Medal Graphic with Blue Ribbon and Number */
+            <svg viewBox="0 0 54 54" className="w-6 h-6 sm:w-10 sm:h-10 md:w-12 md:h-12 drop-shadow-sm z-10" fill="none">
+              {/* Blue Ribbon folded */}
+              <path d="M17 6L27 20L37 6L31 4L27 8L23 4L17 6Z" fill="#3B82F6" />
+              <path d="M20 10L27 20L17 22L20 10Z" fill="#2563EB" />
+              <path d="M34 10L27 20L37 22L34 10Z" fill="#1D4ED8" />
+              {/* Outer disc */}
+              <circle cx="27" cy="31" r="14.5" fill={discOuterColor} />
+              <circle cx="27" cy="31" r="12" fill={discMidColor} />
+              <circle cx="27" cy="31" r="9.5" fill={discInnerColor} />
+              {/* Number */}
+              <text x="27" y="36.5" textAnchor="middle" fill={numColor} fontSize="16" fontWeight="900" fontFamily="sans-serif">
+                {rank}
+              </text>
+            </svg>
+          )}
         </div>
       </div>
 
@@ -211,6 +231,38 @@ const PodiumRunnerCard: React.FC<PodiumRunnerCardProps> = ({
           </div>
         )}
       </div>
+
+      {/* Zoomed Photo Lightbox Modal */}
+      {zoomedPhoto && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in duration-200 dir-rtl text-right" onClick={() => setZoomedPhoto(null)}>
+          <div className="bg-white rounded-3xl p-6 max-w-sm w-full shadow-2xl space-y-4 text-center relative" onClick={e => e.stopPropagation()}>
+            <button
+              type="button"
+              onClick={() => setZoomedPhoto(null)}
+              className="absolute top-4 left-4 p-2 rounded-full bg-slate-100 text-slate-600 hover:bg-slate-200 cursor-pointer transition-colors"
+            >
+              <X className="w-5 h-5" />
+            </button>
+            <div className="inline-block px-3 py-1 rounded-full bg-amber-500 text-slate-950 font-black text-xs">
+              المرتبة #{zoomedPhoto.rank} 🏆
+            </div>
+            <div className="w-64 h-64 sm:w-80 sm:h-80 mx-auto rounded-3xl overflow-hidden shadow-2xl border-4 border-amber-400">
+              <img src={zoomedPhoto.url} alt={zoomedPhoto.name} className="w-full h-full object-cover scale-[3.0] transform" />
+            </div>
+            <div className="space-y-1">
+              <h3 className="text-lg font-black text-slate-900">{zoomedPhoto.name}</h3>
+              <p className="text-xs font-bold text-slate-600">{zoomedPhoto.school} 🏫</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setZoomedPhoto(null)}
+              className="w-full py-2.5 bg-slate-900 text-white rounded-xl text-xs font-black hover:bg-slate-800 cursor-pointer"
+            >
+              إغلاق
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
@@ -370,11 +422,10 @@ export const CrossCountryPodiumView: React.FC<CrossCountryPodiumViewProps> = ({
     }).length;
   }, [results]);
 
-  // Combined pool for quick-fill options
+  // Combined pool for quick-fill options (strictly constrained to this category and gender)
   const categoryStudents = useMemo(() => {
-    if (availableCategoryStudents.length > 0) return availableCategoryStudents;
-    return allCrossCountryStudents;
-  }, [availableCategoryStudents, allCrossCountryStudents]);
+    return availableCategoryStudents;
+  }, [availableCategoryStudents]);
 
   // Quick assign a registered student to a specific rank on the podium directly
   const handleQuickAssignRank = async (rank: number, studentId: string) => {
@@ -1117,55 +1168,75 @@ export const CrossCountryPodiumView: React.FC<CrossCountryPodiumViewProps> = ({
                       )}
                     </div>
 
-                    {/* Mini Podium Triad */}
+                    {/* Mini Olympic Podium */}
                     {hasAny ? (
-                      <div className="space-y-2 text-xs">
-                        {/* 1st Place */}
-                        <div className="p-2 rounded-xl bg-gradient-to-r from-amber-50 to-yellow-100/60 border border-amber-200 flex items-center justify-between gap-2">
-                          <div className="flex items-center gap-2 min-w-0">
-                            <span className="text-base">🥇</span>
-                            <div className="truncate">
-                              <p className="font-black text-slate-900 text-xs truncate">{p1?.fullName || 'غير محدد'}</p>
-                              <p className="text-[10px] text-amber-900 truncate font-medium">{p1?.schoolName || 'المؤسسة'}</p>
+                      <div className="pt-4 pb-1">
+                        <div className="grid grid-cols-3 gap-1.5 items-end max-w-xs mx-auto" dir="ltr">
+                          {/* 2nd Place (Left) */}
+                          <div dir="rtl" className="flex flex-col items-center">
+                            <div className="w-full text-center p-1.5 rounded-t-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 min-h-[75px] flex flex-col justify-between">
+                              <span className="text-xs font-black text-slate-700 dark:text-slate-300">🥈 #2</span>
+                              <p className="font-black text-slate-900 dark:text-white text-[10px] truncate leading-tight mt-0.5" title={p2?.fullName}>
+                                {p2?.fullName || '—'}
+                              </p>
+                              <p className="text-[8.5px] text-slate-500 dark:text-slate-400 truncate leading-none mt-0.5" title={p2?.schoolName}>
+                                {p2?.schoolName || '—'}
+                              </p>
+                              {p2?.time && (
+                                <span className="text-[8px] font-mono font-bold text-slate-600 dark:text-slate-400 mt-0.5">
+                                  {p2.time}
+                                </span>
+                              )}
+                            </div>
+                            <div className="w-full h-8 bg-gradient-to-t from-slate-400 to-slate-200 dark:from-slate-700 dark:to-slate-500 rounded-b-lg flex items-center justify-center font-black font-mono text-xs text-slate-900 dark:text-white shadow-xs">
+                              2
                             </div>
                           </div>
-                          {p1?.time && (
-                            <span className="text-[10px] font-mono font-black text-amber-800 shrink-0 bg-amber-200/60 px-1.5 py-0.5 rounded">
-                              {p1.time}
-                            </span>
-                          )}
-                        </div>
 
-                        {/* 2nd Place */}
-                        <div className="p-2 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-between gap-2">
-                          <div className="flex items-center gap-2 min-w-0">
-                            <span className="text-base">🥈</span>
-                            <div className="truncate">
-                              <p className="font-bold text-slate-800 text-xs truncate">{p2?.fullName || 'غير محدد'}</p>
-                              <p className="text-[10px] text-slate-500 truncate">{p2?.schoolName || 'المؤسسة'}</p>
+                          {/* 1st Place (Center - Elevated) */}
+                          <div dir="rtl" className="flex flex-col items-center -translate-y-2">
+                            <div className="w-full text-center p-1.5 rounded-t-xl bg-amber-50 dark:bg-amber-950/50 border border-amber-300 dark:border-amber-700 min-h-[85px] flex flex-col justify-between ring-2 ring-amber-400/30">
+                              <div className="flex items-center justify-center gap-0.5">
+                                <span className="text-xs">👑</span>
+                                <span className="text-xs font-black text-amber-700 dark:text-amber-300">🥇 #1</span>
+                              </div>
+                              <p className="font-black text-amber-950 dark:text-amber-200 text-[10.5px] truncate leading-tight mt-0.5" title={p1?.fullName}>
+                                {p1?.fullName || '—'}
+                              </p>
+                              <p className="text-[8.5px] text-amber-800 dark:text-amber-300/80 truncate leading-none mt-0.5" title={p1?.schoolName}>
+                                {p1?.schoolName || '—'}
+                              </p>
+                              {p1?.time && (
+                                <span className="text-[8px] font-mono font-black text-amber-800 dark:text-amber-300 bg-amber-200/60 dark:bg-amber-900/60 px-1 py-0.2 rounded mt-0.5">
+                                  {p1.time}
+                                </span>
+                              )}
+                            </div>
+                            <div className="w-full h-12 bg-gradient-to-t from-amber-500 via-yellow-400 to-amber-300 text-slate-950 rounded-b-lg flex items-center justify-center font-black font-mono text-sm shadow-md border-t border-yellow-100">
+                              1
                             </div>
                           </div>
-                          {p2?.time && (
-                            <span className="text-[10px] font-mono font-bold text-slate-600 shrink-0">
-                              {p2.time}
-                            </span>
-                          )}
-                        </div>
 
-                        {/* 3rd Place */}
-                        <div className="p-2 rounded-xl bg-amber-50/40 border border-amber-200/50 flex items-center justify-between gap-2">
-                          <div className="flex items-center gap-2 min-w-0">
-                            <span className="text-base">🥉</span>
-                            <div className="truncate">
-                              <p className="font-bold text-slate-800 text-xs truncate">{p3?.fullName || 'غير محدد'}</p>
-                              <p className="text-[10px] text-slate-500 truncate">{p3?.schoolName || 'المؤسسة'}</p>
+                          {/* 3rd Place (Right) */}
+                          <div dir="rtl" className="flex flex-col items-center">
+                            <div className="w-full text-center p-1.5 rounded-t-xl bg-orange-50/70 dark:bg-orange-950/40 border border-orange-200 dark:border-orange-800 min-h-[70px] flex flex-col justify-between">
+                              <span className="text-xs font-black text-amber-800 dark:text-amber-300">🥉 #3</span>
+                              <p className="font-black text-slate-900 dark:text-white text-[10px] truncate leading-tight mt-0.5" title={p3?.fullName}>
+                                {p3?.fullName || '—'}
+                              </p>
+                              <p className="text-[8.5px] text-slate-500 dark:text-slate-400 truncate leading-none mt-0.5" title={p3?.schoolName}>
+                                {p3?.schoolName || '—'}
+                              </p>
+                              {p3?.time && (
+                                <span className="text-[8px] font-mono font-bold text-amber-900 dark:text-amber-400 mt-0.5">
+                                  {p3.time}
+                                </span>
+                              )}
+                            </div>
+                            <div className="w-full h-6 bg-gradient-to-t from-amber-800 to-amber-600 dark:from-amber-950 dark:to-amber-800 text-amber-50 rounded-b-lg flex items-center justify-center font-black font-mono text-[11px] shadow-xs">
+                              3
                             </div>
                           </div>
-                          {p3?.time && (
-                            <span className="text-[10px] font-mono font-bold text-amber-900 shrink-0">
-                              {p3.time}
-                            </span>
-                          )}
                         </div>
                       </div>
                     ) : (

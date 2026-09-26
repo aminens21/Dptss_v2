@@ -1,4 +1,4 @@
-import { Tournament, Match, School, Venue, User, Referee, Student, Sport, AppNotification, RoleSidebarPermissions, Directorate, DirectorateTransferRequest, SUPER_ADMIN_EMAILS, CrossCountryCategoryResult, PodiumWinner, CustomAgeCategory } from '../types';
+import { Tournament, Match, School, Venue, User, Referee, Student, Sport, AppNotification, RoleSidebarPermissions, Directorate, DirectorateTransferRequest, SUPER_ADMIN_EMAILS, CrossCountryCategoryResult, PodiumWinner, CustomAgeCategory, AthleticsCategoryResult, AthleticsWinner } from '../types';
 import { INITIAL_TOURNAMENTS, INITIAL_MATCHES, INITIAL_SCHOOLS, INITIAL_VENUES, INITIAL_DIRECTORATES } from './initialData';
 import { INITIAL_CROSS_COUNTRY_RESULTS } from './crossCountryConfig';
 import { db } from '../firebase/config';
@@ -733,20 +733,25 @@ export const DataService = {
 
   async deleteTournament(id: string): Promise<void> {
     try {
-      // 1. Get the tournament details first to know what students to delete
+      // 1. Get the tournament details first to know what students, matches, and results to delete
       const tournaments = await this.getTournaments();
       const tournament = tournaments.find(t => t.id === id);
 
       if (tournament) {
-        // 2. Delete Matches
+        // 2. Delete Matches associated with this tournament or specific category/gender/affiliation
         const matches = await this.getMatches();
-        const matchesToDelete = matches.filter(m => m.tournamentId === id);
+        const matchesToDelete = matches.filter(m => 
+          m.tournamentId === id ||
+          (m.sportId === tournament.sportId && 
+           normalizeCategoryKey(m.ageCategory) === normalizeCategoryKey(tournament.ageCategory) && 
+           m.gender === tournament.gender &&
+           (tournament.affiliationType ? (m as any).affiliationType === tournament.affiliationType : true))
+        );
         for (const m of matchesToDelete) {
           await this.deleteMatch(m.id);
         }
 
         // 3. Delete Students (Participants)
-        // Note: Students are linked by (sportId, category, gender, affiliationType)
         const allStudents = await this.getStudents();
         const studentsToDelete = allStudents.filter(s => 
           s.sportId === tournament.sportId &&
@@ -790,6 +795,46 @@ export const DataService = {
 
       // 6. Delete from Firestore
       await deleteDoc(doc(db, 'tournaments', id));
+
+      // 7. Update parent sport configuration (isProgrammed and ageCategories)
+      if (tournament) {
+        const remainingSportTournaments = updated.filter(t => t.sportId === tournament.sportId);
+        const currentSports = getLocal<Sport>('taourirt_sports_config', []);
+        
+        if (remainingSportTournaments.length === 0) {
+          // If no tournaments remain for this sport, turn it to unprogrammed / neutralized
+          const updatedSports = currentSports.map(s => 
+            s.id === tournament.sportId ? { ...s, isProgrammed: false, ageCategories: [] } : s
+          );
+          setLocal('taourirt_sports_config', updatedSports);
+          await setDoc(doc(db, 'sports', tournament.sportId), {
+            isProgrammed: false,
+            ageCategories: [],
+            updatedAt: serverTimestamp()
+          }, { merge: true }).catch(() => {});
+        } else {
+          // Update ageCategories to only remaining active tournament categories
+          const remainingCats = Array.from(new Set(remainingSportTournaments.map(t => normalizeCategoryKey(t.ageCategory)).filter(Boolean)));
+          const updatedSports = currentSports.map(s => 
+            s.id === tournament.sportId ? { ...s, isProgrammed: true, ageCategories: remainingCats } : s
+          );
+          setLocal('taourirt_sports_config', updatedSports);
+          await setDoc(doc(db, 'sports', tournament.sportId), {
+            isProgrammed: true,
+            ageCategories: remainingCats,
+            updatedAt: serverTimestamp()
+          }, { merge: true }).catch(() => {});
+        }
+      }
+
+      // 8. Dispatch synchronization events across all pages/components
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('tournamentDataChanged', { detail: { tournamentId: id } }));
+        window.dispatchEvent(new CustomEvent('matchesDataChanged'));
+        window.dispatchEvent(new CustomEvent('resultsChanged'));
+        window.dispatchEvent(new CustomEvent('sportsConfigChanged'));
+        window.dispatchEvent(new CustomEvent('crossCountryResultsUpdated'));
+      }
     } catch (e) {
       console.warn("Error during cascade delete:", e);
       // Fallback: still delete the tournament locally even if cascade failed
@@ -797,6 +842,11 @@ export const DataService = {
       const updated = localList.filter(t => t.id !== id);
       setLocal(STORAGE_KEYS.TOURNAMENTS, updated);
       await deleteDoc(doc(db, 'tournaments', id)).catch(() => {});
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('tournamentDataChanged', { detail: { tournamentId: id } }));
+        window.dispatchEvent(new CustomEvent('matchesDataChanged'));
+        window.dispatchEvent(new CustomEvent('sportsConfigChanged'));
+      }
     }
   },
 
@@ -814,6 +864,44 @@ export const DataService = {
       }
     }
 
+    // Delete associated matches
+    try {
+      const matches = await this.getMatches();
+      const matchesToDelete = matches.filter(m => m.sportId === sportId || tournamentsToDelete.some(t => t.id === m.tournamentId));
+      for (const m of matchesToDelete) {
+        await this.deleteMatch(m.id);
+      }
+    } catch (e) {
+      console.warn("Error deleting matches for sport:", e);
+    }
+
+    // Delete associated students
+    try {
+      const allStudents = await this.getStudents();
+      const sportStudents = allStudents.filter(s => s.sportId === sportId);
+      for (const s of sportStudents) {
+        await this.deleteStudent(s.id);
+      }
+    } catch (e) {
+      console.warn("Error deleting students for sport:", e);
+    }
+
+    // Delete cross country results if sport is cross_country
+    if (sportId === 'cross_country') {
+      try {
+        const activeDirId = this.getActiveDirectorateId();
+        const resultsMap = await this.getCrossCountryResults();
+        for (const catId of Object.keys(resultsMap)) {
+          const docId = `${activeDirId}_${catId}`;
+          await deleteDoc(doc(db, 'cross_country_results', docId)).catch(() => {});
+        }
+        const cacheKey = `taourirt_cc_results_${activeDirId}`;
+        localStorage.removeItem(cacheKey);
+      } catch (e) {
+        console.warn("Error deleting cross country results:", e);
+      }
+    }
+
     try {
       const currentSports = getLocal<Sport>('taourirt_sports_config', []);
       const updatedSports = currentSports.map(s => s.id === sportId ? { ...s, isProgrammed: false, ageCategories: [] } : s);
@@ -826,6 +914,14 @@ export const DataService = {
       }, { merge: true });
     } catch (e) {
       console.warn("Could not reset sport programmed status in Firestore:", e);
+    }
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('tournamentDataChanged', { detail: { sportId } }));
+      window.dispatchEvent(new CustomEvent('matchesDataChanged'));
+      window.dispatchEvent(new CustomEvent('resultsChanged'));
+      window.dispatchEvent(new CustomEvent('sportsConfigChanged'));
+      window.dispatchEvent(new CustomEvent('crossCountryResultsUpdated'));
     }
   },
 
@@ -1032,10 +1128,22 @@ export const DataService = {
 
   // MATCHES
   async getMatches(): Promise<Match[]> {
+    const normalizeMatch = (m: Match): Match => {
+      const s1 = m.score1 ?? m.team1Score;
+      const s2 = m.score2 ?? m.team2Score;
+      return {
+        ...m,
+        score1: s1,
+        score2: s2,
+        team1Score: s1,
+        team2Score: s2
+      };
+    };
+
     try {
       const snap = await getDocs(collection(db, 'matches'));
       if (!snap.empty) {
-        const firestoreList = snap.docs.map(d => ({ id: d.id, ...d.data() } as Match));
+        const firestoreList = snap.docs.map(d => normalizeMatch({ id: d.id, ...d.data() } as Match));
         const filtered = firestoreList.filter(m => m.id !== 'mat-1' && m.id !== 'mat-2' && m.id !== 'mat-3');
         const deduped = deduplicateById(filtered);
         setLocal(STORAGE_KEYS.MATCHES, deduped);
@@ -1044,7 +1152,7 @@ export const DataService = {
     } catch (e) {
       console.warn("Firestore fetch matches error, falling back to cache:", e);
     }
-    const localList = getLocal<Match>(STORAGE_KEYS.MATCHES, INITIAL_MATCHES);
+    const localList = getLocal<Match>(STORAGE_KEYS.MATCHES, INITIAL_MATCHES).map(normalizeMatch);
     const cleaned = localList.filter(m => m.id !== 'mat-1' && m.id !== 'mat-2' && m.id !== 'mat-3');
     if (cleaned.length !== localList.length) {
       setLocal(STORAGE_KEYS.MATCHES, cleaned);
@@ -1132,6 +1240,8 @@ export const DataService = {
       ...m,
       score1,
       score2,
+      team1Score: score1,
+      team2Score: score2,
       status,
       ...(extras || {})
     } : m);
@@ -1142,6 +1252,8 @@ export const DataService = {
       await updateDoc(doc(db, 'matches', matchId), {
         score1,
         score2,
+        team1Score: score1,
+        team2Score: score2,
         status,
         ...sanitizedExtras,
         updatedAt: serverTimestamp()
@@ -3401,6 +3513,7 @@ export const DataService = {
         }
       });
 
+      this._sanitizeCrossCountryResultsMap(resultsMap);
       localStorage.setItem(cacheKey, JSON.stringify(resultsMap));
       callback(resultsMap);
     }, (error) => {
@@ -3408,6 +3521,92 @@ export const DataService = {
     });
 
     return unsubscribe;
+  },
+
+  _sanitizeCrossCountryResultsMap(resultsMap: Record<string, CrossCountryCategoryResult>): Record<string, CrossCountryCategoryResult> {
+    if (!resultsMap) return resultsMap;
+    const pairs = [
+      { male: 'u12_male', female: 'u12_female' },
+      { male: 'u12_male_club', female: 'u12_female_club' },
+      { male: 'u13_male', female: 'u13_female' },
+      { male: 'u15_male', female: 'u15_female' },
+      { male: 'u15_male_club', female: 'u15_female_club' },
+      { male: 'u18_male', female: 'u18_female' },
+      { male: 'u18_male_club', female: 'u18_female_club' },
+      { male: 'u20_male', female: 'u20_female' },
+      { male: 'u20_male_club', female: 'u20_female_club' }
+    ];
+
+    pairs.forEach(({ male, female }) => {
+      const m = resultsMap[male];
+      const f = resultsMap[female];
+      if (m && f && m.podium && f.podium && m.podium.length > 0 && f.podium.length > 0) {
+        const mSig = m.podium.map(p => (p.studentId || p.fullName || '').trim().toLowerCase()).sort().join('|');
+        const fSig = f.podium.map(p => (p.studentId || p.fullName || '').trim().toLowerCase()).sort().join('|');
+        if (mSig && mSig === fSig) {
+          f.podium = [];
+        }
+      }
+    });
+
+    return resultsMap;
+  },
+
+  /**
+   * Reset or delete all results of a specific sport for the active directorate and season
+   */
+  async deleteSportResults(sportId: string, deleteMatchesCompletely: boolean = false): Promise<void> {
+    const activeDirId = this.getActiveDirectorateId();
+    const effectiveDirId = (!activeDirId || activeDirId === 'all') ? 'taourirt' : activeDirId;
+
+    if (sportId === 'cross_country') {
+      const ccResults = await this.getCrossCountryResults();
+      const resetMap: Record<string, CrossCountryCategoryResult> = {};
+      
+      for (const [key, val] of Object.entries(ccResults)) {
+        const catVal = (val || {}) as CrossCountryCategoryResult;
+        resetMap[key] = {
+          ...catVal,
+          podium: [],
+          status: 'setup',
+          updatedAt: new Date().toISOString()
+        };
+        // Also update Firestore
+        try {
+          const docId = `${effectiveDirId}_${key}`;
+          await setDoc(doc(db, 'cross_country_results', docId), {
+            ...resetMap[key],
+            podium: [],
+            status: 'setup',
+            updatedAt: serverTimestamp()
+          }, { merge: true });
+        } catch (e) {
+          console.warn(`Error resetting cross country doc for ${key}:`, e);
+        }
+      }
+
+      const cacheKey = `taourirt_cc_results_${effectiveDirId}`;
+      localStorage.setItem(cacheKey, JSON.stringify(resetMap));
+      this._notifyCCUpdate({ categoryId: 'all', podium: [] } as any);
+    } else {
+      const allMatches = await this.getMatches();
+      const sportMatches = allMatches.filter(m => m.sportId === sportId);
+
+      for (const m of sportMatches) {
+        if (deleteMatchesCompletely) {
+          await this.deleteMatch(m.id);
+        } else {
+          // Reset match scores and completed status to SCHEDULED
+          await this.updateMatchScore(m.id, null as any, null as any, 'SCHEDULED', {
+            matchSheet: null,
+            team1Score: null,
+            team2Score: null,
+            team1Penalties: null,
+            team2Penalties: null
+          });
+        }
+      }
+    }
   },
 
   async getCrossCountryResults(): Promise<Record<string, CrossCountryCategoryResult>> {
@@ -3432,6 +3631,7 @@ export const DataService = {
             resultsMap[keyToUse] = item;
           }
         });
+        this._sanitizeCrossCountryResultsMap(resultsMap);
         localStorage.setItem(cacheKey, JSON.stringify(resultsMap));
         return resultsMap;
       }
@@ -3444,7 +3644,8 @@ export const DataService = {
       const local = localStorage.getItem(cacheKey);
       if (local) {
         const parsed = JSON.parse(local);
-        return { ...JSON.parse(JSON.stringify(INITIAL_CROSS_COUNTRY_RESULTS)), ...parsed };
+        const merged = { ...JSON.parse(JSON.stringify(INITIAL_CROSS_COUNTRY_RESULTS)), ...parsed };
+        return this._sanitizeCrossCountryResultsMap(merged);
       }
     } catch (e) {
       console.error("Local storage error reading cross country results:", e);
@@ -3632,6 +3833,139 @@ export const DataService = {
 
     window.dispatchEvent(new CustomEvent('studentsUpdated'));
     return removedCount;
+  },
+
+  /**
+   * Get track & field / athletics results
+   */
+  async getAthleticsResults(): Promise<Record<string, AthleticsCategoryResult>> {
+    const activeDirId = this.getActiveDirectorateId();
+    const effectiveDirId = (!activeDirId || activeDirId === 'all') ? 'taourirt' : activeDirId;
+    const cacheKey = `taourirt_athletics_results_${effectiveDirId}`;
+    
+    // 1. Try local cache
+    try {
+      const cached = localStorage.getItem(cacheKey);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Object.keys(parsed).length > 0) {
+          return parsed;
+        }
+      }
+    } catch (e) {
+      console.warn("Failed reading cached athletics results:", e);
+    }
+
+    // 2. Fetch from Firestore
+    try {
+      const q = query(
+        collection(db, 'athletics_results'),
+        where('directorateId', '==', effectiveDirId)
+      );
+      const snap = await getDocs(q);
+      const map: Record<string, AthleticsCategoryResult> = {};
+      snap.docs.forEach((d) => {
+        const data = d.data() as AthleticsCategoryResult;
+        if (data.id) {
+          map[data.id] = data;
+        }
+      });
+      
+      if (Object.keys(map).length > 0) {
+        localStorage.setItem(cacheKey, JSON.stringify(map));
+        return map;
+      }
+    } catch (e) {
+      console.warn("Firestore athletics results fetch error:", e);
+    }
+
+    // 3. Fallback to localStorage without filtering if any
+    try {
+      const globalCached = localStorage.getItem('taourirt_athletics_results');
+      if (globalCached) return JSON.parse(globalCached);
+    } catch (e) {}
+
+    return {};
+  },
+
+  async saveAthleticsCategoryResult(result: AthleticsCategoryResult): Promise<void> {
+    const activeDirId = this.getActiveDirectorateId();
+    const effectiveDirId = (!activeDirId || activeDirId === 'all') ? 'taourirt' : activeDirId;
+    const cacheKey = `taourirt_athletics_results_${effectiveDirId}`;
+    const activeSeason = await this.getActiveSeason();
+
+    const resultWithDir: AthleticsCategoryResult = {
+      ...result,
+      directorateId: result.directorateId || effectiveDirId,
+      seasonId: result.seasonId || activeSeason,
+      updatedAt: new Date().toISOString()
+    };
+
+    // Update local cache
+    try {
+      const current = await this.getAthleticsResults();
+      current[result.id] = resultWithDir;
+      localStorage.setItem(cacheKey, JSON.stringify(current));
+      localStorage.setItem('taourirt_athletics_results', JSON.stringify(current));
+    } catch (e) {
+      console.error("Error updating local Athletics results:", e);
+    }
+
+    // Sync to Firestore
+    try {
+      const docId = `${effectiveDirId}_${result.id}`;
+      const sanitized = JSON.parse(JSON.stringify(resultWithDir));
+      await setDoc(doc(db, 'athletics_results', docId), {
+        ...sanitized,
+        id: docId,
+        updatedAt: serverTimestamp()
+      }, { merge: true });
+    } catch (e) {
+      console.warn("Firestore save Athletics result error:", e);
+    }
+
+    window.dispatchEvent(new CustomEvent('athleticsResultsUpdated', { detail: resultWithDir }));
+  },
+
+  subscribeAthleticsResults(callback: (results: Record<string, AthleticsCategoryResult>) => void): () => void {
+    const activeDirId = this.getActiveDirectorateId();
+    const effectiveDirId = (!activeDirId || activeDirId === 'all') ? 'taourirt' : activeDirId;
+
+    // Load initial
+    this.getAthleticsResults().then(callback);
+
+    // Event listener
+    const handleUpdate = () => {
+      this.getAthleticsResults().then(callback);
+    };
+    window.addEventListener('athleticsResultsUpdated', handleUpdate);
+
+    // Firestore listener
+    let unsubscribeFirestore = () => {};
+    try {
+      const q = query(
+        collection(db, 'athletics_results'),
+        where('directorateId', '==', effectiveDirId)
+      );
+      unsubscribeFirestore = onSnapshot(q, (snap) => {
+        const map: Record<string, AthleticsCategoryResult> = {};
+        snap.docs.forEach((d) => {
+          const data = d.data() as AthleticsCategoryResult;
+          if (data.id) {
+            map[data.id] = data;
+          }
+        });
+        if (Object.keys(map).length > 0) {
+          localStorage.setItem(`taourirt_athletics_results_${effectiveDirId}`, JSON.stringify(map));
+          callback(map);
+        }
+      }, (err) => console.warn("Athletics listener error:", err));
+    } catch (e) {}
+
+    return () => {
+      window.removeEventListener('athleticsResultsUpdated', handleUpdate);
+      unsubscribeFirestore();
+    };
   },
 
   async syncAllDataFromCloud(): Promise<{

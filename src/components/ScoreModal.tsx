@@ -102,24 +102,24 @@ export const ScoreModal: React.FC<ScoreModalProps> = ({
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs" dir="rtl">
       <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-lg w-full max-h-[92vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150">
         {/* Header */}
-        <div className="flex items-center justify-between p-4 md:p-5 border-b border-slate-100 bg-gradient-to-r from-slate-50 to-emerald-50/40 shrink-0">
+        <div className="flex items-center justify-between p-4 md:p-5 border-b border-slate-200 bg-gradient-to-r from-emerald-800 via-teal-900 to-slate-900 text-white shrink-0">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center shadow-xs text-xl">
+            <div className="w-10 h-10 rounded-xl bg-white/15 border border-white/20 text-white flex items-center justify-center shadow-inner text-xl">
               {sportInfo.icon}
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h3 className="text-xs md:text-sm font-bold text-slate-800">تسجيل وتثبيت نتيجة المقابلة</h3>
-                <span className="text-[10px] font-bold px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded-md">
+                <h3 className="text-xs md:text-sm font-bold text-white">تسجيل وتثبيت نتيجة المقابلة</h3>
+                <span className="text-[10px] font-bold px-2 py-0.5 bg-emerald-500/20 text-emerald-200 border border-emerald-400/30 rounded-md">
                   {sportInfo.name}
                 </span>
               </div>
-              <p className="text-[11px] text-slate-500 font-medium mt-0.5">
+              <p className="text-[11px] text-emerald-100 font-medium mt-0.5">
                 {match.stage || 'مباراة رسمية'}
               </p>
             </div>
           </div>
-          <button onClick={onClose} className="p-1.5 text-slate-400 hover:text-slate-700 rounded-lg hover:bg-slate-200/50 cursor-pointer">
+          <button onClick={onClose} className="p-1.5 text-white/80 hover:text-white rounded-lg hover:bg-white/10 transition-colors cursor-pointer">
             <X className="h-5 w-5" />
           </button>
         </div>
@@ -360,14 +360,14 @@ export const ScoreModal: React.FC<ScoreModalProps> = ({
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
+              className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer"
             >
               إلغاء
             </button>
             <button
               type="submit"
               disabled={isSubmitting}
-              className="px-5 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg transition-colors shadow-xs cursor-pointer flex items-center gap-1.5"
+              className="px-5 py-2.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 active:scale-95 rounded-xl transition-all shadow-md shadow-emerald-600/20 cursor-pointer flex items-center gap-1.5"
             >
               <CheckCircle2 className="h-4 w-4" />
               <span>{isSubmitting ? 'جاري الحفظ في قاعدة البيانات...' : 'تثبيت وحفظ النتيجة'}</span>

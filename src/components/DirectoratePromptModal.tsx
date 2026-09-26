@@ -70,13 +70,13 @@ export const DirectoratePromptModal: React.FC = () => {
       <div className="bg-white rounded-3xl shadow-2xl w-full max-w-lg overflow-hidden border border-slate-100 animate-in zoom-in-95 duration-200">
         
         {/* Header */}
-        <div className="bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 p-6 text-white text-center relative overflow-hidden">
+        <div className="bg-gradient-to-r from-emerald-800 via-teal-900 to-slate-900 p-6 text-white text-center relative overflow-hidden">
           <div className="absolute top-0 right-0 -mr-10 -mt-10 w-36 h-36 bg-white/10 rounded-full blur-xl pointer-events-none" />
-          <div className="w-14 h-14 bg-white/15 rounded-2xl flex items-center justify-center mx-auto mb-3 backdrop-blur-md shadow-inner">
-            <Building2 className="w-7 h-7 text-white" />
+          <div className="w-14 h-14 bg-white/15 rounded-2xl flex items-center justify-center mx-auto mb-3 backdrop-blur-md shadow-inner border border-white/15">
+            <Building2 className="w-7 h-7 text-amber-300" />
           </div>
-          <h2 className="text-xl font-black mb-1">تحديد المديرية الإقليمية</h2>
-          <p className="text-emerald-100 text-xs font-medium max-w-xs mx-auto">
+          <h2 className="text-xl font-black mb-1 text-white">تحديد المديرية الإقليمية</h2>
+          <p className="text-emerald-100/90 text-xs font-medium max-w-xs mx-auto">
             لعزل بيانات الأنشطة والبطولات والمؤسسات، يرجى اختيار مديريتك الإقليمية وتأكيد القن السري الخاص بها.
           </p>
         </div>

@@ -9,6 +9,7 @@ import { Login } from './pages/Login';
 import { Dashboard } from './pages/Dashboard';
 import { Tournaments } from './pages/Tournaments';
 import { Matches } from './pages/Matches';
+import { PublicResults } from './pages/PublicResults';
 import { Schools } from './pages/Schools';
 import { Venues } from './pages/Venues';
 import { Teachers } from './pages/Teachers';
@@ -32,6 +33,7 @@ export default function App() {
           <BrowserRouter>
             <Routes>
               <Route path="/login" element={<Login />} />
+              <Route path="/results" element={<PublicResults />} />
               <Route
                 path="/"
                 element={

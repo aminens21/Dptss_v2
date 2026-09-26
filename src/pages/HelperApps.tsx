@@ -324,7 +324,7 @@ export const HelperApps: React.FC = () => {
       {/* ⭐ HERO SECTION: APP #1 - ماسح الصدريات لخط النهاية (The Primary App) ⭐ */}
       {/* ========================================================================= */}
       {isBibScannerExpanded && (
-        <div className="bg-linear-to-br from-white via-slate-50 to-blue-50/40 border-2 border-blue-200/90 rounded-3xl p-6 sm:p-8 shadow-md relative overflow-hidden transition-all hover:shadow-xl animate-in fade-in slide-in-from-top-4 duration-300">
+        <div className="bg-linear-to-br from-white via-slate-50 to-blue-50/40 dark:from-slate-900 dark:via-slate-900 dark:to-blue-950/30 border-2 border-blue-200/90 dark:border-blue-900/60 rounded-3xl p-6 sm:p-8 shadow-md relative overflow-hidden transition-all hover:shadow-xl animate-in fade-in slide-in-from-top-4 duration-300">
           {/* Decorative corner accent */}
           <div className="absolute top-0 left-0 bg-blue-600 text-white px-4 py-1 rounded-br-2xl text-[11px] font-black flex items-center gap-1.5 shadow-xs">
             <Sparkles className="w-3.5 h-3.5 text-amber-300" />
@@ -334,7 +334,7 @@ export const HelperApps: React.FC = () => {
           {/* Close Button for Full App View */}
           <button 
             onClick={() => setIsBibScannerExpanded(false)}
-            className="absolute top-4 left-4 p-2 bg-white/80 hover:bg-white text-slate-500 hover:text-slate-800 rounded-xl border border-slate-200 shadow-sm transition-all cursor-pointer z-10"
+            className="absolute top-4 left-4 p-2 bg-white/80 dark:bg-slate-800/80 hover:bg-white dark:hover:bg-slate-800 text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm transition-all cursor-pointer z-10"
             title="تصغير التطبيق"
           >
             <X className="w-4 h-4" />
@@ -345,34 +345,34 @@ export const HelperApps: React.FC = () => {
           {/* App Branding & Icon */}
           <div className="flex items-center gap-5">
             {/* The Dedicated Custom Icon for Bib Scanner */}
-            <BibScannerAppIcon size={76} className="shadow-blue-500/25 ring-4 ring-white" />
+            <BibScannerAppIcon size={76} className="shadow-blue-500/25 ring-4 ring-white dark:ring-slate-800" />
 
             <div className="space-y-1.5">
               <div className="flex items-center gap-2 flex-wrap">
-                <h2 className="text-lg sm:text-2xl font-black text-slate-900">
+                <h2 className="text-lg sm:text-2xl font-black text-slate-900 dark:text-slate-100">
                   ماسح الصدريات لخط النهاية (Bib Scanner)
                 </h2>
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-100 text-emerald-800 border border-emerald-200 flex items-center gap-1">
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-100 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 flex items-center gap-1">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping" />
                   متاح ومفعّل للتحكيم
                 </span>
               </div>
-              <p className="text-xs sm:text-sm text-slate-600 max-w-2xl leading-relaxed font-medium">
+              <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-300 max-w-2xl leading-relaxed font-medium">
                 تطبيق مخصص لقضاة وحكام خط النهاية لمسح أرقام صدريات العدائين بكاميرا الهاتف أو الإدخال اليدوي، مع تسجيل دقيق لأزمنة الوصول واحتساب فوري وتلقائي لنقاط وترتيب المؤسسات والفرق.
               </p>
 
               {/* Badges / Features */}
-              <div className="flex items-center gap-2 pt-1 flex-wrap text-[11px] text-slate-500 font-semibold">
-                <span className="flex items-center gap-1 bg-white border border-slate-200 px-2.5 py-1 rounded-lg">
-                  <Camera className="w-3 h-3 text-blue-600" />
+              <div className="flex items-center gap-2 pt-1 flex-wrap text-[11px] text-slate-500 dark:text-slate-400 font-semibold">
+                <span className="flex items-center gap-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 px-2.5 py-1 rounded-lg">
+                  <Camera className="w-3 h-3 text-blue-600 dark:text-blue-400" />
                   مسح QR وباركود بالكاميرا
                 </span>
-                <span className="flex items-center gap-1 bg-white border border-slate-200 px-2.5 py-1 rounded-lg">
-                  <Timer className="w-3 h-3 text-emerald-600" />
+                <span className="flex items-center gap-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 px-2.5 py-1 rounded-lg">
+                  <Timer className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
                   ساعة توقيت لحظية
                 </span>
-                <span className="flex items-center gap-1 bg-white border border-slate-200 px-2.5 py-1 rounded-lg">
-                  <Trophy className="w-3 h-3 text-amber-600" />
+                <span className="flex items-center gap-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 px-2.5 py-1 rounded-lg">
+                  <Trophy className="w-3 h-3 text-amber-600 dark:text-amber-400" />
                   حساب نقاط المدارس آلياً
                 </span>
               </div>
@@ -390,20 +390,20 @@ export const HelperApps: React.FC = () => {
               <ChevronRight className="w-4 h-4 shrink-0" />
             </button>
 
-            <div className="text-center text-[10px] text-slate-500 font-bold bg-white/70 px-3 py-1 rounded-lg border border-slate-200">
+            <div className="text-center text-[10px] text-slate-500 dark:text-slate-400 font-bold bg-white/70 dark:bg-slate-800/80 px-3 py-1 rounded-lg border border-slate-200 dark:border-slate-700">
               {totalArrived} عداء مسجل في {completedRaces} من 8 سباقات
             </div>
           </div>
         </div>
 
         {/* Quick Launch Race Category Grid with Auto Participants & Green Finish State */}
-        <div className="mt-6 pt-6 border-t border-slate-200/80">
+        <div className="mt-6 pt-6 border-t border-slate-200/80 dark:border-slate-700/80">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3">
-            <span className="text-xs font-black text-slate-800 flex items-center gap-1.5">
-              <QrCode className="w-3.5 h-3.5 text-blue-600" />
+            <span className="text-xs font-black text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+              <QrCode className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
               <span>فئات السباق (تظهر المشاركين تلقائياً - السباقات المنتهية باللون الأخضر تحيل مباشرة للنتائج):</span>
             </span>
-            <span className="text-[11px] font-bold text-slate-500">
+            <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400">
               8 فئات معتمدة • {completedRaces} سباق مكتمل
             </span>
           </div>
@@ -450,7 +450,7 @@ export const HelperApps: React.FC = () => {
                   className={`p-3 rounded-2xl border text-right transition-all flex flex-col justify-between group cursor-pointer shadow-xs hover:shadow-lg hover:scale-102 active:scale-98 relative overflow-hidden ${
                     isFinished 
                       ? 'bg-gradient-to-br from-emerald-600 via-emerald-700 to-teal-800 text-white border-emerald-400/80 ring-2 ring-emerald-400/40' 
-                      : 'bg-white hover:border-blue-400 border-slate-200 text-slate-800'
+                      : 'bg-white dark:bg-slate-800 hover:border-blue-400 dark:hover:border-blue-500 border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200'
                   }`}
                 >
                   {/* Top Status & Category Badges */}
@@ -460,8 +460,8 @@ export const HelperApps: React.FC = () => {
                         isFinished
                           ? 'bg-white/20 text-white border border-white/30'
                           : isFemale 
-                          ? 'bg-pink-100 text-pink-700' 
-                          : 'bg-blue-100 text-blue-700'
+                          ? 'bg-pink-100 dark:bg-pink-950/80 text-pink-700 dark:text-pink-300' 
+                          : 'bg-blue-100 dark:bg-blue-950/80 text-blue-700 dark:text-blue-300'
                       }`}>
                         {isFemale ? 'إناث' : 'ذكور'}
                       </span>
@@ -472,13 +472,13 @@ export const HelperApps: React.FC = () => {
                           <span>منتهي</span>
                         </span>
                       ) : (
-                        <span className="text-[10px] font-mono text-slate-400 font-bold">{cat.distance}</span>
+                        <span className="text-[10px] font-mono text-slate-400 dark:text-slate-400 font-bold">{cat.distance}</span>
                       )}
                     </div>
 
                     <div className="flex items-center gap-1.5 my-1">
                       <span className="text-base">{cat.icon}</span>
-                      <span className={`text-xs font-black truncate block ${isFinished ? 'text-white' : 'text-slate-900 group-hover:text-blue-600'}`}>
+                      <span className={`text-xs font-black truncate block ${isFinished ? 'text-white' : 'text-slate-900 dark:text-slate-100 group-hover:text-blue-600 dark:group-hover:text-blue-400'}`}>
                         {cat.titleAr}
                       </span>
                     </div>
@@ -486,18 +486,18 @@ export const HelperApps: React.FC = () => {
 
                   {/* Participants Auto Stats from Database */}
                   <div className={`mt-2 pt-2 border-t flex flex-col gap-1 text-[11px] ${
-                    isFinished ? 'border-white/20' : 'border-slate-100'
+                    isFinished ? 'border-white/20' : 'border-slate-100 dark:border-slate-700'
                   }`}>
                     <div className="flex items-center justify-between">
-                      <span className={isFinished ? 'text-emerald-100 font-medium' : 'text-slate-500 font-medium'}>
+                      <span className={isFinished ? 'text-emerald-100 font-medium' : 'text-slate-500 dark:text-slate-400 font-medium'}>
                         {isFinished ? 'الواصلون بالمسح:' : 'المسجلون:'}
                       </span>
                       <span className={`font-black px-1.5 py-0.2 rounded-md ${
                         isFinished 
                           ? 'bg-white/25 text-white' 
                           : registeredCount > 0 
-                          ? 'bg-blue-50 text-blue-700 font-extrabold' 
-                          : 'text-slate-400'
+                          ? 'bg-blue-50 dark:bg-blue-950/80 text-blue-700 dark:text-blue-300 font-extrabold' 
+                          : 'text-slate-400 dark:text-slate-500'
                       }`}>
                         {isFinished ? arrivedCount : registeredCount} عداء
                       </span>

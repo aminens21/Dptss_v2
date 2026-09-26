@@ -260,7 +260,7 @@ export const EditTeacherRoleModal: React.FC<EditTeacherRoleModalProps> = ({
       <div className="bg-white rounded-3xl border border-slate-200 shadow-2xl max-w-xl w-full overflow-hidden animate-in fade-in zoom-in-95 duration-150 my-auto">
         
         {/* Header */}
-        <div className="bg-gradient-to-r from-blue-700 via-indigo-700 to-slate-800 text-white p-5 flex items-start justify-between gap-4">
+        <div className="bg-gradient-to-r from-emerald-800 via-teal-900 to-slate-900 text-white p-5 flex items-start justify-between gap-4">
           <div className="flex items-center gap-3.5">
             <div className="w-12 h-12 rounded-2xl bg-white/10 border border-white/20 text-white flex items-center justify-center text-xl font-black shrink-0 overflow-hidden shadow-inner">
               {teacher.photoUrl ? (
@@ -271,15 +271,15 @@ export const EditTeacherRoleModal: React.FC<EditTeacherRoleModalProps> = ({
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-white/20 text-blue-100 border border-white/20">
+                <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-emerald-500/30 text-emerald-200 border border-emerald-400/30">
                   تعديل الصفة والمهام
                 </span>
-                <span className="text-[10px] font-bold text-slate-200 font-mono">
+                <span className="text-[10px] font-bold text-emerald-100 font-mono">
                   {teacher.leaseNumber || 'بدون تأجير'}
                 </span>
               </div>
               <h3 className="text-base font-black text-white mt-1">{teacher.fullName}</h3>
-              <p className="text-xs text-blue-100/80 font-medium truncate max-w-xs">
+              <p className="text-xs text-emerald-100/90 font-medium truncate max-w-xs">
                 {teacher.workLocation ? `مقر العمل: ${teacher.workLocation}` : 'المديرية الإقليمية تاوريرت'}
               </p>
             </div>
@@ -763,7 +763,7 @@ export const EditTeacherRoleModal: React.FC<EditTeacherRoleModalProps> = ({
               <button
                 type="submit"
                 disabled={saving || deleting}
-                className="flex items-center gap-1.5 px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer disabled:opacity-50"
+                className="flex items-center gap-1.5 px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-all shadow-md shadow-emerald-600/20 cursor-pointer disabled:opacity-50"
               >
                 <Save className="h-4 w-4" />
                 <span>{saving ? 'جاري الحفظ...' : 'حفظ التعديلات'}</span>

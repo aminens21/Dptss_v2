@@ -1274,15 +1274,15 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
           )}
 
           {/* Guidance note inside main modal */}
-          <div className="p-4 bg-blue-50/50 border border-blue-200/70 rounded-2xl flex items-center justify-between gap-3 text-slate-700 shadow-3xs">
+          <div className="p-4 bg-blue-50/50 dark:bg-blue-950/40 border border-blue-200/70 dark:border-blue-800/60 rounded-2xl flex items-center justify-between gap-3 text-slate-700 dark:text-slate-300 shadow-3xs">
             <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-xl bg-blue-100/80 text-blue-700 flex items-center justify-center font-bold shrink-0">
+              <div className="w-9 h-9 rounded-xl bg-blue-100/80 dark:bg-blue-900/80 text-blue-700 dark:text-blue-300 flex items-center justify-center font-bold shrink-0">
                 ℹ️
               </div>
               <div>
-                <h4 className="text-xs font-bold text-slate-800">استعراض وإدارة المؤسسات التعليمية المشاركة</h4>
-                <p className="text-[11px] text-slate-500 mt-0.5">
-                  يرجى الضغط على زر <strong className="text-blue-700">"دخول واستعراض المؤسسات المشاركة 🔓"</strong> داخل بطاقة الصنف المطلوب أعلاه للولوج إلى اللائحة التفصيلية وتنزيل لوائح المشاركة.
+                <h4 className="text-xs font-bold text-slate-800 dark:text-slate-100">استعراض وإدارة المؤسسات التعليمية المشاركة</h4>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                  يرجى الضغط على زر <strong className="text-blue-700 dark:text-blue-400">"دخول واستعراض المؤسسات المشاركة 🔓"</strong> داخل بطاقة الصنف المطلوب أعلاه للولوج إلى اللائحة التفصيلية وتنزيل لوائح المشاركة.
                 </p>
               </div>
             </div>
@@ -1321,7 +1321,7 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
       {/* INNER MODAL: Dedicated branch viewing window for participating schools */}
       {activeBranchModal && (
         <div className="fixed inset-0 z-60 bg-slate-900/70 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4 overflow-y-auto animate-in fade-in duration-200">
-          <div className="w-full max-w-5xl bg-white rounded-3xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[92vh] my-auto">
+          <div className="w-full max-w-5xl bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden flex flex-col max-h-[92vh] my-auto">
             {/* Header */}
             <div className={`p-4 sm:p-5 text-white flex flex-col lg:flex-row lg:items-center justify-between gap-4 ${
               activeBranchModal === 'non_club'

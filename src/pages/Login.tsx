@@ -43,7 +43,9 @@ import {
   X,
   FileSpreadsheet,
   Zap,
-  Info
+  Info,
+  Menu,
+  MoreHorizontal
 } from 'lucide-react';
 import {
   GoogleAuthProvider,
@@ -53,10 +55,11 @@ import {
 } from 'firebase/auth';
 import { doc, setDoc, getDoc, serverTimestamp } from 'firebase/firestore';
 import { auth, db } from '../firebase/config';
-import { Role, Directorate, School, Tournament, Match, Student, CrossCountryCategoryResult } from '../types';
+import { Role, Directorate, School, Tournament, Match, Student, CrossCountryCategoryResult, AthleticsCategoryResult, AthleticsWinner } from '../types';
 import { DataService, SPORTS_MAP, getAgeCategoriesForSeason, getCategoryYearsLabel } from '../lib/dataService';
 import { calculateTeamRankings, resolveRunnerParticipationType } from '../lib/crossCountryConfig';
 import { AppLogo } from '../components/AppLogo';
+import { DemoDataModal } from '../components/DemoDataModal';
 import toast from 'react-hot-toast';
 
 export const Login: React.FC = () => {
@@ -67,15 +70,20 @@ export const Login: React.FC = () => {
   // Mode: 'PUBLIC' (default), or 'REGISTER_TEACHER' if google auth triggers new teacher setup
   const [loginMode, setLoginMode] = useState<'PUBLIC' | 'REGISTER_TEACHER'>('PUBLIC');
   const [showLoginPanel, setShowLoginPanel] = useState(false);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const loginPanelRef = useRef<HTMLDivElement>(null);
 
   // Data states for Public View
+  const [activeDirectorate, setActiveDirectorate] = useState<Directorate | null>(null);
+  const [isDemoDataModalOpen, setIsDemoDataModalOpen] = useState(false);
+  const [isAboutModalOpen, setIsAboutModalOpen] = useState(false);
   const [directorates, setDirectorates] = useState<Directorate[]>([]);
   const [schools, setSchools] = useState<School[]>([]);
   const [tournaments, setTournaments] = useState<Tournament[]>([]);
   const [matches, setMatches] = useState<Match[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
   const [crossCountryResults, setCrossCountryResults] = useState<Record<string, CrossCountryCategoryResult>>({});
+  const [athleticsResults, setAthleticsResults] = useState<Record<string, AthleticsCategoryResult>>({});
   const [loadingData, setLoadingData] = useState(true);
 
   // Public Filters
@@ -83,10 +91,36 @@ export const Login: React.FC = () => {
   const [selectedScope, setSelectedScope] = useState<'ALL' | 'PROVINCIAL' | 'REGIONAL' | 'NATIONAL'>('ALL');
   const [selectedCategory, setSelectedCategory] = useState<string>('ALL');
   const [selectedGender, setSelectedGender] = useState<'ALL' | 'Male' | 'Female'>('ALL');
-  const [selectedAffiliation, setSelectedAffiliation] = useState<'ALL' | 'CLUB' | 'NON_CLUB'>('ALL');
+  const [selectedAffiliation, setSelectedAffiliation] = useState<'ALL' | 'CLUB' | 'NON_CLUB'>('NON_CLUB');
+  const [selectedAthleticsSpecialty, setSelectedAthleticsSpecialty] = useState<'ALL' | 'track' | 'field'>('ALL');
   const [selectedDate, setSelectedDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [searchQuery, setSearchQuery] = useState('');
-  const [activePublicTab, setActivePublicTab] = useState<'CC_PODIUM' | 'MATCHES' | 'TOURNAMENTS'>('CC_PODIUM');
+  const [activePublicTab, setActivePublicTab] = useState<'CC_PODIUM' | 'ATHLETICS' | 'MATCHES' | 'TOURNAMENTS'>('CC_PODIUM');
+
+  // Refs for horizontal scrolling containers
+  const categoryScrollRef = useRef<HTMLDivElement>(null);
+  const ccCategoryScrollRef = useRef<HTMLDivElement>(null);
+  const athCategoryScrollRef = useRef<HTMLDivElement>(null);
+  const genericCategoryScrollRef = useRef<HTMLDivElement>(null);
+
+  const scrollContainer = (ref: React.RefObject<HTMLDivElement>, direction: 'left' | 'right') => {
+    if (ref.current) {
+      const scrollAmount = 200;
+      ref.current.scrollBy({
+        left: direction === 'left' ? -scrollAmount : scrollAmount,
+        behavior: 'smooth'
+      });
+    }
+  };
+
+  // Track expanded state for general ranking tables (default: hidden)
+  const [expandedRankings, setExpandedRankings] = useState<Record<string, boolean>>({});
+  const toggleRanking = (key: string) => {
+    setExpandedRankings(prev => ({
+      ...prev,
+      [key]: !prev[key]
+    }));
+  };
 
   // Helper to safely compare dates regardless of their format (string, Firestore Timestamp, or Date object)
   const safeDateCompare = (dateVal: any, targetYmd: string) => {
@@ -170,9 +204,28 @@ export const Login: React.FC = () => {
     return items.reverse(); 
   }, [dateOffset]);
 
-  // Marquee pause & visibility state
+  // Marquee pause & visibility state (with localStorage persistence)
   const [isMarqueePaused, setIsMarqueePaused] = useState(false);
-  const [isMarqueeVisible, setIsMarqueeVisible] = useState(true);
+  const [isMarqueeVisible, setIsMarqueeVisible] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem('app_marquee_visible');
+      return saved !== null ? saved === 'true' : true;
+    } catch {
+      return true;
+    }
+  });
+
+  const toggleMarqueeVisibility = () => {
+    setIsMarqueeVisible(prev => {
+      const next = !prev;
+      try {
+        localStorage.setItem('app_marquee_visible', String(next));
+      } catch (e) {
+        console.warn(e);
+      }
+      return next;
+    });
+  };
 
   // Prayer times state (Corrected to default to official Moroccan Ministry of Habous Taourirt timings)
   const [prayerTimes, setPrayerTimes] = useState({
@@ -260,25 +313,28 @@ export const Login: React.FC = () => {
   const [regPhoto, setRegPhoto] = useState<string>('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Load initial data for public view & registration
-  useEffect(() => {
-    let isMounted = true;
+  // Load active directorate & initial data for public view & registration
+  const loadAllData = async () => {
     setLoadingData(true);
+    try {
+      const activeDir = await DataService.getActiveDirectorate();
+      setActiveDirectorate(activeDir);
 
-    Promise.all([
-      DataService.getDirectorates(),
-      DataService.getSchools(),
-      DataService.getTournaments(),
-      DataService.getMatches(),
-      DataService.getStudents(),
-      DataService.getCrossCountryResults()
-    ]).then(([dirs, schs, tours, mtchs, stds, ccRes]) => {
-      if (!isMounted) return;
+      const [dirs, schs, tours, mtchs, stds, ccRes, athRes] = await Promise.all([
+        DataService.getDirectorates(),
+        DataService.getSchools(),
+        DataService.getTournaments(),
+        DataService.getMatches(),
+        DataService.getStudents(),
+        DataService.getCrossCountryResults(),
+        DataService.getAthleticsResults()
+      ]);
+
       setDirectorates(dirs || []);
       setSchools(schs || []);
       setTournaments(tours || []);
-      
-      // Inject Demo Matches if none exist for today
+
+      // Inject Demo Matches if none exist
       let finalMatches = mtchs || [];
       if (finalMatches.length === 0) {
         const todayObj = new Date();
@@ -303,9 +359,9 @@ export const Login: React.FC = () => {
         ] as any;
       }
       setMatches(finalMatches);
-      
+
       setStudents(stds || []);
-      
+
       // Inject Demo CC Results if empty
       let finalCcRes = ccRes || {};
       if (Object.keys(finalCcRes).length === 0) {
@@ -336,24 +392,93 @@ export const Login: React.FC = () => {
         } as any;
       }
       setCrossCountryResults(finalCcRes);
-      
-      setLoadingData(false);
-    }).catch(err => {
+
+      // Inject Demo Athletics Results if empty
+      let finalAthRes = athRes || {};
+      if (Object.keys(finalAthRes).length === 0) {
+        finalAthRes = {
+          'u15_male_100m': {
+            id: 'u15_male_100m',
+            category: 'U15',
+            gender: 'Male',
+            specialtyName: 'سباق 100 متر (ذكور)',
+            specialtyType: 'track',
+            venueName: 'الملعب البلدي تاوريرت',
+            status: 'completed',
+            podium: [
+              { rank: 1, fullName: 'ياسين الفيلالي', schoolName: 'إعدادية ابن سينا', performance: '11.85 ث', bibNumber: '112', affiliation: 'non_club' },
+              { rank: 2, fullName: 'طارق الزياني', schoolName: 'إعدادية سيدي لحسن', performance: '12.10 ث', bibNumber: '114', affiliation: 'non_club' },
+              { rank: 3, fullName: 'حمزة المراكشي', schoolName: 'ثانوية علال الفاسي التأهيلية', performance: '12.35 ث', bibNumber: '118', affiliation: 'club_affiliated' }
+            ]
+          },
+          'u15_female_longjump': {
+            id: 'u15_female_longjump',
+            category: 'U15',
+            gender: 'Female',
+            specialtyName: 'القفز الطولي (إناث)',
+            specialtyType: 'field',
+            venueName: 'الملعب البلدي تاوريرت',
+            status: 'completed',
+            podium: [
+              { rank: 1, fullName: 'إيمان المنصوري', schoolName: 'إعدادية ابن سينا', performance: '4.85 م', bibNumber: '205', affiliation: 'non_club' },
+              { rank: 2, fullName: 'زينب الشاوي', schoolName: 'إعدادية سيدي لحسن', performance: '4.62 م', bibNumber: '208', affiliation: 'non_club' },
+              { rank: 3, fullName: 'أسماء البصري', schoolName: 'مجموعة مدارس دبدو الابتدائية', performance: '4.40 م', bibNumber: '211', affiliation: 'non_club' }
+            ]
+          },
+          'u18_male_800m': {
+            id: 'u18_male_800m',
+            category: 'U18',
+            gender: 'Male',
+            specialtyName: 'سباق 800 متر (فتيان)',
+            specialtyType: 'track',
+            venueName: 'الملعب البلدي تاوريرت',
+            status: 'completed',
+            podium: [
+              { rank: 1, fullName: 'أمين العلمي', schoolName: 'ثانوية الفتح التأهيلية', performance: '01:58.4', bibNumber: '304', affiliation: 'club_affiliated' },
+              { rank: 2, fullName: 'وليد السوسي', schoolName: 'ثانوية الزيتون التأهيلية', performance: '02:01.2', bibNumber: '309', affiliation: 'non_club' },
+              { rank: 3, fullName: 'مهدي الحساني', schoolName: 'ثانوية علال الفاسي التأهيلية', performance: '02:03.8', bibNumber: '315', affiliation: 'non_club' }
+            ]
+          },
+          'u18_female_shotput': {
+            id: 'u18_female_shotput',
+            category: 'U18',
+            gender: 'Female',
+            specialtyName: 'دفع الجلة 3 كغم (فتيات)',
+            specialtyType: 'field',
+            venueName: 'الملعب البلدي تاوريرت',
+            status: 'completed',
+            podium: [
+              { rank: 1, fullName: 'خديجة العمراني', schoolName: 'ثانوية الفتح التأهيلية', performance: '11.45 م', bibNumber: '401', affiliation: 'non_club' },
+              { rank: 2, fullName: 'سناء المتوكل', schoolName: 'ثانوية الزيتون التأهيلية', performance: '10.80 م', bibNumber: '406', affiliation: 'non_club' },
+              { rank: 3, fullName: 'دعاء الصابر', schoolName: 'ثانوية علال الفاسي التأهيلية', performance: '10.15 م', bibNumber: '412', affiliation: 'club_affiliated' }
+            ]
+          }
+        } as any;
+      }
+      setAthleticsResults(finalAthRes);
+
+    } catch (err) {
       console.warn("Could not load public data in Login page:", err);
-      if (isMounted) setLoadingData(false);
-    });
+    } finally {
+      setLoadingData(false);
+    }
+  };
+
+  useEffect(() => {
+    loadAllData();
 
     const unsubSchools = DataService.subscribeToSchools((s) => setSchools(s));
     const unsubTournaments = DataService.subscribeToTournaments((t) => setTournaments(t));
     const unsubMatches = DataService.subscribeToMatches((m) => setMatches(m));
     const unsubCcResults = DataService.subscribeCrossCountryResults((r) => setCrossCountryResults(r as Record<string, CrossCountryCategoryResult>));
+    const unsubAthletics = DataService.subscribeAthleticsResults((ar) => setAthleticsResults(ar));
 
     return () => {
-      isMounted = false;
       unsubSchools();
       unsubTournaments();
       unsubMatches();
       unsubCcResults();
+      unsubAthletics();
     };
   }, []);
 
@@ -795,7 +920,7 @@ export const Login: React.FC = () => {
       if (m.date && !safeDateCompare(m.date, selectedDate)) return false;
       
       if (selectedSport !== 'ALL' && m.sportId !== selectedSport) return false;
-      if (selectedCategory !== 'ALL' && m.category !== selectedCategory) return false;
+      if (selectedCategory !== 'ALL' && m.category && !m.category.toUpperCase().includes(selectedCategory.toUpperCase())) return false;
       if (selectedGender !== 'ALL' && m.gender !== selectedGender) return false;
       if (searchQuery.trim()) {
         const q = searchQuery.trim().toLowerCase();
@@ -820,6 +945,7 @@ export const Login: React.FC = () => {
     }> = [];
 
     const processedCategoryKeys = new Set<string>();
+    const seenPodiumSignatures = new Set<string>();
 
     Object.entries(crossCountryResults).forEach(([key, val]) => {
       const catRes = val as CrossCountryCategoryResult;
@@ -828,18 +954,67 @@ export const Login: React.FC = () => {
       // Canonical key for deduplication
       const canonicalKey = catRes.categoryId || key;
       if (processedCategoryKeys.has(canonicalKey)) return;
-      processedCategoryKeys.add(canonicalKey);
 
       const catName = catRes.titleAr || catRes.category || key;
 
+      // Identify declared gender of this category
+      const isFemaleCat =
+        catRes.gender === 'Female' ||
+        catName.includes('إناث') ||
+        catName.includes('البرعمات') ||
+        catName.includes('برعمات') ||
+        catName.includes('الصغيرات') ||
+        catName.includes('الفتيات') ||
+        catName.includes('الشابات') ||
+        canonicalKey.toLowerCase().includes('female');
+
       // Gender Filter
-      if (selectedGender === 'Male' && (catRes.gender === 'Female' || catName.includes('إناث'))) return;
-      if (selectedGender === 'Female' && (catRes.gender === 'Male' || catName.includes('ذكور'))) return;
+      if (selectedGender === 'Male' && isFemaleCat) return;
+      if (selectedGender === 'Female' && !isFemaleCat) return;
 
       // Age Category Filter
       if (selectedCategory !== 'ALL' && catRes.category !== selectedCategory) return;
 
       const winners = catRes.podium || [];
+
+      // Validate runner gender against declared category gender:
+      // If a category claims to be female (e.g. البرعمات إناث), but its registered runners are actually male students,
+      // it is a data glitch / duplication and MUST NOT be displayed under the female category!
+      let confirmedMaleRunnersCount = 0;
+      let confirmedFemaleRunnersCount = 0;
+      winners.forEach(w => {
+        const studentName = w.fullName || (w as any).studentName;
+        const studentObj = students.find(s => s.id === w.studentId || s.fullName === studentName);
+        if (studentObj) {
+          const sGen = (studentObj.gender || '').toLowerCase();
+          if (sGen === 'male' || sGen.includes('ذكر') || sGen.includes('ذكور')) confirmedMaleRunnersCount++;
+          if (sGen === 'female' || sGen.includes('أنثى') || sGen.includes('إناث')) confirmedFemaleRunnersCount++;
+        }
+      });
+
+      // Erroneous cross-gender check
+      if (isFemaleCat && confirmedMaleRunnersCount > 0 && confirmedFemaleRunnersCount === 0) {
+        return;
+      }
+      if (!isFemaleCat && confirmedFemaleRunnersCount > 0 && confirmedMaleRunnersCount === 0) {
+        return;
+      }
+
+      // Check for duplicate podium signatures (exact same set of runner names or student IDs)
+      const podiumSignature = winners
+        .map(w => (w.studentId || w.fullName || '').trim().toLowerCase())
+        .filter(Boolean)
+        .sort()
+        .join('|');
+
+      if (podiumSignature && seenPodiumSignatures.has(podiumSignature)) {
+        return; // Duplicate podium from another category, skip!
+      }
+
+      processedCategoryKeys.add(canonicalKey);
+      if (podiumSignature) {
+        seenPodiumSignatures.add(podiumSignature);
+      }
 
       // Filter runners by search query
       const filteredRunners = winners.filter(w => {
@@ -918,6 +1093,120 @@ export const Login: React.FC = () => {
 
     return list;
   }, [crossCountryResults, students, selectedAffiliation, selectedCategory, selectedGender, searchQuery]);
+
+  // Dynamic active tab categories with gender combo for public filters
+  const activeTabCategories = useMemo(() => {
+    if (activePublicTab === 'CC_PODIUM') {
+      const results = Object.values(crossCountryResults) as CrossCountryCategoryResult[];
+      const uniqueCats = Array.from(new Set<string>(results.map(r => `${r.category}_${r.gender}`)));
+      
+      const list = [
+        { id: 'ALL_ALL', cat: 'ALL', gender: 'ALL', label: 'جميع السباقات 🌟' }
+      ];
+      
+      const catOrder: Record<string, number> = { 'U12': 1, 'U15': 2, 'U18': 3, 'U20': 4 };
+      const sortedKeys = uniqueCats.sort((a, b) => {
+        const catA = a.split('_')[0];
+        const catB = b.split('_')[0];
+        return (catOrder[catA] || 99) - (catOrder[catB] || 99);
+      });
+
+      sortedKeys.forEach(key => {
+        const [cat, gender] = key.split('_');
+        if (!cat || !gender) return;
+        
+        const genderLabel = gender === 'Male' ? 'ذكور' : gender === 'Female' ? 'إناث' : 'مختلط';
+        const catLabel = cat === 'U12' ? 'براعم' : cat === 'U15' ? 'صغار' : cat === 'U18' ? 'فتيان' : 'شبان';
+        
+        list.push({
+          id: key,
+          cat,
+          gender: gender as any,
+          label: `${catLabel} ${genderLabel} (${cat}) 🏃`
+        });
+      });
+      
+      return list;
+    }
+    
+    if (activePublicTab === 'ATHLETICS') {
+      const results = Object.values(athleticsResults) as AthleticsCategoryResult[];
+      const uniqueCats = Array.from(new Set<string>(results.map(r => `${r.category}_${r.gender}`)));
+      
+      const list = [
+        { id: 'ALL_ALL', cat: 'ALL', gender: 'ALL', label: 'جميع المسابقات 🌟' }
+      ];
+      
+      const catOrder: Record<string, number> = { 'U12': 1, 'U15': 2, 'U18': 3, 'U20': 4 };
+      const sortedKeys = uniqueCats.sort((a, b) => {
+        const catA = a.split('_')[0];
+        const catB = b.split('_')[0];
+        return (catOrder[catA] || 99) - (catOrder[catB] || 99);
+      });
+
+      sortedKeys.forEach(key => {
+        const [cat, gender] = key.split('_');
+        if (!cat || !gender) return;
+        
+        const genderLabel = gender === 'Male' ? 'ذكور' : gender === 'Female' ? 'إناث' : 'مختلط';
+        const catLabel = cat === 'U12' ? 'براعم' : cat === 'U15' ? 'صغار' : cat === 'U18' ? 'فتيان' : 'شبان';
+        
+        list.push({
+          id: key,
+          cat,
+          gender: gender as any,
+          label: `${catLabel} ${genderLabel} (${cat}) 🏅`
+        });
+      });
+      
+      return list;
+    }
+    
+    if (activePublicTab === 'MATCHES') {
+      const teamSportsTourns = tournaments.filter(t => {
+        const isTeamSport = t.sportId !== 'cross_country' && t.sportId !== 'athletics';
+        if (!isTeamSport) return false;
+        if (selectedSport !== 'ALL' && t.sportId !== selectedSport) return false;
+        return true;
+      });
+      
+      const uniqueCats = Array.from(new Set<string>(teamSportsTourns.map(t => `${t.ageCategory}_${t.gender}`)));
+      
+      const list = [
+        { id: 'ALL_ALL', cat: 'ALL', gender: 'ALL', label: 'جميع الفئات المبرمجة 🌟' }
+      ];
+      
+      const catOrder: Record<string, number> = { 'U12': 1, 'U15': 2, 'U18': 3, 'U20': 4 };
+      const sortedKeys = uniqueCats.sort((a, b) => {
+        const catA = a.split('_')[0];
+        const catB = b.split('_')[0];
+        return (catOrder[catA] || 99) - (catOrder[catB] || 99);
+      });
+
+      sortedKeys.forEach(key => {
+        const [cat, gender] = key.split('_');
+        if (!cat || !gender) return;
+        
+        const genderLabel = gender === 'Male' ? 'ذكور' : gender === 'Female' ? 'إناث' : 'مختلط';
+        const catLabel = cat === 'U12' ? 'براعم' : cat === 'U15' ? 'صغار' : cat === 'U18' ? 'فتيان' : 'شبان';
+        
+        const sportIcon = selectedSport !== 'ALL' ? (SPORTS_MAP[selectedSport]?.icon || '👥') : '👥';
+
+        list.push({
+          id: key,
+          cat,
+          gender: gender as any,
+          label: `${catLabel} ${genderLabel} (${cat}) ${sportIcon}`
+        });
+      });
+      
+      return list;
+    }
+    
+    return [
+      { id: 'ALL_ALL', cat: 'ALL', gender: 'ALL', label: 'جميع الفئات 🌟' }
+    ];
+  }, [activePublicTab, tournaments, crossCountryResults, athleticsResults, selectedSport]);
 
   // News Marquee Items
   const marqueeNews = [
@@ -1175,256 +1464,360 @@ export const Login: React.FC = () => {
   return (
     <div className={`min-h-screen transition-colors duration-300 font-sans selection:bg-emerald-500 selection:text-white ${isDarkMode ? 'dark bg-[#0a0f1d] text-slate-100' : 'bg-slate-50 text-slate-800'}`} dir="rtl">
       
-      {/* TOP HEADER BAR */}
-      <header className="sticky top-0 z-40 bg-white/90 dark:bg-slate-900/90 backdrop-blur-md border-b border-slate-200 dark:border-slate-800 shadow-xs px-3 sm:px-6 py-2.5 transition-colors">
-        <div className="max-w-7xl mx-auto flex items-center justify-between gap-3">
-          
-          {/* Logo & Platform Name */}
-          <div className="flex items-center gap-3 min-w-0">
-            <AppLogo size={42} showText={false} className="shrink-0" />
-            <div className="min-w-0">
-              <h1 className="text-xs sm:text-sm md:text-base font-black text-slate-900 dark:text-white tracking-tight truncate">
-                منظومة تدبير أنشطة وبطولات الرياضة المدرسية
-              </h1>
-              <p className="text-[10px] sm:text-xs text-emerald-700 dark:text-emerald-400 font-bold flex items-center gap-1 truncate">
-                <Sparkles className="w-3 h-3 text-emerald-500 shrink-0" />
-                <span>النتائج الرسمية والمحاضر العامة للعموم</span>
-              </p>
-            </div>
-          </div>
-
-          {/* Controls Right */}
-          <div className="flex items-center gap-2 shrink-0">
+      {/* FIXED TOP NAVIGATION WRAPPER (HEADER + SPORTS BAR + MARQUEE + DATE BAR) */}
+      <div className="sticky top-0 z-40 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md shadow-sm transition-all duration-300">
+        
+        {/* TOP HEADER BAR */}
+        <header className="border-b border-slate-200 dark:border-slate-800 px-3 sm:px-6 py-2.5 transition-colors">
+          <div className="max-w-7xl mx-auto flex items-center justify-between gap-3">
             
-            {/* Directorate & Season Badge */}
-            <div className="hidden sm:flex items-center gap-1.5 px-3 py-1 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded-full border border-slate-200 dark:border-slate-700 text-xs font-bold">
-              <Building2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
-              <span>الفرع الإقليمي للرياضة المدرسية</span>
+            {/* Logo & Platform Name */}
+            <div className="flex items-center gap-3 min-w-0">
+              <AppLogo size={42} showText={false} className="shrink-0" />
+              <div className="min-w-0">
+                <h1 className="text-xs sm:text-sm md:text-base font-black text-slate-900 dark:text-white tracking-tight truncate">
+                  نتائج البطولات الإقليمية للرياضة المدرسية
+                </h1>
+                <p className="text-[10px] sm:text-xs text-emerald-700 dark:text-emerald-400 font-bold flex items-center gap-1 truncate">
+                  <Sparkles className="w-3 h-3 text-emerald-500 shrink-0" />
+                  <span>{activeDirectorate?.name || 'المديرية الإقليمية تاوريرت'}</span>
+                </p>
+              </div>
             </div>
 
-            {/* Teacher Login Button - Moved here per user request */}
-            <button
-              type="button"
-              onClick={() => {
-                if (loginMode === 'REGISTER_TEACHER') {
-                  setLoginMode('PUBLIC');
-                }
-                const nextState = !showLoginPanel;
-                setShowLoginPanel(nextState);
-                if (nextState) {
-                  setTimeout(() => {
-                    loginPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                  }, 100);
-                }
-              }}
-              className={`px-3 py-1.5 rounded-full text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-sm ${
-                showLoginPanel 
-                  ? 'bg-emerald-700 text-white ring-2 ring-emerald-400' 
-                  : 'bg-emerald-600 hover:bg-emerald-700 text-white'
-              }`}
-            >
-              <LogIn className="w-4 h-4 shrink-0" />
-              <span className="hidden sm:inline">دخول الأطر والمسيرين</span>
-              <span className="sm:hidden text-[10px]">دخول</span>
-            </button>
-
-            {/* Dark Mode Toggle Button */}
-            <button
-              type="button"
-              onClick={toggleDarkMode}
-              className="p-2 sm:px-3 sm:py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700 rounded-full text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs"
-              title={isDarkMode ? 'التحويل للوضع النهار' : 'التحويل للوضع الليلي (Dark Mode)'}
-            >
-              {isDarkMode ? (
-                <Sun className="w-4 h-4 text-amber-400 shrink-0" />
-              ) : (
-                <Moon className="w-4 h-4 text-indigo-600 shrink-0" />
-              )}
-            </button>
-          </div>
-
-        </div>
-      </header>
-
-      {/* SPORTS BAR (شريط الرياضات) */}
-      <section className="bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 border-b border-slate-200 dark:border-slate-800 py-1.5 px-3 sm:px-6 shadow-inner select-none transition-colors">
-        <div className="max-w-4xl mx-auto flex items-center gap-2">
-          
-          <div className="hidden sm:flex items-center gap-1 text-xs font-black text-amber-600 dark:text-amber-400 shrink-0 border-l border-slate-200 dark:border-slate-800 pl-3">
-            <Trophy className="w-4 h-4 text-amber-600 dark:text-amber-400" />
-            <span>شريط الرياضات:</span>
-          </div>
-
-          <div className="flex-1 overflow-x-auto no-scrollbar flex items-center gap-1.5 py-0.5">
-            {/* All Sports Option */}
-            <button
-              type="button"
-              onClick={() => setSelectedSport('ALL')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer flex items-center gap-1.5 shrink-0 ${
-                selectedSport === 'ALL'
-                  ? 'bg-emerald-500 text-white shadow-md shadow-emerald-500/20'
-                  : 'bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white border border-slate-200 dark:border-slate-700/60'
-              }`}
-            >
-              <span>🏆</span>
-              <span>جميع الرياضات</span>
-            </button>
-
-            {/* Individual Sports from SPORTS_MAP */}
-            {Object.entries(SPORTS_MAP).map(([sportKey, sport]) => {
-              const isSelected = selectedSport === sportKey;
-              return (
+            {/* Controls Right */}
+            <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+              
+              {/* Desktop Only Buttons */}
+              <div className="hidden lg:flex items-center gap-2">
+                {/* Dark Mode Toggle (Desktop) */}
                 <button
-                  key={sportKey}
                   type="button"
-                  onClick={() => setSelectedSport(sportKey)}
+                  onClick={toggleDarkMode}
+                  className="p-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700 rounded-full text-xs font-bold transition-all cursor-pointer shadow-2xs"
+                  title={isDarkMode ? 'التحويل للوضع النهار' : 'التحويل للوضع الليلي'}
+                >
+                  {isDarkMode ? (
+                    <Sun className="w-4 h-4 text-amber-400 shrink-0" />
+                  ) : (
+                    <Moon className="w-4 h-4 text-indigo-600 shrink-0" />
+                  )}
+                </button>
+
+                {/* Generate Demo Data Button */}
+                <button
+                  type="button"
+                  onClick={() => setIsDemoDataModalOpen(true)}
+                  className="px-3 py-1.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white rounded-full text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-sm border border-amber-400/40 shrink-0"
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-amber-200 animate-pulse" />
+                  <span>توليد بيانات افتراضية</span>
+                </button>
+
+                {/* Teacher Login Button */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (loginMode === 'REGISTER_TEACHER') setLoginMode('PUBLIC');
+                    const nextState = !showLoginPanel;
+                    setShowLoginPanel(nextState);
+                    if (nextState) {
+                      setTimeout(() => loginPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 100);
+                    }
+                  }}
+                  className={`px-3 py-1.5 rounded-full text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-sm ${
+                    showLoginPanel 
+                      ? 'bg-emerald-700 text-white ring-2 ring-emerald-400' 
+                      : 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                  }`}
+                >
+                  <LogIn className="w-4 h-4" />
+                  <span>دخول الأطر والمسيرين</span>
+                </button>
+              </div>
+
+              {/* Mobile Menu Dropdown Toggle */}
+              <div className="relative lg:hidden">
+                <button
+                  type="button"
+                  onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+                  className={`p-2 rounded-full transition-all cursor-pointer flex items-center justify-center border ${
+                    isMobileMenuOpen 
+                      ? 'bg-emerald-600 text-white border-emerald-500 shadow-md' 
+                      : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 shadow-sm'
+                  }`}
+                >
+                  {isMobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+                </button>
+
+                {/* Dropdown Menu Overlay */}
+                {isMobileMenuOpen && (
+                  <>
+                    <div 
+                      className="fixed inset-0 z-40 bg-transparent" 
+                      onClick={() => setIsMobileMenuOpen(false)}
+                    />
+                    <div className="absolute left-0 mt-2 w-64 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl z-50 overflow-hidden animate-in zoom-in-95 duration-150 origin-top-left">
+                      
+                      {/* Top Action Icons & Search in Menu */}
+                      <div className="p-3 bg-slate-50 dark:bg-slate-800/50 border-b border-slate-100 dark:border-slate-800 space-y-3">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-wider">إعدادات سريعة</span>
+                          <div className="flex items-center gap-2">
+                            {/* Dark Mode Toggle Item */}
+                            <button
+                              type="button"
+                              onClick={toggleDarkMode}
+                              className="p-2.5 bg-white dark:bg-slate-800 text-slate-800 dark:text-amber-400 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm transition-transform active:scale-90"
+                              title={isDarkMode ? 'الوضع النهاري' : 'الوضع الليلي'}
+                            >
+                              {isDarkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Search Input in Side Menu */}
+                        <div className="relative">
+                          <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-emerald-500" />
+                          <input
+                            type="text"
+                            value={searchQuery}
+                            onChange={(e) => setSearchQuery(e.target.value)}
+                            placeholder="ابحث عن تلميذ أو مؤسسة..."
+                            className="w-full pr-9 pl-3 py-2.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-sm"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="p-2 space-y-1">
+                        <button
+                          onClick={() => {
+                            if (loginMode === 'REGISTER_TEACHER') setLoginMode('PUBLIC');
+                            setShowLoginPanel(true);
+                            setIsMobileMenuOpen(false);
+                            setTimeout(() => loginPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 100);
+                          }}
+                          className="w-full flex items-center gap-3 px-3 py-3 text-right text-xs font-black text-slate-700 dark:text-slate-200 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 rounded-xl transition-colors"
+                        >
+                          <LogIn className="w-4 h-4 text-emerald-600" />
+                          <span>تسجيل الدخول للأطر والمسيرين</span>
+                        </button>
+                        
+                        <div className="h-px bg-slate-100 dark:bg-slate-800 my-1 mx-2" />
+
+                        {[
+                          { id: 'CC_PODIUM', label: 'نتائج العدو الريفي', icon: <Trophy className="w-4 h-4" /> },
+                          { id: 'ATHLETICS', label: 'نتائج ألعاب القوى', icon: <Award className="w-4 h-4" /> },
+                          { id: 'MATCHES', label: 'الرياضات الجماعية', icon: <Calendar className="w-4 h-4" /> },
+                          { id: 'TOURNAMENTS', label: 'رياضات أخرى / دليل', icon: <Layers className="w-4 h-4" /> }
+                        ].map(item => (
+                          <button
+                            key={item.id}
+                            onClick={() => {
+                              setActivePublicTab(item.id as any);
+                              setIsMobileMenuOpen(false);
+                              const resultsSection = document.getElementById('public-results-section');
+                              resultsSection?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                            }}
+                            className={`w-full flex items-center gap-3 px-3 py-3 text-right text-xs font-bold rounded-xl transition-colors ${
+                              activePublicTab === item.id 
+                                ? 'bg-emerald-600 text-white shadow-sm' 
+                                : 'text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800'
+                            }`}
+                          >
+                            <span className={activePublicTab === item.id ? 'text-white' : 'text-emerald-500'}>
+                              {item.icon}
+                            </span>
+                            <span>{item.label}</span>
+                          </button>
+                        ))}
+
+                        <div className="h-px bg-slate-100 dark:bg-slate-800 my-1 mx-2" />
+
+                        <button
+                          onClick={() => {
+                            setIsDemoDataModalOpen(true);
+                            setIsMobileMenuOpen(false);
+                          }}
+                          className="w-full flex items-center gap-3 px-3 py-3 text-right text-xs font-black text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-950/30 rounded-xl transition-colors"
+                        >
+                          <Sparkles className="w-4 h-4 animate-pulse" />
+                          <span>توليد بيانات تجريبية ومباريات ⚡</span>
+                        </button>
+
+                        <button
+                          onClick={() => {
+                            setIsAboutModalOpen(true);
+                            setIsMobileMenuOpen(false);
+                          }}
+                          className="w-full flex items-center gap-3 px-3 py-3 text-right text-xs font-black text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 rounded-xl transition-colors"
+                        >
+                          <Info className="w-4 h-4" />
+                          <span>حول المنظومة الرقمية ℹ️</span>
+                        </button>
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+
+          </div>
+        </header>
+
+        {/* SPORTS BAR (شريط الرياضات) */}
+        <section className="bg-white/50 dark:bg-slate-900/50 py-1.5 px-3 sm:px-6 shadow-xs select-none transition-all">
+          <div className="max-w-4xl mx-auto flex items-center justify-between gap-2">
+            
+            <div className="flex items-center gap-2 flex-1 min-w-0">
+              <div className="hidden sm:flex items-center gap-1 text-xs font-black text-amber-600 dark:text-amber-400 shrink-0 border-l border-slate-200 dark:border-slate-800 pl-3">
+                <Trophy className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+                <span>شريط الرياضات:</span>
+              </div>
+
+              <div className="flex-1 overflow-x-auto no-scrollbar flex items-center gap-1.5 py-0.5">
+                {/* All Sports Option */}
+                <button
+                  type="button"
+                  onClick={() => setSelectedSport('ALL')}
                   className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer flex items-center gap-1.5 shrink-0 ${
-                    isSelected
+                    selectedSport === 'ALL'
                       ? 'bg-emerald-500 text-white shadow-md shadow-emerald-500/20'
                       : 'bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white border border-slate-200 dark:border-slate-700/60'
                   }`}
                 >
-                  <span className="text-sm">{sport.icon}</span>
-                  <span>{sport.name}</span>
+                  <span>🏆</span>
+                  <span>جميع الرياضات</span>
                 </button>
-              );
-            })}
-          </div>
 
-        </div>
-      </section>
+                {/* Individual Sports from SPORTS_MAP */}
+                {Object.entries(SPORTS_MAP).map(([sportKey, sport]) => {
+                  const isSelected = selectedSport === sportKey;
+                  return (
+                    <button
+                      key={sportKey}
+                      type="button"
+                      onClick={() => setSelectedSport(sportKey)}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer flex items-center gap-1.5 shrink-0 ${
+                        isSelected
+                          ? 'bg-emerald-500 text-white shadow-md shadow-emerald-500/20'
+                          : 'bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white border border-slate-200 dark:border-slate-700/60'
+                      }`}
+                    >
+                      <span className="text-sm">{sport.icon}</span>
+                      <span>{sport.name}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
 
-      {/* الشريـط اليومـي تحـت الرياضـات (DAILY MARQUEE TICKER BAR) */}
-      <section className="bg-linear-to-r from-emerald-50 via-slate-50 to-teal-50 dark:from-emerald-950 dark:via-slate-900 dark:to-teal-950 text-slate-800 dark:text-white border-b border-emerald-100 dark:border-emerald-800/60 py-1.5 px-3 sm:px-6 shadow-sm overflow-hidden select-none transition-colors">
-        <div className="max-w-4xl mx-auto flex items-center gap-3">
-          
-          {/* Badge Tag */}
-          <div className="flex items-center gap-1.5 px-2.5 py-1 bg-emerald-600 text-white rounded-lg text-[11px] font-black shrink-0 shadow-sm">
-            <span className="relative flex h-2 w-2">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-300 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-400"></span>
-            </span>
-            <Megaphone className="w-3.5 h-3.5 text-amber-300 shrink-0" />
-            <span className="whitespace-nowrap">الشريط اليومي</span>
-          </div>
-
-          {/* Marquee Controls Pill (التحكم بالشريط اليومي) */}
-          <div className="flex items-center gap-1.5 bg-white dark:bg-slate-800 px-2 py-1 rounded-xl shrink-0 border border-slate-200 dark:border-slate-700/60 shadow-xs z-10">
-            {/* Play/Pause Button */}
+            {/* زر دائم وثابت لإظهار وإخفاء الشريط اليومي كاملاً بنقرة واحدة */}
             <button
               type="button"
-              onClick={() => setIsMarqueePaused(!isMarqueePaused)}
-              className="p-1 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-all cursor-pointer flex items-center justify-center"
-              title={isMarqueePaused ? 'تشغيل حركة الشريط' : 'إيقاف حركة الشريط مؤقتاً'}
+              onClick={toggleMarqueeVisibility}
+              className={`shrink-0 px-2.5 py-1.5 rounded-xl text-xs font-black whitespace-nowrap transition-all cursor-pointer flex items-center gap-1.5 border shadow-2xs ${
+                isMarqueeVisible
+                  ? 'bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700'
+                  : 'bg-emerald-600 hover:bg-emerald-700 text-white border-emerald-600 shadow-md shadow-emerald-600/25 animate-pulse'
+              }`}
+              title={isMarqueeVisible ? "إخفاء الشريط اليومي للأخبار بالكامل" : "إظهار الشريط اليومي للأخبار بالكامل"}
             >
-              {isMarqueePaused ? (
-                <Play className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-              ) : (
-                <Pause className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-              )}
-            </button>
-
-            {/* Separator line */}
-            <div className="w-px h-3.5 bg-slate-300 dark:bg-slate-600"></div>
-
-            {/* Eye Hide/Show Button */}
-            <button
-              type="button"
-              onClick={() => setIsMarqueeVisible(!isMarqueeVisible)}
-              className="p-1 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-all cursor-pointer flex items-center justify-center"
-              title={isMarqueeVisible ? 'إخفاء شريط الأخبار بالكامل' : 'إظهار شريط الأخبار'}
-            >
+              <Megaphone className={`w-3.5 h-3.5 shrink-0 ${isMarqueeVisible ? 'text-amber-500' : 'text-amber-300'}`} />
+              <span className="hidden xs:inline">
+                {isMarqueeVisible ? 'إخفاء الشريط' : 'إظهار الشريط اليومي'}
+              </span>
               {isMarqueeVisible ? (
-                <Eye className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                <EyeOff className="w-3.5 h-3.5 opacity-60 shrink-0" />
               ) : (
-                <EyeOff className="w-4 h-4 text-rose-500 dark:text-rose-400" />
+                <Eye className="w-3.5 h-3.5 opacity-90 shrink-0" />
               )}
             </button>
-          </div>
 
-          {/* Animated Marquee Stream / Hidden State */}
-          <div 
-            className="flex-1 overflow-hidden relative min-h-5 flex items-center"
-            onMouseEnter={() => setIsMarqueePaused(true)}
-            onMouseLeave={() => setIsMarqueePaused(false)}
-          >
-            {isMarqueeVisible ? (
-              <div className={`flex items-center gap-8 text-xs font-bold text-emerald-900 dark:text-emerald-100 ${isMarqueePaused ? '' : 'animate-marquee-rtl'}`}>
-                {marqueeNews.map((item) => (
-                  <div key={item.id} className="flex items-center gap-2 whitespace-nowrap shrink-0">
-                    <span className="text-amber-600 dark:text-amber-400 font-extrabold text-sm">{item.icon}</span>
-                    <span className="text-slate-800 dark:text-slate-100 font-medium">{item.text}</span>
-                    <span className="text-emerald-500 dark:text-emerald-500/80 font-mono text-xs mx-2">●</span>
-                  </div>
-                ))}
+          </div>
+        </section>
+
+        {/* الشريـط اليومـي تحـت الرياضـات (DAILY MARQUEE TICKER BAR) - يختفي بالكامل عند الإخفاء */}
+        {isMarqueeVisible && (
+          <section className="bg-gradient-to-r from-emerald-50/80 via-slate-50/80 to-teal-50/80 dark:from-emerald-950/80 dark:via-slate-900/80 dark:to-teal-950/80 text-slate-800 dark:text-white border-b border-emerald-100 dark:border-emerald-800/60 py-1 px-3 sm:px-6 shadow-xs overflow-hidden select-none transition-all">
+            <div className="max-w-4xl mx-auto flex items-center gap-3">
+              
+              {/* Badge Tag */}
+              <div className="flex items-center gap-1.5 px-2 py-0.5 bg-emerald-600 text-white rounded-lg text-[10px] font-black shrink-0 shadow-sm">
+                <Megaphone className="w-3 h-3 text-amber-300 shrink-0" />
+                <span className="whitespace-nowrap">عاجل</span>
               </div>
-            ) : (
-              <div className="text-[11px] font-bold text-slate-400 dark:text-slate-500 italic flex items-center gap-1.5 animate-in fade-in duration-200">
-                <EyeOff className="w-3.5 h-3.5 text-rose-500 shrink-0" />
-                <span>عناوين الأخبار مخفية (انقر على الأيقونة لإظهار الشريط)</span>
+
+              {/* Animated Marquee Stream */}
+              <div 
+                className="flex-1 overflow-hidden relative min-h-5 flex items-center"
+                onMouseEnter={() => setIsMarqueePaused(true)}
+                onMouseLeave={() => setIsMarqueePaused(false)}
+              >
+                <div className={`flex items-center gap-8 text-[10px] sm:text-xs font-bold text-emerald-900 dark:text-emerald-100 ${isMarqueePaused ? '' : 'animate-marquee-rtl'}`}>
+                  {marqueeNews.map((item) => (
+                    <div key={item.id} className="flex items-center gap-2 whitespace-nowrap shrink-0">
+                      <span className="text-amber-600 dark:text-amber-400 font-extrabold">{item.icon}</span>
+                      <span className="text-slate-800 dark:text-slate-100">{item.text}</span>
+                    </div>
+                  ))}
+                </div>
               </div>
-            )}
+
+            </div>
+          </section>
+        )}
+
+        {/* شريط التاريخ (DATE NAVIGATION BAR) */}
+        <section className="bg-white/80 dark:bg-slate-900/80 border-b border-slate-200 dark:border-slate-800 shadow-xs transition-colors overflow-hidden">
+          <div className="max-w-4xl mx-auto flex items-stretch h-9 sm:h-10">
+            
+            {/* Right Arrow (Past / أقدم) */}
+            <button 
+              type="button"
+              onClick={handleDateBarPrev}
+              className="px-3 border-l border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 transition-colors flex items-center justify-center shrink-0 cursor-pointer group"
+            >
+              <ChevronRight className="w-3.5 h-3.5 group-hover:scale-125 transition-transform" />
+            </button>
+
+            {/* Dates list container */}
+            <div ref={dateBarScrollRef} className="flex-1 flex overflow-x-auto no-scrollbar scroll-smooth">
+              {dateBarItems.map((item) => {
+                const isSelected = selectedDate === item.date;
+                const isToday = item.isToday;
+                return (
+                  <button
+                    key={item.date}
+                    id={isToday ? "today-date-btn" : undefined}
+                    type="button"
+                    onClick={() => setSelectedDate(item.date)}
+                    className={`flex-1 min-w-[110px] sm:min-w-[125px] px-2 flex flex-col items-center justify-center border-l border-slate-100 dark:border-slate-800 transition-all cursor-pointer relative ${
+                      isToday
+                        ? 'bg-yellow-400 dark:bg-yellow-500 text-slate-950 font-black shadow-inner'
+                        : isSelected 
+                        ? 'bg-emerald-600 dark:bg-emerald-500 text-white font-black' 
+                        : 'hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-400 font-bold'
+                    }`}
+                  >
+                    <span className="text-[10px] sm:text-[11px] whitespace-nowrap">{item.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Left Arrow (Future / أحدث) */}
+            <button 
+              type="button"
+              onClick={handleDateBarNext}
+              className="px-3 border-r border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 transition-colors flex items-center justify-center shrink-0 cursor-pointer group"
+            >
+              <ChevronLeft className="w-3.5 h-3.5 group-hover:scale-125 transition-transform" />
+            </button>
+
           </div>
-
-        </div>
-      </section>
-
-      {/* شريط التاريخ (DATE NAVIGATION BAR) */}
-      <section className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 shadow-xs transition-colors overflow-hidden">
-        <div className="max-w-4xl mx-auto flex items-stretch h-10">
-          
-          {/* Right Arrow (Past / أقدم) */}
-          <button 
-            type="button"
-            onClick={handleDateBarPrev}
-            className="px-3 border-l border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 hover:text-emerald-600 transition-colors flex items-center justify-center shrink-0 cursor-pointer group"
-            title="الأيام السابقة"
-          >
-            <ChevronRight className="w-4 h-4 group-hover:scale-125 transition-transform" />
-          </button>
-
-          {/* Dates list container with scroll ref */}
-          <div 
-            ref={dateBarScrollRef}
-            className="flex-1 flex overflow-x-auto no-scrollbar scroll-smooth"
-          >
-            {dateBarItems.map((item) => {
-              const isSelected = selectedDate === item.date;
-              const isToday = item.isToday;
-              return (
-                <button
-                  key={item.date}
-                  id={isToday ? "today-date-btn" : undefined}
-                  type="button"
-                  onClick={() => setSelectedDate(item.date)}
-                  className={`flex-1 min-w-[125px] px-2 flex flex-col items-center justify-center border-l border-slate-200 dark:border-slate-800 transition-all cursor-pointer relative ${
-                    isToday
-                      ? 'bg-yellow-400 dark:bg-yellow-500 text-slate-950 font-black shadow-[0_10px_25px_-5px_rgba(234,179,8,0.6),0_8px_10px_-6px_rgba(234,179,8,0.6)] scale-105 z-10 border-b-4 border-yellow-600 dark:border-yellow-700'
-                      : isSelected 
-                      ? 'bg-emerald-600 dark:bg-emerald-500 text-white font-black shadow-[0_8px_20px_rgba(16,185,129,0.3)] z-10' 
-                      : 'hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-400 font-bold'
-                  }`}
-                >
-                  <span className="text-[11px] whitespace-nowrap flex items-center gap-1">
-                    <span>{item.label}</span>
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-
-          {/* Left Arrow (Future / أحدث) */}
-          <button 
-            type="button"
-            onClick={handleDateBarNext}
-            className="px-3 border-r border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 hover:text-emerald-600 transition-colors flex items-center justify-center shrink-0 cursor-pointer group"
-            title="الأيام القادمة"
-          >
-            <ChevronLeft className="w-4 h-4 group-hover:scale-125 transition-transform" />
-          </button>
-
-        </div>
-      </section>
+        </section>
+      </div>
 
       {/* MAIN CONTAINER (TRIPLE LAYOUT: LEFT WIDGETS | PUBLIC RESULTS | SIDE TEACHER LOGIN) */}
       <main className="max-w-7xl mx-auto px-3 sm:px-6 py-6">
@@ -1451,203 +1844,179 @@ export const Login: React.FC = () => {
               : 'lg:col-span-9 lg:col-start-4'
           }`}>
             
-            {/* PUBLIC HERO BANNER */}
-            <div className="relative rounded-3xl bg-linear-to-r from-emerald-800 via-teal-900 to-slate-900 text-white p-5 sm:p-6 shadow-xl overflow-hidden border border-emerald-700/40">
-              <div className="absolute -left-10 -bottom-10 w-48 h-48 bg-emerald-500/10 rounded-full blur-2xl pointer-events-none"></div>
+            {/* FILTER BAR & SEARCH - Reordered: Sports -> Affiliation -> Guides (Categories moved inside tabs) */}
+            <div id="public-results-section" className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-sm space-y-4 transition-colors scroll-mt-24">
               
-              <div className="relative z-10 space-y-3">
-                <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/20 border border-emerald-400/30 text-emerald-300 text-xs font-bold">
-                  <Flame className="w-3.5 h-3.5 text-amber-400" />
-                  <span>الموسم الدراسي 2026 / 2027</span>
-                </div>
-
-                <h2 className="text-lg sm:text-xl md:text-2xl font-black text-white leading-snug">
-                  نتائج ومحاضر البطولات والأنشطة الرياضية المدرسية
-                </h2>
-
-                <p className="text-xs sm:text-sm text-emerald-100/90 max-w-2xl leading-relaxed">
-                  بوابة العموم الرسمية لمتابعة نتائج العدو الريفي المدرسي والمنتمين للأندية، المجموعات، نتائج المباريات وتصنيفات الأبطال والمؤسسات التعليمية بالمديرية الإقليمية.
-                </p>
-
-                {/* Scope Filters */}
-                <div className="flex flex-wrap items-center gap-2 pt-2">
-                  {[
-                    { id: 'ALL', label: 'جميع المستويات' },
-                    { id: 'PROVINCIAL', label: '🏆 البطولة الإقليمية' },
-                    { id: 'REGIONAL', label: '🏅 البطولة الجهوية' },
-                    { id: 'NATIONAL', label: '🥇 البطولة الوطنية' }
-                  ].map(s => (
-                    <button
-                      key={s.id}
-                      type="button"
-                      onClick={() => setSelectedScope(s.id as any)}
-                      className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                        selectedScope === s.id
-                          ? 'bg-amber-400 text-slate-950 font-black shadow-md'
-                          : 'bg-white/10 hover:bg-white/20 text-white border border-white/20'
-                      }`}
-                    >
-                      {s.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            {/* FILTER BAR & SEARCH */}
-            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-sm space-y-3 transition-colors">
-              
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2.5">
-                
-                {/* Search Input */}
-                <div className="sm:col-span-2 relative">
-                  <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                  <input
-                    type="text"
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    placeholder="ابحث باسم التلميذ، المؤسسة، أو التخصص..."
-                    className="w-full pr-9 pl-3 py-2 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500 placeholder-slate-400"
-                  />
-                </div>
-
-                {/* Category Filter */}
-                <div>
-                  <select
-                    value={selectedCategory}
-                    onChange={(e) => setSelectedCategory(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                  >
-                    <option value="ALL">جميع الفئات العمرية</option>
-                    <option value="U12">البراعم والبرعمات (U12)</option>
-                    <option value="U15">الصغار والصغيرات (U15)</option>
-                    <option value="U18">الفتيان والفتيات (U18)</option>
-                    <option value="U20">الشبان والشابات (U20)</option>
-                  </select>
-                </div>
-
-                {/* Affiliation Filter for Cross Country / Individual Sports */}
-                <div>
-                  <select
-                    value={selectedAffiliation}
-                    onChange={(e) => setSelectedAffiliation(e.target.value as any)}
-                    className="w-full px-3 py-2 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-300 dark:border-emerald-700 rounded-xl text-xs font-black text-emerald-900 dark:text-emerald-300 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                  >
-                    <option value="ALL">معيار الانتماء: جميع المشاركين</option>
-                    <option value="CLUB">المنتمين للأندية فقط 🏅</option>
-                    <option value="NON_CLUB">غير المنتمين للأندية (مدرسي) 🏫</option>
-                  </select>
-                </div>
-
-              </div>
-
-              {/* View Sub-Tabs */}
-              <div className="flex items-center gap-2 border-t border-slate-100 dark:border-slate-800 pt-3">
+              {/* PART 1: MAIN SPORT TABS (Cross Country, Athletics, Collective) */}
+              <div className="flex flex-wrap sm:flex-nowrap items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => setActivePublicTab('CC_PODIUM')}
-                  className={`flex-1 py-2 px-3 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                  onClick={() => {
+                    setActivePublicTab('CC_PODIUM');
+                    setSelectedCategory('ALL');
+                    setSelectedGender('ALL');
+                    setSelectedSport('ALL');
+                  }}
+                  className={`flex-1 py-3 px-3 rounded-2xl text-sm font-black transition-all cursor-pointer flex items-center justify-center gap-2 border-2 ${
                     activePublicTab === 'CC_PODIUM'
-                      ? 'bg-emerald-600 text-white shadow-sm'
-                      : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                      ? (selectedAffiliation === 'CLUB' ? 'bg-amber-500 text-slate-950 border-amber-400' : 'bg-emerald-600 text-white border-emerald-500') + ' shadow-md ring-2 ring-emerald-400/20'
+                      : 'bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-100 dark:border-slate-800 hover:bg-slate-100'
                   }`}
                 >
-                  <Trophy className="w-4 h-4 text-amber-400" />
-                  <span>نتائج العدو الريفي والمنتمين للأندية</span>
+                  <Trophy className={`w-5 h-5 ${activePublicTab === 'CC_PODIUM' ? (selectedAffiliation === 'CLUB' ? 'text-slate-900' : 'text-amber-400') : 'text-emerald-500'}`} />
+                  <span>العدو الريفي</span>
                 </button>
 
                 <button
                   type="button"
-                  onClick={() => setActivePublicTab('MATCHES')}
-                  className={`flex-1 py-2 px-3 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                  onClick={() => {
+                    setActivePublicTab('ATHLETICS');
+                    setSelectedCategory('ALL');
+                    setSelectedSport('ALL');
+                  }}
+                  className={`flex-1 py-3 px-3 rounded-2xl text-sm font-black transition-all cursor-pointer flex items-center justify-center gap-2 border-2 ${
+                    activePublicTab === 'ATHLETICS'
+                      ? (selectedAffiliation === 'CLUB' ? 'bg-amber-500 text-slate-950 border-amber-400' : 'bg-emerald-600 text-white border-emerald-500') + ' shadow-md ring-2 ring-emerald-400/20'
+                      : 'bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-100 dark:border-slate-800 hover:bg-slate-100'
+                  }`}
+                >
+                  <Award className={`w-5 h-5 ${activePublicTab === 'ATHLETICS' ? (selectedAffiliation === 'CLUB' ? 'text-slate-900' : 'text-amber-300') : 'text-emerald-500'}`} />
+                  <span>ألعاب القوى</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActivePublicTab('MATCHES');
+                    setSelectedCategory('ALL');
+                    setSelectedSport('ALL');
+                  }}
+                  className={`flex-1 py-3 px-3 rounded-2xl text-sm font-black transition-all cursor-pointer flex items-center justify-center gap-2 border-2 ${
                     activePublicTab === 'MATCHES'
-                      ? 'bg-emerald-600 text-white shadow-sm'
-                      : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                      ? (selectedAffiliation === 'CLUB' ? 'bg-amber-500 text-slate-950 border-amber-400' : 'bg-emerald-600 text-white border-emerald-500') + ' shadow-md ring-2 ring-emerald-400/20'
+                      : 'bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-100 dark:border-slate-800 hover:bg-slate-100'
                   }`}
                 >
-                  <Calendar className="w-4 h-4" />
-                  <span>المباريات والنتائج الجماعية</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setActivePublicTab('TOURNAMENTS')}
-                  className={`flex-1 py-2 px-3 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
-                    activePublicTab === 'TOURNAMENTS'
-                      ? 'bg-emerald-600 text-white shadow-sm'
-                      : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-                  }`}
-                >
-                  <Layers className="w-4 h-4" />
-                  <span>دليل البطولات ({filteredTournaments.length})</span>
+                  <div className="relative">
+                    <Calendar className={`w-5 h-5 ${activePublicTab === 'MATCHES' ? (selectedAffiliation === 'CLUB' ? 'text-slate-900' : 'text-white') : 'text-emerald-500'}`} />
+                    {activePublicTab !== 'MATCHES' && (
+                      <span className="absolute -top-1 -right-1 flex h-2 w-2">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                        <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                      </span>
+                    )}
+                  </div>
+                  <span>النتائج الجماعية</span>
                 </button>
               </div>
+
+              {/* PART 2: AFFILIATION (Club vs Non-club) */}
+              <div className="flex items-center gap-2">
+                {[
+                  { id: 'CLUB', label: 'منتمين للأندية 🏅', color: 'bg-amber-500 border-amber-400 text-slate-950' },
+                  { id: 'NON_CLUB', label: 'مدرسي (غير منتمين) 🏫', color: 'bg-emerald-700 border-emerald-500 text-white' }
+                ].map(aff => (
+                  <button
+                    key={aff.id}
+                    type="button"
+                    onClick={() => setSelectedAffiliation(aff.id as any)}
+                    className={`flex-1 py-3 px-3 rounded-2xl text-xs font-black transition-all cursor-pointer border-2 ${
+                      selectedAffiliation === aff.id
+                        ? aff.color + ' shadow-inner'
+                        : 'bg-white dark:bg-slate-800 text-slate-500 dark:text-slate-400 border-slate-100 dark:border-slate-800 hover:bg-slate-50'
+                    }`}
+                  >
+                    {aff.label}
+                  </button>
+                ))}
+              </div>
+
+              {/* SHARED, DYNAMIC CATEGORY SELECTOR WITH SCROLL ARROWS */}
+              {activePublicTab !== 'TOURNAMENTS' && activeTabCategories.length > 0 && (
+                <div className="space-y-1.5 border-t border-slate-100 dark:border-slate-800 pt-3">
+                  <div className="flex items-center justify-between text-xs font-black text-slate-700 dark:text-slate-300 px-1">
+                    <span className="flex items-center gap-1.5 text-emerald-700 dark:text-emerald-400">
+                      <Flame className="w-4 h-4 text-amber-500" />
+                      <span>الفئات العمرية المتاحة للبطولة المحددة:</span>
+                    </span>
+                  </div>
+
+                  <div className="relative flex items-center pr-1 pl-1">
+                    {/* Right side floating arrow */}
+                    <button
+                      type="button"
+                      onClick={() => scrollContainer(categoryScrollRef, 'right')}
+                      className="absolute right-0 z-10 p-1.5 bg-white/95 dark:bg-slate-900/95 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full shadow-md text-emerald-700 dark:text-emerald-400 focus:outline-none transition-all cursor-pointer border border-slate-200 dark:border-slate-700"
+                      title="التمرير لليمين"
+                    >
+                      <ChevronRight className="w-4 h-4" />
+                    </button>
+
+                    <div 
+                      ref={categoryScrollRef} 
+                      className="flex-1 flex items-center gap-1.5 overflow-x-auto no-scrollbar py-1 px-8 scroll-smooth"
+                    >
+                      {activeTabCategories.map((item) => {
+                        const isActive = selectedCategory === item.cat && selectedGender === item.gender;
+                        
+                        // Condition coloring: Amber/Yellow for CLUB, Emerald/Green for NON_CLUB
+                        const activeStyle = selectedAffiliation === 'CLUB'
+                          ? 'bg-amber-500 text-slate-950 border-amber-400 ring-amber-300 shadow-md ring-2 font-black animate-in zoom-in-95'
+                          : 'bg-emerald-600 text-white border-emerald-500 ring-emerald-400 shadow-md ring-2 font-black animate-in zoom-in-95';
+
+                        return (
+                          <button
+                            key={item.id}
+                            type="button"
+                            onClick={() => {
+                              setSelectedCategory(item.cat);
+                              setSelectedGender(item.gender as any);
+                            }}
+                            className={`px-4 py-2.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer border ${
+                              isActive
+                                ? activeStyle
+                                : 'bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 border-transparent'
+                            }`}
+                          >
+                            {item.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {/* Left side floating arrow */}
+                    <button
+                      type="button"
+                      onClick={() => scrollContainer(categoryScrollRef, 'left')}
+                      className="absolute left-0 z-10 p-1.5 bg-white/95 dark:bg-slate-900/95 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full shadow-md text-emerald-700 dark:text-emerald-400 focus:outline-none transition-all cursor-pointer border border-slate-200 dark:border-slate-700"
+                      title="التمرير لليسار"
+                    >
+                      <ChevronLeft className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* PART 4: TOURNAMENT GUIDES (Bottom) */}
+              <button
+                type="button"
+                onClick={() => setActivePublicTab('TOURNAMENTS')}
+                className={`w-full py-3.5 px-4 rounded-2xl text-sm font-black transition-all cursor-pointer flex items-center justify-center gap-3 border-2 ${
+                  activePublicTab === 'TOURNAMENTS'
+                    ? 'bg-emerald-600 text-white border-emerald-500 shadow-md'
+                    : 'bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-slate-100 dark:border-slate-800 hover:bg-slate-100'
+                }`}
+              >
+                <Layers className={`w-5 h-5 ${activePublicTab === 'TOURNAMENTS' ? 'text-white' : 'text-emerald-600'}`} />
+                <span>دليل البطولات والمحاضر ({filteredTournaments.length})</span>
+                <Trophy className="w-5 h-5 text-amber-500" />
+              </button>
 
             </div>
 
             {/* TAB 1: CROSS COUNTRY PODIUM & RANKING RESULTS */}
             {activePublicTab === 'CC_PODIUM' && (
               <div className="space-y-6">
-                
-                {/* Category Quick Selector Pills for Public */}
-                <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-3 shadow-xs space-y-2">
-                  <div className="flex items-center justify-between text-xs font-black text-slate-700 dark:text-slate-300 px-1">
-                    <span className="flex items-center gap-1.5 text-emerald-700 dark:text-emerald-400">
-                      <Trophy className="w-4 h-4 text-amber-500" />
-                      <span>اختر الفئة لعرض منصة التتويج والنتائج الرسمية:</span>
-                    </span>
-                    <span className="text-[11px] text-slate-400 font-bold">
-                      {crossCountryList.length} فئة معتمدة
-                    </span>
-                  </div>
-
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setSelectedCategory('ALL');
-                        setSelectedGender('ALL');
-                      }}
-                      className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer ${
-                        selectedCategory === 'ALL' && selectedGender === 'ALL'
-                          ? 'bg-emerald-600 text-white shadow-xs'
-                          : 'bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300'
-                      }`}
-                    >
-                      🌟 جميع السباقات والفئات
-                    </button>
-
-                    {[
-                      { cat: 'U12', g: 'Male', label: '🏃‍♂️ براعم ذكور (U12)' },
-                      { cat: 'U12', g: 'Female', label: '🏃‍♀️ برعمات إناث (U12)' },
-                      { cat: 'U15', g: 'Male', label: '🏃‍♂️ صغار ذكور (U15)' },
-                      { cat: 'U15', g: 'Female', label: '🏃‍♀️ صغيرات إناث (U15)' },
-                      { cat: 'U18', g: 'Male', label: '🏃‍♂️ فتيان ذكور (U18)' },
-                      { cat: 'U18', g: 'Female', label: '🏃‍♀️ فتيات إناث (U18)' },
-                      { cat: 'U20', g: 'Male', label: '🏃‍♂️ شبان ذكور (U20)' },
-                      { cat: 'U20', g: 'Female', label: '🏃‍♀️ شابات إناث (U20)' }
-                    ].map((item, idx) => {
-                      const isActive = selectedCategory === item.cat && selectedGender === item.g;
-                      return (
-                        <button
-                          key={idx}
-                          type="button"
-                          onClick={() => {
-                            setSelectedCategory(item.cat);
-                            setSelectedGender(item.g as any);
-                          }}
-                          className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                            isActive
-                              ? 'bg-amber-500 text-slate-950 font-black shadow-xs ring-2 ring-amber-300 dark:ring-amber-600'
-                              : 'bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300'
-                          }`}
-                        >
-                          {item.label}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
 
                 {crossCountryList.length === 0 ? (
                   <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-8 text-center space-y-3 shadow-xs transition-colors">
@@ -1667,27 +2036,26 @@ export const Login: React.FC = () => {
                     const third = sortedRunners[2] || null;
 
                     return (
-                      <div key={catGroup.key} className="bg-white dark:bg-slate-900 border-2 border-emerald-500/20 dark:border-slate-800 rounded-3xl p-4 sm:p-6 shadow-md space-y-5 transition-colors">
+                      <div key={catGroup.key} className="bg-white dark:bg-slate-900 border-2 border-emerald-500/20 dark:border-slate-800 rounded-3xl p-3 sm:p-6 shadow-md space-y-4 sm:space-y-5 transition-colors overflow-hidden">
                         
                         {/* Header with Title & Badge */}
-                        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-800 pb-4">
-                          <div className="flex items-center gap-3">
-                            <span className="p-2.5 bg-gradient-to-br from-amber-400 to-amber-600 text-white rounded-2xl shadow-sm">
-                              <Trophy className="w-6 h-6" />
+                        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-800 pb-3 sm:pb-4">
+                          <div className="flex items-center gap-2.5 sm:gap-3">
+                            <span className="p-2 sm:p-2.5 bg-gradient-to-br from-amber-400 to-amber-600 text-white rounded-xl sm:rounded-2xl shadow-sm">
+                              <Trophy className="w-5 h-5 sm:w-6 sm:h-6" />
                             </span>
                             <div>
-                              <h3 className="text-base sm:text-lg font-black text-slate-900 dark:text-white flex items-center gap-2">
+                              <h3 className="text-sm sm:text-lg font-black text-slate-900 dark:text-white flex items-center gap-2">
                                 <span>{catGroup.categoryName}</span>
                               </h3>
-                              <p className="text-xs text-slate-500 dark:text-slate-400 font-bold mt-0.5">
+                              <p className="text-[11px] sm:text-xs text-slate-500 dark:text-slate-400 font-bold mt-0.5">
                                 منصة التتويج الرسمية • عدد العدائين المصنفين: {catGroup.runners.length} عداء(ة)
                               </p>
                             </div>
                           </div>
 
                           <div className="flex items-center gap-2">
-                            <span className="px-3 py-1 bg-amber-50 dark:bg-amber-950/50 text-amber-800 dark:text-amber-200 border border-amber-200 dark:border-amber-800 rounded-full text-xs font-black flex items-center gap-1.5 shadow-xs">
-                              <span>👑</span>
+                            <span className="px-2.5 py-1 bg-amber-50 dark:bg-amber-950/50 text-amber-800 dark:text-amber-200 border border-amber-200 dark:border-amber-800 rounded-full text-[11px] sm:text-xs font-black flex items-center gap-1.5 shadow-xs">
                               <span>منصة التتويج الأولمبية</span>
                             </span>
                           </div>
@@ -1714,32 +2082,49 @@ export const Login: React.FC = () => {
                               : 'from-amber-600 via-amber-700 to-amber-900 border-amber-500 text-amber-100';
 
                             const stepHeight = isGold
-                              ? 'h-24 sm:h-28 bg-gradient-to-t from-amber-500 via-yellow-400 to-amber-300 text-slate-950 border-t-4 border-yellow-100 shadow-lg'
+                              ? 'h-14 sm:h-28 bg-gradient-to-t from-amber-500 via-yellow-400 to-amber-300 text-slate-950 border-t-2 sm:border-t-4 border-yellow-100 shadow-lg'
                               : isSilver
-                              ? 'h-16 sm:h-20 bg-gradient-to-t from-slate-400 to-slate-200 dark:from-slate-700 dark:to-slate-500 text-slate-950 dark:text-white border-t-4 border-slate-300 shadow-md'
-                              : 'h-12 sm:h-16 bg-gradient-to-t from-amber-800 to-amber-600 dark:from-amber-950 dark:to-amber-800 text-amber-50 border-t-4 border-amber-400 shadow-md';
+                              ? 'h-10 sm:h-20 bg-gradient-to-t from-slate-400 to-slate-200 dark:from-slate-700 dark:to-slate-500 text-slate-950 dark:text-white border-t-2 sm:border-t-4 border-slate-300 shadow-md'
+                              : 'h-7 sm:h-16 bg-gradient-to-t from-amber-800 to-amber-600 dark:from-amber-950 dark:to-amber-800 text-amber-50 border-t-2 sm:border-t-4 border-amber-400 shadow-md';
 
                             return (
-                              <div className={`flex flex-col items-center justify-end w-full ${isGold ? '-translate-y-2 sm:-translate-y-4 z-10' : 'z-0'}`}>
+                              <div className={`flex flex-col items-center justify-end w-full min-w-0 ${isGold ? '-translate-y-1.5 sm:-translate-y-4 z-10' : 'z-0'}`}>
                                 {/* Circular Medal Badge at top with crown */}
-                                <div className="relative -mb-5 sm:-mb-7 z-10">
-                                  <div className={`w-12 h-12 sm:w-16 sm:h-16 md:w-20 md:h-20 rounded-full border-2 sm:border-4 bg-gradient-to-b ${medalBg} shadow-xl flex flex-col items-center justify-center relative overflow-hidden shrink-0 select-none`}>
-                                    {isGold && <span className="text-xs sm:text-sm md:text-base leading-none -mb-0.5">👑</span>}
-                                    <span className="font-black text-sm sm:text-lg md:text-xl font-mono leading-none">
-                                      #{rank}
-                                    </span>
+                                <div className="relative -mb-4 sm:-mb-8 z-10">
+                                  <div className={`w-20 h-20 sm:w-32 sm:h-32 rounded-full border-2 sm:border-4 overflow-hidden bg-gradient-to-b ${medalBg} shadow-md sm:shadow-xl flex flex-col items-center justify-center relative shrink-0 select-none`}>
+                                    {(() => {
+                                      const matchedStud = students.find(s => 
+                                        (runner?.studentId && s.id === runner.studentId) ||
+                                        (runnerName && s.fullName.trim().toLowerCase() === runnerName.trim().toLowerCase())
+                                      );
+                                      const pPhoto = runner?.photoUrl || matchedStud?.photoUrl;
+                                      if (pPhoto) {
+                                        return (
+                                          <>
+                                            <img 
+                                              src={pPhoto} 
+                                              alt={runnerName} 
+                                              className="absolute inset-0 w-full h-full object-cover z-10" 
+                                            />
+                                          </>
+                                        );
+                                      }
+                                      return (
+                                        <div className="w-full h-full bg-slate-100/20" />
+                                      );
+                                    })()}
                                   </div>
                                 </div>
 
                                 {/* Podium Athlete Card */}
-                                <div className={`w-full pt-7 sm:pt-9 pb-3 px-2 sm:px-3 rounded-2xl border text-center flex flex-col items-center justify-between min-h-[170px] sm:min-h-[210px] shadow-sm transition-all ${
+                                <div className={`w-full min-w-0 pt-4 sm:pt-8 pb-2 sm:pb-3 px-1 sm:px-3 rounded-xl sm:rounded-2xl border text-center flex flex-col items-center justify-between min-h-[145px] sm:min-h-[210px] shadow-sm transition-all overflow-hidden ${
                                   isGold
-                                    ? 'bg-amber-50/95 dark:bg-amber-950/40 border-amber-400 dark:border-amber-600 ring-4 ring-amber-400/20'
+                                    ? 'bg-amber-50/95 dark:bg-amber-950/40 border-amber-400 dark:border-amber-600 ring-2 sm:ring-4 ring-amber-400/20'
                                     : isSilver
                                     ? 'bg-slate-50 dark:bg-slate-800/90 border-slate-300 dark:border-slate-700 shadow-xs'
                                     : 'bg-orange-50/80 dark:bg-orange-950/30 border-orange-300 dark:border-orange-800 shadow-xs'
                                 }`}>
-                                  <div className={`px-2.5 py-0.5 rounded-full text-[10px] sm:text-xs font-black mb-1.5 shadow-xs ${
+                                  <div className={`px-1.5 sm:px-2.5 py-0.5 rounded-full text-[8.5px] sm:text-xs font-black mb-1 shadow-xs truncate max-w-full ${
                                     isGold
                                       ? 'bg-amber-400 text-slate-950'
                                       : isSilver
@@ -1750,44 +2135,44 @@ export const Login: React.FC = () => {
                                   </div>
 
                                   {runner ? (
-                                    <div className="w-full space-y-1.5 my-auto">
-                                      <h4 className="text-xs sm:text-base font-black text-slate-900 dark:text-white truncate" title={runnerName}>
+                                    <div className="w-full min-w-0 space-y-0.5 sm:space-y-1.5 my-auto px-0.5">
+                                      <h4 className="text-[11px] sm:text-sm md:text-base font-black text-slate-900 dark:text-white truncate w-full" title={runnerName}>
                                         {runnerName}
                                       </h4>
-                                      <p className="text-[11px] sm:text-xs font-bold text-slate-600 dark:text-slate-300 truncate" title={runner.schoolName}>
+                                      <p className="text-[9px] sm:text-xs font-bold text-slate-600 dark:text-slate-300 truncate w-full" title={runner.schoolName}>
                                         {runner.schoolName}
                                       </p>
                                       {runner.bibNumber && (
-                                        <p className="text-[10px] sm:text-xs font-mono font-bold text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/60 px-2 py-0.5 rounded-md inline-block">
+                                        <p className="text-[8.5px] sm:text-xs font-mono font-bold text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/60 px-1.5 py-0.5 rounded inline-block max-w-full truncate">
                                           صدرية: #{runner.bibNumber}
                                         </p>
                                       )}
-                                      <div className="flex flex-wrap items-center justify-center gap-1 pt-1">
-                                        <span className={`px-2 py-0.5 rounded text-[9px] sm:text-[10px] font-bold ${
+                                      <div className="flex flex-col sm:flex-row flex-wrap items-center justify-center gap-0.5 sm:gap-1 pt-0.5 w-full">
+                                        <span className={`px-1 sm:px-2 py-0.5 rounded text-[8px] sm:text-[10px] font-bold truncate max-w-full ${
                                           isClub
                                             ? 'bg-purple-100 dark:bg-purple-950 text-purple-800 dark:text-purple-300 border border-purple-200 dark:border-purple-800'
                                             : 'bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800'
                                         }`}>
-                                          {isClub ? 'منتمي للأندية' : 'مدرسي (غير منتمي)'}
+                                          {isClub ? '🏅 منتمي' : '🏫 مدرسي'}
                                         </span>
-                                        <span className={`px-2 py-0.5 rounded text-[9px] sm:text-[10px] font-bold ${
+                                        <span className={`px-1 sm:px-2 py-0.5 rounded text-[8px] sm:text-[10px] font-bold truncate max-w-full ${
                                           isTeam
                                             ? 'bg-blue-100 dark:bg-blue-950/80 text-blue-800 dark:text-blue-300 border border-blue-200 dark:border-blue-800'
                                             : 'bg-amber-100 dark:bg-amber-950/80 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800'
                                         }`}>
-                                          {isTeam ? '👥 فريق المؤسسة' : '👤 مشاركة فردية'}
+                                          {isTeam ? '👥 فريق' : '👤 فردي'}
                                         </span>
                                       </div>
                                     </div>
                                   ) : (
-                                    <div className="my-auto py-3">
-                                      <p className="text-xs text-slate-400 font-bold">في انتظار استكمال النتائج</p>
+                                    <div className="my-auto py-2">
+                                      <p className="text-[10px] sm:text-xs text-slate-400 font-bold">في انتظار استكمال النتائج</p>
                                     </div>
                                   )}
                                 </div>
 
                                 {/* Olympic Step Block with Number */}
-                                <div className={`w-full rounded-t-2xl font-black font-mono flex items-center justify-center text-lg sm:text-2xl ${stepHeight}`}>
+                                <div className={`w-full rounded-t-xl sm:rounded-t-2xl font-black font-mono flex items-center justify-center text-sm sm:text-2xl ${stepHeight}`}>
                                   <span>{rank}</span>
                                 </div>
                               </div>
@@ -1795,21 +2180,18 @@ export const Login: React.FC = () => {
                           };
 
                           return (
-                            <div className="bg-gradient-to-b from-slate-100/70 to-slate-50/30 dark:from-slate-800/50 dark:to-slate-900/30 p-4 sm:p-6 rounded-3xl border border-slate-200/80 dark:border-slate-800">
-                              {/* Layout: Left = 2nd (اليسار), Center = 1st (الوسط), Right = 3rd (اليمين) */}
-                              <div className="grid grid-cols-3 gap-2 sm:gap-4 items-end max-w-2xl mx-auto" dir="ltr">
-                                {/* Left on screen: 2nd place (الوصيف 🥈) */}
-                                <div dir="rtl" className="w-full">
+                            <div className="bg-gradient-to-b from-slate-100/50 to-white dark:from-slate-800/30 dark:to-slate-900/30 p-2 sm:p-5 rounded-2xl sm:rounded-3xl border border-slate-200 dark:border-slate-800 overflow-hidden">
+                              <div className="flex items-end justify-center gap-1 sm:gap-3 max-w-xl mx-auto w-full" dir="ltr">
+                                {/* Rank 2 (Left) - Order 1 */}
+                                <div dir="rtl" className="flex-1 min-w-0 max-w-[33.33%]">
                                   {renderPodiumSlot(second, 2)}
                                 </div>
-
-                                {/* Center on screen: 1st place (الأول 🥇) */}
-                                <div dir="rtl" className="w-full">
+                                {/* Rank 1 (Center) - Order 2 (elevated) */}
+                                <div dir="rtl" className="flex-1 min-w-0 max-w-[33.33%]">
                                   {renderPodiumSlot(first, 1)}
                                 </div>
-
-                                {/* Right on screen: 3rd place (الثالث 🥉) */}
-                                <div dir="rtl" className="w-full">
+                                {/* Rank 3 (Right) - Order 3 */}
+                                <div dir="rtl" className="flex-1 min-w-0 max-w-[33.33%]">
                                   {renderPodiumSlot(third, 3)}
                                 </div>
                               </div>
@@ -1819,8 +2201,8 @@ export const Login: React.FC = () => {
 
                         {/* SCHOOL TEAM RANKINGS (ترتيب فرق المؤسسات التعليمية) */}
                         {catGroup.teamRankings && catGroup.teamRankings.length > 0 ? (
-                          <div className="bg-gradient-to-br from-amber-500/10 via-amber-500/5 to-emerald-500/10 border border-amber-300 dark:border-amber-800/60 rounded-2xl p-4 space-y-3">
-                            <div className="flex items-center justify-between">
+                          <div className="bg-gradient-to-br from-amber-500/10 via-amber-500/5 to-emerald-500/10 border border-amber-300 dark:border-amber-800/60 rounded-2xl p-3 sm:p-4 space-y-3 overflow-hidden">
+                            <div className="flex flex-wrap items-center justify-between gap-2">
                               <div className="flex items-center gap-2">
                                 <span className="p-1.5 bg-amber-500 text-white rounded-lg shadow-xs">
                                   <Award className="w-4 h-4" />
@@ -1844,13 +2226,13 @@ export const Login: React.FC = () => {
                             </div>
 
                             <div className="overflow-x-auto border border-amber-200 dark:border-amber-900/50 rounded-xl bg-white/80 dark:bg-slate-900/80 backdrop-blur-xs">
-                              <table className="w-full text-right text-xs">
-                                <thead className="bg-amber-100/60 dark:bg-amber-950/40 text-amber-950 dark:text-amber-200 font-bold border-b border-amber-200 dark:border-amber-900">
+                              <table className="w-full text-right text-[11px] sm:text-xs min-w-[440px]">
+                                <thead className="bg-amber-100/60 dark:bg-amber-950/40 text-amber-950 dark:text-amber-200 font-bold border-b border-amber-200 dark:border-amber-900 whitespace-nowrap">
                                   <tr>
-                                    <th className="p-2 text-center">الترتيب</th>
+                                    <th className="p-2 text-center w-12">الترتيب</th>
                                     <th className="p-2">المؤسسة التعليمية</th>
                                     <th className="p-2 text-center">مجموع النقاط</th>
-                                    <th className="p-2 text-center">رتب العدائين الـ 4 الأوائل</th>
+                                    <th className="p-2 text-center">رتب الـ 4 الأوائل</th>
                                     <th className="p-2 text-center">حسم التعادل (العداء 4)</th>
                                   </tr>
                                 </thead>
@@ -1872,13 +2254,13 @@ export const Login: React.FC = () => {
                                             #{rank}
                                           </span>
                                         </td>
-                                        <td className="p-2 font-bold text-slate-900 dark:text-white">
+                                        <td className="p-2 font-bold text-slate-900 dark:text-white whitespace-nowrap">
                                           {team.schoolName}
                                         </td>
-                                        <td className="p-2 text-center font-mono font-black text-amber-700 dark:text-amber-400">
+                                        <td className="p-2 text-center font-mono font-black text-amber-700 dark:text-amber-400 whitespace-nowrap">
                                           {team.totalPoints} ن
                                         </td>
-                                        <td className="p-2 text-center">
+                                        <td className="p-2 text-center whitespace-nowrap">
                                           <div className="flex items-center justify-center gap-1 font-mono text-[10px]">
                                             {team.top4Runners.map((r, rI) => (
                                               <span key={rI} className="px-1.5 py-0.5 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded border border-slate-200 dark:border-slate-700">
@@ -1887,7 +2269,7 @@ export const Login: React.FC = () => {
                                             ))}
                                           </div>
                                         </td>
-                                        <td className="p-2 text-center font-mono text-[11px] text-slate-600 dark:text-slate-400">
+                                        <td className="p-2 text-center font-mono text-[11px] text-slate-600 dark:text-slate-400 whitespace-nowrap">
                                           العداء 4 (رتبة #{team.fourthRunnerRank})
                                         </td>
                                       </tr>
@@ -1905,72 +2287,97 @@ export const Login: React.FC = () => {
                           </div>
                         )}
 
-                        {/* Full Runner Results Table Header & Table */}
-                        <div className="space-y-2 pt-2">
-                          <div className="flex items-center justify-between px-1">
-                            <h4 className="text-xs font-black text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
-                              <Layers className="w-4 h-4 text-emerald-600" />
-                              <span>الترتيب العام الكامل لجميع العدائين ({sortedRunners.length})</span>
-                            </h4>
-                          </div>
+                        {/* Collapsible Full Runner Results Section (Default: Hidden) */}
+                        {(() => {
+                          const isExpanded = Boolean(expandedRankings[catGroup.key]);
+                          return (
+                            <div className="pt-2 border-t border-slate-100 dark:border-slate-800">
+                              <button
+                                type="button"
+                                onClick={() => toggleRanking(catGroup.key)}
+                                className="w-full py-2.5 px-3 sm:px-4 bg-slate-50 hover:bg-emerald-50/80 dark:bg-slate-800/60 dark:hover:bg-emerald-950/40 border border-slate-200 hover:border-emerald-300 dark:border-slate-700 dark:hover:border-emerald-700 rounded-2xl text-xs font-black text-slate-800 dark:text-slate-200 transition-all flex items-center justify-between cursor-pointer group shadow-xs"
+                              >
+                                <div className="flex items-center gap-2">
+                                  <span className="p-1.5 bg-emerald-100 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-400 rounded-xl group-hover:scale-110 transition-transform shrink-0">
+                                    <Layers className="w-4 h-4" />
+                                  </span>
+                                  <div className="text-right">
+                                    <span className="block font-black text-xs sm:text-sm text-slate-900 dark:text-white">
+                                      {isExpanded ? 'إخفاء الترتيب العام الكامل' : `الترتيب العام الكامل لجميع العدائين (${sortedRunners.length})`}
+                                    </span>
+                                    <span className="block text-[10px] text-slate-400 dark:text-slate-500 font-bold">
+                                      {isExpanded ? 'انقر لطي الجدول وإخفائه' : 'انقر لاستعراض جدول النتائج وتفاصيل جميع العدائين'}
+                                    </span>
+                                  </div>
+                                </div>
 
-                          <div className="overflow-x-auto border border-slate-200 dark:border-slate-800 rounded-2xl">
-                            <table className="w-full text-right text-xs">
-                              <thead className="bg-slate-100 dark:bg-slate-800/80 text-slate-700 dark:text-slate-300 font-bold border-b border-slate-200 dark:border-slate-700">
-                                <tr>
-                                  <th className="p-2.5 text-center">الترتيب</th>
-                                  <th className="p-2.5">رقم الصدرية</th>
-                                  <th className="p-2.5">اسم التلميذ(ة)</th>
-                                  <th className="p-2.5">المؤسسة التعليمية</th>
-                                  <th className="p-2.5 text-center">معيار الانتماء</th>
-                                  <th className="p-2.5 text-center">نوع المشاركة</th>
-                                </tr>
-                              </thead>
-                              <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                                {sortedRunners.map((runner, rIdx) => {
-                                  const runnerName = runner.fullName || runner.studentName;
-                                  const isClub = students.find(s => s.id === runner.studentId || s.fullName === runnerName)?.affiliationType === 'club_affiliated' || runner.affiliationType === 'club_affiliated';
-                                  const isTeam = runner.participationType === 'school_team' || runner.participationType === 'فريق';
+                                <div className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-emerald-700 dark:text-emerald-400 text-[11px] sm:text-xs font-black shadow-2xs group-hover:border-emerald-400 transition-colors shrink-0">
+                                  <span>{isExpanded ? 'إخفاء' : 'عرض الترتيب'}</span>
+                                  <ChevronDown className={`w-3.5 h-3.5 sm:w-4 sm:h-4 transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`} />
+                                </div>
+                              </button>
 
-                                  return (
-                                    <tr key={runner.studentId || rIdx} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
-                                      <td className="p-2.5 text-center font-black text-slate-900 dark:text-white">
-                                        #{runner.recalculatedRank || runner.rank || rIdx + 1}
-                                      </td>
-                                      <td className="p-2.5 font-mono font-bold text-emerald-700 dark:text-emerald-400">
-                                        {runner.bibNumber || '-'}
-                                      </td>
-                                      <td className="p-2.5 font-bold text-slate-900 dark:text-slate-100">
-                                        {runner.fullName || runner.studentName}
-                                      </td>
-                                      <td className="p-2.5 text-slate-600 dark:text-slate-400">
-                                        {runner.schoolName}
-                                      </td>
-                                      <td className="p-2.5 text-center">
-                                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                                          isClub
-                                            ? 'bg-purple-100 dark:bg-purple-950/80 text-purple-800 dark:text-purple-300'
-                                            : 'bg-emerald-100 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300'
-                                        }`}>
-                                          {isClub ? 'منتمي للأندية' : 'غير منتمي (مدرسي)'}
-                                        </span>
-                                      </td>
-                                      <td className="p-2.5 text-center">
-                                        <span className={`px-2.5 py-0.5 rounded text-[10px] font-bold ${
-                                          isTeam
-                                            ? 'bg-blue-100 dark:bg-blue-950/80 text-blue-800 dark:text-blue-300 border border-blue-200 dark:border-blue-800'
-                                            : 'bg-amber-100 dark:bg-amber-950/80 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800'
-                                        }`}>
-                                          {isTeam ? '👥 فريق المؤسسة' : '👤 مشاركة فردية'}
-                                        </span>
-                                      </td>
-                                    </tr>
-                                  );
-                                })}
-                              </tbody>
-                            </table>
-                          </div>
-                        </div>
+                              {isExpanded && (
+                                <div className="mt-3 overflow-x-auto border border-slate-200 dark:border-slate-800 rounded-2xl animate-in fade-in slide-in-from-top-2 duration-200">
+                                  <table className="w-full text-right text-xs min-w-[500px]">
+                                    <thead className="bg-slate-100 dark:bg-slate-800/80 text-slate-700 dark:text-slate-300 font-bold border-b border-slate-200 dark:border-slate-700 whitespace-nowrap">
+                                      <tr>
+                                        <th className="p-2.5 text-center w-12">الترتيب</th>
+                                        <th className="p-2.5 text-center">رقم الصدرية</th>
+                                        <th className="p-2.5">اسم التلميذ(ة)</th>
+                                        <th className="p-2.5">المؤسسة التعليمية</th>
+                                        <th className="p-2.5 text-center">معيار الانتماء</th>
+                                        <th className="p-2.5 text-center">نوع المشاركة</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                                      {sortedRunners.map((runner, rIdx) => {
+                                        const runnerName = runner.fullName || runner.studentName;
+                                        const isClub = students.find(s => s.id === runner.studentId || s.fullName === runnerName)?.affiliationType === 'club_affiliated' || runner.affiliationType === 'club_affiliated';
+                                        const isTeam = runner.participationType === 'school_team' || runner.participationType === 'فريق';
+
+                                        return (
+                                          <tr key={runner.studentId || rIdx} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
+                                            <td className="p-2.5 text-center font-black text-slate-900 dark:text-white">
+                                              #{runner.recalculatedRank || runner.rank || rIdx + 1}
+                                            </td>
+                                            <td className="p-2.5 text-center font-mono font-bold text-emerald-700 dark:text-emerald-400">
+                                              {runner.bibNumber || '-'}
+                                            </td>
+                                            <td className="p-2.5 font-bold text-slate-900 dark:text-slate-100 whitespace-nowrap">
+                                              {runner.fullName || runner.studentName}
+                                            </td>
+                                            <td className="p-2.5 text-slate-600 dark:text-slate-400 whitespace-nowrap">
+                                              {runner.schoolName}
+                                            </td>
+                                            <td className="p-2.5 text-center whitespace-nowrap">
+                                              <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                                isClub
+                                                  ? 'bg-purple-100 dark:bg-purple-950/80 text-purple-800 dark:text-purple-300'
+                                                  : 'bg-emerald-100 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300'
+                                              }`}>
+                                                {isClub ? 'منتمي للأندية' : 'غير منتمي (مدرسي)'}
+                                              </span>
+                                            </td>
+                                            <td className="p-2.5 text-center whitespace-nowrap">
+                                              <span className={`px-2.5 py-0.5 rounded text-[10px] font-bold ${
+                                                isTeam
+                                                  ? 'bg-blue-100 dark:bg-blue-950/80 text-blue-800 dark:text-blue-300 border border-blue-200 dark:border-blue-800'
+                                                  : 'bg-amber-100 dark:bg-amber-950/80 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800'
+                                              }`}>
+                                                {isTeam ? '👥 فريق المؤسسة' : '👤 مشاركة فردية'}
+                                              </span>
+                                            </td>
+                                          </tr>
+                                        );
+                                      })}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })()}
 
                       </div>
                     );
@@ -1979,9 +2386,243 @@ export const Login: React.FC = () => {
               </div>
             )}
 
+            {/* TAB: ATHLETICS (ألعاب القوى) RESULTS */}
+            {activePublicTab === 'ATHLETICS' && (
+              <div className="space-y-6">
+
+                {/* Athletics Specialty Filter Quick Pills */}
+                <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-3 shadow-xs space-y-2">
+                  <div className="flex items-center justify-between text-xs font-black text-slate-700 dark:text-slate-300 px-1">
+                    <span className="flex items-center gap-1.5 text-emerald-700 dark:text-emerald-400">
+                      <Filter className="w-3.5 h-3.5 text-emerald-500" />
+                      <span>نوع المسابقة:</span>
+                    </span>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setSelectedAthleticsSpecialty('ALL')}
+                      className={`px-3 py-1.5 rounded-xl text-[10px] font-black transition-all cursor-pointer ${
+                        selectedAthleticsSpecialty === 'ALL'
+                          ? (selectedAffiliation === 'CLUB' ? 'bg-amber-400 text-slate-950' : 'bg-emerald-600 text-white')
+                          : 'bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300'
+                      }`}
+                    >
+                      🌟 جميع التخصصات
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedAthleticsSpecialty('track')}
+                      className={`px-3 py-1.5 rounded-xl text-[10px] font-black transition-all cursor-pointer ${
+                        selectedAthleticsSpecialty === 'track'
+                          ? (selectedAffiliation === 'CLUB' ? 'bg-amber-400 text-slate-950' : 'bg-emerald-600 text-white')
+                          : 'bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300'
+                      }`}
+                    >
+                      🏃‍♂️ سباقات الجري (المضمار)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedAthleticsSpecialty('field')}
+                      className={`px-3 py-1.5 rounded-xl text-[10px] font-black transition-all cursor-pointer ${
+                        selectedAthleticsSpecialty === 'field'
+                          ? (selectedAffiliation === 'CLUB' ? 'bg-amber-400 text-slate-950' : 'bg-emerald-600 text-white')
+                          : 'bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300'
+                      }`}
+                    >
+                      🎯 القفز والرمي (الميدان)
+                    </button>
+                  </div>
+                </div>
+
+                {/* Athletics Events Grid */}
+                {(() => {
+                  const rawItems = Object.values(athleticsResults) as AthleticsCategoryResult[];
+                  const items = rawItems.filter((item: AthleticsCategoryResult) => {
+                    if (selectedCategory !== 'ALL' && item.category !== selectedCategory) return false;
+                    if (selectedGender !== 'ALL' && item.gender !== selectedGender) return false;
+                    if (selectedAthleticsSpecialty !== 'ALL' && item.specialtyType !== selectedAthleticsSpecialty) return false;
+                    if (searchQuery.trim()) {
+                      const q = searchQuery.toLowerCase();
+                      const matchName = item.specialtyName.toLowerCase().includes(q) || (item.venueName || '').toLowerCase().includes(q);
+                      const matchWinner = item.podium?.some(p => p.fullName.toLowerCase().includes(q) || p.schoolName.toLowerCase().includes(q));
+                      if (!matchName && !matchWinner) return false;
+                    }
+                    return true;
+                  });
+
+                  if (items.length === 0) {
+                    return (
+                      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-8 text-center space-y-4 shadow-xs">
+                        <Award className="w-12 h-12 text-slate-300 dark:text-slate-700 mx-auto" />
+                        <div>
+                          <p className="text-sm font-bold text-slate-700 dark:text-slate-300">
+                            لا توجد نتائج مسجلة لألعاب القوى تطابق الفلترة المحددة
+                          </p>
+                          <p className="text-xs text-slate-400 mt-1">
+                            يمكنك توليد بيانات تجريبية لمعاينة عرض مسابقات القفز والرمي وسباقات السرعة
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setIsDemoDataModalOpen(true)}
+                          className="px-4 py-2 bg-gradient-to-r from-amber-500 to-teal-600 text-white rounded-xl text-xs font-black shadow-md hover:shadow-lg transition-all cursor-pointer inline-flex items-center gap-2"
+                        >
+                          <Sparkles className="w-4 h-4 text-amber-200" />
+                          <span>⚡ توليد نتائج ألعاب القوى افتراضياً</span>
+                        </button>
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                      {items.map((ath: AthleticsCategoryResult) => (
+                        <div
+                          key={ath.id}
+                          className="bg-white dark:bg-slate-900 border-2 border-emerald-500/20 dark:border-slate-800 rounded-3xl p-4 sm:p-5 shadow-md hover:shadow-lg transition-all space-y-4"
+                        >
+                          {/* Card Header */}
+                          <div className="flex items-start justify-between gap-3 border-b border-slate-100 dark:border-slate-800 pb-3">
+                            <div>
+                              <div className="flex items-center gap-2 mb-1">
+                                <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black ${
+                                  ath.specialtyType === 'track'
+                                    ? 'bg-blue-100 dark:bg-blue-950/80 text-blue-800 dark:text-blue-300 border border-blue-200 dark:border-blue-800'
+                                    : 'bg-emerald-100 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800'
+                                }`}>
+                                  {ath.specialtyType === 'track' ? '🏃‍♂️ مضمار / جري' : '🎯 ميدان / قفز ورمي'}
+                                </span>
+                                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
+                                  {ath.category} - {ath.gender === 'Male' ? 'ذكور' : 'إناث'}
+                                </span>
+                              </div>
+                              <h3 className="text-sm sm:text-base font-black text-slate-900 dark:text-white">
+                                {ath.specialtyName}
+                              </h3>
+                              {ath.venueName && (
+                                <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 flex items-center gap-1">
+                                  <MapPin className="w-3 h-3 text-slate-400 shrink-0" />
+                                  <span>{ath.venueName}</span>
+                                </p>
+                              )}
+                            </div>
+
+                            <span className="px-2.5 py-1 bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-200 border border-amber-200 dark:border-amber-800 text-[10px] font-black rounded-xl shrink-0 flex items-center gap-1 shadow-2xs">
+                              <span>منصة التتويج</span>
+                            </span>
+                          </div>
+
+                          {/* Olympic 3D Podium Pedestal Display (2nd Left, 1st Center Elevated, 3rd Right) */}
+                          <div className="grid grid-cols-3 gap-1.5 sm:gap-3 items-end pt-1 pb-1">
+                            {[
+                              { rank: 2 as const, winner: ath.podium?.find(p => p.rank === 2) || ath.podium?.[1] || null },
+                              { rank: 1 as const, winner: ath.podium?.find(p => p.rank === 1) || ath.podium?.[0] || null },
+                              { rank: 3 as const, winner: ath.podium?.find(p => p.rank === 3) || ath.podium?.[2] || null }
+                            ].map(({ rank, winner }) => {
+                              const isGold = rank === 1;
+                              const isSilver = rank === 2;
+                              const isBronze = rank === 3;
+
+                              const medalBg = isGold
+                                ? 'from-[#ffea79] via-[#fbc02d] to-[#f59e0b] border-amber-300 text-[#713F12]'
+                                : isSilver
+                                ? 'from-slate-100 via-slate-200 to-slate-400 border-slate-200 text-slate-900'
+                                : 'from-amber-600 via-amber-700 to-amber-900 border-amber-500 text-amber-100';
+
+                              const stepHeight = isGold
+                                ? 'h-9 sm:h-16 bg-gradient-to-t from-amber-500 via-yellow-400 to-amber-300 text-slate-950 border-t-2 sm:border-t-4 border-yellow-100 shadow-md'
+                                : isSilver
+                                ? 'h-6 sm:h-12 bg-gradient-to-t from-slate-400 to-slate-200 dark:from-slate-700 dark:to-slate-500 text-slate-950 dark:text-white border-t-2 sm:border-t-4 border-slate-300 shadow-sm'
+                                : 'h-4 sm:h-8 bg-gradient-to-t from-amber-800 to-amber-600 dark:from-amber-950 dark:to-amber-800 text-amber-50 border-t-2 sm:border-t-4 border-amber-400 shadow-sm';
+
+                              return (
+                                <div key={rank} className={`flex flex-col items-center justify-end w-full min-w-0 ${isGold ? '-translate-y-1 sm:-translate-y-2 z-10' : 'z-0'}`}>
+                                  {/* Medal Badge / Photo */}
+                                  <div className="relative -mb-4 sm:-mb-8 z-10">
+                                    <div className={`w-16 h-16 sm:w-24 sm:h-24 rounded-full border-2 sm:border-3 overflow-hidden bg-gradient-to-b ${medalBg} shadow-md flex flex-col items-center justify-center relative shrink-0 select-none`}>
+                                      {(() => {
+                                        const matchedStud = students.find(s => 
+                                          (winner?.studentId && s.id === winner.studentId) ||
+                                          (winner?.fullName && s.fullName.trim().toLowerCase() === winner.fullName.trim().toLowerCase())
+                                        );
+                                        const pPhoto = winner?.photoUrl || matchedStud?.photoUrl;
+                                        if (pPhoto) {
+                                          return (
+                                            <>
+                                              <img 
+                                                src={pPhoto} 
+                                                alt={winner?.fullName || ''} 
+                                                className="absolute inset-0 w-full h-full object-cover z-10" 
+                                              />
+                                            </>
+                                          );
+                                        }
+                                        return (
+                                          <div className="w-full h-full bg-slate-100/20" />
+                                        );
+                                      })()}
+                                    </div>
+                                  </div>
+
+                                  {/* Podium Athlete Card */}
+                                  <div className={`w-full min-w-0 pt-3 sm:pt-5 pb-2 px-1 sm:px-2 rounded-xl border text-center flex flex-col items-center justify-between min-h-[115px] sm:min-h-[145px] shadow-2xs transition-all overflow-hidden ${
+                                    isGold
+                                      ? 'bg-amber-50/95 dark:bg-amber-950/40 border-amber-400 dark:border-amber-600 ring-2 ring-amber-400/20'
+                                      : isSilver
+                                      ? 'bg-slate-50 dark:bg-slate-800/90 border-slate-300 dark:border-slate-700'
+                                      : 'bg-orange-50/80 dark:bg-orange-950/30 border-orange-300 dark:border-orange-800'
+                                  }`}>
+                                    <div className={`px-1.5 py-0.5 rounded-full text-[8px] sm:text-[9.5px] font-black mb-1 shadow-2xs truncate max-w-full ${
+                                      isGold
+                                        ? 'bg-amber-400 text-slate-950'
+                                        : isSilver
+                                        ? 'bg-slate-300 dark:bg-slate-700 text-slate-900 dark:text-white'
+                                        : 'bg-amber-700 text-amber-50'
+                                    }`}>
+                                      {isGold ? '🥇 البطل الأوّل' : isSilver ? '🥈 وصيف البطل' : '🥉 المرتبة الثالثة'}
+                                    </div>
+
+                                    {winner ? (
+                                      <div className="w-full space-y-0.5 my-0.5">
+                                        <h5 className="font-black text-[10.5px] sm:text-xs text-slate-900 dark:text-white truncate leading-snug">
+                                          {winner.fullName}
+                                        </h5>
+                                        <p className="text-[8.5px] sm:text-[10px] text-slate-600 dark:text-slate-400 truncate font-bold">
+                                          {winner.schoolName}
+                                        </p>
+                                        <p className="text-[10px] sm:text-xs font-mono font-black text-emerald-700 dark:text-emerald-400">
+                                          {winner.performance}
+                                        </p>
+                                      </div>
+                                    ) : (
+                                      <div className="my-auto py-2">
+                                        <span className="text-[9px] text-slate-400 font-bold">غير محدد</span>
+                                      </div>
+                                    )}
+
+                                    {/* Pedestal Base */}
+                                    <div className={`w-full rounded-lg flex items-center justify-center font-black font-mono text-xs sm:text-sm mt-1 ${stepHeight}`}>
+                                      <span>{isGold ? '1' : isSilver ? '2' : '3'}</span>
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })()}
+
+              </div>
+            )}
+
             {/* TAB 2: TEAM MATCHES & STANDINGS */}
             {activePublicTab === 'MATCHES' && (
-              <div className="space-y-3">
+              <div className="space-y-4">
                 {filteredMatches.length === 0 ? (
                   <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-8 text-center space-y-3 shadow-xs transition-colors">
                     <Calendar className="w-12 h-12 text-slate-300 dark:text-slate-700 mx-auto" />
@@ -1992,54 +2633,86 @@ export const Login: React.FC = () => {
                 ) : (
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     {filteredMatches.map((m) => (
-                      <div key={m.id} className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-sm space-y-3 transition-colors">
+                      <div key={m.id} className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-sm hover:shadow-md space-y-3 transition-all">
                         
                         <div className="flex items-center justify-between text-[11px] font-bold text-slate-500 dark:text-slate-400 border-b border-slate-100 dark:border-slate-800 pb-2">
-                          <span className="flex items-center gap-1 text-emerald-700 dark:text-emerald-400">
+                          <span className="flex items-center gap-1.5 text-emerald-700 dark:text-emerald-400 font-black">
                             <span>{SPORTS_MAP[m.sportId]?.icon || '⚽'}</span>
                             <span>{m.sportName || 'مباراة رياضية'}</span>
                           </span>
-                          <span className="px-2 py-0.5 bg-slate-100 dark:bg-slate-800 rounded text-[10px]">
+                          <span className="px-2.5 py-0.5 bg-slate-100 dark:bg-slate-800 rounded-full text-[10px] font-bold text-slate-700 dark:text-slate-300">
                             {m.category || 'عامة'}
                           </span>
                         </div>
 
-                        {/* Teams & Scorecard */}
-                        <div className="flex items-center justify-between gap-2 py-1">
-                          <div className="flex-1 text-center space-y-1 min-w-0">
-                            <p className="text-xs font-black text-slate-900 dark:text-white truncate">
-                              {m.team1Name}
-                            </p>
-                            <p className="text-[10px] text-slate-500 dark:text-slate-400 truncate">
-                              {m.team1SchoolName || 'المؤسسة الأولى'}
-                            </p>
+                        {/* Teams Vertical Layout: School under School with score next to each school */}
+                        <div className="space-y-2 py-1">
+                          {/* School 1 Row */}
+                          <div className={`flex items-center justify-between p-2.5 rounded-xl border transition-colors ${
+                            m.status === 'Completed' && (m.team1Score ?? 0) > (m.team2Score ?? 0)
+                              ? 'bg-emerald-50/90 dark:bg-emerald-950/40 border-emerald-300 dark:border-emerald-800 shadow-2xs'
+                              : 'bg-slate-50 dark:bg-slate-800/60 border-slate-200 dark:border-slate-700'
+                          }`}>
+                            <div className="flex items-center gap-2.5 min-w-0">
+                              <span className="w-6 h-6 rounded-lg bg-emerald-600 text-white flex items-center justify-center text-[10px] font-black shrink-0 shadow-2xs">
+                                1
+                              </span>
+                              <div className="min-w-0">
+                                <p className="text-xs font-black text-slate-900 dark:text-white truncate">
+                                  {m.team1SchoolName || m.team1Name}
+                                </p>
+                                {m.team1SchoolName && m.team1Name !== m.team1SchoolName && (
+                                  <p className="text-[10px] text-slate-500 dark:text-slate-400 truncate">
+                                    {m.team1Name}
+                                  </p>
+                                )}
+                              </div>
+                            </div>
+
+                            <div className="font-mono font-black text-sm sm:text-base px-3 py-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl shrink-0 shadow-2xs text-slate-900 dark:text-white">
+                              {m.status === 'Completed' ? (m.team1Score ?? 0) : '-'}
+                            </div>
                           </div>
 
-                          <div className="px-3 py-1 bg-slate-900 dark:bg-slate-800 text-white rounded-xl text-center font-mono font-black text-sm shrink-0 shadow-xs">
-                            {m.status === 'COMPLETED' ? `${m.team1Score ?? 0} - ${m.team2Score ?? 0}` : 'VS'}
-                          </div>
+                          {/* School 2 Row */}
+                          <div className={`flex items-center justify-between p-2.5 rounded-xl border transition-colors ${
+                            m.status === 'Completed' && (m.team2Score ?? 0) > (m.team1Score ?? 0)
+                              ? 'bg-emerald-50/90 dark:bg-emerald-950/40 border-emerald-300 dark:border-emerald-800 shadow-2xs'
+                              : 'bg-slate-50 dark:bg-slate-800/60 border-slate-200 dark:border-slate-700'
+                          }`}>
+                            <div className="flex items-center gap-2.5 min-w-0">
+                              <span className="w-6 h-6 rounded-lg bg-indigo-600 text-white flex items-center justify-center text-[10px] font-black shrink-0 shadow-2xs">
+                                2
+                              </span>
+                              <div className="min-w-0">
+                                <p className="text-xs font-black text-slate-900 dark:text-white truncate">
+                                  {m.team2SchoolName || m.team2Name}
+                                </p>
+                                {m.team2SchoolName && m.team2Name !== m.team2SchoolName && (
+                                  <p className="text-[10px] text-slate-500 dark:text-slate-400 truncate">
+                                    {m.team2Name}
+                                  </p>
+                                )}
+                              </div>
+                            </div>
 
-                          <div className="flex-1 text-center space-y-1 min-w-0">
-                            <p className="text-xs font-black text-slate-900 dark:text-white truncate">
-                              {m.team2Name}
-                            </p>
-                            <p className="text-[10px] text-slate-500 dark:text-slate-400 truncate">
-                              {m.team2SchoolName || 'المؤسسة الثانية'}
-                            </p>
+                            <div className="font-mono font-black text-sm sm:text-base px-3 py-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl shrink-0 shadow-2xs text-slate-900 dark:text-white">
+                              {m.status === 'Completed' ? (m.team2Score ?? 0) : '-'}
+                            </div>
                           </div>
                         </div>
 
                         <div className="flex items-center justify-between text-[10px] text-slate-500 dark:text-slate-400 pt-2 border-t border-slate-100 dark:border-slate-800">
                           <span className="flex items-center gap-1">
-                            <MapPin className="w-3 h-3 text-slate-400" />
+                            <MapPin className="w-3 h-3 text-slate-400 shrink-0" />
                             <span>{m.venueName || 'الملعب الرياضي'}</span>
                           </span>
                           <span className={`px-2 py-0.5 rounded font-bold ${
-                            m.status === 'COMPLETED'
+                            m.status === 'Completed'
                               ? 'bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300'
                               : 'bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300'
                           }`}>
-                            {m.status === 'COMPLETED' ? 'مباراة منتهية ✅' : 'مباراة قادمة ⏳'}
+                            {m.status === 'Completed' ? 'مباراة منتهية ✅' : 'مباراة قادمة ⏳'}
                           </span>
                         </div>
 
@@ -2161,13 +2834,78 @@ export const Login: React.FC = () => {
         </div>
       )}
 
+      {/* DEMO DATA MODAL */}
+      <DemoDataModal
+        isOpen={isDemoDataModalOpen}
+        onClose={() => setIsDemoDataModalOpen(false)}
+        activeDirectorateId={activeDirectorate?.id || 'taourirt'}
+        activeDirectorateName={activeDirectorate?.name || 'تاوريرت'}
+        activeSeason="2026/2027"
+        onDataLoaded={loadAllData}
+      />
+
+      {/* ABOUT APPLICATION MODAL */}
+      {isAboutModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-200" dir="rtl">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 max-w-md w-full space-y-4 shadow-2xl animate-in zoom-in-95 duration-150 relative overflow-hidden text-right">
+            <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-emerald-500 via-teal-500 to-amber-500" />
+            
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+              <div className="flex items-center gap-2">
+                <ShieldCheck className="w-5 h-5 text-emerald-600" />
+                <h3 className="text-base font-black text-slate-900 dark:text-white">
+                  حول المنظومة الرقمية 2026
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsAboutModalOpen(false)}
+                className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-lg cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-3.5 text-xs text-slate-700 dark:text-slate-300 leading-relaxed font-bold">
+              <p className="text-sm font-black text-emerald-800 dark:text-emerald-400">
+                المنظومة الرقمية لتتبع نتائج البطولات المدرسية الاقليمية 2026
+              </p>
+              <p className="text-slate-500 dark:text-slate-400 font-semibold leading-relaxed">
+                تم تطوير هذه المنظومة بالكامل باللغة العربية لدعم وتدبير الأنشطة والبطولات المدرسية المغربية بالمديرية الإقليمية.
+              </p>
+              <p className="text-slate-600 dark:text-slate-300 font-medium">
+                تتيح المنصة الرقمية الموحدة تسجيل المشاركين والفرق، طباعة الصدريات الذكية مع الباركود والماسح الضوئي الرقمي، إدارة وتعيين الملاعب والحكام المعتمدين، ونشر التحديثات الفورية والنتائج الرسمية لجميع الرياضات المدرسية (ألعاب جماعية، عدو ريفي، ألعاب قوى، كرة طاولة...) بدقة وسرعة متناهية.
+              </p>
+              <div className="p-3 bg-slate-50 dark:bg-slate-800 rounded-2xl border border-slate-100 dark:border-slate-700 text-[11px] space-y-1 text-slate-500 dark:text-slate-400">
+                <p>• الإصدار: 1.3.4 (نسخة مستقرة)</p>
+                <p>• الفئة المستهدفة: أطر التربية البدنية، اللجان التقنية والجمهور الكريم</p>
+                <p>• المنصة متكاملة بنظام إشعارات الواتساب الذكية والعمل أوفلاين</p>
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setIsAboutModalOpen(false)}
+                className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-black rounded-xl text-xs cursor-pointer shadow-md shadow-emerald-600/20 text-center active:scale-98 transition-all"
+              >
+                حسناً، فهمت
+              </button>
+              <p className="text-[10px] text-center text-slate-400 dark:text-slate-500">
+                كل الحقوق محفوظة &copy; 2026
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* FOOTER */}
       <footer className="border-t border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 py-6 text-center text-xs text-slate-500 dark:text-slate-400 space-y-1 transition-colors">
         <p className="font-bold text-slate-700 dark:text-slate-300">
-          الفرع الإقليمي للجامعة الملكية المغربية للرياضة المدرسية، بوابة نتائج بطولة المديرية الإقليمية تاوريرت 2026
+          المنظومة الرقمية لتتبع نتائج البطولات المدرسية الاقليمية 2026
         </p>
-        <p className="text-[11px]">
-          تم التطوير بالكامل باللغة العربية لدعم وتدبير الأنشطة والبطولات المدرسية المغربية.
+        <p className="text-[11px] font-semibold">
+          كل الحقوق محفوظة &copy; 2026
         </p>
       </footer>
 

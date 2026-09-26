@@ -119,21 +119,21 @@ export const CreateVenueModal: React.FC<CreateVenueModalProps> = ({
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs" dir="rtl">
       <div className="bg-white rounded-2xl border border-slate-200 shadow-xl max-w-lg w-full overflow-hidden animate-in fade-in zoom-in-95 duration-150 max-h-[90vh] flex flex-col">
         {/* Header */}
-        <div className="flex items-center justify-between p-4 md:p-5 border-b border-slate-100 bg-slate-50/70 shrink-0">
+        <div className="flex items-center justify-between p-4 md:p-5 border-b border-slate-200 bg-gradient-to-r from-emerald-800 via-teal-900 to-slate-900 text-white shrink-0">
           <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-xl bg-blue-600 text-white flex items-center justify-center shadow-xs">
+            <div className="w-9 h-9 rounded-xl bg-white/15 border border-white/20 text-white flex items-center justify-center shadow-inner">
               <MapPin className="h-5 w-5" />
             </div>
             <div>
-              <h3 className="text-sm font-bold text-slate-800">
+              <h3 className="text-sm font-bold text-white">
                 {initialData ? 'تعديل مركز التباري / القاعة' : 'إضافة مركز تباري أو قاعة رياضية'}
               </h3>
-              <p className="text-[11px] text-slate-500 font-medium">تسجيل المنشآت والملاعب لاحتضان المنافسات الإقليمية</p>
+              <p className="text-[11px] text-emerald-100 font-medium">تسجيل المنشآت والملاعب لاحتضان المنافسات الإقليمية</p>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="p-1.5 text-slate-400 hover:text-slate-700 rounded-lg hover:bg-slate-200/60 transition-colors cursor-pointer animate-none"
+            className="p-1.5 text-white/80 hover:text-white rounded-lg hover:bg-white/10 transition-colors cursor-pointer"
           >
             <X className="h-5 w-5" />
           </button>
@@ -149,7 +149,7 @@ export const CreateVenueModal: React.FC<CreateVenueModalProps> = ({
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="مثال: القاعة المغطاة للرياضات بتاوريرت"
-              className="w-full text-xs rounded-lg border border-slate-200 px-3 py-2 text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-2xs"
             />
           </div>
 
@@ -159,7 +159,7 @@ export const CreateVenueModal: React.FC<CreateVenueModalProps> = ({
               <select
                 value={city}
                 onChange={(e) => setCity(e.target.value)}
-                className="w-full text-xs rounded-lg border border-slate-200 px-3 py-2 text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-2xs"
               >
                 <option value="تاوريرت">تاوريرت</option>
                 <option value="العيون سيدي ملوك">العيون سيدي ملوك</option>
@@ -177,7 +177,7 @@ export const CreateVenueModal: React.FC<CreateVenueModalProps> = ({
                 onChange={(e) => setCapacity(Number(e.target.value))}
                 placeholder="1000"
                 min="0"
-                className="w-full text-xs rounded-lg border border-slate-200 px-3 py-2 text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-2xs"
               />
             </div>
           </div>
@@ -190,13 +190,13 @@ export const CreateVenueModal: React.FC<CreateVenueModalProps> = ({
               value={address}
               onChange={(e) => setAddress(e.target.value)}
               placeholder="مثال: شارع الحسن الثاني، قرب المركب السوسيو رياضي"
-              className="w-full text-xs rounded-lg border border-slate-200 px-3 py-2 text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-2xs"
             />
           </div>
 
           {/* Section: Appoint Venue Head */}
           <div className="border-t border-slate-100 pt-3 space-y-3">
-            <div className="flex items-center gap-1.5 text-xs font-bold text-blue-800">
+            <div className="flex items-center gap-1.5 text-xs font-bold text-emerald-800">
               <UserCheck className="h-4 w-4" />
               <span>تعيين رئيس مركز التباري (مسؤول القاعة/الملعب)</span>
             </div>
@@ -207,7 +207,7 @@ export const CreateVenueModal: React.FC<CreateVenueModalProps> = ({
               <select
                 value={selectedTeacherId}
                 onChange={(e) => handleTeacherChange(e.target.value)}
-                className="w-full text-xs rounded-lg border border-slate-200 px-3 py-2 text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-2xs"
               >
                 <option value="">-- اختر أستاذاً لملء معلومات المسؤول تلقائياً --</option>
                 {teachers.map(t => (
@@ -227,7 +227,7 @@ export const CreateVenueModal: React.FC<CreateVenueModalProps> = ({
                   value={managerName}
                   onChange={(e) => setManagerName(e.target.value)}
                   placeholder="الاسم الكامل لرئيس المركز"
-                  className="w-full text-xs rounded-lg border border-slate-200 px-3 py-2 text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-2xs"
                 />
               </div>
 
@@ -238,7 +238,7 @@ export const CreateVenueModal: React.FC<CreateVenueModalProps> = ({
                   value={managerPhone}
                   onChange={(e) => setManagerPhone(e.target.value)}
                   placeholder="مثال: 0612345678"
-                  className="w-full text-xs rounded-lg border border-slate-200 px-3 py-2 text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono"
+                  className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 font-mono shadow-2xs"
                 />
               </div>
             </div>
@@ -250,7 +250,7 @@ export const CreateVenueModal: React.FC<CreateVenueModalProps> = ({
                 value={managerEmail}
                 onChange={(e) => setManagerEmail(e.target.value)}
                 placeholder="name@example.com"
-                className="w-full text-xs rounded-lg border border-slate-200 px-3 py-2 text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-2xs"
               />
             </div>
           </div>
@@ -262,7 +262,7 @@ export const CreateVenueModal: React.FC<CreateVenueModalProps> = ({
               onChange={(e) => setNotes(e.target.value)}
               placeholder="نوع الأرضية (باركيه / عشب اصطناعي)، التجهيزات المتوفرة، مستودعات الملابس..."
               rows={2}
-              className="w-full text-xs rounded-lg border border-slate-200 px-3 py-2 text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-2xs"
             />
           </div>
 
@@ -270,14 +270,14 @@ export const CreateVenueModal: React.FC<CreateVenueModalProps> = ({
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
+              className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer"
             >
               إلغاء
             </button>
             <button
               type="submit"
               disabled={isSubmitting}
-              className="px-5 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors shadow-xs disabled:bg-blue-300 cursor-pointer"
+              className="px-5 py-2.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 active:scale-95 rounded-xl transition-all shadow-md shadow-emerald-600/20 disabled:bg-slate-300 cursor-pointer"
             >
               {isSubmitting ? 'جاري الحفظ...' : initialData ? 'تحديث المركز' : 'إضافة مركز التباري'}
             </button>

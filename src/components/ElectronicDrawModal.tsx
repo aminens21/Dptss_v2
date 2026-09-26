@@ -451,14 +451,14 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
       <div className="bg-white border border-slate-200 rounded-3xl shadow-2xl max-w-5xl w-full max-h-[94vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200">
         
         {/* Modal Header */}
-        <div className="px-5 py-4 bg-slate-900 text-white flex items-center justify-between border-b border-slate-800 shrink-0">
+        <div className="px-5 py-4 bg-gradient-to-r from-emerald-800 via-teal-900 to-slate-900 text-white flex items-center justify-between border-b border-slate-800 shrink-0">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-amber-500 text-slate-950 flex items-center justify-center text-xl shadow-xs">
+            <div className="w-10 h-10 rounded-2xl bg-amber-400 text-slate-950 flex items-center justify-center text-xl shadow-xs font-black">
               <Shuffle className="w-5 h-5" />
             </div>
             <div>
               <h3 className="text-base font-black text-white">القرعة الإلكترونية وبرمجة المباريات</h3>
-              <p className="text-xs text-slate-400 mt-0.5">
+              <p className="text-xs text-emerald-100/90 mt-0.5 font-medium">
                 {currentUser?.role === 'SPORT_MANAGER' 
                   ? `خاص برئيس اللجنة / المسؤول الرياضي (${currentUser.fullName})` 
                   : 'توزيع المجموعات وتحديد مواعيد وأماكن إجراء المقابلات'}
@@ -468,7 +468,7 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
 
           <button
             onClick={onClose}
-            className="w-8 h-8 rounded-xl bg-white/10 hover:bg-white/20 text-slate-300 hover:text-white flex items-center justify-center transition-all cursor-pointer"
+            className="w-8 h-8 rounded-xl bg-white/10 hover:bg-white/20 text-slate-200 hover:text-white flex items-center justify-center transition-all cursor-pointer"
             title="إغلاق"
           >
             <X className="w-4 h-4" />
@@ -477,22 +477,22 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
 
         {/* Stepper Progress Bar */}
         <div className="bg-slate-100 px-6 py-2.5 border-b border-slate-200 flex items-center justify-between text-xs font-bold shrink-0">
-          <div className={`flex items-center gap-2 ${step >= 1 ? 'text-blue-700 font-black' : 'text-slate-400'}`}>
-            <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs ${step >= 1 ? 'bg-blue-600 text-white' : 'bg-slate-300 text-slate-600'}`}>1</span>
+          <div className={`flex items-center gap-2 ${step >= 1 ? 'text-emerald-800 font-black' : 'text-slate-400'}`}>
+            <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs ${step >= 1 ? 'bg-emerald-600 text-white' : 'bg-slate-300 text-slate-600'}`}>1</span>
             <span>اختيار نوع البطولة</span>
           </div>
 
           <div className="w-12 h-0.5 bg-slate-300" />
 
-          <div className={`flex items-center gap-2 ${step >= 2 ? 'text-blue-700 font-black' : 'text-slate-400'}`}>
-            <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs ${step >= 2 ? 'bg-blue-600 text-white' : 'bg-slate-300 text-slate-600'}`}>2</span>
+          <div className={`flex items-center gap-2 ${step >= 2 ? 'text-emerald-800 font-black' : 'text-slate-400'}`}>
+            <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs ${step >= 2 ? 'bg-emerald-600 text-white' : 'bg-slate-300 text-slate-600'}`}>2</span>
             <span>المؤسسات ونظام القرعة</span>
           </div>
 
           <div className="w-12 h-0.5 bg-slate-300" />
 
-          <div className={`flex items-center gap-2 ${step >= 3 ? 'text-blue-700 font-black' : 'text-slate-400'}`}>
-            <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs ${step >= 3 ? 'bg-blue-600 text-white' : 'bg-slate-300 text-slate-600'}`}>3</span>
+          <div className={`flex items-center gap-2 ${step >= 3 ? 'text-emerald-800 font-black' : 'text-slate-400'}`}>
+            <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs ${step >= 3 ? 'bg-emerald-600 text-white' : 'bg-slate-300 text-slate-600'}`}>3</span>
             <span>نتائج القرعة وتحديد المواعيد والأماكن</span>
           </div>
         </div>

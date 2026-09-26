@@ -282,8 +282,16 @@ export const Tournaments: React.FC = () => {
     });
 
     window.addEventListener('directorateChanged', handleDirChange);
+    window.addEventListener('tournamentDataChanged', handleDirChange);
+    window.addEventListener('matchesDataChanged', handleDirChange);
+    window.addEventListener('sportsConfigChanged', handleDirChange);
+    window.addEventListener('resultsChanged', handleDirChange);
     return () => {
       window.removeEventListener('directorateChanged', handleDirChange);
+      window.removeEventListener('tournamentDataChanged', handleDirChange);
+      window.removeEventListener('matchesDataChanged', handleDirChange);
+      window.removeEventListener('sportsConfigChanged', handleDirChange);
+      window.removeEventListener('resultsChanged', handleDirChange);
       if (unsubscribeTournaments) unsubscribeTournaments();
       if (unsubscribeMatches) unsubscribeMatches();
       if (unsubscribeSchools) unsubscribeSchools();
@@ -502,7 +510,9 @@ export const Tournaments: React.FC = () => {
     try {
       await DataService.deleteTournament(tournamentToDelete.id);
       setTournaments(prev => prev.filter(t => t.id !== tournamentToDelete.id));
-      toast.success('تم حذف البطولة بنجاح');
+      const updatedSports = await DataService.getSportsConfig();
+      setSportsConfig(updatedSports);
+      toast.success('تم حذف البطولة وتحييد نتائجها بنجاح');
       setTournamentToDelete(null);
     } catch (e) {
       toast.error('تعذر حذف البطولة');
@@ -969,6 +979,17 @@ export const Tournaments: React.FC = () => {
                   🥇 البطولة الوطنية
                 </button>
               )}
+
+              {/* Demo Data Generator Button */}
+              <button
+                type="button"
+                onClick={() => setIsDemoDataModalOpen(true)}
+                className="px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 text-white shadow-xs flex items-center gap-1.5"
+                title="توليد بيانات تجريبية وبطولات ونتائج للمنصة"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-emerald-200" />
+                <span>توليد بيانات ونتائج افتراضية</span>
+              </button>
             </div>
           </div>
 
@@ -1330,37 +1351,37 @@ export const Tournaments: React.FC = () => {
                           </div>
                         </div>
 
-                        <span className="inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-bold bg-slate-200 text-slate-600 border border-slate-300">
-                          <Lock className="h-3 w-3 text-slate-500" />
+                        <span className="inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-bold bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-600">
+                          <Lock className="h-3 w-3 text-slate-600 dark:text-slate-400" />
                           غير مبرمجة بعد
                         </span>
                       </div>
 
-                      <h3 className="text-sm font-bold text-slate-700 leading-snug">
+                      <h3 className="text-sm font-black text-slate-900 dark:text-slate-100 leading-snug">
                         البطولة الإقليمية لـ {sport.name}
                       </h3>
 
-                      <p className="text-xs text-slate-500 leading-relaxed bg-white/60 p-2.5 rounded-xl border border-slate-200/60">
+                      <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed bg-white/60 dark:bg-slate-950/40 p-2.5 rounded-xl border border-slate-200/60 dark:border-slate-700/60">
                         في انتظار تحديد الفئات العمرية وضوابط المشاركة من طرف المسير المركزي أو رئيس اللجنة التقنية المكلف.
                       </p>
 
                       {/* Technical Committee Head Info */}
-                      <div className="bg-slate-200/50 p-2.5 rounded-xl border border-slate-300/50 flex items-center justify-between text-xs">
-                        <div className="flex items-center gap-1.5 text-slate-600 font-medium">
-                          <ShieldCheck className="h-4 w-4 text-slate-500" />
+                      <div className="bg-slate-200/50 dark:bg-slate-800 p-2.5 rounded-xl border border-slate-300/50 dark:border-slate-700 flex items-center justify-between text-xs">
+                        <div className="flex items-center gap-1.5 text-slate-700 dark:text-slate-300 font-medium">
+                          <ShieldCheck className="h-4 w-4 text-slate-500 dark:text-slate-400" />
                           <span>رئيس اللجنة التقنية:</span>
                         </div>
-                        <span className="font-bold text-slate-700">
+                        <span className="font-bold text-slate-900 dark:text-slate-100">
                           {techHead ? techHead.fullName : 'لم يتم التعيين بعد'}
                         </span>
                       </div>
                     </div>
 
-                    <div className="p-3 bg-slate-200/60 border-t border-slate-300/60 flex items-center justify-between gap-2">
+                    <div className="p-3 bg-slate-200/60 dark:bg-slate-800 border-t border-slate-300/60 dark:border-slate-700 flex items-center justify-between gap-2">
                       {canManageThis ? (
                         <button
                           onClick={() => handleOpenProgramModal(sport.id)}
-                          className="w-full py-2 px-3 bg-slate-700 hover:bg-slate-800 text-white font-bold text-xs rounded-xl flex items-center justify-center gap-2 transition-all shadow-xs cursor-pointer"
+                          className="w-full py-2 px-3 bg-slate-700 dark:bg-slate-600 hover:bg-slate-800 text-white font-black text-xs rounded-xl flex items-center justify-center gap-2 transition-all shadow-xs cursor-pointer"
                         >
                           <Settings className="h-4 w-4" />
                           <span>إعداد وبرمجة البطولة الآن</span>
@@ -1368,13 +1389,13 @@ export const Tournaments: React.FC = () => {
                       ) : (
                         <button
                           disabled
-                          className="w-full py-2 px-3 bg-slate-300/80 text-slate-500 font-bold text-xs rounded-xl flex items-center justify-center gap-2 cursor-not-allowed"
+                          className="w-full py-2 px-3 bg-slate-300/80 dark:bg-slate-700 text-slate-600 dark:text-slate-400 font-bold text-xs rounded-xl flex items-center justify-center gap-2 cursor-not-allowed"
                         >
                           <Lock className="h-3.5 w-3.5" />
                           <span>في طور الإعداد (غير مبرمجة)</span>
                         </button>
                       )}
-                    </div>
+                  </div>
                   </div>
                 );
               }
@@ -1391,47 +1412,48 @@ export const Tournaments: React.FC = () => {
                   key={sport.id}
                   className={`flex flex-col rounded-2xl border shadow-3xs overflow-hidden transition-all hover:shadow-md ${
                     isClub
-                      ? 'bg-amber-50/90 border-amber-300 hover:border-amber-400'
-                      : 'bg-white border-slate-200 hover:border-blue-300'
+                      ? 'bg-amber-50/90 dark:bg-amber-950/40 border-amber-300 dark:border-amber-800 hover:border-amber-400'
+                      : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 hover:border-blue-300 dark:hover:border-blue-700'
                   } ${
                     isManagerSpecialty
                       ? 'ring-2 ring-blue-500/20'
                       : ''
                   }`}
                 >
+
                   <div className="p-4 md:p-5 flex-1 space-y-3">
                     <div className="flex items-start justify-between gap-2">
                       <div className="flex items-center gap-2.5">
                         <div className={`w-10 h-10 rounded-2xl text-xl flex items-center justify-center border shadow-3xs ${
-                          isClub ? 'bg-amber-100/80 border-amber-300' : 'bg-blue-50 border-blue-100'
+                          isClub ? 'bg-amber-100/80 dark:bg-amber-900/60 border-amber-300 dark:border-amber-700' : 'bg-blue-50 dark:bg-blue-950/60 border-blue-100 dark:border-blue-900'
                         }`}>
                           {sport.icon || '🏆'}
                         </div>
                         <div>
                           <div className="flex items-center gap-1.5 flex-wrap">
-                            <span className="text-[10px] font-bold text-blue-900 uppercase tracking-wider">
+                            <span className="text-[10px] font-bold text-blue-900 dark:text-blue-200 uppercase tracking-wider">
                               {sport.name}
                             </span>
                             {hasBothClasses ? (
                               <div className="flex items-center gap-1 flex-wrap">
-                                <span className="text-[9px] font-extrabold bg-amber-100 text-amber-950 px-1.5 py-0.2 rounded border border-amber-300 shadow-3xs">
+                                <span className="text-[9px] font-extrabold bg-amber-100 dark:bg-amber-900 text-amber-950 dark:text-amber-200 px-1.5 py-0.2 rounded border border-amber-300 dark:border-amber-700 shadow-3xs">
                                   🟡 للمنتمين للأندية
                                 </span>
-                                <span className="text-[9px] font-extrabold bg-slate-100 text-slate-800 px-1.5 py-0.2 rounded border border-slate-300 shadow-3xs">
+                                <span className="text-[9px] font-extrabold bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-300 px-1.5 py-0.2 rounded border border-slate-300 dark:border-slate-700 shadow-3xs">
                                   ⚪ لا منتمين
                                 </span>
                               </div>
                             ) : isClub ? (
-                              <span className="text-[9px] font-extrabold bg-amber-200 text-amber-950 px-1.5 py-0.2 rounded border border-amber-400 shadow-3xs">
+                              <span className="text-[9px] font-extrabold bg-amber-200 dark:bg-amber-800 text-amber-950 dark:text-amber-100 px-1.5 py-0.2 rounded border border-amber-400 dark:border-amber-700 shadow-3xs">
                                 🟡 للمنتمين للأندية
                               </span>
                             ) : (
-                              <span className="text-[9px] font-extrabold bg-slate-100 text-slate-800 px-1.5 py-0.2 rounded border border-slate-300 shadow-3xs">
+                              <span className="text-[9px] font-extrabold bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-300 px-1.5 py-0.2 rounded border border-slate-300 dark:border-slate-700 shadow-3xs">
                                 ⚪ لا منتمين
                               </span>
                             )}
                             {isManagerSpecialty && (
-                              <span className="inline-flex items-center gap-0.5 text-[9px] bg-amber-50 text-amber-800 font-bold px-1.5 py-0.2 rounded border border-amber-200">
+                              <span className="inline-flex items-center gap-0.5 text-[9px] bg-amber-50 dark:bg-amber-950 text-amber-800 dark:text-amber-300 font-bold px-1.5 py-0.2 rounded border border-amber-200 dark:border-amber-800">
                                 <Star className="h-2.5 w-2.5 fill-amber-500 text-amber-500" />
                                 تخصصك
                               </span>

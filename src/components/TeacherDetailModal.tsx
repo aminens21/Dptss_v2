@@ -75,7 +75,7 @@ export const TeacherDetailModal: React.FC<TeacherDetailModalProps> = ({
       <div className="bg-white rounded-3xl border border-slate-200 shadow-2xl max-w-2xl w-full overflow-hidden animate-in fade-in zoom-in-95 duration-150 my-auto">
         
         {/* Modal Header */}
-        <div className="bg-gradient-to-r from-blue-900 via-indigo-900 to-slate-900 text-white p-5 md:p-6 flex items-start justify-between gap-4">
+        <div className="bg-gradient-to-r from-emerald-800 via-teal-900 to-slate-900 text-white p-5 md:p-6 flex items-start justify-between gap-4">
           <div className="flex items-center gap-4">
             <div className="w-16 h-16 rounded-2xl bg-white/10 border border-white/20 text-white flex items-center justify-center text-2xl font-black shrink-0 overflow-hidden shadow-inner">
               {teacher.photoUrl ? (
@@ -91,7 +91,7 @@ export const TeacherDetailModal: React.FC<TeacherDetailModalProps> = ({
                   {getCadreLabel(teacher.teachingCadre).text}
                 </span>
 
-                <span className="text-[10px] font-extrabold px-2.5 py-0.5 rounded-full bg-blue-500/30 text-blue-200 border border-blue-400/30">
+                <span className="text-[10px] font-extrabold px-2.5 py-0.5 rounded-full bg-emerald-500/30 text-emerald-200 border border-emerald-400/30">
                   {teacher.isSuperAdmin
                     ? 'المسؤول المركزي'
                     : teacher.role === 'CENTRAL_ADMIN'
@@ -118,7 +118,7 @@ export const TeacherDetailModal: React.FC<TeacherDetailModalProps> = ({
               <h2 className="text-lg md:text-xl font-extrabold text-white mt-1.5 leading-tight">
                 {teacher.fullName}
               </h2>
-              <p className="text-xs text-slate-300 font-medium mt-0.5">
+              <p className="text-xs text-emerald-100 font-medium mt-0.5">
                 {teacher.workLocation ? `مؤطر أستاذ بـ: ${teacher.workLocation}` : 'أستاذ بالمديرية الإقليمية بتاوريرت'}
               </p>
             </div>

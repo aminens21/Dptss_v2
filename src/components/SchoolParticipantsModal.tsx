@@ -430,7 +430,7 @@ export const SchoolParticipantsModal: React.FC<SchoolParticipantsModalProps> = (
       <div className="fixed inset-0 z-50 overflow-y-auto p-1.5 sm:p-4 flex min-h-full items-center justify-center bg-slate-900/60 backdrop-blur-xs overscroll-contain" dir="rtl">
         <div className="relative w-full max-w-4xl bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden my-auto max-h-[94dvh] flex flex-col animate-in fade-in zoom-in-95 duration-150">
           {/* Header */}
-          <div className="bg-gradient-to-r from-blue-700 via-blue-800 to-indigo-900 text-white p-4 sm:p-5 relative shrink-0">
+          <div className="bg-gradient-to-r from-emerald-800 via-teal-900 to-slate-900 text-white p-4 sm:p-5 relative shrink-0">
             <button
               onClick={onClose}
               className="absolute top-3.5 left-3.5 p-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-white transition-colors cursor-pointer"
@@ -446,7 +446,7 @@ export const SchoolParticipantsModal: React.FC<SchoolParticipantsModalProps> = (
                 </div>
                 <div>
                   <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-[10px] sm:text-[11px] bg-blue-500/40 text-blue-100 font-bold px-2.5 py-0.5 rounded-full border border-blue-300/30">
+                    <span className="text-[10px] sm:text-[11px] bg-emerald-500/30 text-emerald-200 font-bold px-2.5 py-0.5 rounded-full border border-emerald-400/30">
                       {sportInfo ? `بطولة ${sportInfo.name}` : 'جميع البطولات والرياضات'}
                     </span>
                     <span className="text-[10px] sm:text-[11px] bg-white/20 text-white font-medium px-2 py-0.5 rounded-full">
@@ -456,21 +456,21 @@ export const SchoolParticipantsModal: React.FC<SchoolParticipantsModalProps> = (
                   <h2 className="text-base sm:text-xl font-black mt-1 text-white leading-tight">
                     {school.name} - ملف المشاركات والفرق
                   </h2>
-                  <div className="flex items-center gap-2 sm:gap-3 text-[11px] sm:text-xs text-blue-100/90 mt-1 flex-wrap font-medium">
+                  <div className="flex items-center gap-2 sm:gap-3 text-[11px] sm:text-xs text-emerald-100 font-medium mt-1 flex-wrap">
                     <span className="flex items-center gap-1">
-                      <MapPin className="h-3.5 w-3.5 text-blue-200 shrink-0" />
+                      <MapPin className="h-3.5 w-3.5 text-emerald-300 shrink-0" />
                       {school.commune}
                     </span>
                     <span>•</span>
                     <span className="flex items-center gap-1">
-                      <User className="h-3.5 w-3.5 text-blue-200 shrink-0" />
+                      <User className="h-3.5 w-3.5 text-emerald-300 shrink-0" />
                       المؤطر: {school.teacherName || school.coordinatorName || '—'}
                     </span>
                     {school.phone && (
                       <>
                         <span>•</span>
                         <span className="flex items-center gap-1 font-mono" dir="ltr">
-                          <Phone className="h-3 w-3 text-blue-200 shrink-0" />
+                          <Phone className="h-3 w-3 text-emerald-300 shrink-0" />
                           {school.phone}
                         </span>
                       </>

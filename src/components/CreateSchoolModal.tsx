@@ -88,16 +88,16 @@ export const CreateSchoolModal: React.FC<CreateSchoolModalProps> = ({
       <div className="relative w-full max-w-lg bg-white rounded-2xl border border-slate-200 shadow-2xl overflow-hidden my-auto max-h-[92dvh] flex flex-col animate-in fade-in zoom-in-95 duration-150">
         
         {/* Modal Header (Fixed at top) */}
-        <div className="flex items-center justify-between p-4 md:p-5 border-b border-slate-100 bg-slate-50/80 shrink-0">
+        <div className="flex items-center justify-between p-4 md:p-5 border-b border-slate-200 bg-gradient-to-r from-emerald-800 via-teal-900 to-slate-900 text-white shrink-0">
           <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-xl bg-blue-600 text-white flex items-center justify-center shadow-xs shrink-0">
+            <div className="w-9 h-9 rounded-xl bg-white/15 border border-white/20 text-white flex items-center justify-center shadow-inner shrink-0">
               <SchoolIcon className="h-5 w-5" />
             </div>
             <div>
-              <h3 className="text-sm sm:text-base font-bold text-slate-800">
+              <h3 className="text-sm sm:text-base font-bold text-white">
                 {initialData ? 'تعديل بيانات المؤسسة التعليمية' : 'إضافة مؤسسة تعليمية جديدة'}
               </h3>
-              <p className="text-[11px] text-slate-500 font-medium">
+              <p className="text-[11px] text-emerald-100 font-medium">
                 {activeDir?.name ? `تسجيل المؤسسة بـ ${activeDir.name}` : 'تسجيل المؤسسة وأرقام التواصل'}
               </p>
             </div>
@@ -105,7 +105,7 @@ export const CreateSchoolModal: React.FC<CreateSchoolModalProps> = ({
           <button
             type="button"
             onClick={onClose}
-            className="p-1.5 text-slate-400 hover:text-slate-700 rounded-lg hover:bg-slate-200/60 transition-colors cursor-pointer"
+            className="p-1.5 text-white/80 hover:text-white rounded-lg hover:bg-white/10 transition-colors cursor-pointer"
             aria-label="إغلاق"
           >
             <X className="h-5 w-5" />
@@ -114,7 +114,7 @@ export const CreateSchoolModal: React.FC<CreateSchoolModalProps> = ({
 
         {/* Scrollable Form Body */}
         <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-4 md:p-6 space-y-4 overscroll-contain">
-          <div className="p-3 bg-blue-50/80 border border-blue-100 rounded-xl text-[11px] text-blue-900 leading-relaxed">
+          <div className="p-3 bg-emerald-50/80 border border-emerald-200 rounded-xl text-[11px] text-emerald-950 leading-relaxed">
             💡 <strong>تنبيه إداري:</strong> المؤسسة المضافة ستظهر تلقائياً في قائمة الاختيار للأساتذة عند فتح حساب أو تحديث بياناتهم حسب السلك، مما يضمن توحيد وتفادي تكرار أسماء المؤسسات.
           </div>
 
@@ -126,7 +126,7 @@ export const CreateSchoolModal: React.FC<CreateSchoolModalProps> = ({
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="مثال: ثانوية الفتح التأهيلية"
-              className="w-full text-sm sm:text-xs rounded-lg border border-slate-200 px-3 py-2 text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+              className="w-full text-sm sm:text-xs rounded-xl border border-slate-200 px-3 py-2 text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-white shadow-2xs"
             />
           </div>
 
@@ -136,7 +136,7 @@ export const CreateSchoolModal: React.FC<CreateSchoolModalProps> = ({
               <select
                 value={type}
                 onChange={(e) => setType(e.target.value)}
-                className="w-full text-sm sm:text-xs rounded-lg border border-slate-200 px-3 py-2 text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full text-sm sm:text-xs rounded-xl border border-slate-200 px-3 py-2 text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-2xs"
               >
                 <option value="تأهيلي">ثانوي تأهيلي</option>
                 <option value="إعدادي">ثانوي إعدادي</option>
@@ -149,7 +149,7 @@ export const CreateSchoolModal: React.FC<CreateSchoolModalProps> = ({
               <select
                 value={commune}
                 onChange={(e) => setCommune(e.target.value)}
-                className="w-full text-sm sm:text-xs rounded-lg border border-slate-200 px-3 py-2 text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full text-sm sm:text-xs rounded-xl border border-slate-200 px-3 py-2 text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-2xs"
               >
                 <option value="تاوريرت المركز">تاوريرت المركز</option>
                 <option value="العيون سيدي ملوك">العيون سيدي ملوك</option>
@@ -176,7 +176,7 @@ export const CreateSchoolModal: React.FC<CreateSchoolModalProps> = ({
                 value={teacherName}
                 onChange={(e) => setTeacherName(e.target.value)}
                 placeholder="مثال: ذ. عبد الرحيم بلقاسم"
-                className="w-full text-sm sm:text-xs rounded-lg border border-slate-200 px-3 py-2 text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                className="w-full text-sm sm:text-xs rounded-xl border border-slate-200 px-3 py-2 text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-white shadow-2xs"
               />
             </div>
 
@@ -188,7 +188,7 @@ export const CreateSchoolModal: React.FC<CreateSchoolModalProps> = ({
                   value={phone}
                   onChange={(e) => setPhone(e.target.value)}
                   placeholder="06XXXXXXXX"
-                  className="w-full text-sm sm:text-xs rounded-lg border border-slate-200 px-3 py-2 text-slate-800 font-mono focus:outline-none focus:ring-2 focus:ring-blue-500 text-left pl-8 bg-white"
+                  className="w-full text-sm sm:text-xs rounded-xl border border-slate-200 px-3 py-2 text-slate-800 font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500 text-left pl-8 bg-white shadow-2xs"
                   dir="ltr"
                 />
                 <Phone className="h-3.5 w-3.5 text-slate-400 absolute left-2.5 top-2.5" />
@@ -236,12 +236,12 @@ export const CreateSchoolModal: React.FC<CreateSchoolModalProps> = ({
           </div>
 
           {/* School Access PIN Code (رمز الأمان السري للمؤسسة) */}
-          <div className="bg-blue-50/50 rounded-xl p-3.5 border border-blue-200/60 space-y-2">
+          <div className="bg-emerald-50/50 rounded-2xl p-3.5 border border-emerald-200/60 space-y-2">
             <div className="flex items-center gap-1.5">
-              <KeyRound className="h-4 w-4 text-blue-600 shrink-0" />
-              <label className="text-xs font-bold text-blue-950">رمز أمان المؤسسة (Access Code / PIN)</label>
+              <KeyRound className="h-4 w-4 text-emerald-600 shrink-0" />
+              <label className="text-xs font-bold text-emerald-950">رمز أمان المؤسسة (Access Code / PIN)</label>
             </div>
-            <p className="text-[10px] text-blue-800 leading-relaxed">
+            <p className="text-[10px] text-emerald-800 leading-relaxed">
               رمز سري مكون من 6 أحرف وأرقام يمنح لأساتذة المؤسسة لربط حساباتهم بالمؤسسة لضمان أمان معطياتها وتفادي عبث المتطفلين. (اتركه فارغاً للتوليد التلقائي).
             </p>
             <div className="relative">
@@ -251,7 +251,7 @@ export const CreateSchoolModal: React.FC<CreateSchoolModalProps> = ({
                 value={accessCode}
                 onChange={(e) => setAccessCode(e.target.value.replace(/[^a-zA-Z0-9]/g, ''))}
                 placeholder="6 أحرف وأرقام سرية (مثال: 589412)"
-                className="w-full text-center tracking-[0.3em] text-sm sm:text-xs rounded-lg border border-blue-300 bg-white px-3 py-2.5 text-blue-950 font-mono font-black focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full text-center tracking-[0.3em] text-sm sm:text-xs rounded-xl border border-emerald-300 bg-white px-3 py-2.5 text-emerald-950 font-mono font-black focus:outline-none focus:ring-2 focus:ring-emerald-500"
               />
             </div>
           </div>
@@ -261,14 +261,14 @@ export const CreateSchoolModal: React.FC<CreateSchoolModalProps> = ({
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
+              className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer"
             >
               إلغاء
             </button>
             <button
               type="submit"
               disabled={isSubmitting}
-              className="px-5 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors shadow-xs disabled:bg-blue-300 cursor-pointer"
+              className="px-5 py-2.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 active:scale-95 rounded-xl transition-all shadow-md shadow-emerald-600/20 disabled:bg-slate-300 cursor-pointer"
             >
               {isSubmitting ? 'جاري الحفظ...' : initialData ? 'تحديث البيانات' : 'إضافة المؤسسة'}
             </button>

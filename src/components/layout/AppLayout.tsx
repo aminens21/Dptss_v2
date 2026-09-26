@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
+import { useTheme } from '../../contexts/ThemeContext';
 import { auth } from '../../firebase/config';
 import { signOut } from 'firebase/auth';
 import {
@@ -38,7 +39,9 @@ import {
   Wifi,
   Award,
   Wrench,
-  Boxes
+  Boxes,
+  Sun,
+  Moon
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import toast from 'react-hot-toast';
@@ -53,6 +56,7 @@ import { db } from '../../firebase/config';
 
 export const AppLayout: React.FC = () => {
   const { currentUser, userProfile, logout, isDemo, openProfileModal, updateProfileState } = useAuth();
+  const { isDarkMode, toggleDarkMode } = useTheme();
   const navigate = useNavigate();
   const location = useLocation();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -69,6 +73,7 @@ export const AppLayout: React.FC = () => {
   const [pendingDirectorate, setPendingDirectorate] = useState<Directorate | null>(null);
   const [isSyncingData, setIsSyncingData] = useState(false);
   const directorateMenuRef = useRef<HTMLDivElement>(null);
+  const [isAboutModalOpen, setIsAboutModalOpen] = useState(false);
 
   // School verification for teachers
   const [schoolsList, setSchoolsList] = useState<School[]>([]);
@@ -447,10 +452,10 @@ export const AppLayout: React.FC = () => {
   if (isTeacherBlocked) {
     return (
       <div className="flex min-h-screen w-full items-center justify-center bg-slate-100/60 p-4 sm:p-6 select-none" dir="rtl" style={{ fontFamily: "'Cairo', 'Tajawal', sans-serif" }}>
-        <div className="w-full max-w-md bg-white border border-slate-200/80 rounded-2xl shadow-xl hover:shadow-2xl transition-all duration-300 p-6 sm:p-8 space-y-6 text-center animate-in fade-in zoom-in-95 duration-200 relative overflow-hidden">
+        <div className="w-full max-w-md bg-white border border-slate-200/80 rounded-3xl shadow-xl hover:shadow-2xl transition-all duration-300 p-6 sm:p-8 space-y-6 text-center animate-in fade-in zoom-in-95 duration-200 relative overflow-hidden">
           
           {/* Top Decorative bar */}
-          <div className="absolute top-0 left-0 right-0 h-1.5 bg-linear-to-r from-blue-500 via-sky-500 to-emerald-500" />
+          <div className="absolute top-0 left-0 right-0 h-1.5 bg-linear-to-r from-emerald-500 via-teal-500 to-amber-500" />
 
           {/* Logo and Icon Header */}
           <div className="flex flex-col items-center gap-2 pt-2">
@@ -462,15 +467,15 @@ export const AppLayout: React.FC = () => {
           </div>
 
           {/* Welcome User info - Digital Badge style */}
-          <div className="bg-slate-50 border border-slate-200/60 rounded-xl p-4 text-right space-y-2.5 shadow-2xs">
+          <div className="bg-slate-50 border border-slate-200/60 rounded-2xl p-4 text-right space-y-2.5 shadow-2xs">
             <div className="text-xs font-bold text-slate-800 flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <span className="p-1 bg-blue-100 text-blue-700 rounded-md">
+                <span className="p-1 bg-emerald-100 text-emerald-700 rounded-md">
                   <UserIcon className="h-3.5 w-3.5" />
                 </span>
                 <span className="text-slate-600">الأستاذ(ة):</span>
               </div>
-              <span className="text-blue-700 font-black text-sm">{userProfile?.fullName}</span>
+              <span className="text-emerald-800 font-black text-sm">{userProfile?.fullName}</span>
             </div>
             
             <div className="text-xs font-bold text-slate-800 flex items-center justify-between leading-relaxed">
@@ -480,12 +485,12 @@ export const AppLayout: React.FC = () => {
                 </span>
                 <span className="text-slate-600">مؤسسة العمل:</span>
               </div>
-              <span className="text-emerald-800 font-black bg-emerald-50 border border-emerald-200/80 px-2.5 py-0.5 rounded text-[11px]">{userProfile?.workLocation || 'غير محددة'}</span>
+              <span className="text-emerald-800 font-black bg-emerald-50 border border-emerald-200/80 px-2.5 py-0.5 rounded-lg text-[11px]">{userProfile?.workLocation || 'غير محددة'}</span>
             </div>
           </div>
 
           {/* Description */}
-          <div className="p-3.5 bg-amber-50/70 border border-amber-100 rounded-xl text-right">
+          <div className="p-3.5 bg-amber-50/70 border border-amber-100 rounded-2xl text-right">
             <p className="text-[11px] text-slate-700 leading-relaxed font-bold">
               تأكيد انتسابك لهذه المؤسسة يحمي معطياتها ويضمن عدم تداخل حسابات الأستاذة بالمنصة.
               <span className="block mt-1.5 text-[10px] text-amber-700 font-black flex items-center gap-1">
@@ -506,7 +511,7 @@ export const AppLayout: React.FC = () => {
                   value={schoolAccessInput}
                   onChange={(e) => setSchoolAccessInput(e.target.value.replace(/[^a-zA-Z0-9]/g, ''))}
                   placeholder="0 0 0 0 0 0"
-                  className="w-full text-center tracking-[0.5em] font-mono text-base sm:text-lg px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all font-black text-blue-950 shadow-2xs"
+                  className="w-full text-center tracking-[0.5em] font-mono text-base sm:text-lg px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-all font-black text-emerald-950 shadow-2xs"
                 />
               </div>
             </div>
@@ -515,7 +520,7 @@ export const AppLayout: React.FC = () => {
               <button
                 type="submit"
                 disabled={isVerifyingCode || schoolAccessInput.length < 6}
-                className="flex-1 bg-blue-600 hover:bg-blue-700 text-white rounded-xl py-3 text-xs font-black transition-all disabled:opacity-50 disabled:pointer-events-none flex items-center justify-center gap-2 shadow-md shadow-blue-500/10 cursor-pointer active:scale-98"
+                className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl py-3 text-xs font-black transition-all disabled:opacity-50 disabled:pointer-events-none flex items-center justify-center gap-2 shadow-md shadow-emerald-500/10 cursor-pointer active:scale-98"
               >
                 {isVerifyingCode ? (
                   <>
@@ -549,23 +554,23 @@ export const AppLayout: React.FC = () => {
 
   return (
     <div className="flex h-screen w-full bg-[#f8fafc] dark:bg-[#0b0f1a] text-[#1e293b] dark:text-slate-200 transition-colors duration-300" dir="rtl">
-      {/* Sidebar for Desktop - High Density Dark Navy with Collapse/Expand feature */}
+      {/* Sidebar for Desktop - Coordinated Day/Night mode styling */}
       <aside
         className={cn(
-          'hidden md:flex md:flex-col bg-[#0f172a] text-white border-l border-slate-700/80 shadow-lg select-none transition-all duration-300 relative z-20',
+          'hidden md:flex md:flex-col bg-white dark:bg-[#0f172a] text-slate-800 dark:text-white border-l border-slate-200 dark:border-slate-700/80 shadow-sm dark:shadow-lg select-none transition-all duration-300 relative z-20',
           isSidebarCollapsed ? 'w-18' : 'w-64'
         )}
       >
         {/* Brand Header */}
-        <div className="p-3.5 border-b border-slate-700/80 bg-slate-900/40 flex items-center justify-between">
+        <div className="p-3.5 border-b border-slate-200 dark:border-slate-700/80 bg-slate-50/80 dark:bg-slate-900/40 flex items-center justify-between">
           <div className="flex items-center gap-2.5 overflow-hidden">
             <AppLogo size={isSidebarCollapsed ? 36 : 48} />
             {!isSidebarCollapsed && (
               <div className="truncate">
-                <h1 className="text-xs font-bold leading-tight text-white truncate">
+                <h1 className="text-xs font-black leading-tight text-slate-900 dark:text-white truncate">
                   {activeDirObj?.name || 'المديرية الإقليمية'}
                 </h1>
-                <p className="text-[10px] text-slate-400 font-medium truncate">الفرع الإقليمي للجامعة الملكية للرياضة المدرسية</p>
+                <p className="text-[10px] text-slate-500 dark:text-slate-400 font-bold truncate">المنظومة الرقمية لتتبع نتائج البطولات المدرسية الاقليمية 2026</p>
               </div>
             )}
           </div>
@@ -574,7 +579,7 @@ export const AppLayout: React.FC = () => {
           <button
             type="button"
             onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
-            className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
+            className="p-1.5 text-slate-400 hover:text-slate-700 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
             title={isSidebarCollapsed ? 'إظهار القائمة الجانبية بالكامل' : 'طي وإخفاء القائمة الجانبية'}
           >
             {isSidebarCollapsed ? (
@@ -612,8 +617,8 @@ export const AppLayout: React.FC = () => {
                     cn(
                       'flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-black transition-all group min-w-0',
                       isActive
-                        ? 'bg-blue-600 text-white shadow-md shadow-blue-600/30 font-black'
-                        : 'text-slate-200 hover:bg-slate-800/90 hover:text-white font-bold',
+                        ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/20 font-black'
+                        : 'text-slate-600 hover:bg-emerald-50/70 hover:text-emerald-800 font-bold dark:text-slate-200 dark:hover:bg-slate-800/90 dark:hover:text-white',
                       isSidebarCollapsed && 'justify-center px-2'
                     )
                   }
@@ -624,7 +629,7 @@ export const AppLayout: React.FC = () => {
 
                 {/* Tournament Sub-Branches */}
                 {isTournamentsItem && isTournamentsExpanded && !isSidebarCollapsed && (
-                  <div className="mr-5 my-1 pr-2 border-r border-slate-700/60 space-y-1 animate-in fade-in slide-in-from-top-1 duration-150">
+                  <div className="mr-5 my-1 pr-2 border-r border-slate-200 dark:border-slate-700/60 space-y-1 animate-in fade-in slide-in-from-top-1 duration-150">
                     {[
                       { name: 'بطولة إقليمية', tab: 'provincial', icon: '🏆', show: true },
                       { name: 'بطولة جهوية', tab: 'regional', icon: '🏅', show: hasRegionalQualification },
@@ -643,8 +648,8 @@ export const AppLayout: React.FC = () => {
                           className={cn(
                             'flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-[11px] font-normal transition-all',
                             isSubActive
-                              ? 'bg-blue-600/30 text-blue-200 font-bold border-r-2 border-blue-400'
-                              : 'text-slate-200 font-bold hover:text-white hover:bg-slate-800/80'
+                              ? 'bg-emerald-50 text-emerald-800 font-black border-r-2 border-emerald-500 dark:bg-emerald-600/30 dark:text-emerald-200 dark:border-emerald-400'
+                              : 'text-slate-600 font-bold hover:text-emerald-800 hover:bg-emerald-50/50 dark:text-slate-200 dark:hover:text-white dark:hover:bg-slate-800/80'
                           )}
                         >
                           <span className="text-[11px] opacity-80">{sub.icon}</span>
@@ -657,7 +662,7 @@ export const AppLayout: React.FC = () => {
 
                 {/* Teacher Sub-Branches */}
                 {isTeachersItem && isTeachersExpanded && !isSidebarCollapsed && (
-                  <div className="mr-5 my-1 pr-2 border-r border-slate-700/60 space-y-1 animate-in fade-in slide-in-from-top-1 duration-150">
+                  <div className="mr-5 my-1 pr-2 border-r border-slate-200 dark:border-slate-700/60 space-y-1 animate-in fade-in slide-in-from-top-1 duration-150">
                     {[
                       { name: 'أستاذ التعليم الابتدائي', cadre: 'PRIMARY', icon: '🏫' },
                       { name: 'أستاذ التعليم الثانوي الإعدادي', cadre: 'MIDDLE', icon: '📘' },
@@ -671,8 +676,8 @@ export const AppLayout: React.FC = () => {
                           className={cn(
                             'flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-[11px] font-normal transition-all',
                             isSubActive
-                              ? 'bg-blue-600/30 text-blue-200 font-bold border-r-2 border-blue-400'
-                              : 'text-slate-200 font-bold hover:text-white hover:bg-slate-800/80'
+                              ? 'bg-emerald-50 text-emerald-800 font-black border-r-2 border-emerald-500 dark:bg-emerald-600/30 dark:text-emerald-200 dark:border-emerald-400'
+                              : 'text-slate-600 font-bold hover:text-emerald-800 hover:bg-emerald-50/50 dark:text-slate-200 dark:hover:text-white dark:hover:bg-slate-800/80'
                           )}
                         >
                           <span className="text-[11px] opacity-80">{sub.icon}</span>
@@ -685,7 +690,7 @@ export const AppLayout: React.FC = () => {
 
                 {/* Matches & Calendar Sub-Branches */}
                 {isMatchesItem && isMatchesExpanded && !isSidebarCollapsed && (
-                  <div className="mr-5 my-1 pr-2 border-r border-slate-700/60 space-y-1 animate-in fade-in slide-in-from-top-1 duration-150">
+                  <div className="mr-5 my-1 pr-2 border-r border-slate-200 dark:border-slate-700/60 space-y-1 animate-in fade-in slide-in-from-top-1 duration-150">
                     {[
                       { name: 'جدول المقابلات والنتائج', tab: 'list', icon: '⚽', show: true },
                       { name: 'الرزنامة والبرنامج (Calendrier)', tab: 'calendar', icon: '📅', show: true },
@@ -704,8 +709,8 @@ export const AppLayout: React.FC = () => {
                           className={cn(
                             'flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-[11px] font-normal transition-all',
                             isSubActive
-                              ? 'bg-blue-600/30 text-blue-200 font-bold border-r-2 border-blue-400'
-                              : 'text-slate-200 font-bold hover:text-white hover:bg-slate-800/80'
+                              ? 'bg-emerald-50 text-emerald-800 font-black border-r-2 border-emerald-500 dark:bg-emerald-600/30 dark:text-emerald-200 dark:border-emerald-400'
+                              : 'text-slate-600 font-bold hover:text-emerald-800 hover:bg-emerald-50/50 dark:text-slate-200 dark:hover:text-white dark:hover:bg-slate-800/80'
                           )}
                         >
                           <span className="text-[11px] opacity-80">{sub.icon}</span>
@@ -720,15 +725,29 @@ export const AppLayout: React.FC = () => {
           })}
         </nav>
 
+        {/* About App Button */}
+        {!isSidebarCollapsed && (
+          <div className="px-3 py-1">
+            <button
+              type="button"
+              onClick={() => setIsAboutModalOpen(true)}
+              className="flex w-full items-center gap-2.5 px-3 py-2 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:text-emerald-800 dark:hover:text-white hover:bg-emerald-50 dark:hover:bg-slate-800 rounded-xl transition-all cursor-pointer border border-transparent hover:border-slate-200 dark:hover:border-slate-700"
+            >
+              <ShieldCheck className="h-4 w-4 text-emerald-600 shrink-0" />
+              <span>حول المنظومة الرقمية ℹ️</span>
+            </button>
+          </div>
+        )}
+
         {/* PWA Install Sidebar Button */}
         {!isSidebarCollapsed && (
-          <div className="px-3 py-2 border-t border-slate-800">
+          <div className="px-3 py-2 border-t border-slate-200 dark:border-slate-800">
             <PWAInstallButton variant="sidebar" />
           </div>
         )}
 
         {/* User Profile Footer */}
-        <div className="p-3 border-t border-slate-700/80 bg-slate-900/70">
+        <div className="p-3 border-t border-slate-200 dark:border-slate-700/80 bg-slate-50/80 dark:bg-slate-900/70">
           <div className={cn('flex items-center', isSidebarCollapsed ? 'justify-center' : 'justify-between')}>
             <button
               type="button"
@@ -740,20 +759,20 @@ export const AppLayout: React.FC = () => {
                 <img
                   src={userProfile.photoUrl}
                   alt={userProfile.fullName || 'User'}
-                  className="w-8 h-8 rounded-full object-cover border border-blue-400 shrink-0"
+                  className="w-8 h-8 rounded-full object-cover border border-emerald-500 shrink-0"
                 />
               ) : (
-                <div className="w-8 h-8 rounded-full bg-slate-700 border border-slate-600 flex items-center justify-center text-xs font-bold text-slate-200 group-hover:border-blue-400 group-hover:text-blue-300 transition-colors shrink-0">
+                <div className="w-8 h-8 rounded-full bg-emerald-50 dark:bg-slate-700 border border-emerald-200 dark:border-slate-600 flex items-center justify-center text-xs font-bold text-emerald-700 dark:text-slate-200 group-hover:border-emerald-500 group-hover:text-emerald-800 transition-colors shrink-0">
                   {userProfile?.fullName?.[0] || 'U'}
                 </div>
               )}
               {!isSidebarCollapsed && (
                 <div className="min-w-0 flex-1">
-                  <p className="text-xs font-bold text-slate-200 truncate group-hover:text-blue-300 transition-colors flex items-center gap-1">
+                  <p className="text-xs font-black text-slate-800 dark:text-slate-200 truncate group-hover:text-emerald-700 dark:group-hover:text-emerald-300 transition-colors flex items-center gap-1">
                     <span>{userProfile?.fullName || 'المسير'}</span>
-                    <Edit3 className="h-2.5 w-2.5 opacity-0 group-hover:opacity-100 text-blue-400 transition-opacity" />
+                    <Edit3 className="h-2.5 w-2.5 opacity-0 group-hover:opacity-100 text-emerald-600 transition-opacity" />
                   </p>
-                  <p className="text-[10px] text-slate-400 truncate">{getRoleLabel(userProfile)}</p>
+                  <p className="text-[10px] text-slate-500 dark:text-slate-400 font-medium truncate">{getRoleLabel(userProfile)}</p>
                 </div>
               )}
             </button>
@@ -761,7 +780,7 @@ export const AppLayout: React.FC = () => {
               <button
                 onClick={handleLogout}
                 title="تسجيل الخروج"
-                className="p-1.5 rounded-md text-slate-400 hover:text-red-400 hover:bg-slate-800 transition-colors cursor-pointer shrink-0 mr-1"
+                className="p-1.5 rounded-md text-slate-400 hover:text-red-500 hover:bg-slate-200/60 dark:hover:bg-slate-800 transition-colors cursor-pointer shrink-0 mr-1"
               >
                 <LogOut className="h-4 w-4" />
               </button>
@@ -811,25 +830,25 @@ export const AppLayout: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setIsDirectorateMenuOpen(!isDirectorateMenuOpen)}
-                  className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50/90 dark:bg-blue-900/20 hover:bg-blue-100 dark:hover:bg-blue-900/30 border border-blue-200 dark:border-blue-800 text-blue-900 dark:text-blue-100 rounded-full text-xs font-black transition-all cursor-pointer shadow-2xs shrink-0 select-none"
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50/90 dark:bg-emerald-950/30 hover:bg-emerald-100 dark:hover:bg-emerald-900/40 border border-emerald-200/90 dark:border-emerald-800 text-emerald-950 dark:text-emerald-100 rounded-full text-xs font-black transition-all cursor-pointer shadow-2xs shrink-0 select-none"
                   title="المديرية الإقليمية المحددة حالياً - انقر للتبديل"
                 >
-                  <Building2 className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0" />
-                  <span className="truncate max-w-[160px] font-black text-blue-900 dark:text-blue-50">
+                  <Building2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                  <span className="truncate max-w-[160px] font-black text-emerald-950 dark:text-emerald-50">
                     {activeDirObj?.shortName || activeDirObj?.name || 'المديرية الإقليمية'}
                   </span>
                   <div className="flex items-center gap-1 bg-amber-100/90 dark:bg-amber-900/40 text-amber-900 dark:text-amber-200 border border-amber-300 dark:border-amber-800 px-1.5 py-0.5 rounded-full font-mono text-[9px] font-bold">
                     <KeyRound className="w-2.5 h-2.5 text-amber-700 dark:text-amber-400" />
                     <span>{activeDirObj?.code || 'PIN'}</span>
                   </div>
-                  <ChevronDown className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 shrink-0" />
+                  <ChevronDown className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
                 </button>
 
                 {/* Desktop Dropdown Menu */}
                 {isDirectorateMenuOpen && (
-                  <div className="absolute right-0 top-full mt-2 w-80 bg-white rounded-2xl shadow-2xl border border-slate-200 p-2.5 z-50 animate-in fade-in zoom-in-95 duration-100">
-                    <div className="px-3 py-2 border-b border-slate-100 mb-1.5 flex items-center justify-between">
-                      <p className="text-[11px] font-black text-slate-700">المديريات الإقليمية والأقنان السرية</p>
+                  <div className="absolute right-0 top-full mt-2 w-80 bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 p-2.5 z-50 animate-in fade-in zoom-in-95 duration-100">
+                    <div className="px-3 py-2 border-b border-slate-100 dark:border-slate-800 mb-1.5 flex items-center justify-between">
+                      <p className="text-[11px] font-black text-slate-700 dark:text-slate-200">المديريات الإقليمية والأقنان السرية</p>
                       <span className="text-[10px] text-slate-400 font-bold">{directoratesList.length} مديرية</span>
                     </div>
 
@@ -853,14 +872,14 @@ export const AppLayout: React.FC = () => {
                                 ? 'bg-amber-50 text-amber-900 border border-amber-300'
                                 : isSelected
                                 ? 'bg-emerald-50 text-emerald-900 border border-emerald-300'
-                                : 'hover:bg-slate-50 text-slate-700'
+                                : 'hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200'
                             }`}
                           >
                             <div className="truncate min-w-0 flex-1 pl-2">
                               <p className="truncate font-black">{d.shortName || d.name}</p>
                               <p className="text-[10px] text-slate-400 font-normal">{d.region || 'جهة الشرق'}</p>
                             </div>
-                            <div className="flex items-center gap-1 bg-amber-50 text-amber-800 border border-amber-200 px-2 py-0.5 rounded-md font-mono text-[10px] font-bold shrink-0">
+                            <div className="flex items-center gap-1 bg-amber-50 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800 px-2 py-0.5 rounded-md font-mono text-[10px] font-bold shrink-0">
                               <KeyRound className="w-2.5 h-2.5 text-amber-600" />
                               <span>{d.code}</span>
                             </div>
@@ -891,21 +910,21 @@ export const AppLayout: React.FC = () => {
                               setPendingDirectorate(null);
                               toast.success(`تم التبديل إلى ${pendingDirectorate.name}`);
                             }}
-                            className="flex-[2] py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-[10px] font-black cursor-pointer text-center shadow-xs"
+                            className="flex-[2] py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[10px] font-black cursor-pointer text-center shadow-xs"
                           >
                             تأكيد التغيير ✅
                           </button>
                         </div>
                       </div>
                     ) : (
-                      <div className="pt-2 mt-2 border-t border-slate-100 space-y-1">
+                      <div className="pt-2 mt-2 border-t border-slate-100 dark:border-slate-800 space-y-1">
                         <button
                           type="button"
                           onClick={() => {
                             setIsDirectorateMenuOpen(false);
                             navigate('/sports-config');
                           }}
-                          className="flex items-center justify-center gap-1.5 w-full py-2 bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-xl text-xs font-bold transition-colors cursor-pointer"
+                          className="flex items-center justify-center gap-1.5 w-full py-2 bg-slate-50 hover:bg-emerald-50 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 hover:text-emerald-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold transition-colors cursor-pointer"
                         >
                           <Settings className="w-3.5 h-3.5 text-slate-400" />
                           <span>إدارة وتعديل المديريات والأقنان ⚙️</span>
@@ -917,9 +936,9 @@ export const AppLayout: React.FC = () => {
               </div>
             ) : (
               userProfile?.directorateId && (
-                <div className="hidden md:flex items-center gap-1.5 px-3 py-1.5 bg-white/80 border border-slate-200/80 text-slate-800 rounded-full text-xs font-black shrink-0 select-none shadow-2xs">
-                  <Building2 className="w-4 h-4 text-blue-600 shrink-0" />
-                  <span className="truncate max-w-[160px] text-slate-700">
+                <div className="hidden md:flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50/80 border border-emerald-200/80 text-emerald-950 dark:bg-emerald-950/30 dark:border-emerald-800 dark:text-emerald-100 rounded-full text-xs font-black shrink-0 select-none shadow-2xs">
+                  <Building2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span className="truncate max-w-[160px]">
                     {userProfile.directorateName || activeDirObj?.shortName || activeDirObj?.name}
                   </span>
                 </div>
@@ -927,7 +946,21 @@ export const AppLayout: React.FC = () => {
             )}
           </div>
 
-          <div className="flex items-center gap-2 sm:gap-3 md:gap-4">
+          <div className="flex items-center gap-2 sm:gap-2.5 md:gap-3">
+            {/* Dark Mode Toggle Button (Identical to Homepage) */}
+            <button
+              type="button"
+              onClick={toggleDarkMode}
+              className="p-2 sm:px-2.5 sm:py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700 rounded-full text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs shrink-0"
+              title={isDarkMode ? 'التحويل للوضع النهاري' : 'التحويل للوضع الليلي (Dark Mode)'}
+            >
+              {isDarkMode ? (
+                <Sun className="w-4 h-4 text-amber-400 shrink-0" />
+              ) : (
+                <Moon className="w-4 h-4 text-indigo-600 shrink-0" />
+              )}
+            </button>
+
             {/* Notifications Center Bell with Dropdown */}
             <div className="relative" ref={notificationsRef}>
               <button
@@ -935,8 +968,8 @@ export const AppLayout: React.FC = () => {
                 onClick={() => setIsNotificationsOpen(!isNotificationsOpen)}
                 className={`p-2 rounded-full transition-all cursor-pointer shadow-2xs hover:shadow-xs flex items-center justify-center shrink-0 relative ${
                   isNotificationsOpen
-                    ? 'bg-blue-100 text-blue-800 border border-blue-300'
-                    : 'bg-slate-50 hover:bg-slate-100 text-slate-600 border border-slate-200'
+                    ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                    : 'bg-slate-50 hover:bg-slate-100 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700'
                 }`}
                 title="مركز الإشعارات والتنبيهات"
               >
@@ -950,10 +983,10 @@ export const AppLayout: React.FC = () => {
 
               {/* Dropdown Panel */}
               {isNotificationsOpen && (
-                <div className="absolute left-0 mt-2 w-80 bg-white rounded-2xl shadow-2xl border border-slate-200 p-3 z-50 animate-in fade-in zoom-in-95 duration-100 text-right" dir="rtl">
-                  <div className="flex items-center justify-between border-b border-slate-100 pb-2 mb-2">
-                    <div className="flex items-center gap-1.5 font-black text-slate-800 text-xs">
-                      <Bell className="w-4 h-4 text-blue-600" />
+                <div className="absolute left-0 mt-2 w-80 bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 p-3 z-50 animate-in fade-in zoom-in-95 duration-100 text-right" dir="rtl">
+                  <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-2 mb-2">
+                    <div className="flex items-center gap-1.5 font-black text-slate-800 dark:text-white text-xs">
+                      <Bell className="w-4 h-4 text-emerald-600" />
                       <span>الإشعارات والتنبيهات</span>
                     </div>
                     {unreadCount > 0 && (
@@ -963,7 +996,7 @@ export const AppLayout: React.FC = () => {
                           await markAllAsRead();
                           toast.success('تم تحديد جميع الإشعارات كمقروءة');
                         }}
-                        className="text-[10px] font-bold text-blue-600 hover:text-blue-800 hover:underline cursor-pointer"
+                        className="text-[10px] font-bold text-emerald-600 hover:text-emerald-800 hover:underline cursor-pointer"
                       >
                         قراءة الكل
                       </button>
@@ -989,19 +1022,19 @@ export const AppLayout: React.FC = () => {
                             }}
                             className={`p-2.5 rounded-xl border text-right transition-all cursor-pointer flex flex-col gap-1 ${
                               isUnread
-                                ? 'bg-blue-50/50 border-blue-100 hover:bg-blue-50'
-                                : 'bg-slate-50/40 border-slate-100 hover:bg-slate-50'
+                                ? 'bg-emerald-50/60 dark:bg-emerald-950/40 border-emerald-100 dark:border-emerald-800 hover:bg-emerald-50'
+                                : 'bg-slate-50/50 dark:bg-slate-800/40 border-slate-100 dark:border-slate-800 hover:bg-slate-50'
                             }`}
                           >
                             <div className="flex items-start justify-between gap-2">
-                              <h4 className={`text-xs leading-snug font-black ${isUnread ? 'text-blue-950' : 'text-slate-700'}`}>
+                              <h4 className={`text-xs leading-snug font-black ${isUnread ? 'text-emerald-950 dark:text-emerald-200' : 'text-slate-700 dark:text-slate-200'}`}>
                                 {n.title}
                               </h4>
                               {isUnread && (
-                                <span className="w-2 h-2 rounded-full bg-blue-600 shrink-0 mt-1 animate-ping" />
+                                <span className="w-2 h-2 rounded-full bg-emerald-600 shrink-0 mt-1 animate-ping" />
                               )}
                             </div>
-                            <p className="text-[10px] text-slate-500 leading-relaxed font-semibold">
+                            <p className="text-[10px] text-slate-500 dark:text-slate-400 leading-relaxed font-semibold">
                               {n.body}
                             </p>
                             <span className="text-[8px] text-slate-400 self-start font-medium mt-0.5">
@@ -1016,7 +1049,7 @@ export const AppLayout: React.FC = () => {
               )}
             </div>
 
-            {/* Sync Button (مزامنة البيانات صامتاً بين الأجهزة) - Small Green circular arrows with rotation on sync */}
+            {/* Sync Button (مزامنة البيانات صامتاً بين الأجهزة) */}
             <button
               type="button"
               onClick={() => handleSyncData(true)}
@@ -1032,9 +1065,9 @@ export const AppLayout: React.FC = () => {
             <button
               type="button"
               onClick={() => navigate('/statistics')}
-              className="hidden lg:flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-lg text-xs font-bold transition-colors cursor-pointer"
+              className="hidden lg:flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-emerald-50 text-slate-700 hover:text-emerald-800 border border-slate-200 hover:border-emerald-200 rounded-xl text-xs font-bold transition-colors cursor-pointer"
             >
-              <BarChart3 className="w-3.5 h-3.5 text-indigo-600" />
+              <BarChart3 className="w-3.5 h-3.5 text-emerald-600" />
               <span>الإحصائيات والترتيب</span>
             </button>
 
@@ -1042,37 +1075,37 @@ export const AppLayout: React.FC = () => {
             <button
               type="button"
               onClick={openProfileModal}
-              className="flex items-center gap-2 py-1.5 px-2.5 hover:bg-slate-100 rounded-lg text-slate-700 transition-colors cursor-pointer border border-slate-200"
+              className="flex items-center gap-2 py-1.5 px-2.5 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl text-slate-700 dark:text-slate-200 transition-colors cursor-pointer border border-slate-200 dark:border-slate-700"
               title="تعديل البيانات الشخصية"
             >
               {userProfile?.photoUrl ? (
                 <img
                   src={userProfile.photoUrl}
                   alt={userProfile.fullName || 'User'}
-                  className="w-6 h-6 rounded-full object-cover border border-blue-400 shrink-0"
+                  className="w-6 h-6 rounded-full object-cover border border-emerald-500 shrink-0"
                 />
               ) : (
-                <div className="w-6 h-6 rounded-full bg-blue-100 text-blue-700 border border-blue-200 flex items-center justify-center text-xs font-bold shrink-0">
+                <div className="w-6 h-6 rounded-full bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 flex items-center justify-center text-xs font-bold shrink-0">
                   {userProfile?.fullName?.[0] || 'U'}
                 </div>
               )}
               <div className="hidden sm:block text-right">
-                <p className="text-xs font-bold text-slate-800 leading-tight truncate max-w-[120px]">
+                <p className="text-xs font-bold text-slate-800 dark:text-slate-100 leading-tight truncate max-w-[120px]">
                   {userProfile?.fullName || 'المستخدم'}
                 </p>
-                <p className="text-[9px] text-blue-600 font-semibold leading-none">الملف الشخصي</p>
+                <p className="text-[9px] text-emerald-600 dark:text-emerald-400 font-bold leading-none">الملف الشخصي</p>
               </div>
               <Edit3 className="h-3 w-3 text-slate-400 hidden sm:block" />
             </button>
 
-            <div className="h-6 w-px bg-slate-200 hidden sm:block"></div>
+            <div className="h-6 w-px bg-slate-200 dark:bg-slate-700 hidden sm:block"></div>
 
             {/* Quick Action Button - Central Admin Only */}
             {isCentralAdmin && (
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => navigate('/tournaments')}
-                  className="bg-blue-600 text-white px-3 py-1.5 md:px-3.5 md:py-2 rounded-md text-xs font-bold flex items-center gap-1.5 hover:bg-blue-700 transition-colors shadow-sm cursor-pointer"
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white px-3.5 py-2 rounded-xl text-xs font-black flex items-center gap-1.5 shadow-xs shadow-emerald-600/20 active:scale-98 transition-all cursor-pointer"
                 >
                   <Plus className="h-3.5 w-3.5" />
                   <span>بطولة جديدة</span>
@@ -1086,21 +1119,21 @@ export const AppLayout: React.FC = () => {
         {isMobileMenuOpen && (
           <div className="fixed inset-0 z-50 flex md:hidden" dir="rtl">
             <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs" onClick={() => setIsMobileMenuOpen(false)}></div>
-            <div className="relative flex w-72 flex-1 flex-col bg-[#0f172a] text-white shadow-2xl">
-              <div className="flex items-center justify-between p-3.5 border-b border-slate-700 bg-slate-900/90">
+            <div className="relative flex w-72 flex-1 flex-col bg-white dark:bg-[#0f172a] text-slate-800 dark:text-white shadow-2xl border-l border-slate-200 dark:border-slate-700">
+              <div className="flex items-center justify-between p-3.5 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/90">
                 <div className="flex items-center gap-2.5 min-w-0">
                   <AppLogo size={46} className="shrink-0" />
                   <div className="flex flex-col text-right min-w-0">
-                    <span className="text-xs font-black text-white truncate">
+                    <span className="text-xs font-black text-slate-900 dark:text-white truncate">
                       {activeDirObj?.name || 'المديرية الإقليمية'}
                     </span>
-                    <span className="text-[10px] text-slate-300 font-bold leading-tight truncate">
-                      الفرع الإقليمي للجامعة الملكية
+                    <span className="text-[10px] text-slate-500 dark:text-slate-300 font-bold leading-tight truncate">
+                      المنظومة الرقمية لتتبع نتائج البطولات المدرسية الاقليمية 2026
                     </span>
                   </div>
                 </div>
                 <button
-                  className="text-slate-400 hover:text-white p-1.5 rounded-lg hover:bg-slate-800 transition-colors cursor-pointer shrink-0"
+                  className="text-slate-400 hover:text-slate-700 dark:hover:text-white p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer shrink-0"
                   onClick={() => setIsMobileMenuOpen(false)}
                 >
                   <X className="h-5 w-5" />
@@ -1109,13 +1142,13 @@ export const AppLayout: React.FC = () => {
 
               {/* Mobile Directorate Quick Switcher inside Drawer */}
               {(isCentralAdmin || userProfile?.isSuperAdmin) && (
-                <div className="p-3 bg-slate-800/90 border-b border-slate-700/80 space-y-2">
-                  <div className="flex items-center justify-between text-slate-300 text-[11px] font-bold">
+                <div className="p-3 bg-emerald-50/70 dark:bg-slate-800/90 border-b border-emerald-100 dark:border-slate-700/80 space-y-2">
+                  <div className="flex items-center justify-between text-slate-700 dark:text-slate-300 text-[11px] font-bold">
                     <span className="flex items-center gap-1.5">
-                      <Building2 className="w-3.5 h-3.5 text-blue-400" />
+                      <Building2 className="w-3.5 h-3.5 text-emerald-600" />
                       <span>المديرية الإقليمية الحالية:</span>
                     </span>
-                    <span className="bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded text-[10px] font-mono border border-amber-500/30">
+                    <span className="bg-amber-500/20 text-amber-800 dark:text-amber-300 px-2 py-0.5 rounded text-[10px] font-mono border border-amber-500/30">
                       PIN: {activeDirObj?.code}
                     </span>
                   </div>
@@ -1125,13 +1158,13 @@ export const AppLayout: React.FC = () => {
                       setIsDirectorateMenuOpen(true);
                       setIsMobileMenuOpen(false);
                     }}
-                    className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-2 px-3 rounded-xl text-xs flex items-center justify-between shadow-xs transition-colors cursor-pointer"
+                    className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-black py-2 px-3 rounded-xl text-xs flex items-center justify-between shadow-xs transition-colors cursor-pointer active:scale-98"
                   >
                     <div className="flex items-center gap-2 truncate">
-                      <Building2 className="w-4 h-4 text-blue-200 shrink-0" />
+                      <Building2 className="w-4 h-4 text-emerald-200 shrink-0" />
                       <span className="truncate">{activeDirObj?.shortName || activeDirObj?.name || 'اختر المديرية'}</span>
                     </div>
-                    <div className="flex items-center gap-1 text-[10px] bg-blue-700/90 px-2 py-0.5 rounded-lg shrink-0">
+                    <div className="flex items-center gap-1 text-[10px] bg-emerald-700/90 px-2 py-0.5 rounded-lg shrink-0">
                       <span>تغيير المديرية 🏢</span>
                       <ChevronDown className="w-3 h-3" />
                     </div>
@@ -1173,8 +1206,8 @@ export const AppLayout: React.FC = () => {
                         className={cn(
                           'flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer select-none',
                           location.pathname === item.href || (hasSubItems && location.pathname.startsWith(item.href))
-                            ? 'bg-blue-600 text-white shadow-xs'
-                            : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+                            ? 'bg-emerald-600 text-white shadow-xs font-black'
+                            : 'text-slate-700 hover:bg-emerald-50 hover:text-emerald-800 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white'
                         )}
                       >
                         <div className="flex items-center gap-2.5 min-w-0">
@@ -1190,7 +1223,7 @@ export const AppLayout: React.FC = () => {
 
                       {/* Tournament Sub-Branches */}
                       {isTournamentsItem && isTournamentsExpanded && (
-                        <div className="mr-5 my-1 pr-2 border-r-2 border-blue-500/60 space-y-1 animate-in fade-in slide-in-from-top-1 duration-150">
+                        <div className="mr-5 my-1 pr-2 border-r-2 border-emerald-500/60 space-y-1 animate-in fade-in slide-in-from-top-1 duration-150">
                           {[
                             { name: 'بطولة إقليمية', tab: 'provincial', icon: '🏆', show: true },
                             { name: 'بطولة جهوية', tab: 'regional', icon: '🏅', show: hasRegionalQualification },
@@ -1202,7 +1235,7 @@ export const AppLayout: React.FC = () => {
                               key={sub.tab}
                               to={`/tournaments?tab=${sub.tab}`}
                               onClick={() => setIsMobileMenuOpen(false)}
-                              className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-300 hover:text-white hover:bg-slate-800/80 transition-colors"
+                              className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-600 hover:text-emerald-800 hover:bg-emerald-50/60 dark:text-slate-300 dark:hover:text-white dark:hover:bg-slate-800/80 transition-colors"
                             >
                               <span className="text-xs">{sub.icon}</span>
                               <span>{sub.name}</span>
@@ -1213,7 +1246,7 @@ export const AppLayout: React.FC = () => {
 
                       {/* Teachers Sub-Branches */}
                       {isTeachersItem && isTeachersExpanded && (
-                        <div className="mr-5 my-1 pr-2 border-r-2 border-blue-500/60 space-y-1 animate-in fade-in slide-in-from-top-1 duration-150">
+                        <div className="mr-5 my-1 pr-2 border-r-2 border-emerald-500/60 space-y-1 animate-in fade-in slide-in-from-top-1 duration-150">
                           {[
                             { name: 'أستاذ التعليم الابتدائي', cadre: 'PRIMARY', icon: '🏫' },
                             { name: 'أستاذ التعليم الثانوي الإعدادي', cadre: 'MIDDLE', icon: '📘' },
@@ -1223,7 +1256,7 @@ export const AppLayout: React.FC = () => {
                               key={sub.cadre}
                               to={`/teachers?cadre=${sub.cadre}`}
                               onClick={() => setIsMobileMenuOpen(false)}
-                              className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-300 hover:text-white hover:bg-slate-800/80 transition-colors"
+                              className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-600 hover:text-emerald-800 hover:bg-emerald-50/60 dark:text-slate-300 dark:hover:text-white dark:hover:bg-slate-800/80 transition-colors"
                             >
                               <span className="text-xs">{sub.icon}</span>
                               <span>{sub.name}</span>
@@ -1234,7 +1267,7 @@ export const AppLayout: React.FC = () => {
 
                       {/* Schools Sub-Branches */}
                       {isSchoolsItem && isSchoolsExpanded && (
-                        <div className="mr-5 my-1 pr-2 border-r-2 border-blue-500/60 space-y-1 animate-in fade-in slide-in-from-top-1 duration-150">
+                        <div className="mr-5 my-1 pr-2 border-r-2 border-emerald-500/60 space-y-1 animate-in fade-in slide-in-from-top-1 duration-150">
                           {[
                             { name: 'جميع المؤسسات التعليمية', level: 'ALL', icon: '🏫' },
                             { name: 'التعليم الابتدائي', level: 'PRIMARY', icon: '👧' },
@@ -1245,7 +1278,7 @@ export const AppLayout: React.FC = () => {
                               key={sub.level}
                               to={sub.level === 'ALL' ? '/schools' : `/schools?level=${sub.level}`}
                               onClick={() => setIsMobileMenuOpen(false)}
-                              className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-300 hover:text-white hover:bg-slate-800/80 transition-colors"
+                              className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-600 hover:text-emerald-800 hover:bg-emerald-50/60 dark:text-slate-300 dark:hover:text-white dark:hover:bg-slate-800/80 transition-colors"
                             >
                               <span className="text-xs">{sub.icon}</span>
                               <span>{sub.name}</span>
@@ -1256,7 +1289,7 @@ export const AppLayout: React.FC = () => {
 
                       {/* Matches Sub-Branches */}
                       {isMatchesItem && isMatchesExpanded && (
-                        <div className="mr-5 my-1 pr-2 border-r-2 border-blue-500/60 space-y-1 animate-in fade-in slide-in-from-top-1 duration-150">
+                        <div className="mr-5 my-1 pr-2 border-r-2 border-emerald-500/60 space-y-1 animate-in fade-in slide-in-from-top-1 duration-150">
                           {[
                             { name: 'جدول المقابلات والنتائج', tab: 'list', icon: '⚽' },
                             { name: 'الرزنامة والبرنامج (Calendrier)', tab: 'calendar', icon: '📅' },
@@ -1265,7 +1298,7 @@ export const AppLayout: React.FC = () => {
                               key={sub.tab}
                               to={`/matches?tab=${sub.tab}`}
                               onClick={() => setIsMobileMenuOpen(false)}
-                              className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-300 hover:text-white hover:bg-slate-800/80 transition-colors"
+                              className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-600 hover:text-emerald-800 hover:bg-emerald-50/60 dark:text-slate-300 dark:hover:text-white dark:hover:bg-slate-800/80 transition-colors"
                             >
                               <span className="text-xs">{sub.icon}</span>
                               <span>{sub.name}</span>
@@ -1277,21 +1310,31 @@ export const AppLayout: React.FC = () => {
                   );
                 })}
               </div>
-              <div className="p-4 border-t border-slate-700 bg-slate-900/50 space-y-2">
+              <div className="p-4 border-t border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50 space-y-2">
                 <PWAInstallButton variant="sidebar" className="mb-2" />
+                <button
+                  onClick={() => {
+                    setIsMobileMenuOpen(false);
+                    setIsAboutModalOpen(true);
+                  }}
+                  className="flex w-full items-center gap-3 px-3 py-3 text-xs font-black text-emerald-700 dark:text-emerald-300 hover:bg-emerald-50 dark:hover:bg-slate-800 rounded-xl transition-all cursor-pointer mb-2"
+                >
+                  <ShieldCheck className="h-5 w-5" />
+                  <span>حول المنظومة الرقمية ℹ️</span>
+                </button>
                 <button
                   onClick={() => {
                     setIsMobileMenuOpen(false);
                     openProfileModal();
                   }}
-                  className="flex w-full items-center gap-2 text-xs font-semibold text-blue-300 hover:text-blue-200 cursor-pointer"
+                  className="flex w-full items-center gap-2 text-xs font-semibold text-emerald-700 dark:text-emerald-300 hover:text-emerald-800 cursor-pointer"
                 >
                   <UserIcon className="h-4 w-4" />
                   <span>تعديل البيانات الشخصية</span>
                 </button>
                 <button
                   onClick={handleLogout}
-                  className="flex w-full items-center gap-2 text-xs font-semibold text-red-400 hover:text-red-300 cursor-pointer"
+                  className="flex w-full items-center gap-2 text-xs font-semibold text-red-500 hover:text-red-600 cursor-pointer"
                 >
                   <LogOut className="h-4 w-4" />
                   <span>تسجيل الخروج</span>
@@ -1302,7 +1345,7 @@ export const AppLayout: React.FC = () => {
         )}
 
         {/* Content Viewport */}
-        <main className="flex-1 overflow-y-auto bg-[#f8fafc] p-4 md:p-6">
+        <main className="flex-1 overflow-y-auto bg-slate-50 dark:bg-[#0b0f1a] p-4 md:p-6 transition-colors">
           <Outlet />
         </main>
       </div>
@@ -1310,10 +1353,10 @@ export const AppLayout: React.FC = () => {
       {/* Mobile Directorate Selection Modal */}
       {isDirectorateMenuOpen && userProfile?.isSuperAdmin && (
         <div className="md:hidden fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-150" dir="rtl">
-          <div className="relative w-full max-w-sm bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[85vh] my-auto">
-            <div className="px-4 py-3.5 bg-slate-900 text-white flex items-center justify-between shrink-0">
+          <div className="relative w-full max-w-sm bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden flex flex-col max-h-[85vh] my-auto">
+            <div className="px-4 py-3.5 bg-linear-to-r from-emerald-800 via-teal-900 to-slate-900 text-white flex items-center justify-between shrink-0">
               <div className="flex items-center gap-2 min-w-0">
-                <Building2 className="w-5 h-5 text-blue-400 shrink-0" />
+                <Building2 className="w-5 h-5 text-emerald-400 shrink-0" />
                 <div className="min-w-0">
                   <h3 className="text-xs font-black text-white truncate">التبديل بين المديريات الإقليمية</h3>
                   <p className="text-[10px] text-slate-300 truncate">اختر المديرية لمتابعة التدبير والنتائج</p>
@@ -1350,7 +1393,7 @@ export const AppLayout: React.FC = () => {
                       isPending
                         ? 'bg-amber-50 text-amber-900 border-2 border-amber-500 shadow-xs'
                         : isSelected
-                        ? 'bg-blue-50 text-blue-900 border-2 border-blue-600 shadow-xs'
+                        ? 'bg-emerald-50 text-emerald-900 border-2 border-emerald-600 shadow-xs'
                         : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200'
                     }`}
                   >
@@ -1394,7 +1437,7 @@ export const AppLayout: React.FC = () => {
                       setPendingDirectorate(null);
                       toast.success(`تم التغيير بنجاح إلى ${pendingDirectorate.name}`);
                     }}
-                    className="flex-[2] py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black transition-colors shadow-md shadow-blue-600/20 cursor-pointer text-center"
+                    className="flex-[2] py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black transition-colors shadow-md shadow-emerald-600/20 cursor-pointer text-center active:scale-98"
                   >
                     تأكيد التبديل ✅
                   </button>
@@ -1415,6 +1458,61 @@ export const AppLayout: React.FC = () => {
                 </button>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* ABOUT APPLICATION MODAL */}
+      {isAboutModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-200" dir="rtl">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 max-w-md w-full space-y-4 shadow-2xl animate-in zoom-in-95 duration-150 relative overflow-hidden text-right">
+            <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-emerald-500 via-teal-500 to-amber-500" />
+            
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+              <div className="flex items-center gap-2">
+                <ShieldCheck className="w-5 h-5 text-emerald-600" />
+                <h3 className="text-base font-black text-slate-900 dark:text-white">
+                  حول المنظومة الرقمية 2026
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsAboutModalOpen(false)}
+                className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-lg cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-3.5 text-xs text-slate-700 dark:text-slate-300 leading-relaxed font-bold">
+              <p className="text-sm font-black text-emerald-800 dark:text-emerald-400">
+                المنظومة الرقمية لتتبع نتائج البطولات المدرسية الاقليمية 2026
+              </p>
+              <p className="text-slate-500 dark:text-slate-400 font-semibold leading-relaxed">
+                تم تطوير هذه المنظومة بالكامل باللغة العربية لدعم وتدبير الأنشطة والبطولات المدرسية المغربية بالمديرية الإقليمية.
+              </p>
+              <p className="text-slate-600 dark:text-slate-300 font-medium">
+                تتيح المنصة الرقمية الموحدة تسجيل المشاركين والفرق، طباعة الصدريات الذكية مع الباركود والماسح الضوئي الرقمي، إدارة وتعيين الملاعب والحكام المعتمدين، ونشر التحديثات الفورية والنتائج الرسمية لجميع الرياضات المدرسية (ألعاب جماعية، عدو ريفي، ألعاب قوى، كرة طاولة...) بدقة وسرعة متناهية.
+              </p>
+              <div className="p-3 bg-slate-50 dark:bg-slate-800 rounded-2xl border border-slate-100 dark:border-slate-700 text-[11px] space-y-1 text-slate-500 dark:text-slate-400">
+                <p>• الإصدار: 1.3.4 (نسخة مستقرة)</p>
+                <p>• الفئة المستهدفة: أطر التربية البدنية، اللجان التقنية والجمهور الكريم</p>
+                <p>• المنصة متكاملة بنظام إشعارات الواتساب الذكية والعمل أوفلاين</p>
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setIsAboutModalOpen(false)}
+                className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-black rounded-xl text-xs cursor-pointer shadow-md shadow-emerald-600/20 text-center active:scale-98 transition-all"
+              >
+                حسناً، فهمت
+              </button>
+              <p className="text-[10px] text-center text-slate-400 dark:text-slate-500">
+                كل الحقوق محفوظة &copy; 2026
+              </p>
+            </div>
           </div>
         </div>
       )}

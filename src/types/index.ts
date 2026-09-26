@@ -170,6 +170,8 @@ export interface Match {
   team2Id: string;
   team1Name?: string;
   team2Name?: string;
+  team1SchoolName?: string;
+  team2SchoolName?: string;
   team1Score?: number;
   team2Score?: number;
   venueName?: string;
@@ -290,6 +292,29 @@ export interface CrossCountryCategoryResult {
   status?: 'setup' | 'running' | 'summary' | 'completed';
   updatedAt?: any;
   updatedBy?: string;
+}
+
+export interface AthleticsWinner {
+  rank: number;
+  fullName: string;
+  schoolName: string;
+  performance: string; // e.g., '11.85 ث' or '5.65 م' or '12.40 م'
+  bibNumber?: string;
+  affiliation?: 'non_club' | 'club_affiliated';
+}
+
+export interface AthleticsCategoryResult {
+  id: string; // e.g. 'u15_male_100m' or 'u18_female_long_jump'
+  category: string; // 'U12' | 'U15' | 'U18' | 'U20'
+  gender: 'Male' | 'Female';
+  specialtyName: string; // e.g. 'جري 100 متر' or 'القفز الطولي' or 'دفع الجلة'
+  specialtyType: 'track' | 'field'; // مضمار / ميدان
+  venueName?: string;
+  seasonId?: string;
+  directorateId?: string;
+  podium: AthleticsWinner[];
+  status?: 'completed' | 'running' | 'setup';
+  updatedAt?: any;
 }
 
 

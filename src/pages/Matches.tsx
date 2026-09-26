@@ -47,6 +47,7 @@ import { SportResultsModal } from '../components/SportResultsModal';
 import { EditTournamentModal } from '../components/EditTournamentModal';
 import { EditTournamentScheduleModal } from '../components/EditTournamentScheduleModal';
 import { RefereeMatchesView } from '../components/RefereeMatchesView';
+import { DemoDataModal } from '../components/DemoDataModal';
 import { CrossCountryCategoryResult } from '../types';
 import { CROSS_COUNTRY_CATEGORIES, INITIAL_CROSS_COUNTRY_RESULTS } from '../lib/crossCountryConfig';
 import { cn } from '../lib/utils';
@@ -87,6 +88,7 @@ export const Matches: React.FC = () => {
   // Selected sport for detailed results modal (Level 2 & 3)
   const [selectedSportForResults, setSelectedSportForResults] = useState<Sport | null>(null);
   const [isResultsModalOpen, setIsResultsModalOpen] = useState(false);
+  const [isDemoDataModalOpen, setIsDemoDataModalOpen] = useState(false);
 
   // Modals for Match / Tournament operations
   const [isCreateMatchOpen, setIsCreateMatchOpen] = useState(false);
@@ -104,6 +106,9 @@ export const Matches: React.FC = () => {
   // Deletion targets
   const [matchToDelete, setMatchToDelete] = useState<Match | null>(null);
   const [tournamentToDelete, setTournamentToDelete] = useState<Tournament | null>(null);
+  const [sportToDeleteResults, setSportToDeleteResults] = useState<Sport | null>(null);
+  const [deleteSportResultsMode, setDeleteSportResultsMode] = useState<'reset_scores' | 'delete_all'>('reset_scores');
+  const [isDeletingSportResults, setIsDeletingSportResults] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
 
   // Role flags
@@ -144,10 +149,10 @@ export const Matches: React.FC = () => {
       ]);
       
       // Batch updates to minimize re-renders and avoid clobbering live data
-      setMatches(prev => m.length > prev.length ? m : (prev.length > 0 ? prev : m));
-      setSchools(prev => s.length > prev.length ? s : (prev.length > 0 ? prev : s));
-      setVenues(prev => v.length > prev.length ? v : (prev.length > 0 ? prev : v));
-      setTournaments(prev => t.length > prev.length ? deduplicateById(t) : (prev.length > 0 ? prev : deduplicateById(t)));
+      setMatches(m);
+      setSchools(s);
+      setVenues(v);
+      setTournaments(deduplicateById(t));
       
       if (curSeason) setActiveSeason(curSeason);
       
@@ -155,9 +160,9 @@ export const Matches: React.FC = () => {
         setCrossCountryResults(ccRes);
       }
 
-      if (stu) setStudents(prev => stu.length > prev.length ? stu : (prev.length > 0 ? prev : stu));
-      if (config) setSportsConfig(prev => config.length > prev.length ? config : (prev.length > 0 ? prev : config));
-      if (tch) setTeachers(prev => tch.length > prev.length ? tch : (prev.length > 0 ? prev : tch));
+      if (stu) setStudents(stu);
+      if (config) setSportsConfig(config);
+      if (tch) setTeachers(tch);
     } catch (error) {
       console.error('Error loading matches data:', error);
       // toast.error('حدث خطأ أثناء تحميل بيانات المباريات والنتائج');
@@ -169,6 +174,10 @@ export const Matches: React.FC = () => {
   useEffect(() => {
     loadData();
     const handleDirChange = () => {
+      loadData();
+    };
+
+    const handleDataSync = () => {
       loadData();
     };
 
@@ -241,13 +250,20 @@ export const Matches: React.FC = () => {
     };
 
     window.addEventListener('crossCountryResultsUpdated', handleCCUpdate);
-
+    window.addEventListener('tournamentDataChanged', handleDataSync);
+    window.addEventListener('matchesDataChanged', handleDataSync);
+    window.addEventListener('sportsConfigChanged', handleDataSync);
+    window.addEventListener('resultsChanged', handleDataSync);
     window.addEventListener('directorateChanged', handleDirChange);
     window.addEventListener('seasonChanged', handleDirChange);
 
     return () => {
       window.removeEventListener('directorateChanged', handleDirChange);
       window.removeEventListener('seasonChanged', handleDirChange);
+      window.removeEventListener('tournamentDataChanged', handleDataSync);
+      window.removeEventListener('matchesDataChanged', handleDataSync);
+      window.removeEventListener('sportsConfigChanged', handleDataSync);
+      window.removeEventListener('resultsChanged', handleDataSync);
       window.removeEventListener('crossCountryResultsUpdated', handleCCUpdate);
       bc.close();
       if (unsubscribeCC) unsubscribeCC();
@@ -372,6 +388,29 @@ export const Matches: React.FC = () => {
     }
   };
 
+  // Confirm delete sport tournament results
+  const handleConfirmDeleteSportResults = async () => {
+    if (!sportToDeleteResults) return;
+    setIsDeletingSportResults(true);
+    try {
+      const sportName = sportToDeleteResults.name;
+      const isCC = sportToDeleteResults.id === 'cross_country';
+      await DataService.deleteSportResults(sportToDeleteResults.id, deleteSportResultsMode === 'delete_all');
+      if (isCC) {
+        const freshCC = await DataService.getCrossCountryResults();
+        setCrossCountryResults(freshCC);
+      }
+      toast.success(`تم حذف وتصفير نتائج بطولة ${sportName} بنجاح! 🗑️`);
+      setSportToDeleteResults(null);
+      await loadData();
+    } catch (error: any) {
+      console.error('Error deleting sport results:', error);
+      toast.error(error?.message || 'فشل في حذف نتائج البطولة');
+    } finally {
+      setIsDeletingSportResults(false);
+    }
+  };
+
   // Save cross country category result
   const handleSaveCrossCountryResult = async (result: CrossCountryCategoryResult) => {
     try {
@@ -447,17 +486,28 @@ export const Matches: React.FC = () => {
         });
       }
 
-      const sportMatches = matches.filter(m => {
+      // Determine if programmed / open
+      // A sport is programmed only if active tournaments exist for it
+      const isProgrammed = sport.id === 'cross_country'
+        ? (tournaments.some(t => t.sportId === 'cross_country') || sportTournaments.length > 0)
+        : (sportTournaments.length > 0);
+
+      const sportMatches = isProgrammed ? matches.filter(m => {
         // Directorate filter check
         if (activeDirId && activeDirId !== 'all') {
           const matchDir = m.directorateId || 'taourirt';
           if (matchDir !== activeDirId) return false;
         }
 
-        // Determine effective sportId of match
-        const effectiveSportId = m.sportId || (m.tournamentId ? tournaments.find(t => t.id === m.tournamentId)?.sportId : undefined);
-        if (effectiveSportId && effectiveSportId !== sport.id) return false;
-        if (!effectiveSportId && sport.id !== 'football') return false; // Fallback to football if sportId missing
+        // Must belong to one of active sport tournaments
+        if (m.tournamentId) {
+          if (!sportTournaments.some(t => t.id === m.tournamentId)) return false;
+        } else {
+          if (m.sportId !== sport.id) return false;
+          if (!sportTournaments.some(t => normalizeCategoryKey(t.ageCategory) === normalizeCategoryKey(m.ageCategory) && t.gender === m.gender)) {
+            return false;
+          }
+        }
 
         // Affiliation check if filtered
         if (affiliationFilter !== 'ALL') {
@@ -484,42 +534,49 @@ export const Matches: React.FC = () => {
         }
 
         return true;
-      });
+      }) : [];
 
-      let scheduledCount = sportMatches.filter(m => m.status === 'Scheduled').length;
-      let ongoingCount = sportMatches.filter(m => m.status === 'Ongoing').length;
-      let completedCount = sportMatches.filter(m => m.status === 'Completed').length;
-      let totalMatches = sportMatches.length;
+      let scheduledCount = isProgrammed ? sportMatches.filter(m => m.status === 'Scheduled').length : 0;
+      let ongoingCount = isProgrammed ? sportMatches.filter(m => m.status === 'Ongoing').length : 0;
+      let completedCount = isProgrammed ? sportMatches.filter(m => m.status === 'Completed').length : 0;
+      let totalMatches = isProgrammed ? sportMatches.length : 0;
 
       if (sport.id === 'cross_country') {
-        const isClubFilter = affiliationFilter === 'club_affiliated';
-        const isNonClubFilter = affiliationFilter === 'non_club';
+        if (isProgrammed) {
+          const isClubFilter = affiliationFilter === 'club_affiliated';
+          const isNonClubFilter = affiliationFilter === 'non_club';
 
-        const ccCompleted = CROSS_COUNTRY_CATEGORIES.filter(c => {
-          const nonClubRes = crossCountryResults[c.id];
-          const clubRes = crossCountryResults[`${c.id}_club`];
-          
-          if (isClubFilter) {
-            return (clubRes?.status === 'completed') || (clubRes?.podium && clubRes.podium.length > 0 && clubRes.status !== 'running');
-          }
-          if (isNonClubFilter) {
-            return (nonClubRes?.status === 'completed') || (nonClubRes?.podium && nonClubRes.podium.length > 0 && nonClubRes.status !== 'running');
-          }
-          const hasNonClubDone = (nonClubRes?.status === 'completed') || (nonClubRes?.podium && nonClubRes.podium.length > 0 && nonClubRes.status !== 'running');
-          const hasClubDone = (clubRes?.status === 'completed') || (clubRes?.podium && clubRes.podium.length > 0 && clubRes.status !== 'running');
-          return hasNonClubDone || hasClubDone;
-        }).length;
+          const ccCompleted = CROSS_COUNTRY_CATEGORIES.filter(c => {
+            const nonClubRes = crossCountryResults[c.id];
+            const clubRes = crossCountryResults[`${c.id}_club`];
+            
+            if (isClubFilter) {
+              return (clubRes?.status === 'completed') || (clubRes?.podium && clubRes.podium.length > 0 && clubRes.status !== 'running');
+            }
+            if (isNonClubFilter) {
+              return (nonClubRes?.status === 'completed') || (nonClubRes?.podium && nonClubRes.podium.length > 0 && nonClubRes.status !== 'running');
+            }
+            const hasNonClubDone = (nonClubRes?.status === 'completed') || (nonClubRes?.podium && nonClubRes.podium.length > 0 && nonClubRes.status !== 'running');
+            const hasClubDone = (clubRes?.status === 'completed') || (clubRes?.podium && clubRes.podium.length > 0 && clubRes.status !== 'running');
+            return hasNonClubDone || hasClubDone;
+          }).length;
 
-        const ccOngoing = CROSS_COUNTRY_CATEGORIES.filter(c => {
-          if (isClubFilter) return crossCountryResults[`${c.id}_club`]?.status === 'running';
-          if (isNonClubFilter) return crossCountryResults[c.id]?.status === 'running';
-          return crossCountryResults[c.id]?.status === 'running' || crossCountryResults[`${c.id}_club`]?.status === 'running';
-        }).length;
+          const ccOngoing = CROSS_COUNTRY_CATEGORIES.filter(c => {
+            if (isClubFilter) return crossCountryResults[`${c.id}_club`]?.status === 'running';
+            if (isNonClubFilter) return crossCountryResults[c.id]?.status === 'running';
+            return crossCountryResults[c.id]?.status === 'running' || crossCountryResults[`${c.id}_club`]?.status === 'running';
+          }).length;
 
-        completedCount = ccCompleted;
-        ongoingCount = ccOngoing;
-        totalMatches = 8;
-        scheduledCount = Math.max(0, 8 - ccCompleted - ccOngoing);
+          completedCount = ccCompleted;
+          ongoingCount = ccOngoing;
+          totalMatches = 8;
+          scheduledCount = Math.max(0, 8 - ccCompleted - ccOngoing);
+        } else {
+          completedCount = 0;
+          ongoingCount = 0;
+          totalMatches = 0;
+          scheduledCount = 0;
+        }
       }
 
       const nonClubCount = sportMatches.filter(m => {
@@ -530,16 +587,7 @@ export const Matches: React.FC = () => {
         return true;
       }).length;
 
-      const clubCount = totalMatches - nonClubCount;
-
-      // Determine if programmed / open
-      const isProgrammed = sport.id === 'cross_country'
-        ? true
-        : (sportTournaments.length > 0 || sportMatches.length > 0
-          ? true
-          : (sport.isProgrammed !== undefined
-            ? sport.isProgrammed
-            : (Boolean(sport.ageCategories && sport.ageCategories.length > 0 && sport.studentLimit !== undefined && sport.studentLimit > 0))));
+      const clubCount = Math.max(0, totalMatches - nonClubCount);
 
       // Technical head
       const techHead = teachers.find(tch =>
@@ -712,19 +760,31 @@ export const Matches: React.FC = () => {
             )}
           </div>
 
-          {canCreate && (
+          {/* Actions */}
+          <div className="flex items-center gap-2">
             <button
-              onClick={() => {
-                setEditingMatch(null);
-                setCreateMatchInitialSportId(undefined);
-                setIsCreateMatchOpen(true);
-              }}
-              className="inline-flex items-center justify-center gap-2 rounded-2xl bg-blue-600 px-4 py-2 text-xs font-black text-white shadow-xs hover:bg-blue-700 transition-colors cursor-pointer"
+              onClick={() => setIsDemoDataModalOpen(true)}
+              className="inline-flex items-center justify-center gap-1.5 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 px-3.5 py-2 text-xs font-black text-white shadow-xs transition-colors cursor-pointer"
+              title="توليد وتعبئة نتائج ومباريات افتراضية لكافة الرياضات الجماعية"
             >
-              <Plus className="h-4 w-4" />
-              <span>برمجة مباراة جديد</span>
+              <Sparkles className="h-3.5 w-3.5 text-emerald-200" />
+              <span>توليد نتائج وبيانات افتراضية</span>
             </button>
-          )}
+
+            {canCreate && (
+              <button
+                onClick={() => {
+                  setEditingMatch(null);
+                  setCreateMatchInitialSportId(undefined);
+                  setIsCreateMatchOpen(true);
+                }}
+                className="inline-flex items-center justify-center gap-1.5 rounded-2xl bg-blue-600 px-3.5 py-2 text-xs font-black text-white shadow-xs hover:bg-blue-700 transition-colors cursor-pointer"
+              >
+                <Plus className="h-4 w-4" />
+                <span>برمجة مباراة جديد</span>
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
@@ -928,20 +988,20 @@ export const Matches: React.FC = () => {
                     } = item;
 
                     return (
-                      <tr key={sport.id} className="hover:bg-slate-50/80 transition-colors">
+                      <tr key={sport.id} className={cn("transition-colors", !isProgrammed ? "bg-slate-50/60 opacity-80" : "hover:bg-slate-50/80")}>
                         <td className="p-3.5 md:p-4 font-bold text-slate-400">{index + 1}</td>
                         
                         <td className="p-3.5 md:p-4">
                           <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-900 border border-blue-100 flex items-center justify-center text-xl shrink-0 shadow-2xs">
+                            <div className={cn("w-10 h-10 rounded-xl border flex items-center justify-center text-xl shrink-0 shadow-2xs", !isProgrammed ? "bg-slate-100 border-slate-200 grayscale opacity-75" : "bg-blue-50 text-blue-900 border-blue-100")}>
                               {sport.icon || '🏆'}
                             </div>
                             <div>
-                              <div className="font-extrabold text-slate-800 text-sm">
+                              <div className={cn("font-extrabold text-sm", !isProgrammed ? "text-slate-600" : "text-slate-800")}>
                                 {sport.name}
                               </div>
-                              <div className="text-[10px] text-slate-500">
-                                {sport.description || `بطولات ومنافسات ${sport.name}`}
+                              <div className="text-[10px] text-slate-400">
+                                {!isProgrammed ? "تم تحييد نتائج البطولة" : (sport.description || `بطولات ومنافسات ${sport.name}`)}
                               </div>
                             </div>
                           </div>
@@ -954,27 +1014,31 @@ export const Matches: React.FC = () => {
                             </span>
                           ) : (
                             <span className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[10px] font-bold bg-slate-100 text-slate-500 border border-slate-200">
-                              ⚪ في طور الإعداد
+                              ⚪ غير مبرمجة (محيدة)
                             </span>
                           )}
                         </td>
 
                         <td className="p-3.5 md:p-4 text-center">
-                          <div className="flex items-center justify-center gap-1.5 font-bold text-[11px]">
-                            {ongoingCount > 0 && (
-                              <span className="bg-red-50 text-red-700 border border-red-200 px-2 py-0.5 rounded-md">
-                                🔴 جارية: {ongoingCount}
+                          {isProgrammed ? (
+                            <div className="flex items-center justify-center gap-1.5 font-bold text-[11px]">
+                              {ongoingCount > 0 && (
+                                <span className="bg-red-50 text-red-700 border border-red-200 px-2 py-0.5 rounded-md">
+                                  🔴 جارية: {ongoingCount}
+                                </span>
+                              )}
+                              <span className="bg-blue-50 text-blue-700 border border-blue-200 px-2 py-0.5 rounded-md">
+                                📅 مبرمجة: {scheduledCount}
                               </span>
-                            )}
-                            <span className="bg-blue-50 text-blue-700 border border-blue-200 px-2 py-0.5 rounded-md">
-                              📅 مبرمجة: {scheduledCount}
-                            </span>
-                          </div>
+                            </div>
+                          ) : (
+                            <span className="text-slate-400 font-mono text-xs">-</span>
+                          )}
                         </td>
 
                         <td className="p-3.5 md:p-4">
                           {techHead ? (
-                            <div className="font-bold text-slate-800 text-xs">
+                            <div className="font-bold text-slate-700 text-xs">
                               {techHead.fullName}
                             </div>
                           ) : (
@@ -983,19 +1047,33 @@ export const Matches: React.FC = () => {
                         </td>
 
                         <td className="p-3.5 md:p-4 text-center">
-                          <span className="bg-emerald-50 text-emerald-800 border border-emerald-200 px-2.5 py-1 rounded-lg text-xs font-extrabold">
-                            🏆 مكتملة: {completedCount}
-                          </span>
+                          {isProgrammed ? (
+                            <span className="bg-emerald-50 text-emerald-800 border border-emerald-200 px-2.5 py-1 rounded-lg text-xs font-extrabold">
+                              🏆 مكتملة: {completedCount}
+                            </span>
+                          ) : (
+                            <span className="text-slate-400 font-mono text-xs">-</span>
+                          )}
                         </td>
 
                         <td className="p-3.5 md:p-4 text-center">
-                          <button
-                            onClick={() => handleOpenSportResults(sport)}
-                            className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl transition-colors shadow-2xs cursor-pointer inline-flex items-center gap-1"
-                          >
-                            <Trophy className="h-3.5 w-3.5" />
-                            <span>عرض النتائج والجدول</span>
-                          </button>
+                          {isProgrammed ? (
+                            <button
+                              onClick={() => handleOpenSportResults(sport)}
+                              className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl transition-colors shadow-2xs cursor-pointer inline-flex items-center gap-1"
+                            >
+                              <Trophy className="h-3.5 w-3.5" />
+                              <span>عرض النتائج والجدول</span>
+                            </button>
+                          ) : (
+                            <button
+                              disabled
+                              className="px-3.5 py-1.5 bg-slate-100 text-slate-400 border border-slate-200 font-bold text-xs rounded-xl inline-flex items-center gap-1 cursor-not-allowed"
+                            >
+                              <Lock className="h-3 w-3" />
+                              <span>غير مبرمجة</span>
+                            </button>
+                          )}
                         </td>
                       </tr>
                     );
@@ -1021,6 +1099,7 @@ export const Matches: React.FC = () => {
                   isClub
                 } = item;
                 const isManagerSpecialty = managerSportId === sport.id;
+                const canManageThisSport = isCentralAdmin || isTechCommitteeHead || (isSportManager && isManagerSpecialty);
 
                 // 1. Cross Country Championship Card (Identical dark gradient styling as in Tournaments.tsx)
                 if (sport.id === 'cross_country' && isProgrammed) {
@@ -1149,19 +1228,33 @@ export const Matches: React.FC = () => {
                           <span>استعراض منصة التتويج والنتائج الرسمية</span>
                         </button>
 
-                        {isCentralAdmin && (
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setSelectedSportForSchedule(sport);
-                              setIsScheduleModalOpen(true);
-                            }}
-                            className="p-2.5 bg-white/10 hover:bg-white/20 text-white rounded-xl text-xs font-bold transition-colors cursor-pointer shrink-0 border border-white/15 flex items-center justify-center"
-                            title="تعديل تواريخ وإعدادات رياضة العدو الريفي"
-                          >
-                            <Settings className="w-4 h-4" />
-                          </button>
+                        {canManageThisSport && (
+                          <>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedSportForSchedule(sport);
+                                setIsScheduleModalOpen(true);
+                              }}
+                              className="p-2.5 bg-white/10 hover:bg-white/20 text-white rounded-xl text-xs font-bold transition-colors cursor-pointer shrink-0 border border-white/15 flex items-center justify-center"
+                              title="تعديل تواريخ وإعدادات رياضة العدو الريفي"
+                            >
+                              <Settings className="w-4 h-4" />
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSportToDeleteResults(sport);
+                              }}
+                              className="p-2.5 bg-rose-500/25 hover:bg-rose-500/40 text-rose-200 hover:text-white rounded-xl text-xs font-bold transition-colors cursor-pointer shrink-0 border border-rose-400/30 flex items-center justify-center group"
+                              title="حذف وتصفير نتائج رياضة العدو الريفي"
+                            >
+                              <Trash2 className="w-4 h-4 group-hover:scale-110 transition-transform" />
+                            </button>
+                          </>
                         )}
                       </div>
                     </div>
@@ -1228,19 +1321,33 @@ export const Matches: React.FC = () => {
                           <span>في طور الإعداد (غير مبرمجة)</span>
                         </button>
 
-                        {isCentralAdmin && (
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setSelectedSportForSchedule(sport);
-                              setIsScheduleModalOpen(true);
-                            }}
-                            className="p-2 bg-slate-200 hover:bg-slate-300 text-slate-800 rounded-xl text-xs font-bold transition-colors cursor-pointer shrink-0"
-                            title="تعديل تواريخ وإعدادات الرياضة"
-                          >
-                            <Settings className="w-4 h-4" />
-                          </button>
+                        {canManageThisSport && (
+                          <>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedSportForSchedule(sport);
+                                setIsScheduleModalOpen(true);
+                              }}
+                              className="p-2 bg-slate-200 hover:bg-slate-300 text-slate-800 rounded-xl text-xs font-bold transition-colors cursor-pointer shrink-0"
+                              title="تعديل تواريخ وإعدادات الرياضة"
+                            >
+                              <Settings className="w-4 h-4" />
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSportToDeleteResults(sport);
+                              }}
+                              className="p-2 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-xl text-xs font-bold transition-colors cursor-pointer shrink-0 border border-rose-200/80 group"
+                              title="حذف وتصفير نتائج البطولة"
+                            >
+                              <Trash2 className="w-4 h-4 group-hover:scale-110 transition-transform" />
+                            </button>
+                          </>
                         )}
                       </div>
                     </div>
@@ -1408,19 +1515,33 @@ export const Matches: React.FC = () => {
                         <span>دخول واستعراض نتائج ومباريات البطولة</span>
                       </button>
 
-                      {isCentralAdmin && (
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setSelectedSportForSchedule(sport);
-                            setIsScheduleModalOpen(true);
-                          }}
-                          className="p-2 bg-slate-200 hover:bg-slate-300 text-slate-800 rounded-xl text-xs font-bold transition-colors cursor-pointer shrink-0"
-                          title="تعديل تواريخ وإعدادات الرياضة"
-                        >
-                          <Settings className="w-4 h-4" />
-                        </button>
+                      {canManageThisSport && (
+                        <>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedSportForSchedule(sport);
+                              setIsScheduleModalOpen(true);
+                            }}
+                            className="p-2 bg-slate-200 hover:bg-slate-300 text-slate-800 rounded-xl text-xs font-bold transition-colors cursor-pointer shrink-0"
+                            title="تعديل تواريخ وإعدادات الرياضة"
+                          >
+                            <Settings className="w-4 h-4" />
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSportToDeleteResults(sport);
+                            }}
+                            className="p-2 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-xl text-xs font-bold transition-colors cursor-pointer shrink-0 border border-rose-200/80 group"
+                            title="حذف وتصفير نتائج البطولة"
+                          >
+                            <Trash2 className="w-4 h-4 group-hover:scale-110 transition-transform" />
+                          </button>
+                        </>
                       )}
                     </div>
                   </div>
@@ -1541,6 +1662,134 @@ export const Matches: React.FC = () => {
         message={`هل أنت متأكد من رغبتك في حذف بطولة "${tournamentToDelete?.name || ''}" نهائياً؟`}
         confirmText="تأكيد الحذف"
         isDeleting={isDeleting}
+      />
+
+      {/* CONFIRM DELETE SPORT TOURNAMENT RESULTS MODAL */}
+      {sportToDeleteResults && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-200" dir="rtl">
+          <div 
+            className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-lg w-full p-6 shadow-2xl space-y-5 animate-in zoom-in-95 duration-200"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start gap-4">
+              <div className="p-3 bg-rose-100 dark:bg-rose-950/70 text-rose-600 dark:text-rose-400 rounded-2xl shrink-0">
+                <Trash2 className="w-6 h-6" />
+              </div>
+              <div className="flex-1 space-y-1">
+                <h3 className="text-lg font-black text-slate-900 dark:text-white">
+                  حذف وتصفير نتائج بطولة {sportToDeleteResults.name}
+                </h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  يرجى تحديد خيار الحذف أدناه. هذا الإجراء سيؤثر على النتائج المعروضة للعموم في المنصة.
+                </p>
+              </div>
+            </div>
+
+            {sportToDeleteResults.id === 'cross_country' ? (
+              <div className="bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60 rounded-2xl p-4 text-xs space-y-2 text-amber-900 dark:text-amber-200">
+                <p className="font-bold flex items-center gap-1.5">
+                  <span>⚠️</span>
+                  <span>تنبيه بخصوص نتائج العدو الريفي:</span>
+                </p>
+                <p className="leading-relaxed opacity-90">
+                  سيتم حذف وتصفير جميع نتائج البوديوم ومراكز التتويج المسجلة لجميع الفئات (ذكور وإناث) وإعادة حالة المسابقة إلى وضع الإعداد الأولي. لن يتم حذف لوائح العدائين المسجلين في البطولة.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <p className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                  اختر نمط الحذف والتصفير المطلوب:
+                </p>
+                <div className="space-y-2.5">
+                  <label 
+                    className={`flex items-start gap-3 p-3.5 rounded-2xl border-2 cursor-pointer transition-all ${
+                      deleteSportResultsMode === 'reset_scores'
+                        ? 'border-rose-500 bg-rose-50/50 dark:bg-rose-950/30'
+                        : 'border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="deleteMode"
+                      checked={deleteSportResultsMode === 'reset_scores'}
+                      onChange={() => setDeleteSportResultsMode('reset_scores')}
+                      className="mt-0.5 text-rose-600 focus:ring-rose-500"
+                    />
+                    <div className="text-xs space-y-0.5">
+                      <span className="font-bold text-slate-800 dark:text-slate-200 block">
+                        تصفير النتائج والأهداف فقط (مُوصى به)
+                      </span>
+                      <span className="text-slate-500 dark:text-slate-400 leading-relaxed block text-[11px]">
+                        إلغاء نتائج وأهداف المباريات وإعادتها لحالة مبرمجة (SCHEDULED) مع الحفاظ على جدول المباريات والفرق والتواريخ.
+                      </span>
+                    </div>
+                  </label>
+
+                  <label 
+                    className={`flex items-start gap-3 p-3.5 rounded-2xl border-2 cursor-pointer transition-all ${
+                      deleteSportResultsMode === 'delete_all'
+                        ? 'border-rose-500 bg-rose-50/50 dark:bg-rose-950/30'
+                        : 'border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="deleteMode"
+                      checked={deleteSportResultsMode === 'delete_all'}
+                      onChange={() => setDeleteSportResultsMode('delete_all')}
+                      className="mt-0.5 text-rose-600 focus:ring-rose-500"
+                    />
+                    <div className="text-xs space-y-0.5">
+                      <span className="font-bold text-rose-700 dark:text-rose-400 block">
+                        حذف كامل للمباريات ونتائجها
+                      </span>
+                      <span className="text-slate-500 dark:text-slate-400 leading-relaxed block text-[11px]">
+                        حذف جميع مباريات هذه البطولة ونتائجها نهائياً من قاعدة البيانات.
+                      </span>
+                    </div>
+                  </label>
+                </div>
+              </div>
+            )}
+
+            <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-100 dark:border-slate-800">
+              <button
+                type="button"
+                onClick={() => setSportToDeleteResults(null)}
+                disabled={isDeletingSportResults}
+                className="px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-bold transition-colors cursor-pointer"
+              >
+                إلغاء
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDeleteSportResults}
+                disabled={isDeletingSportResults}
+                className="px-5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold transition-all shadow-md shadow-rose-600/20 flex items-center gap-2 cursor-pointer disabled:opacity-50"
+              >
+                {isDeletingSportResults ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    <span>جاري الحذف والتصفير...</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-4 h-4" />
+                    <span>تأكيد الحذف والتصفير</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      <DemoDataModal
+        isOpen={isDemoDataModalOpen}
+        onClose={() => setIsDemoDataModalOpen(false)}
+        activeDirectorateId={DataService.getActiveDirectorateId() || 'taourirt'}
+        activeDirectorateName="المديرية الإقليمية بتاوريرت"
+        activeSeason={activeSeason}
+        onDataLoaded={loadData}
       />
     </div>
   );

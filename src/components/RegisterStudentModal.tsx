@@ -346,16 +346,16 @@ export const RegisterStudentModal: React.FC<RegisterStudentModalProps> = ({
       <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl max-w-lg w-full flex flex-col overflow-hidden my-auto animate-in fade-in zoom-in-95 duration-150 relative z-[101]">
         
         {/* Header */}
-        <div className="p-4 bg-gradient-to-r from-blue-900 to-slate-900 dark:from-slate-900 dark:to-indigo-950 text-white flex items-center justify-between gap-3">
+        <div className="p-4 bg-gradient-to-r from-emerald-800 via-teal-900 to-slate-900 text-white flex items-center justify-between gap-3">
           <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-xl bg-blue-600/30 text-blue-300 flex items-center justify-center font-bold border border-blue-400/30 text-lg">
+            <div className="w-9 h-9 rounded-xl bg-white/15 border border-white/20 text-white flex items-center justify-center font-bold text-lg shadow-inner">
               🎓
             </div>
             <div>
               <h3 className="text-sm font-black text-white">
                 تسجيل تلميذ(ة) جديد في بطولة {sport.name}
               </h3>
-              <p className="text-[11px] text-slate-300 dark:text-slate-400">
+              <p className="text-[11px] text-emerald-100 font-medium">
                 إدخال البيانات الرسمية المشاركة بالمؤسسة التعليمية
               </p>
             </div>
@@ -385,12 +385,12 @@ export const RegisterStudentModal: React.FC<RegisterStudentModalProps> = ({
         <form onSubmit={handleSubmit} className="p-4 sm:p-5 space-y-4">
           {/* Automatic Tournament Constraints Banner */}
           {(preselectedCategory || preselectedGender || preselectedAffiliation) && (
-            <div className="p-3 bg-blue-50/80 dark:bg-blue-950/30 border border-blue-200/90 dark:border-blue-800/50 rounded-2xl flex items-center justify-between gap-2 shadow-3xs transition-colors">
-              <div className="flex items-center gap-2 text-xs font-bold text-blue-950 dark:text-blue-100">
+            <div className="p-3 bg-emerald-50/80 dark:bg-emerald-950/30 border border-emerald-200/90 dark:border-emerald-800/50 rounded-2xl flex items-center justify-between gap-2 shadow-3xs transition-colors">
+              <div className="flex items-center gap-2 text-xs font-bold text-emerald-950 dark:text-emerald-100">
                 <span className="text-base">🔒</span>
                 <span>
                   محدد ومقفل تلقائياً وفق شروط البطولة:{' '}
-                  <strong className="text-blue-700 dark:text-blue-400">
+                  <strong className="text-emerald-800 dark:text-emerald-300">
                     {preselectedGender ? (gender === 'Male' ? 'ذكور 👦' : 'إناث 👧') : ''}
                     {preselectedGender && preselectedCategory ? ' • ' : ''}
                     {preselectedCategory ? `فئة ${getCategoryGenderLabel(category, gender, currentSeason)} 🏅` : ''}
@@ -399,7 +399,7 @@ export const RegisterStudentModal: React.FC<RegisterStudentModalProps> = ({
                   </strong>
                 </span>
               </div>
-              <span className="text-[10px] font-black bg-blue-600 dark:bg-blue-700 text-white px-2 py-0.5 rounded-full shrink-0">
+              <span className="text-[10px] font-black bg-emerald-600 dark:bg-emerald-700 text-white px-2 py-0.5 rounded-full shrink-0">
                 التزام إجباري
               </span>
             </div>
@@ -837,7 +837,7 @@ export const RegisterStudentModal: React.FC<RegisterStudentModalProps> = ({
             <button
               type="submit"
               disabled={isSubmitting || isExpired}
-              className="px-5 py-2 text-xs font-bold text-white bg-blue-600 dark:bg-blue-700 hover:bg-blue-700 dark:hover:bg-blue-600 rounded-xl transition-all shadow-xs disabled:bg-slate-300 dark:disabled:bg-slate-800 disabled:cursor-not-allowed cursor-pointer flex items-center gap-1.5"
+              className="px-5 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 active:scale-95 rounded-xl transition-all shadow-md shadow-emerald-600/20 disabled:bg-slate-300 dark:disabled:bg-slate-800 disabled:cursor-not-allowed cursor-pointer flex items-center gap-1.5"
             >
               {isSubmitting ? (
                 <span>جاري الحفظ...</span>

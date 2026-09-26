@@ -304,7 +304,7 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
         {/* Header */}
         <div className="flex items-center justify-between p-4 md:p-5 border-b border-slate-100 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-800/60">
           <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-xl bg-blue-600 text-white flex items-center justify-center shadow-xs">
+            <div className="w-9 h-9 rounded-xl bg-emerald-600 text-white flex items-center justify-center shadow-xs">
               <Trophy className="h-5 w-5" />
             </div>
             <div>
@@ -337,7 +337,7 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
               placeholder="مثال: البطولة الإقليمية المدرسية لكرة السلة"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              className="w-full text-xs rounded-lg border border-slate-200 px-3 py-2 text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
             />
             <span className="text-[10px] text-slate-400 block mt-1 leading-relaxed">
               * سيقوم النظام بإضافة لواحق الجنس والفئة تلقائياً (مثال: - ذكور (البراعم U12)) لكل نسخة يتم توليدها.
@@ -353,7 +353,7 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
               value={sportId}
               onChange={(e) => setSportId(e.target.value)}
               disabled={allowedSportIds !== null && allowedSportIds !== undefined && allowedSportIds.length === 1}
-              className="w-full text-xs rounded-lg border border-slate-200 px-3 py-2 text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 font-bold disabled:bg-slate-100 disabled:text-slate-700 disabled:cursor-not-allowed cursor-pointer"
+              className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500 font-bold disabled:bg-slate-100 disabled:text-slate-700 disabled:cursor-not-allowed cursor-pointer"
             >
               {availableSports.length > 0
                 ? availableSports.map((s) => (
@@ -394,10 +394,10 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
                 <button
                   type="button"
                   onClick={() => setGenderSelection('Both')}
-                  className={`py-2 px-3 text-xs font-bold rounded-lg border transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                  className={`py-2 px-3 text-xs font-bold rounded-xl border transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
                     genderSelection === 'Both'
-                      ? 'bg-blue-600 text-white border-blue-600'
-                      : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                      ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
+                      : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
                   }`}
                 >
                   👫 الجنسين معاً (ذكور + إناث)
@@ -405,10 +405,10 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
                 <button
                   type="button"
                   onClick={() => setGenderSelection('Male')}
-                  className={`py-2 px-3 text-xs font-bold rounded-lg border transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                  className={`py-2 px-3 text-xs font-bold rounded-xl border transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
                     genderSelection === 'Male'
-                      ? 'bg-blue-600 text-white border-blue-600'
-                      : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                      ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
+                      : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
                   }`}
                 >
                   👦 ذكور فقط
@@ -416,10 +416,10 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
                 <button
                   type="button"
                   onClick={() => setGenderSelection('Female')}
-                  className={`py-2 px-3 text-xs font-bold rounded-lg border transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                  className={`py-2 px-3 text-xs font-bold rounded-xl border transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
                     genderSelection === 'Female'
-                      ? 'bg-blue-600 text-white border-blue-600'
-                      : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                      ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
+                      : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
                   }`}
                 >
                   👧 إناث فقط
@@ -427,10 +427,10 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
                 <button
                   type="button"
                   onClick={() => setGenderSelection('Mixed')}
-                  className={`py-2 px-3 text-xs font-bold rounded-lg border transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                  className={`py-2 px-3 text-xs font-bold rounded-xl border transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
                     genderSelection === 'Mixed'
-                      ? 'bg-blue-600 text-white border-blue-600'
-                      : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                      ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
+                      : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
                   }`}
                 >
                   👥 مختلط (Mixed)
@@ -458,7 +458,7 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
                   ⚠️ لم يتم تفعيل أو إضافة أي فئة لهذا التخصص بعد في لوحة التحكم.
                 </p>
               ) : (
-                <div className="flex flex-col gap-2 bg-white p-3 rounded-xl border border-slate-200 shadow-2xs">
+                <div className="flex flex-col gap-2 bg-white p-3 rounded-2xl border border-slate-200 shadow-2xs">
                   {/* Dedicated Checkbox for "المشاركة في جميع الفئات" */}
                   <label className="flex items-center justify-between gap-2.5 px-3 py-2.5 rounded-xl bg-emerald-50 border border-emerald-300 hover:bg-emerald-100/90 cursor-pointer text-xs font-black text-emerald-950 transition-all shadow-2xs">
                     <div className="flex items-center gap-2.5">
@@ -494,9 +494,9 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
                       return (
                         <label
                           key={cat.id}
-                          className={`flex items-center gap-2.5 px-2.5 py-2 rounded-lg border cursor-pointer text-xs font-bold transition-all ${
+                          className={`flex items-center gap-2.5 px-2.5 py-2 rounded-xl border cursor-pointer text-xs font-bold transition-all ${
                             isChecked
-                              ? 'bg-blue-50/90 border-blue-300 text-blue-900 shadow-2xs'
+                              ? 'bg-emerald-50/90 border-emerald-300 text-emerald-950 shadow-2xs'
                               : 'bg-slate-50/70 border-slate-200/80 text-slate-700 hover:bg-slate-100/80'
                           }`}
                         >
@@ -504,7 +504,7 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
                             type="checkbox"
                             checked={isChecked}
                             onChange={() => handleToggleCategory(cat.id)}
-                            className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 w-4 h-4 cursor-pointer"
+                            className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 w-4 h-4 cursor-pointer accent-emerald-600"
                           />
                           <span>{cat.name}</span>
                         </label>
@@ -535,17 +535,17 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
               <button
                 type="button"
                 onClick={() => setAffiliationSelection('both')}
-                className={`p-2 rounded-xl text-right border transition-all cursor-pointer flex flex-col justify-between ${
+                className={`p-2.5 rounded-xl text-right border transition-all cursor-pointer flex flex-col justify-between ${
                   affiliationSelection === 'both'
-                    ? 'bg-blue-600 text-white border-blue-600 shadow-xs ring-2 ring-blue-400/40'
+                    ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs ring-2 ring-emerald-400/40'
                     : 'bg-white border-slate-200 hover:border-slate-300 text-slate-800'
                 }`}
               >
                 <div>
                   <div className="flex items-center justify-between mb-1">
                     <span className="font-extrabold text-[10px]">⚡ كلاهما</span>
-                    <span className={`text-[8px] px-1 py-0.5 rounded font-bold ${
-                      affiliationSelection === 'both' ? 'bg-white/20 text-white' : 'bg-blue-50 text-blue-700'
+                    <span className={`text-[8px] px-1.5 py-0.5 rounded font-bold ${
+                      affiliationSelection === 'both' ? 'bg-white/20 text-white' : 'bg-emerald-50 text-emerald-800 border border-emerald-200'
                     }`}>
                       2 بطولتين
                     </span>
@@ -557,7 +557,7 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
               <button
                 type="button"
                 onClick={() => setAffiliationSelection('non_club')}
-                className={`p-2 rounded-xl text-right border transition-all cursor-pointer flex flex-col justify-between ${
+                className={`p-2.5 rounded-xl text-right border transition-all cursor-pointer flex flex-col justify-between ${
                   affiliationSelection === 'non_club'
                     ? 'bg-slate-900 text-white border-slate-900 shadow-xs ring-2 ring-slate-400/40'
                     : 'bg-white border-slate-200 hover:border-slate-300 text-slate-800'
@@ -566,7 +566,7 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
                 <div>
                   <div className="flex items-center justify-between mb-1">
                     <span className="font-extrabold text-[10px]">⚪ غير منتمين</span>
-                    <span className={`text-[8px] px-1 py-0.5 rounded font-bold ${
+                    <span className={`text-[8px] px-1.5 py-0.5 rounded font-bold ${
                       affiliationSelection === 'non_club' ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-700 border border-slate-200'
                     }`}>
                       مدرسي
@@ -579,7 +579,7 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
               <button
                 type="button"
                 onClick={() => setAffiliationSelection('club_affiliated')}
-                className={`p-2 rounded-xl text-right border transition-all cursor-pointer flex flex-col justify-between ${
+                className={`p-2.5 rounded-xl text-right border transition-all cursor-pointer flex flex-col justify-between ${
                   affiliationSelection === 'club_affiliated'
                     ? 'bg-amber-400 text-amber-950 border-amber-500 shadow-xs ring-2 ring-amber-400/60 font-bold'
                     : 'bg-amber-50/80 border-amber-200 hover:border-amber-300 text-amber-900'
@@ -596,7 +596,7 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
               <button
                 type="button"
                 onClick={() => setAffiliationSelection('open')}
-                className={`p-2 rounded-xl text-right border transition-all cursor-pointer flex flex-col justify-between ${
+                className={`p-2.5 rounded-xl text-right border transition-all cursor-pointer flex flex-col justify-between ${
                   affiliationSelection === 'open'
                     ? 'bg-emerald-600 text-white border-emerald-700 shadow-xs ring-2 ring-emerald-400/40 font-bold'
                     : 'bg-emerald-50/80 border-emerald-200 hover:border-emerald-300 text-emerald-900'
@@ -605,7 +605,7 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
                 <div>
                   <div className="flex items-center justify-between mb-1">
                     <span className="font-extrabold text-[10px]">🟢 دوري مفتوح</span>
-                    <span className={`text-[8px] px-1 py-0.5 rounded font-bold ${
+                    <span className={`text-[8px] px-1.5 py-0.5 rounded font-bold ${
                       affiliationSelection === 'open' ? 'bg-white/20 text-white' : 'bg-emerald-100 text-emerald-700 border border-emerald-200'
                     }`}>
                       للجميع
@@ -626,7 +626,7 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
                 type="date"
                 value={startDate}
                 onChange={(e) => setStartDate(e.target.value)}
-                className="w-full text-xs rounded-lg border border-slate-200 px-3 py-2 text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500"
               />
             </div>
 
@@ -638,7 +638,7 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
                 type="date"
                 value={endDate}
                 onChange={(e) => setEndDate(e.target.value)}
-                className="w-full text-xs rounded-lg border border-slate-200 px-3 py-2 text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500"
               />
             </div>
           </div>
@@ -653,7 +653,7 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
               type="datetime-local"
               value={registrationDeadline}
               onChange={(e) => setRegistrationDeadline(e.target.value)}
-              className="w-full text-xs rounded-lg border border-amber-300 bg-white px-3 py-2 text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-500 font-semibold"
+              className="w-full text-xs rounded-xl border border-amber-300 bg-white px-3 py-2 text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-500 font-semibold"
             />
             <p className="text-[10px] text-amber-700 mt-1">
               بعد هذا الموعد، يقفل نظام التسجيل أوتوماتيكياً أمام الأساتذة ولا يمكن إضافة مشاركين جدد.
@@ -661,17 +661,17 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
           </div>
 
           {/* School Levels Selection */}
-          <div className="space-y-2 p-3.5 bg-indigo-50/50 border border-indigo-200/80 rounded-xl">
+          <div className="space-y-2 p-3.5 bg-emerald-50/50 border border-emerald-200/80 rounded-2xl">
             <div className="flex items-center justify-between">
-              <label className="block text-xs font-bold text-indigo-950 flex items-center gap-1.5">
-                <GraduationCap className="w-3.5 h-3.5 text-indigo-700" />
+              <label className="block text-xs font-bold text-emerald-950 flex items-center gap-1.5">
+                <GraduationCap className="w-3.5 h-3.5 text-emerald-700" />
                 <span>الأسلاك التعليمية المسموح لها بالمشاركة *</span>
               </label>
-              <span className="text-[10px] bg-indigo-100 text-indigo-900 font-bold px-2 py-0.5 rounded border border-indigo-300">
+              <span className="text-[10px] bg-emerald-100 text-emerald-900 font-bold px-2 py-0.5 rounded border border-emerald-300">
                 التحكم بالانتساب
               </span>
             </div>
-            <p className="text-[11px] text-indigo-800 leading-relaxed">
+            <p className="text-[11px] text-emerald-800 leading-relaxed">
               حدد سلك واحد أو أكثر ليتم فلترة ومنع تسجيل أي تلاميذ ينتمون لمؤسسات من خارج الأسلاك المحددة.
             </p>
             <div className="flex flex-wrap gap-1.5 pt-1">
@@ -692,9 +692,9 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
                           : [...prev, item.id as any]
                       );
                     }}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-all cursor-pointer ${
+                    className={`px-3.5 py-1.5 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
                       isSelected
-                        ? 'bg-indigo-600 border-indigo-600 text-white shadow-3xs'
+                        ? 'bg-emerald-600 border-emerald-600 text-white shadow-3xs'
                         : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
                     }`}
                   >
@@ -714,7 +714,7 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
               <select
                 value={scope}
                 onChange={(e) => setScope(e.target.value as any)}
-                className="w-full text-xs rounded-lg border border-slate-200 px-3 py-2 text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
               >
                 <option value="Provincial">إقليمية (مديرية تاوريرت)</option>
                 <option value="Regional">جهوية (أكاديمية جهة الشرق)</option>
@@ -729,7 +729,7 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
               <select
                 value={status}
                 onChange={(e) => setStatus(e.target.value as any)}
-                className="w-full text-xs rounded-lg border border-slate-200 px-3 py-2 text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
               >
                 <option value="Scheduled">مبرمجة وقيد الإعداد</option>
                 <option value="Ongoing">جارية ومفتوحة</option>
@@ -739,17 +739,17 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
           </div>
 
           {/* Technical Committee Authority Banner */}
-          <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200/80 rounded-xl p-3.5 space-y-1.5">
+          <div className="bg-emerald-50 dark:bg-emerald-950/80 border border-emerald-200 dark:border-emerald-800 rounded-2xl p-3.5 space-y-1.5">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <ShieldCheck className="h-4 w-4 text-blue-700" />
-                <h4 className="text-xs font-bold text-blue-900">إشراف وضوابط البطولة</h4>
+                <ShieldCheck className="h-4 w-4 text-emerald-700 dark:text-emerald-400" />
+                <h4 className="text-xs font-black text-emerald-950 dark:text-emerald-100">إشراف وضوابط البطولة</h4>
               </div>
-              <span className="text-[10px] bg-blue-100/80 text-blue-800 font-bold px-2 py-0.5 rounded">
+              <span className="text-[10px] bg-emerald-100 dark:bg-emerald-900/90 text-emerald-800 dark:text-emerald-200 font-extrabold px-2 py-0.5 rounded-md border border-emerald-200 dark:border-emerald-700">
                 اللجنة التقنية
               </span>
             </div>
-            <p className="text-[11px] text-slate-600 leading-relaxed">
+            <p className="text-[11px] text-emerald-900 dark:text-emerald-200 font-bold leading-relaxed">
               يتولى رئيس اللجنة التقنية المكلّف بهذا الصنف الرياضي (والمعيّن من طرف المسؤول المركزي) كامل صلاحيات الإشراف والضوابط وإدارة المباريات والنتائج للبطولة.
             </p>
           </div>
@@ -764,7 +764,7 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
               placeholder="مثال: تجرى المباريات بالقاعة المغطاة بتاوريرت، ويتأهل الفائز للبطولة الجهوية بوجدة..."
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              className="w-full text-xs rounded-lg border border-slate-200 px-3 py-2 text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500"
             />
           </div>
 
@@ -773,7 +773,7 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
+              className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer"
             >
               إلغاء
             </button>
@@ -783,7 +783,7 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
                 <button
                   type="submit"
                   disabled={isSubmitting}
-                  className="px-5 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors shadow-xs disabled:bg-blue-300 cursor-pointer flex items-center gap-2"
+                  className="px-5 py-2.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 active:scale-95 rounded-xl transition-all shadow-md shadow-emerald-600/20 disabled:bg-emerald-300 cursor-pointer flex items-center gap-2"
                 >
                   {isSubmitting ? (
                     <>

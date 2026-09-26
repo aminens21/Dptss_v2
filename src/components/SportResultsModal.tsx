@@ -117,13 +117,18 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
     return sportTournaments.filter(t => !isClubTournament(t) && (t.affiliationType === 'open' || (t.name && (t.name.includes('مفتوحة') || t.name.includes('المفتوحة')))));
   }, [sportTournaments]);
 
-  // Matches for this sport
+  // Matches for this sport (strictly limited to active programmed tournaments)
   const sportMatches = useMemo(() => {
-    if (!sport) return [];
+    if (!sport || sportTournaments.length === 0) return [];
     return matches.filter(m => {
-      if (m.sportId === sport.id) return true;
       if (m.tournamentId) {
         return sportTournaments.some(t => t.id === m.tournamentId);
+      }
+      if (m.sportId === sport.id) {
+        return sportTournaments.some(t => 
+          normalizeCategoryKey(t.ageCategory) === normalizeCategoryKey(m.ageCategory) &&
+          t.gender === m.gender
+        );
       }
       return false;
     });
@@ -246,17 +251,17 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
         }`}
       >
         {/* Modal Header */}
-        <div className="px-4 sm:px-5 py-3.5 sm:py-4 bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white flex flex-col xs:flex-row xs:items-center justify-between gap-3 border-b border-white/10 shrink-0">
+        <div className="px-4 sm:px-5 py-3.5 sm:py-4 bg-gradient-to-r from-emerald-800 via-teal-900 to-slate-900 text-white flex flex-col xs:flex-row xs:items-center justify-between gap-3 border-b border-white/10 shrink-0">
           <div className="flex items-center gap-2.5 min-w-0">
             <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-2xl bg-gradient-to-br from-amber-400 to-amber-600 flex items-center justify-center text-xl sm:text-2xl shadow-md border border-amber-300/40 shrink-0">
               {sport.icon || '🏆'}
             </div>
             <div className="min-w-0 text-right">
               <div className="flex items-center gap-1.5 flex-wrap">
-                <span className="text-[9px] sm:text-[10px] font-black px-2 py-0.5 rounded-md bg-amber-500/20 text-amber-300 border border-amber-400/30 whitespace-nowrap">
+                <span className="text-[9px] sm:text-[10px] font-black px-2 py-0.5 rounded-md bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 whitespace-nowrap">
                   نتائج ومباريات الرياضة
                 </span>
-                <span className="text-[9px] sm:text-[10px] text-slate-400 font-bold whitespace-nowrap">{activeSeason}</span>
+                <span className="text-[9px] sm:text-[10px] text-emerald-100 font-bold whitespace-nowrap">{activeSeason}</span>
               </div>
               <h2 className="text-sm sm:text-base md:text-lg font-black text-white mt-0.5 truncate">
                 البطولة الإقليمية المدرسية لـ {sport.name}
@@ -608,33 +613,55 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
                       <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs space-y-3">
                         <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3">
                           {/* Category Pills */}
-                          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none">
-                            <span className="text-xs font-bold text-slate-500 whitespace-nowrap ml-1">الفئة:</span>
+                          <div className="relative flex items-center gap-1.5 w-full">
                             <button
                               type="button"
-                              onClick={() => setSelectedCategory('ALL')}
-                              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
-                                selectedCategory === 'ALL'
-                                  ? 'bg-slate-900 text-white shadow-xs'
-                                  : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
-                              }`}
+                              onClick={() => {
+                                const container = document.getElementById('category-container');
+                                if (container) container.scrollBy({ left: -150, behavior: 'smooth' });
+                              }}
+                              className="p-1 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600 shrink-0"
                             >
-                              جميع الفئات
+                              <ChevronLeft className="w-4 h-4" />
                             </button>
-                            {sportCategories.map(catId => (
+                            <div id="category-container" className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none flex-1">
+                              <span className="text-xs font-bold text-slate-500 whitespace-nowrap ml-1">الفئة:</span>
                               <button
-                                key={catId}
                                 type="button"
-                                onClick={() => setSelectedCategory(catId)}
+                                onClick={() => setSelectedCategory('ALL')}
                                 className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
-                                  selectedCategory === catId
-                                    ? 'bg-blue-600 text-white shadow-xs'
+                                  selectedCategory === 'ALL'
+                                    ? 'bg-slate-900 text-white shadow-xs'
                                     : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
                                 }`}
                               >
-                                {getCategoryName(catId)}
+                                جميع الفئات
                               </button>
-                            ))}
+                              {sportCategories.map(catId => (
+                                <button
+                                  key={catId}
+                                  type="button"
+                                  onClick={() => setSelectedCategory(catId)}
+                                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
+                                    selectedCategory === catId
+                                      ? 'bg-blue-600 text-white shadow-xs'
+                                      : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+                                  }`}
+                                >
+                                  {getCategoryName(catId)}
+                                </button>
+                              ))}
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const container = document.getElementById('category-container');
+                                if (container) container.scrollBy({ left: 150, behavior: 'smooth' });
+                              }}
+                              className="p-1 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600 shrink-0"
+                            >
+                              <ChevronLeft className="w-4 h-4 rotate-180" />
+                            </button>
                           </div>
 
                           {/* Gender & Status Filters */}

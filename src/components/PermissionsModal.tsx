@@ -227,21 +227,21 @@ export const PermissionsModal: React.FC<PermissionsModalProps> = ({ isOpen, onCl
         onClick={(e) => e.stopPropagation()}
       >
         {/* Modal Header */}
-        <div className="flex items-center justify-between px-6 py-4 bg-white border-b border-slate-200 shrink-0">
+        <div className="flex items-center justify-between px-6 py-4 bg-gradient-to-r from-emerald-800 via-teal-900 to-slate-900 text-white border-b border-slate-200 shrink-0">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-blue-50 border border-blue-200 text-blue-600 flex items-center justify-center shrink-0">
+            <div className="w-10 h-10 rounded-xl bg-white/15 border border-white/20 text-white flex items-center justify-center shadow-inner shrink-0">
               <KeyRound className="h-5 w-5" />
             </div>
             <div>
-              <h2 className="text-sm sm:text-base font-black text-slate-900">نافذة التحكم في صلاحيات الوصول والأدوار</h2>
-              <p className="text-[11px] text-slate-500 font-medium">تخصيص صفحات القائمة الجانبية المتاحة لكل فئة بالموقع في الوقت الفعلي</p>
+              <h2 className="text-sm sm:text-base font-black text-white">نافذة التحكم في صلاحيات الوصول والأدوار</h2>
+              <p className="text-[11px] text-emerald-100 font-medium">تخصيص صفحات القائمة الجانبية المتاحة لكل فئة بالموقع في الوقت الفعلي</p>
             </div>
           </div>
           
           <button
             type="button"
             onClick={onClose}
-            className="text-slate-400 hover:text-slate-600 p-2 rounded-xl hover:bg-slate-100 transition-colors cursor-pointer active:scale-95"
+            className="text-white/80 hover:text-white p-2 rounded-xl hover:bg-white/10 transition-colors cursor-pointer active:scale-95"
           >
             <X className="h-5 w-5" />
           </button>
@@ -449,7 +449,7 @@ export const PermissionsModal: React.FC<PermissionsModalProps> = ({ isOpen, onCl
                 type="button"
                 onClick={handleSaveRolePermissions}
                 disabled={savingPermissions}
-                className="flex items-center gap-1.5 px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-black rounded-xl transition-all shadow-md shadow-blue-500/10 cursor-pointer active:scale-95 disabled:opacity-50"
+                className="flex items-center gap-1.5 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black rounded-xl transition-all shadow-md shadow-emerald-600/20 cursor-pointer active:scale-95 disabled:opacity-50"
               >
                 <Save className="h-3.5 w-3.5 shrink-0" />
                 <span>{savingPermissions ? 'جاري تطبيق الحفظ...' : 'حفظ وتطبيق المصفوفة 💾'}</span>

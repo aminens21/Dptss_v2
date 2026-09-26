@@ -761,17 +761,20 @@ export const BibGeneratorModal: React.FC<BibGeneratorModalProps> = ({
       <div className="bg-white border border-slate-200 rounded-3xl shadow-2xl max-w-4xl w-full max-h-[96vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200">
         
         {/* Modal Top Header */}
-        <div className="px-5 py-4 bg-slate-900 text-white flex items-center justify-between border-b border-slate-800 shrink-0">
+        <div className="px-5 py-4 bg-gradient-to-r from-emerald-800 via-teal-900 to-slate-900 text-white flex items-center justify-between border-b border-slate-800 shrink-0">
           <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-xl bg-blue-600 text-white flex items-center justify-center text-base shadow-xs">
+            <div className="w-8 h-8 rounded-xl bg-white/15 border border-white/20 text-white flex items-center justify-center text-base shadow-inner">
               <Eye className="w-4 h-4" />
             </div>
-            <h3 className="text-base font-black text-white">إنشاء الصدريات (PDF)</h3>
+            <div>
+              <h3 className="text-base font-black text-white">إنشاء الصدريات وبطاقات الأرقام (PDF)</h3>
+              <p className="text-[10px] text-emerald-100 font-medium">توليد وطباعة أرقام الصدريات للعدائين بدقة عالية</p>
+            </div>
           </div>
 
           <button
             onClick={onClose}
-            className="w-8 h-8 rounded-xl bg-white/10 hover:bg-white/20 text-slate-300 hover:text-white flex items-center justify-center transition-all cursor-pointer"
+            className="w-8 h-8 rounded-xl bg-white/10 hover:bg-white/20 text-slate-200 hover:text-white flex items-center justify-center transition-all cursor-pointer"
             title="إغلاق"
           >
             <X className="w-4 h-4" />
@@ -1347,24 +1350,24 @@ export const BibGeneratorModal: React.FC<BibGeneratorModalProps> = ({
             </div>
 
             {/* Subtitle / Status text */}
-            <div className="text-center text-xs font-bold text-slate-600 pt-2 border-t border-slate-100 flex items-center justify-center gap-2 flex-wrap">
-              <span className="inline-flex items-center gap-1 text-blue-700 bg-blue-50 px-2 py-0.5 rounded-full border border-blue-200">
+            <div className="text-center text-xs font-bold text-slate-600 dark:text-slate-300 pt-2 border-t border-slate-100 dark:border-slate-800 flex items-center justify-center gap-2 flex-wrap">
+              <span className="inline-flex items-center gap-1 text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-950/60 px-2 py-0.5 rounded-full border border-blue-200 dark:border-blue-800">
                 <span>السباقات المحددة:</span>
                 <strong className="font-mono">{selectedRaces.length}</strong>
               </span>
-              <span className="text-slate-300">•</span>
-              <span>مجموع الصدريات: <strong className="text-blue-600 font-black text-sm">{filteredRunners.length}</strong></span>
-              <span className="text-slate-300">•</span>
-              <span className="inline-flex items-center gap-1 text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+              <span className="text-slate-300 dark:text-slate-700">•</span>
+              <span>مجموع الصدريات: <strong className="text-blue-600 dark:text-blue-400 font-black text-sm">{filteredRunners.length}</strong></span>
+              <span className="text-slate-300 dark:text-slate-700">•</span>
+              <span className="inline-flex items-center gap-1 text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/60 px-2 py-0.5 rounded-full border border-emerald-200 dark:border-emerald-800">
                 <FileText className="w-3 h-3" />
                 <span>{bibsPerPage === 6 ? '6 صدريات في الصفحة (اقتصادي)' : '2 صدريات في الصفحة (A5)'}</span>
               </span>
-              <span className="text-slate-300">•</span>
-              <span>عدد الصفحات المتوقعة: <strong className="font-mono text-slate-900">{Math.max(1, Math.ceil(filteredRunners.length / bibsPerPage))}</strong></span>
+              <span className="text-slate-300 dark:text-slate-700">•</span>
+              <span>عدد الصفحات المتوقعة: <strong className="font-mono text-slate-900 dark:text-slate-100">{Math.max(1, Math.ceil(filteredRunners.length / bibsPerPage))}</strong></span>
               {separatePagesPerRace && selectedRaces.length > 1 && (
                 <>
-                  <span className="text-slate-300">•</span>
-                  <span className="inline-flex items-center gap-1 text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200 text-[11px]">
+                  <span className="text-slate-300 dark:text-slate-700">•</span>
+                  <span className="inline-flex items-center gap-1 text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/60 px-2 py-0.5 rounded-full border border-amber-200 dark:border-amber-800 text-[11px]">
                     صفحات منفصلة لكل سباق
                   </span>
                 </>
@@ -1409,7 +1412,7 @@ export const BibGeneratorModal: React.FC<BibGeneratorModalProps> = ({
               <button
                 type="button"
                 onClick={onClose}
-                className="px-4 py-2.5 bg-slate-200 hover:bg-slate-300 text-slate-700 active:scale-98 rounded-xl text-xs font-black transition-all cursor-pointer"
+                className="px-4 py-2.5 bg-slate-200 hover:bg-slate-300 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 active:scale-98 rounded-xl text-xs font-black transition-all cursor-pointer"
               >
                 إلغاء
               </button>
@@ -1421,8 +1424,8 @@ export const BibGeneratorModal: React.FC<BibGeneratorModalProps> = ({
           <div className="space-y-2.5">
             <div className="flex items-center justify-between px-2 flex-wrap gap-2">
               <div className="flex items-center gap-2">
-                <span className="text-xs font-black text-slate-700">معاينة مباشرة للصفحة</span>
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-blue-100 text-blue-800">
+                <span className="text-xs font-black text-slate-700 dark:text-slate-200">معاينة مباشرة للصفحة</span>
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-blue-100 dark:bg-blue-950/80 text-blue-800 dark:text-blue-300">
                   {bibsPerPage === 6 ? 'شبكة 6 صدريات (2×3)' : 'صدرية مزدوجة (2 في الصفحة)'}
                 </span>
               </div>
@@ -1535,17 +1538,17 @@ export const BibGeneratorModal: React.FC<BibGeneratorModalProps> = ({
                           }}
                         >
                           {/* TOP SECTION: 3 Columns Grid */}
-                          <div className="grid grid-cols-12 border-b-2 border-black h-[88px] bg-inherit">
+                          <div className="grid grid-cols-12 border-b-2 border-black h-[88px] bg-white text-slate-950">
                             
                             {/* Left Column (3 Rows): الفئة / تاريخ الازدياد / الجنس */}
-                            <div className="col-span-4 border-l border-black flex flex-col justify-between text-center font-black text-slate-900 bg-inherit divide-y border-black">
-                              <div className="flex-1 flex items-center justify-center px-1 truncate leading-tight" style={textBaseStyle}>
+                            <div className="col-span-4 border-l border-black flex flex-col justify-between text-center font-black text-slate-950 bg-white divide-y border-black divide-black">
+                              <div className="flex-1 flex items-center justify-center px-1 truncate leading-tight text-slate-950" style={textBaseStyle}>
                                 {runner.categoryLabel}
                               </div>
-                              <div className="flex-1 flex items-center justify-center px-1 font-mono leading-tight" style={textBaseStyle}>
+                              <div className="flex-1 flex items-center justify-center px-1 font-mono leading-tight text-slate-950" style={textBaseStyle}>
                                 {runner.birthDate || runner.birthYear}
                               </div>
-                              <div className="flex-1 flex items-center justify-center px-1 leading-tight" style={textBaseStyle}>
+                              <div className="flex-1 flex items-center justify-center px-1 leading-tight text-slate-950" style={textBaseStyle}>
                                 {runner.genderLabel}
                               </div>
                             </div>
@@ -1572,14 +1575,14 @@ export const BibGeneratorModal: React.FC<BibGeneratorModalProps> = ({
                             </div>
 
                             {/* Right Column (3 Rows): الاسم الكامل / رقم مسار / المؤسسة */}
-                            <div className="col-span-4 border-r border-black flex flex-col justify-between text-center font-black text-slate-900 bg-inherit divide-y border-black">
-                              <div className="flex-1 flex items-center justify-center px-1 truncate leading-tight" style={textBaseStyle}>
+                            <div className="col-span-4 border-r border-black flex flex-col justify-between text-center font-black text-slate-950 bg-white divide-y border-black divide-black">
+                              <div className="flex-1 flex items-center justify-center px-1 truncate leading-tight text-slate-950" style={textBaseStyle}>
                                 {runner.fullName}
                               </div>
-                              <div className="flex-1 flex items-center justify-center px-1 font-mono leading-tight" style={textBaseStyle}>
+                              <div className="flex-1 flex items-center justify-center px-1 font-mono leading-tight text-slate-950" style={textBaseStyle}>
                                 {runner.massarNumber}
                               </div>
-                              <div className="flex-1 flex items-center justify-center px-1 truncate leading-tight" style={textSmallStyle}>
+                              <div className="flex-1 flex items-center justify-center px-1 truncate leading-tight text-slate-950" style={textSmallStyle}>
                                 {runner.schoolName}
                               </div>
                             </div>
@@ -1587,10 +1590,10 @@ export const BibGeneratorModal: React.FC<BibGeneratorModalProps> = ({
                           </div>
 
                           {/* BOTTOM SECTION: Prominent Massive Bib Number */}
-                          <div className="flex-1 flex items-center justify-center bg-inherit py-1 overflow-visible">
+                          <div className="flex-1 flex items-center justify-center bg-white text-slate-950 py-1 overflow-visible">
                             <span 
-                              className={`text-black leading-none font-black tracking-tighter ${fontClass} transition-all select-all`}
-                              style={{ fontSize: `${bibNumberPx}px`, lineHeight: 0.9 }}
+                              className={`text-slate-950 leading-none font-black tracking-tighter ${fontClass} transition-all select-all`}
+                              style={{ fontSize: `${bibNumberPx}px`, lineHeight: 0.9, color: '#000000' }}
                             >
                               {runner.bibNumber}
                             </span>
@@ -1622,20 +1625,20 @@ export const BibGeneratorModal: React.FC<BibGeneratorModalProps> = ({
                           }}
                         >
                           {/* TOP SECTION: 3 Columns Grid */}
-                          <div className="grid grid-cols-12 border-b-4 border-black h-[120px] bg-inherit">
+                          <div className="grid grid-cols-12 border-b-4 border-black h-[120px] bg-white text-slate-950">
                             
                             {/* Left Column (4 Rows): الفئة / تاريخ الازدياد / الجنس / الجماعة */}
-                            <div className="col-span-4 border-l-2 border-black flex flex-col justify-between text-center font-black text-slate-900 bg-inherit divide-y-2 divide-black">
-                              <div className="flex-1 flex items-center justify-center px-1 truncate leading-tight" style={textBaseStyle}>
+                            <div className="col-span-4 border-l-2 border-black flex flex-col justify-between text-center font-black text-slate-950 bg-white divide-y-2 divide-black">
+                              <div className="flex-1 flex items-center justify-center px-1 truncate leading-tight text-slate-950" style={textBaseStyle}>
                                 {runner.categoryLabel}
                               </div>
-                              <div className="flex-1 flex items-center justify-center px-1 font-mono leading-tight" style={textBaseStyle}>
+                              <div className="flex-1 flex items-center justify-center px-1 font-mono leading-tight text-slate-950" style={textBaseStyle}>
                                 {runner.birthDate || runner.birthYear}
                               </div>
-                              <div className="flex-1 flex items-center justify-center px-1 leading-tight" style={textBaseStyle}>
+                              <div className="flex-1 flex items-center justify-center px-1 leading-tight text-slate-950" style={textBaseStyle}>
                                 {runner.genderLabel}
                               </div>
-                              <div className="flex-1 flex items-center justify-center px-1 truncate leading-tight" style={textSmallStyle}>
+                              <div className="flex-1 flex items-center justify-center px-1 truncate leading-tight text-slate-950" style={textSmallStyle}>
                                 {runner.commune || runner.directorateName}
                               </div>
                             </div>
@@ -1662,17 +1665,17 @@ export const BibGeneratorModal: React.FC<BibGeneratorModalProps> = ({
                             </div>
 
                             {/* Right Column (4 Rows): الاسم الكامل / رقم مسار / المؤسسة / المديرية */}
-                            <div className="col-span-4 border-r-2 border-black flex flex-col justify-between text-center font-black text-slate-900 bg-inherit divide-y-2 divide-black">
-                              <div className="flex-1 flex items-center justify-center px-1 truncate leading-tight" style={textBaseStyle}>
+                            <div className="col-span-4 border-r-2 border-black flex flex-col justify-between text-center font-black text-slate-950 bg-white divide-y-2 divide-black">
+                              <div className="flex-1 flex items-center justify-center px-1 truncate leading-tight text-slate-950" style={textBaseStyle}>
                                 {runner.fullName}
                               </div>
-                              <div className="flex-1 flex items-center justify-center px-1 font-mono leading-tight" style={textBaseStyle}>
+                              <div className="flex-1 flex items-center justify-center px-1 font-mono leading-tight text-slate-950" style={textBaseStyle}>
                                 {runner.massarNumber}
                               </div>
-                              <div className="flex-1 flex items-center justify-center px-1 truncate leading-tight" style={textSmallStyle}>
+                              <div className="flex-1 flex items-center justify-center px-1 truncate leading-tight text-slate-950" style={textSmallStyle}>
                                 {runner.schoolName}
                               </div>
-                              <div className="flex-1 flex items-center justify-center px-1 truncate leading-tight" style={textSmallStyle}>
+                              <div className="flex-1 flex items-center justify-center px-1 truncate leading-tight text-slate-950" style={textSmallStyle}>
                                 {runner.directorateName}
                               </div>
                             </div>
@@ -1680,10 +1683,10 @@ export const BibGeneratorModal: React.FC<BibGeneratorModalProps> = ({
                           </div>
 
                           {/* BOTTOM SECTION: Prominent Giant Bib Number with font & size control */}
-                          <div className="flex-1 flex items-center justify-center bg-inherit overflow-visible">
+                          <div className="flex-1 flex items-center justify-center bg-white text-slate-950 overflow-visible">
                             <span 
-                              className={`text-black leading-none font-black tracking-tighter ${fontClass} py-1 transition-all select-all`}
-                              style={{ fontSize: `${bibNumberPx}px`, lineHeight: 0.9 }}
+                              className={`text-slate-950 leading-none font-black tracking-tighter ${fontClass} py-1 transition-all select-all`}
+                              style={{ fontSize: `${bibNumberPx}px`, lineHeight: 0.9, color: '#000000' }}
                             >
                               {runner.bibNumber}
                             </span>

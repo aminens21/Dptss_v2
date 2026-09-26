@@ -224,7 +224,7 @@ export const TournamentPosterModal: React.FC<TournamentPosterModalProps> = ({
 
   // Form State
   const [organizer, setOrganizer] = useState(`المديرية الإقليمية لوزارة التربية الوطنية والتعليم الأولي والرياضة ب${resolvedDirName.replace(/^المديرية الإقليمية (ب|في )?/, '')}`);
-  const [partner, setPartner] = useState(`الفرع الإقليمي للجامعة الملكية المغربية للرياضة المدرسية ب${resolvedDirName.replace(/^المديرية الإقليمية (ب|في )?/, '')}`);
+  const [partner, setPartner] = useState(`المنظومة الرقمية لتتبع نتائج البطولات المدرسية الاقليمية 2026 ب${resolvedDirName.replace(/^المديرية الإقليمية (ب|في )?/, '')}`);
   const [organizerPrefix, setOrganizerPrefix] = useState('تنظم');
   const [partnerPrefix, setPartnerPrefix] = useState('بتعاون مع');
 
@@ -765,9 +765,9 @@ export const TournamentPosterModal: React.FC<TournamentPosterModalProps> = ({
       <div className="bg-white rounded-3xl shadow-2xl border border-slate-200 w-full max-w-6xl my-auto flex flex-col overflow-visible lg:overflow-hidden lg:max-h-[96vh] animate-in fade-in zoom-in-95 duration-150">
         
         {/* Modal Top Bar - Ultra sleek on mobile */}
-        <div className="px-3.5 py-2 sm:px-5 sm:py-3.5 bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 text-white flex items-center justify-between border-b border-slate-800 shrink-0">
+        <div className="px-3.5 py-2 sm:px-5 sm:py-3.5 bg-gradient-to-r from-emerald-800 via-teal-900 to-slate-900 text-white flex items-center justify-between border-b border-white/10 shrink-0">
           <div className="flex items-center gap-2 sm:gap-3">
-            <div className="w-7 h-7 sm:w-9 sm:h-9 rounded-lg sm:rounded-xl bg-orange-500/20 border border-orange-400/40 flex items-center justify-center text-orange-400 shrink-0">
+            <div className="w-7 h-7 sm:w-9 sm:h-9 rounded-lg sm:rounded-xl bg-amber-500/20 border border-amber-400/40 flex items-center justify-center text-amber-400 shrink-0">
               <Palette className="h-4 w-4 sm:h-5 sm:w-5" />
             </div>
             <div>
@@ -1178,7 +1178,7 @@ export const TournamentPosterModal: React.FC<TournamentPosterModalProps> = ({
               <div className="flex items-center justify-between gap-2">
                 <label className="text-xs font-bold text-slate-800 flex items-center gap-1.5 min-w-0">
                   <Building className="h-3.5 w-3.5 text-blue-600 shrink-0" />
-                  <span className="truncate">الجهة المنظمة والفرع الإقليمي</span>
+                  <span className="truncate">الجهة المنظمة والمنظومة الرقمية</span>
                 </label>
                 <button
                   type="button"
@@ -1201,7 +1201,7 @@ export const TournamentPosterModal: React.FC<TournamentPosterModalProps> = ({
                     />
                   </div>
                   <div>
-                    <span className="text-[10px] font-bold text-slate-500 block mb-0.5">الفرع الإقليمي الشريك:</span>
+                    <span className="text-[10px] font-bold text-slate-500 block mb-0.5">المنظومة الرقمية الشريكة:</span>
                     <input
                       type="text"
                       value={partner}

@@ -465,7 +465,7 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
         {/* Header */}
         <div className="flex items-center justify-between p-4 md:p-5 border-b border-slate-100 bg-slate-50/70 shrink-0">
           <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-xl bg-blue-600 text-white flex items-center justify-center shadow-xs">
+            <div className="w-9 h-9 rounded-xl bg-emerald-600 text-white flex items-center justify-center shadow-xs">
               <CalendarDays className="h-5 w-5" />
             </div>
             <div>
@@ -487,16 +487,16 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
         <form onSubmit={handleSubmit} className="p-4 md:p-6 space-y-4 overflow-y-auto flex-1">
           {/* Manager Specialty Notice */}
           {managerSportId && (
-            <div className="p-3 bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-xl flex items-center gap-3">
-              <div className="w-9 h-9 rounded-xl bg-blue-600 text-white flex items-center justify-center text-lg font-bold shadow-xs shrink-0">
+            <div className="p-3.5 bg-linear-to-r from-emerald-50 to-teal-50 border border-emerald-200 rounded-2xl flex items-center gap-3">
+              <div className="w-9 h-9 rounded-xl bg-emerald-600 text-white flex items-center justify-center text-lg font-bold shadow-xs shrink-0">
                 {sportInfo.icon}
               </div>
               <div className="flex-1 text-xs">
-                <div className="flex items-center gap-1.5 font-bold text-blue-900">
-                  <ShieldCheck className="h-4 w-4 text-blue-600" />
+                <div className="flex items-center gap-1.5 font-bold text-emerald-950">
+                  <ShieldCheck className="h-4 w-4 text-emerald-700" />
                   <span>تخصصك المعتمد: {sportInfo.name} {sportInfo.icon}</span>
                 </div>
-                <p className="text-[11px] text-blue-700 mt-0.5">
+                <p className="text-[11px] text-emerald-800 mt-0.5">
                   بصفتك مسؤولاً عن هذا النشاط، يمكنك برمجة مقابلات <strong>{sportInfo.name}</strong> وتعيين حكام التخصص مباشرة.
                 </p>
               </div>
@@ -526,7 +526,7 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
                     }
                   }
                 }}
-                className="w-full text-xs rounded-lg border border-slate-200 px-3 py-2 text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 font-bold"
+                className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500 font-bold"
               >
                 {availableTournaments.map(t => (
                   <option key={t.id} value={t.id}>
@@ -538,9 +538,9 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
           )}
 
           {/* Age Category & Gender */}
-          <div className="p-3.5 bg-blue-50/50 rounded-xl border border-blue-100 space-y-3">
-            <div className="flex items-center gap-1.5 text-xs font-bold text-blue-900">
-              <Tag className="h-3.5 w-3.5 text-blue-600" />
+          <div className="p-3.5 bg-emerald-50/40 rounded-2xl border border-emerald-100 space-y-3">
+            <div className="flex items-center gap-1.5 text-xs font-bold text-emerald-950">
+              <Tag className="h-3.5 w-3.5 text-emerald-700" />
               <span>الفئة العمرية والجنس للمشاركين:</span>
             </div>
 
@@ -982,15 +982,15 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
+              className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer"
             >
               إلغاء
             </button>
             <button
               type="submit"
               disabled={isSubmitting}
-              className={`px-5 py-2 text-xs font-bold text-white rounded-lg transition-colors shadow-xs disabled:bg-blue-300 cursor-pointer ${
-                hasConflict ? 'bg-amber-600 hover:bg-amber-700' : 'bg-blue-600 hover:bg-blue-700'
+              className={`px-5 py-2.5 text-xs font-bold text-white rounded-xl transition-all shadow-md active:scale-95 disabled:bg-slate-300 cursor-pointer ${
+                hasConflict ? 'bg-amber-600 hover:bg-amber-700 shadow-amber-600/20' : 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-600/20'
               }`}
             >
               {isSubmitting ? 'جاري الحفظ...' : hasConflict ? 'تأكيد الحفظ رغم التعارض' : (editingMatch ? 'حفظ التعديلات' : 'تأكيد برمجة المباراة')}

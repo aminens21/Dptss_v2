@@ -15,15 +15,15 @@ export const auth = getAuth(app);
 const databaseId = (firebaseConfig as any).firestoreDatabaseId || undefined;
 
 // Suppress non-fatal retry logs and network noise
-setLogLevel('error');
+setLogLevel('silent');
 
 // Robust Firestore initialization:
-// Enables forced long polling to safely and instantly connect across preview iframes and proxies.
+// Enables auto/forced long polling to safely and instantly connect across preview iframes and proxies.
 // Includes persistent local caching with multi-tab support for seamless offline & online operation.
 let firestoreDb;
 try {
   firestoreDb = initializeFirestore(app, {
-    experimentalForceLongPolling: true,
+    experimentalAutoDetectLongPolling: true,
     localCache: persistentLocalCache({
       tabManager: persistentMultipleTabManager()
     })
