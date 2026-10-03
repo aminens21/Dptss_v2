@@ -69,8 +69,9 @@ export const TeacherTeams: React.FC = () => {
   }, [userProfile, schools]);
 
   const teacherAllowedTournaments = useMemo(() => {
-    if (!isTeacherRole || canManage) return tournaments;
-    return tournaments.filter(t => isTeacherLevelAllowedForTournament(teacherCadre, t.level));
+    const activeTourns = tournaments.filter(t => t.status !== 'Draft' && (t as any).isActive !== false);
+    if (!isTeacherRole || canManage) return activeTourns;
+    return activeTourns.filter(t => isTeacherLevelAllowedForTournament(teacherCadre, t.level));
   }, [tournaments, isTeacherRole, canManage, teacherCadre]);
 
   const isSportProgrammed = (s: Sport): boolean => {
@@ -756,6 +757,11 @@ export const TeacherTeams: React.FC = () => {
     const validation = validateBirthDateForCategory(birthDate, category, currentSeason, gender, selectedSportId);
     if (!validation.isValid) {
       toast.error(validation.errorMessage || 'خطأ في تاريخ الازدياد لا يتناسب مع الفئة المعنية');
+      return;
+    }
+
+    if (!photo || !photo.trim()) {
+      toast.error('الصورة الشخصية للتلميذ(ة) إجبارية للتسجيل والمشاركة');
       return;
     }
 
@@ -1907,11 +1913,14 @@ export const TeacherTeams: React.FC = () => {
 
                   {/* Photo Upload */}
                   <div className="md:col-span-2">
-                    <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                      صورة التلميذ (اختياري)
+                    <label className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center justify-between">
+                      <span>الصورة الشخصية للتلميذ(ة) (إلزامية) *</span>
+                      <span className="text-[10px] text-red-600 font-bold bg-red-50 px-2 py-0.5 rounded border border-red-200">
+                        إجباري للمشاركة وبطاقة التلميذ
+                      </span>
                     </label>
-                    <div className="flex flex-col sm:flex-row items-center gap-4 p-4 border border-dashed border-slate-200 rounded-2xl bg-slate-50/50">
-                      <div className="w-16 h-16 rounded-full border bg-white flex items-center justify-center overflow-hidden shrink-0 shadow-3xs">
+                    <div className={`flex flex-col sm:flex-row items-center gap-4 p-4 border rounded-2xl ${!photo ? 'border-red-200 bg-red-50/20' : 'border-slate-200 bg-slate-50/50'}`}>
+                      <div className="w-16 h-16 rounded-full border-2 border-slate-200 bg-white flex items-center justify-center overflow-hidden shrink-0 shadow-3xs">
                         {photo ? (
                           <img src={photo} alt="Preview" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
                         ) : (
@@ -1920,7 +1929,7 @@ export const TeacherTeams: React.FC = () => {
                       </div>
                       
                       <div className="flex-1 text-center sm:text-right space-y-1">
-                        <p className="text-[11px] font-bold text-slate-700">التقاط صورة مباشرة أو رفع ملف صورة التلميذ</p>
+                        <p className="text-[11px] font-bold text-slate-700">التقاط صورة شخصية مباشرة بالكاميرا 📸 أو رفع ملف من الجهاز</p>
                         <p className="text-[10px] text-slate-400">سيتم ضغط وتصغير حجم الصورة تلقائياً للحفاظ على مساحة التخزين وسرعة التصفح</p>
                         
                         <div className="pt-2 flex flex-wrap gap-2 justify-center sm:justify-start">

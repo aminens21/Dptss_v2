@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { formatMatchDate } from '../lib/utils';
-import { DataService, deduplicateById, normalizeCategoryKey } from '../lib/dataService';
+import { DataService, deduplicateById, normalizeCategoryKey, isTeacherLevelAllowedForTournament } from '../lib/dataService';
 import { Match, Tournament, School, Venue, Referee, User } from '../types';
 import {
   Trophy,
@@ -148,10 +148,24 @@ export const Dashboard: React.FC = () => {
       setReferees(dirReferees);
       setTeachers(dirTeachers);
 
+      let displayTournamentsCount = dirTournaments.length;
+      let displaySchoolsCount = dirSchools.length;
+
+      if (userProfile?.role === 'TEACHER') {
+        displaySchoolsCount = 1;
+        const teacherCadre = userProfile.teachingCadre;
+        const activeTeacherTourns = dirTournaments.filter(t => 
+          t.status !== 'Draft' && 
+          (t as any).isActive !== false &&
+          (!teacherCadre || isTeacherLevelAllowedForTournament(teacherCadre, t.level))
+        );
+        displayTournamentsCount = activeTeacherTourns.length;
+      }
+
       setStats({
-        tournaments: dirTournaments.length,
+        tournaments: displayTournamentsCount,
         matches: dirMatches.length,
-        schools: dirSchools.length,
+        schools: displaySchoolsCount,
         completedMatches: completed
       });
       setRecentMatches(dirMatches.slice(0, 5));
@@ -390,7 +404,9 @@ export const Dashboard: React.FC = () => {
           onClick={() => navigate('/tournaments')}
           className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs hover:border-emerald-300 dark:hover:border-emerald-700 hover:shadow-sm transition-all cursor-pointer"
         >
-          <p className="text-[10px] text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider mb-1">إجمالي البطولات</p>
+          <p className="text-[10px] text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider mb-1">
+            {userProfile?.role === 'TEACHER' ? 'البطولات المفعلة' : 'إجمالي البطولات'}
+          </p>
           <div className="flex items-end justify-between">
             <h3 className="text-2xl font-black text-slate-800 dark:text-white tracking-tight">
               {stats.tournaments}
@@ -422,13 +438,15 @@ export const Dashboard: React.FC = () => {
           onClick={() => navigate('/schools')}
           className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs hover:border-slate-300 dark:hover:border-slate-700 hover:shadow-sm transition-all cursor-pointer"
         >
-          <p className="text-[10px] text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider mb-1">المؤسسات المشاركة</p>
+          <p className="text-[10px] text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider mb-1">
+            {userProfile?.role === 'TEACHER' ? 'مؤسستي التعليمية' : 'المؤسسات المشاركة'}
+          </p>
           <div className="flex items-end justify-between">
             <h3 className="text-2xl font-black text-slate-800 dark:text-white tracking-tight">
               {stats.schools}
             </h3>
             <span className="text-slate-700 dark:text-slate-300 text-[10px] font-bold bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded border border-slate-200 dark:border-slate-700">
-              دليل المؤسسات
+              {userProfile?.role === 'TEACHER' ? 'مؤسستي' : 'دليل المؤسسات'}
             </span>
           </div>
         </div>

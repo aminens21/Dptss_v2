@@ -577,7 +577,8 @@ export const DataService = {
   },
 
   // TOURNAMENTS
-  async getTournaments(): Promise<Tournament[]> {
+  async getTournaments(targetDirectorateId?: string, all?: boolean): Promise<Tournament[]> {
+    const activeDirId = targetDirectorateId || this.getActiveDirectorateId();
     const tournsMap = new Map<string, Tournament>();
 
     // 1. Fetch from Firestore first (source of truth)
@@ -591,7 +592,7 @@ export const DataService = {
             name: data.name || '',
             sportId: data.sportId || '',
             seasonId: data.seasonId || '',
-            directorateId: data.directorateId || '',
+            directorateId: data.directorateId || 'taourirt',
             ageCategory: data.ageCategory || '',
             gender: data.gender || 'Mixed',
             level: data.level || '',
@@ -619,7 +620,9 @@ export const DataService = {
     }
 
     // 2. Merge local cache for any items not yet in Firestore or newer local edits
-    const localList = getLocal<Tournament>(STORAGE_KEYS.TOURNAMENTS, tournsMap.size > 0 ? [] : INITIAL_TOURNAMENTS);
+    // Only use INITIAL_TOURNAMENTS fallback if we are on taourirt or requesting all
+    const initialFallback = (all === true || activeDirId === 'taourirt') ? INITIAL_TOURNAMENTS : [];
+    const localList = getLocal<Tournament>(STORAGE_KEYS.TOURNAMENTS, tournsMap.size > 0 ? [] : initialFallback);
     localList.forEach(t => {
       if (t && t.id) {
         const existing = tournsMap.get(t.id);
@@ -628,6 +631,7 @@ export const DataService = {
           if (tournsMap.size === 0 || t.id.startsWith('tourn-')) {
             tournsMap.set(t.id, {
               ...t,
+              directorateId: t.directorateId || 'taourirt',
               startDate: t.startDate ? (typeof t.startDate === 'object' && 'toDate' in t.startDate ? (t.startDate as any).toDate() : (t.startDate instanceof Date ? t.startDate : new Date(t.startDate))) : undefined,
               endDate: t.endDate ? (typeof t.endDate === 'object' && 'toDate' in t.endDate ? (t.endDate as any).toDate() : (t.endDate instanceof Date ? t.endDate : new Date(t.endDate))) : undefined,
               registrationDeadline: t.registrationDeadline ? (typeof t.registrationDeadline === 'object' && 'toDate' in t.registrationDeadline ? (t.registrationDeadline as any).toDate() : (t.registrationDeadline instanceof Date ? t.registrationDeadline : new Date(t.registrationDeadline))) : undefined
@@ -642,6 +646,7 @@ export const DataService = {
             tournsMap.set(t.id, {
               ...existing,
               ...t,
+              directorateId: t.directorateId || existing.directorateId || 'taourirt',
               startDate: t.startDate ? (typeof t.startDate === 'object' && 'toDate' in t.startDate ? (t.startDate as any).toDate() : (t.startDate instanceof Date ? t.startDate : new Date(t.startDate))) : existing.startDate,
               endDate: t.endDate ? (typeof t.endDate === 'object' && 'toDate' in t.endDate ? (t.endDate as any).toDate() : (t.endDate instanceof Date ? t.endDate : new Date(t.endDate))) : existing.endDate,
               registrationDeadline: t.registrationDeadline !== undefined 
@@ -655,7 +660,14 @@ export const DataService = {
 
     const mergedList = Array.from(tournsMap.values());
     setLocal(STORAGE_KEYS.TOURNAMENTS, mergedList);
-    return deduplicateById(mergedList);
+    const deduped = deduplicateById(mergedList);
+
+    if (all === true || !activeDirId || activeDirId === 'all') {
+      return deduped;
+    }
+
+    // Isolate by active directorate
+    return deduped.filter(t => (t.directorateId || 'taourirt') === activeDirId);
   },
 
   async addTournament(tournament: Omit<Tournament, 'id'>): Promise<Tournament> {
@@ -1127,12 +1139,14 @@ export const DataService = {
   },
 
   // MATCHES
-  async getMatches(): Promise<Match[]> {
+  async getMatches(targetDirectorateId?: string, all?: boolean): Promise<Match[]> {
+    const activeDirId = targetDirectorateId || this.getActiveDirectorateId();
     const normalizeMatch = (m: Match): Match => {
       const s1 = m.score1 ?? m.team1Score;
       const s2 = m.score2 ?? m.team2Score;
       return {
         ...m,
+        directorateId: m.directorateId || 'taourirt',
         score1: s1,
         score2: s2,
         team1Score: s1,
@@ -1140,24 +1154,34 @@ export const DataService = {
       };
     };
 
+    let allMatches: Match[] = [];
     try {
       const snap = await getDocs(collection(db, 'matches'));
       if (!snap.empty) {
         const firestoreList = snap.docs.map(d => normalizeMatch({ id: d.id, ...d.data() } as Match));
         const filtered = firestoreList.filter(m => m.id !== 'mat-1' && m.id !== 'mat-2' && m.id !== 'mat-3');
-        const deduped = deduplicateById(filtered);
-        setLocal(STORAGE_KEYS.MATCHES, deduped);
-        return deduped;
+        allMatches = deduplicateById(filtered);
+        setLocal(STORAGE_KEYS.MATCHES, allMatches);
       }
     } catch (e) {
       console.warn("Firestore fetch matches error, falling back to cache:", e);
     }
-    const localList = getLocal<Match>(STORAGE_KEYS.MATCHES, INITIAL_MATCHES).map(normalizeMatch);
-    const cleaned = localList.filter(m => m.id !== 'mat-1' && m.id !== 'mat-2' && m.id !== 'mat-3');
-    if (cleaned.length !== localList.length) {
-      setLocal(STORAGE_KEYS.MATCHES, cleaned);
+
+    if (allMatches.length === 0) {
+      const initialFallback = (all === true || activeDirId === 'taourirt') ? INITIAL_MATCHES : [];
+      const localList = getLocal<Match>(STORAGE_KEYS.MATCHES, initialFallback).map(normalizeMatch);
+      const cleaned = localList.filter(m => m.id !== 'mat-1' && m.id !== 'mat-2' && m.id !== 'mat-3');
+      if (cleaned.length !== localList.length) {
+        setLocal(STORAGE_KEYS.MATCHES, cleaned);
+      }
+      allMatches = deduplicateById(cleaned);
     }
-    return deduplicateById(cleaned);
+
+    if (all === true || !activeDirId || activeDirId === 'all') {
+      return allMatches;
+    }
+
+    return allMatches.filter(m => (m.directorateId || 'taourirt') === activeDirId);
   },
 
   async addMatch(match: Omit<Match, 'id'>): Promise<Match> {
@@ -1282,12 +1306,13 @@ export const DataService = {
   },
 
   // SCHOOLS
-  async getSchools(): Promise<School[]> {
+  async getSchools(targetDirectorateId?: string, all?: boolean): Promise<School[]> {
+    const activeDirId = targetDirectorateId || this.getActiveDirectorateId();
     try {
       const snap = await getDocs(collection(db, 'schools'));
       if (!snap.empty) {
         const firestoreList = snap.docs
-          .map(d => ({ id: d.id, ...d.data() } as School))
+          .map(d => ({ id: d.id, ...d.data(), directorateId: d.data().directorateId || 'taourirt' } as School))
           .filter(s => s && s.name && !s.name.includes('الكندي') && !s.name.includes('غير محدد') && s.name.trim() !== 'ثانوية المغرب العربي التأهيلية');
         
         // Auto-clean any document with name 'ثانوية المغرب العربي التأهيلية'
@@ -1316,7 +1341,10 @@ export const DataService = {
         });
 
         setLocal(STORAGE_KEYS.SCHOOLS, listWithCodes);
-        return listWithCodes;
+        if (all === true || !activeDirId || activeDirId === 'all') {
+          return listWithCodes;
+        }
+        return listWithCodes.filter(s => (s.directorateId || 'taourirt') === activeDirId);
       } else {
         // If Firestore is empty, we return an empty list instead of auto-seeding
         // This allows the user to have a clean database after "Delete All"
@@ -1327,7 +1355,11 @@ export const DataService = {
       console.warn("Firestore schools fetch error:", e);
       // Fallback to local storage only, without INITIAL_SCHOOLS to respect empty state
       const localList = getLocal<School>(STORAGE_KEYS.SCHOOLS, []);
-      return localList.filter(s => s && s.name && !s.name.includes('الكندي') && !s.name.includes('غير محدد') && s.name.trim() !== 'ثانوية المغرب العربي التأهيلية');
+      const filtered = localList.filter(s => s && s.name && !s.name.includes('الكندي') && !s.name.includes('غير محدد') && s.name.trim() !== 'ثانوية المغرب العربي التأهيلية');
+      if (all === true || !activeDirId || activeDirId === 'all') {
+        return filtered;
+      }
+      return filtered.filter(s => (s.directorateId || 'taourirt') === activeDirId);
     }
   },
 
@@ -2793,22 +2825,29 @@ export const DataService = {
   },
 
   // STUDENTS / TEAM ROSTERS
-  async getStudents(): Promise<Student[]> {
+  async getStudents(targetDirectorateId?: string, all?: boolean): Promise<Student[]> {
+    const activeDirId = targetDirectorateId || this.getActiveDirectorateId();
+    let allStudents: Student[] = [];
     try {
       const snap = await getDocs(collection(db, 'students'));
       if (!snap.empty) {
-        const firestoreList = snap.docs.map(d => ({ id: d.id, ...d.data() } as Student));
+        const firestoreList = snap.docs.map(d => ({ id: d.id, ...d.data(), directorateId: d.data().directorateId || 'taourirt' } as Student));
         const localList = getLocal<Student>('taourirt_students_data', []);
         // Prioritize localList first so newer local updates are not overwritten by stale Firestore fetches
-        const merged = deduplicateById([...localList, ...firestoreList]);
-        setLocal('taourirt_students_data', merged);
-        return merged;
+        allStudents = deduplicateById([...localList, ...firestoreList]);
+        setLocal('taourirt_students_data', allStudents);
+      } else {
+        allStudents = getLocal<Student>('taourirt_students_data', []);
       }
     } catch (e) {
       console.warn("Firestore fetch students error, using local storage:", e);
+      allStudents = getLocal<Student>('taourirt_students_data', []);
     }
-    const localList = getLocal<Student>('taourirt_students_data', []);
-    return deduplicateById(localList);
+    const cleanList = deduplicateById(allStudents);
+    if (all === true || !activeDirId || activeDirId === 'all') {
+      return cleanList;
+    }
+    return cleanList.filter(s => (s.directorateId || 'taourirt') === activeDirId);
   },
 
   subscribeToStudents(callback: (students: Student[]) => void): () => void {
@@ -3609,48 +3648,63 @@ export const DataService = {
     }
   },
 
-  async getCrossCountryResults(): Promise<Record<string, CrossCountryCategoryResult>> {
-    const activeDirId = this.getActiveDirectorateId();
+  async getCrossCountryResults(targetDirectorateId?: string): Promise<Record<string, CrossCountryCategoryResult>> {
+    const activeDirId = targetDirectorateId || this.getActiveDirectorateId();
+    const effectiveDirId = (!activeDirId || activeDirId === 'all') ? 'taourirt' : activeDirId;
     const activeSeason = await this.getActiveSeason();
-    const cacheKey = `taourirt_cc_results_${activeDirId}`;
+    const cacheKey = `taourirt_cc_results_${effectiveDirId}`;
     try {
       const snap = await getDocs(collection(db, 'cross_country_results'));
       if (!snap.empty) {
-        const resultsMap: Record<string, CrossCountryCategoryResult> = JSON.parse(JSON.stringify(INITIAL_CROSS_COUNTRY_RESULTS));
+        // Only seed with initial demo results if the directorate is taourirt!
+        const initialSeed = (effectiveDirId === 'taourirt') ? JSON.parse(JSON.stringify(INITIAL_CROSS_COUNTRY_RESULTS)) : {};
+        const resultsMap: Record<string, CrossCountryCategoryResult> = initialSeed;
+        let foundAnyForDir = false;
+
         snap.docs.forEach(docSnap => {
           const data = docSnap.data();
-          const docDirId = data.directorateId || (docSnap.id.includes('_') ? docSnap.id.substring(0, docSnap.id.lastIndexOf('_')) : docSnap.id);
+          const docDirId = data.directorateId || (docSnap.id.includes('_') ? docSnap.id.substring(0, docSnap.id.lastIndexOf('_')) : (effectiveDirId === 'taourirt' ? 'taourirt' : ''));
           const docSeasonId = data.seasonId || '2026/2027';
 
           // Only process results for the current active season
           if (docSeasonId !== activeSeason) return;
 
-          if (!activeDirId || activeDirId === 'all' || activeDirId === 'taourirt' || docDirId === activeDirId) {
-            const item = this._normalizeCrossCountryDoc(docSnap.id, data, activeDirId);
+          if (docDirId === effectiveDirId) {
+            foundAnyForDir = true;
+            const item = this._normalizeCrossCountryDoc(docSnap.id, data, effectiveDirId);
             const keyToUse = item.categoryId || docSnap.id;
             resultsMap[keyToUse] = item;
           }
         });
-        this._sanitizeCrossCountryResultsMap(resultsMap);
-        localStorage.setItem(cacheKey, JSON.stringify(resultsMap));
-        return resultsMap;
+
+        if (foundAnyForDir || effectiveDirId === 'taourirt') {
+          this._sanitizeCrossCountryResultsMap(resultsMap);
+          localStorage.setItem(cacheKey, JSON.stringify(resultsMap));
+          return resultsMap;
+        }
       }
     } catch (e) {
       console.warn("Firestore fetch cross_country_results error, using local storage:", e);
     }
 
-    // Check local storage
+    // Check local storage for this specific directorate
     try {
       const local = localStorage.getItem(cacheKey);
       if (local) {
         const parsed = JSON.parse(local);
-        const merged = { ...JSON.parse(JSON.stringify(INITIAL_CROSS_COUNTRY_RESULTS)), ...parsed };
+        const initialSeed = (effectiveDirId === 'taourirt') ? JSON.parse(JSON.stringify(INITIAL_CROSS_COUNTRY_RESULTS)) : {};
+        const merged = { ...initialSeed, ...parsed };
         return this._sanitizeCrossCountryResultsMap(merged);
       }
     } catch (e) {
       console.error("Local storage error reading cross country results:", e);
     }
-    return JSON.parse(JSON.stringify(INITIAL_CROSS_COUNTRY_RESULTS));
+
+    // For other directorates with no results yet, return a clean empty space
+    if (effectiveDirId === 'taourirt') {
+      return JSON.parse(JSON.stringify(INITIAL_CROSS_COUNTRY_RESULTS));
+    }
+    return {};
   },
 
   // Dispatch local and cross-tab updates
@@ -3838,8 +3892,8 @@ export const DataService = {
   /**
    * Get track & field / athletics results
    */
-  async getAthleticsResults(): Promise<Record<string, AthleticsCategoryResult>> {
-    const activeDirId = this.getActiveDirectorateId();
+  async getAthleticsResults(targetDirectorateId?: string): Promise<Record<string, AthleticsCategoryResult>> {
+    const activeDirId = targetDirectorateId || this.getActiveDirectorateId();
     const effectiveDirId = (!activeDirId || activeDirId === 'all') ? 'taourirt' : activeDirId;
     const cacheKey = `taourirt_athletics_results_${effectiveDirId}`;
     
@@ -3879,10 +3933,12 @@ export const DataService = {
       console.warn("Firestore athletics results fetch error:", e);
     }
 
-    // 3. Fallback to localStorage without filtering if any
+    // 3. Fallback to localStorage without filtering only if taourirt
     try {
-      const globalCached = localStorage.getItem('taourirt_athletics_results');
-      if (globalCached) return JSON.parse(globalCached);
+      if (effectiveDirId === 'taourirt') {
+        const globalCached = localStorage.getItem('taourirt_athletics_results');
+        if (globalCached) return JSON.parse(globalCached);
+      }
     } catch (e) {}
 
     return {};

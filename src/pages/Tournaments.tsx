@@ -748,7 +748,7 @@ export const Tournaments: React.FC = () => {
     }
 
     return sportsConfig.map(sport => {
-      let sportTournaments = tournaments.filter(t => t.sportId === sport.id);
+      let sportTournaments = tournaments.filter(t => t.sportId === sport.id && t.status !== 'Draft' && (t as any).isActive !== false);
       const isManagerOfSport = canManageSport(sport.id);
 
       // For teachers (non-admins), strictly filter tournaments to ONLY those allowed for their teaching cadre
@@ -816,6 +816,9 @@ export const Tournaments: React.FC = () => {
       .filter(item => {
         const { sport, isProgrammed, techHead, hasParticipations } = item;
 
+        // In teacher account: strictly show ONLY tournaments that have been activated / programmed
+        if (isTeacherRole && !isProgrammed) return false;
+
         // Filter by Sport
         if (filterSport !== 'ALL' && sport.id !== filterSport) return false;
 
@@ -841,7 +844,7 @@ export const Tournaments: React.FC = () => {
         if (!a.isProgrammed && b.isProgrammed) return 1;
         return 0;
       });
-  }, [sportsWithTournamentData, filterSport, filterStatus, search]);
+  }, [sportsWithTournamentData, filterSport, filterStatus, search, isTeacherRole]);
 
   const handleOpenSportModal = (sport: Sport) => {
     // 1. Get programmed tournaments for this sport
@@ -1054,12 +1057,16 @@ export const Tournaments: React.FC = () => {
               onChange={(e) => setFilterStatus(e.target.value as any)}
               className="text-xs font-bold text-slate-700 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl px-2.5 py-1.5 focus:outline-none cursor-pointer"
             >
-              <option value="ALL">جميع الحالات</option>
-              <option value="PROGRAMMED">🟢 المبرمجة والمفتوحة للتسجيل</option>
-              {userProfile?.role === 'TEACHER' && (
-                <option value="MY_SCHOOL">🏫 رياضات تشارك فيها مؤسستي</option>
+              <option value="ALL">{isTeacherRole ? '🟢 جميع البطولات المفعلة' : 'جميع الحالات'}</option>
+              {!isTeacherRole && (
+                <option value="PROGRAMMED">🟢 المبرمجة والمفتوحة للتسجيل</option>
               )}
-              <option value="UNPROGRAMMED">⚪ غير المبرمجة (في طور الإعداد)</option>
+              {userProfile?.role === 'TEACHER' && (
+                <option value="MY_SCHOOL">🏫 بطولات تشارك فيها مؤسستي</option>
+              )}
+              {!isTeacherRole && (
+                <option value="UNPROGRAMMED">⚪ غير المبرمجة (في طور الإعداد)</option>
+              )}
             </select>
           </div>
 
@@ -1072,7 +1079,10 @@ export const Tournaments: React.FC = () => {
               className="text-xs font-bold text-slate-700 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl px-2.5 py-1.5 focus:outline-none cursor-pointer max-w-[160px]"
             >
               <option value="ALL">🏆 جميع الرياضات</option>
-              {sportsConfig.map(s => (
+              {(isTeacherRole
+                ? sportsConfig.filter(s => sportsWithTournamentData.some(item => item.sport.id === s.id && item.isProgrammed))
+                : sportsConfig
+              ).map(s => (
                 <option key={s.id} value={s.id}>
                   {s.icon || '🏆'} {s.name}
                 </option>
@@ -1605,8 +1615,14 @@ export const Tournaments: React.FC = () => {
           ) : (
             <div className="col-span-full flex flex-col items-center justify-center p-12 text-slate-500 bg-white rounded-2xl border border-slate-200 text-center">
               <Trophy className="h-10 w-10 text-slate-300 mb-3" />
-              <p className="text-sm font-bold text-slate-700 mb-1">لا توجد رياضات مطابقة للبحث</p>
-              <p className="text-xs text-slate-400 mb-4">يمكنك تغيير فلتر الرياضة أو الفلتر المعتمد أعلاه</p>
+              <p className="text-sm font-bold text-slate-700 mb-1">
+                {isTeacherRole ? 'لا توجد بطولات مفعلة حالياً لمؤسستكم' : 'لا توجد رياضات مطابقة للبحث'}
+              </p>
+              <p className="text-xs text-slate-400 mb-4">
+                {isTeacherRole
+                  ? 'يتم عرض البطولات المبرمجة والمفعلة رسمياً فقط. ستظهر البطولات فور قيام الإدارة واللجنة التقنية بتفعيلها.'
+                  : 'يمكنك تغيير فلتر الرياضة أو الفلتر المعتمد أعلاه'}
+              </p>
             </div>
           )}
         </div>

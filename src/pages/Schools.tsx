@@ -556,8 +556,43 @@ export const Schools: React.FC = () => {
     return ids;
   }, [selectedSport, matches, students, schools]);
 
+  // For teachers: Locate their exact institution, or synthesize from profile if not yet in database
+  const teacherMatchedSchool = useMemo(() => {
+    if (!isTeacher) return null;
+    let found = schools.find(s => isTeacherSchool(s));
+    if (!found && userProfile?.workLocation) {
+      const cleanLoc = userProfile.workLocation.trim().toLowerCase();
+      found = schools.find(s => {
+        const sName = (s.name || '').trim().toLowerCase();
+        return sName === cleanLoc || sName.includes(cleanLoc) || cleanLoc.includes(sName);
+      });
+    }
+    if (!found && userProfile?.workLocation) {
+      found = {
+        id: userProfile.schoolId || 'teacher-school',
+        name: userProfile.workLocation,
+        type: userProfile.teachingCadre === 'PRIMARY' ? 'ابتدائي' : userProfile.teachingCadre === 'MIDDLE' ? 'إعدادي' : 'تأهيلي',
+        commune: activeDirObj?.shortName || 'تاوريرت',
+        teacherName: userProfile.fullName || '',
+        coordinatorName: userProfile.fullName,
+        phone: userProfile.phone || '',
+        principalName: '',
+        directorateId: activeDirObj?.id || 'taourirt'
+      };
+    }
+    return found;
+  }, [isTeacher, schools, userProfile?.workLocation, userProfile?.schoolId, userProfile?.fullName, userProfile?.phone, userProfile?.teachingCadre, activeDirObj]);
+
+  // Base list of schools: For teachers, ONLY their institution is available
+  const effectiveSchools = useMemo(() => {
+    if (isTeacher) {
+      return teacherMatchedSchool ? [teacherMatchedSchool] : [];
+    }
+    return schools;
+  }, [isTeacher, teacherMatchedSchool, schools]);
+
   const filtered = useMemo(() => {
-    const list = schools.filter(s => {
+    const list = effectiveSchools.filter(s => {
       const coordinatorStr = (s.coordinatorName || s.teacherName || '').toLowerCase();
       const principalStr = (s.principalName || '').toLowerCase();
       const matchSearch = s.name.toLowerCase().includes(search.toLowerCase()) ||
@@ -587,11 +622,11 @@ export const Schools: React.FC = () => {
     }
 
     return list;
-  }, [schools, search, typeFilter, communeFilter, selectedSport, selectedSchoolFilter, participatingSchoolIdsForSport, userProfile?.workLocation, userProfile?.schoolId]);
+  }, [effectiveSchools, search, typeFilter, communeFilter, selectedSport, selectedSchoolFilter, participatingSchoolIdsForSport, userProfile?.workLocation, userProfile?.schoolId]);
 
-  const highSchoolsCount = schools.filter(s => s.type === 'تأهيلي').length;
-  const middleSchoolsCount = schools.filter(s => s.type === 'إعدادي').length;
-  const primarySchoolsCount = schools.filter(s => s.type === 'ابتدائي').length;
+  const highSchoolsCount = effectiveSchools.filter(s => s.type === 'تأهيلي').length;
+  const middleSchoolsCount = effectiveSchools.filter(s => s.type === 'إعدادي').length;
+  const primarySchoolsCount = effectiveSchools.filter(s => s.type === 'ابتدائي').length;
 
   return (
     <div className="space-y-4" dir="rtl">
@@ -612,13 +647,17 @@ export const Schools: React.FC = () => {
             <div className="w-8 h-8 rounded-xl bg-blue-50 text-blue-600 border border-blue-200 flex items-center justify-center shadow-2xs">
               <SchoolIcon className="w-4 h-4" />
             </div>
-            <h2 className="text-lg md:text-xl font-black text-slate-900 tracking-tight">دليل المؤسسات التعليمية</h2>
+            <h2 className="text-lg md:text-xl font-black text-slate-900 tracking-tight">
+              {isTeacher ? 'مؤسستي التعليمية' : 'دليل المؤسسات التعليمية'}
+            </h2>
             <span className="text-xs bg-blue-50 text-blue-700 font-extrabold px-2.5 py-1 rounded-lg border border-blue-200 shadow-2xs">
               {activeDirObj?.name || 'المديرية الإقليمية'}
             </span>
           </div>
           <p className="text-xs text-slate-500 font-medium mt-1.5 leading-relaxed">
-            قائمة المؤسسات التعليمية والمنسقين والإدارة التربوية لـ {activeDirObj?.name || 'المديرية الإقليمية'}
+            {isTeacher
+              ? `بيانات ومشاركات مؤسستكم التعليمية (${teacherMatchedSchool?.name || userProfile?.workLocation || 'المؤسسة المعتمدة'})`
+              : `قائمة المؤسسات التعليمية والمنسقين والإدارة التربوية لـ ${activeDirObj?.name || 'المديرية الإقليمية'}`}
           </p>
         </div>
 
@@ -719,60 +758,85 @@ export const Schools: React.FC = () => {
             </div>
             <div>
               <p className="font-extrabold text-amber-950">
-                مرحباً بك يا أستاذ! تم إبراز مؤسستك (<span className="text-amber-900 underline font-black">{userProfile.workLocation}</span>) في أول القائمة لتيسير الولوج إليها.
+                {isTeacher
+                  ? <>مرحباً بك يا أستاذ! يتم حصر العرض على مؤسستك التعليمية فقط (<span className="text-amber-900 underline font-black">{teacherMatchedSchool?.name || userProfile.workLocation}</span>).</>
+                  : <>مرحباً بك يا أستاذ! تم إبراز مؤسستك (<span className="text-amber-900 underline font-black">{userProfile.workLocation}</span>) في أول القائمة لتيسير الولوج إليها.</>}
               </p>
               <p className="text-[11px] text-amber-800 font-normal mt-0.5">
                 {isTeacher
-                  ? 'بصفتك أستاذاً، يمكنك الاطلاع على بيانات المؤسسات المشاركة، بينما الولوج إلى لوائح وتدبير المشاركين متاح حصرياً لمؤسستك فقط.'
+                  ? 'بصفتك أستاذاً، يقتصر العرض والتدبير على بيانات ومشاركات وتلاميذ مؤسستك التعليمية حصرياً.'
                   : 'تظهر مؤسستك دائماً في المرتبة الأولى لتسهيل الوصول المباشر إلى تلاميذك ومشاركاتك.'}
               </p>
             </div>
           </div>
           <span className="shrink-0 self-start sm:self-center inline-flex items-center gap-1 text-[11px] font-black bg-amber-500 text-white px-3 py-1 rounded-full shadow-2xs">
-            <span>مؤسستي أولاً</span>
+            <span>{isTeacher ? 'مؤسستي حصرياً' : 'مؤسستي أولاً'}</span>
             <span>⭐</span>
           </span>
         </div>
       )}
 
       {/* Quick Stats */}
-      <div className="grid grid-cols-3 gap-3">
-        <button
-          onClick={() => setTypeFilter('تأهيلي')}
-          className={`p-3 rounded-xl border text-right transition-all cursor-pointer ${
-            typeFilter === 'تأهيلي'
-              ? 'bg-blue-50/80 border-blue-300 ring-2 ring-blue-500/20'
-              : 'bg-white border-slate-200 hover:border-blue-200'
-          }`}
-        >
-          <span className="text-[10px] font-bold text-blue-700 uppercase">الثانوي التأهيلي</span>
-          <p className="text-lg md:text-xl font-black text-slate-800 mt-1">{highSchoolsCount}</p>
-        </button>
+      {isTeacher ? (
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className="p-3 bg-white rounded-xl border border-slate-200 text-right shadow-3xs">
+            <span className="text-[10px] font-bold text-blue-700 uppercase">سلك المؤسسة</span>
+            <p className="text-base font-black text-slate-800 mt-1">{teacherMatchedSchool?.type || 'غير محدد'}</p>
+          </div>
+          <div className="p-3 bg-white rounded-xl border border-slate-200 text-right shadow-3xs">
+            <span className="text-[10px] font-bold text-emerald-700 uppercase">الجماعة الترابية</span>
+            <p className="text-base font-black text-emerald-700 mt-1">{teacherMatchedSchool?.commune || activeDirObj?.shortName || 'تاوريرت'}</p>
+          </div>
+          <div className="p-3 bg-white rounded-xl border border-slate-200 text-right shadow-3xs">
+            <span className="text-[10px] font-bold text-amber-700 uppercase">التلاميذ المسجلون بالمؤسسة</span>
+            <p className="text-base font-black text-slate-800 mt-1">
+              {students.filter(st => {
+                const sName = (st.schoolName || '').trim().toLowerCase();
+                const myName = (teacherMatchedSchool?.name || userProfile?.workLocation || '').trim().toLowerCase();
+                return (teacherMatchedSchool && st.schoolId === teacherMatchedSchool.id) || (myName && sName.includes(myName));
+              }).length} تلاميذ
+            </p>
+          </div>
+        </div>
+      ) : (
+        <div className="grid grid-cols-3 gap-3">
+          <button
+            onClick={() => setTypeFilter('تأهيلي')}
+            className={`p-3 rounded-xl border text-right transition-all cursor-pointer ${
+              typeFilter === 'تأهيلي'
+                ? 'bg-blue-50/80 border-blue-300 ring-2 ring-blue-500/20'
+                : 'bg-white border-slate-200 hover:border-blue-200'
+            }`}
+          >
+            <span className="text-[10px] font-bold text-blue-700 uppercase">الثانوي التأهيلي</span>
+            <p className="text-lg md:text-xl font-black text-slate-800 mt-1">{highSchoolsCount}</p>
+          </button>
 
-        <button
-          onClick={() => setTypeFilter('إعدادي')}
-          className={`p-3 rounded-xl border text-right transition-all cursor-pointer ${
-            typeFilter === 'إعدادي'
-              ? 'bg-emerald-50/80 border-emerald-300 ring-2 ring-emerald-500/20'
-              : 'bg-white border-slate-200 hover:border-emerald-200'
-          }`}
-        >
-          <span className="text-[10px] font-bold text-emerald-700 uppercase">الثانوي الإعدادي</span>
-          <p className="text-lg md:text-xl font-black text-emerald-700 mt-1">{middleSchoolsCount}</p>
-        </button>
+          <button
+            onClick={() => setTypeFilter('إعدادي')}
+            className={`p-3 rounded-xl border text-right transition-all cursor-pointer ${
+              typeFilter === 'إعدادي'
+                ? 'bg-emerald-50/80 border-emerald-300 ring-2 ring-emerald-500/20'
+                : 'bg-white border-slate-200 hover:border-emerald-200'
+            }`}
+          >
+            <span className="text-[10px] font-bold text-emerald-700 uppercase">الثانوي الإعدادي</span>
+            <p className="text-lg md:text-xl font-black text-emerald-700 mt-1">{middleSchoolsCount}</p>
+          </button>
 
-        <button
-          onClick={() => setTypeFilter('ابتدائي')}
-          className={`p-3 rounded-xl border text-right transition-all cursor-pointer ${
-            typeFilter === 'ابتدائي'
-              ? 'bg-amber-50/80 border-amber-300 ring-2 ring-amber-500/20'
-              : 'bg-white border-slate-200 hover:border-amber-200'
-          }`}
-        >
-          <span className="text-[10px] font-bold text-amber-700 uppercase">التعليم الابتدائي</span>
-          <p className="text-lg md:text-xl font-black text-slate-800 mt-1">{primarySchoolsCount}</p>
-        </button>
-      </div>
+          <button
+            onClick={() => setTypeFilter('ابتدائي')}
+            className={`p-3 rounded-xl border text-right transition-all cursor-pointer ${
+              typeFilter === 'ابتدائي'
+                ? 'bg-amber-50/80 border-amber-300 ring-2 ring-amber-500/20'
+                : 'bg-white border-slate-200 hover:border-amber-200'
+            }`}
+          >
+            <span className="text-[10px] font-bold text-amber-700 uppercase">التعليم الابتدائي</span>
+            <p className="text-lg md:text-xl font-black text-slate-800 mt-1">{primarySchoolsCount}</p>
+          </button>
+        </div>
+      )}
 
       {/* Filter and search */}
       <div className="flex flex-col lg:flex-row items-center gap-3 bg-white p-3 rounded-xl border border-slate-200 shadow-xs">
@@ -780,32 +844,33 @@ export const Schools: React.FC = () => {
           <Search className="h-4 w-4 text-slate-400 ml-2 shrink-0" />
           <input
             type="text"
-            placeholder="ابحث باسم المؤسسة، الجماعة، المنسق، أو المدير..."
+            placeholder={isTeacher ? "ابحث في معطيات مؤسستك..." : "ابحث باسم المؤسسة، الجماعة، المنسق، أو المدير..."}
             className="w-full border-0 focus:ring-0 text-xs py-1 text-slate-800 placeholder-slate-400 focus:outline-none"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
         </div>
 
-        {/* School Search Filter Dropdown */}
-        <div className="relative flex items-center gap-2 w-full lg:w-auto border-t lg:border-t-0 lg:border-r border-slate-100 pt-2 lg:pt-0 lg:pr-3 shrink-0">
-          <label className="text-xs font-bold text-slate-600 whitespace-nowrap flex items-center gap-1.5">
-            <SchoolIcon className="h-3.5 w-3.5 text-emerald-600" />
-            <span>المؤسسة:</span>
-          </label>
-          <div className="relative min-w-[200px] w-full lg:w-auto">
-            <button
-              type="button"
-              onClick={() => setIsSchoolDropdownOpen(!isSchoolDropdownOpen)}
-              className="flex justify-between items-center w-full rounded-lg border border-slate-200 px-3 py-1.5 text-slate-700 text-xs font-bold bg-slate-50 hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer text-right"
-            >
-              <span className="truncate max-w-[150px]">
-                {selectedSchoolFilter === 'ALL' 
-                  ? '🏫 جميع المؤسسات' 
-                  : (schools.find(sch => sch.id === selectedSchoolFilter || sch.name === selectedSchoolFilter)?.name || selectedSchoolFilter)}
-              </span>
-              <ChevronDown className="h-3.5 w-3.5 text-slate-400 shrink-0 mr-1" />
-            </button>
+        {/* School Search Filter Dropdown (Hidden for teachers since only their school is visible) */}
+        {!isTeacher && (
+          <div className="relative flex items-center gap-2 w-full lg:w-auto border-t lg:border-t-0 lg:border-r border-slate-100 pt-2 lg:pt-0 lg:pr-3 shrink-0">
+            <label className="text-xs font-bold text-slate-600 whitespace-nowrap flex items-center gap-1.5">
+              <SchoolIcon className="h-3.5 w-3.5 text-emerald-600" />
+              <span>المؤسسة:</span>
+            </label>
+            <div className="relative min-w-[200px] w-full lg:w-auto">
+              <button
+                type="button"
+                onClick={() => setIsSchoolDropdownOpen(!isSchoolDropdownOpen)}
+                className="flex justify-between items-center w-full rounded-lg border border-slate-200 px-3 py-1.5 text-slate-700 text-xs font-bold bg-slate-50 hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer text-right"
+              >
+                <span className="truncate max-w-[150px]">
+                  {selectedSchoolFilter === 'ALL' 
+                    ? '🏫 جميع المؤسسات' 
+                    : (schools.find(sch => sch.id === selectedSchoolFilter || sch.name === selectedSchoolFilter)?.name || selectedSchoolFilter)}
+                </span>
+                <ChevronDown className="h-3.5 w-3.5 text-slate-400 shrink-0 mr-1" />
+              </button>
 
             {isSchoolDropdownOpen && (
               <>
@@ -863,6 +928,7 @@ export const Schools: React.FC = () => {
             )}
           </div>
         </div>
+        )}
 
         {/* Sport Filter Dropdown */}
         <div className="flex items-center gap-2 w-full lg:w-auto border-t lg:border-t-0 lg:border-r border-slate-100 pt-2 lg:pt-0 lg:pr-3 shrink-0">

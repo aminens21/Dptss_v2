@@ -1310,14 +1310,15 @@ export const AppLayout: React.FC = () => {
                   );
                 })}
               </div>
-              <div className="p-4 border-t border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50 space-y-2">
+              <div className="p-4 border-t border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50 space-y-3">
                 <PWAInstallButton variant="sidebar" className="mb-2" />
+
                 <button
                   onClick={() => {
                     setIsMobileMenuOpen(false);
                     setIsAboutModalOpen(true);
                   }}
-                  className="flex w-full items-center gap-3 px-3 py-3 text-xs font-black text-emerald-700 dark:text-emerald-300 hover:bg-emerald-50 dark:hover:bg-slate-800 rounded-xl transition-all cursor-pointer mb-2"
+                  className="flex w-full items-center gap-3 px-3 py-3 text-xs font-black text-emerald-700 dark:text-emerald-300 hover:bg-emerald-50 dark:hover:bg-slate-800 rounded-xl transition-all cursor-pointer mb-1"
                 >
                   <ShieldCheck className="h-5 w-5" />
                   <span>حول المنظومة الرقمية ℹ️</span>

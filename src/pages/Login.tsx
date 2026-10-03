@@ -61,6 +61,7 @@ import { calculateTeamRankings, resolveRunnerParticipationType } from '../lib/cr
 import { AppLogo } from '../components/AppLogo';
 import { DemoDataModal } from '../components/DemoDataModal';
 import toast from 'react-hot-toast';
+import { cn } from '../lib/utils';
 
 export const Login: React.FC = () => {
   const { currentUser, userProfile, loading, updateProfileState, loginAsDemo } = useAuth();
@@ -96,7 +97,7 @@ export const Login: React.FC = () => {
   const [selectedDate, setSelectedDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [searchQuery, setSearchQuery] = useState('');
   const [activePublicTab, setActivePublicTab] = useState<'CC_PODIUM' | 'ATHLETICS' | 'MATCHES' | 'TOURNAMENTS'>('CC_PODIUM');
-
+  
   // Refs for horizontal scrolling containers
   const categoryScrollRef = useRef<HTMLDivElement>(null);
   const ccCategoryScrollRef = useRef<HTMLDivElement>(null);
@@ -314,29 +315,36 @@ export const Login: React.FC = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Load active directorate & initial data for public view & registration
-  const loadAllData = async () => {
+  const loadAllData = async (targetDirId?: string) => {
     setLoadingData(true);
     try {
       const activeDir = await DataService.getActiveDirectorate();
-      setActiveDirectorate(activeDir);
+      const effectiveDirId = targetDirId || activeDir.id;
+      if (targetDirId && activeDir.id !== targetDirId) {
+        const dirs = await DataService.getDirectorates();
+        const found = dirs.find(d => d.id === targetDirId);
+        if (found) setActiveDirectorate(found);
+      } else {
+        setActiveDirectorate(activeDir);
+      }
 
       const [dirs, schs, tours, mtchs, stds, ccRes, athRes] = await Promise.all([
         DataService.getDirectorates(),
-        DataService.getSchools(),
-        DataService.getTournaments(),
-        DataService.getMatches(),
-        DataService.getStudents(),
-        DataService.getCrossCountryResults(),
-        DataService.getAthleticsResults()
+        DataService.getSchools(effectiveDirId),
+        DataService.getTournaments(effectiveDirId),
+        DataService.getMatches(effectiveDirId),
+        DataService.getStudents(effectiveDirId),
+        DataService.getCrossCountryResults(effectiveDirId),
+        DataService.getAthleticsResults(effectiveDirId)
       ]);
 
       setDirectorates(dirs || []);
       setSchools(schs || []);
       setTournaments(tours || []);
 
-      // Inject Demo Matches if none exist
+      // Inject Demo Matches only if directorate is taourirt and none exist
       let finalMatches = mtchs || [];
-      if (finalMatches.length === 0) {
+      if (finalMatches.length === 0 && effectiveDirId === 'taourirt') {
         const todayObj = new Date();
         const y = todayObj.getFullYear();
         const m = String(todayObj.getMonth() + 1).padStart(2, '0');
@@ -362,9 +370,9 @@ export const Login: React.FC = () => {
 
       setStudents(stds || []);
 
-      // Inject Demo CC Results if empty
+      // Inject Demo CC Results only if directorate is taourirt and results are empty
       let finalCcRes = ccRes || {};
-      if (Object.keys(finalCcRes).length === 0) {
+      if (Object.keys(finalCcRes).length === 0 && effectiveDirId === 'taourirt') {
         finalCcRes = {
           'u12_male': {
             categoryId: 'u12_male',
@@ -393,9 +401,9 @@ export const Login: React.FC = () => {
       }
       setCrossCountryResults(finalCcRes);
 
-      // Inject Demo Athletics Results if empty
+      // Inject Demo Athletics Results only if directorate is taourirt and results are empty
       let finalAthRes = athRes || {};
-      if (Object.keys(finalAthRes).length === 0) {
+      if (Object.keys(finalAthRes).length === 0 && effectiveDirId === 'taourirt') {
         finalAthRes = {
           'u15_male_100m': {
             id: 'u15_male_100m',
@@ -462,6 +470,18 @@ export const Login: React.FC = () => {
     } finally {
       setLoadingData(false);
     }
+  };
+
+  const handleDirectorateChange = async (dirId: string) => {
+    DataService.setActiveDirectorateId(dirId);
+    const targetDir = directorates.find(d => d.id === dirId);
+    if (targetDir) {
+      setActiveDirectorate(targetDir);
+    }
+    setRegDirectorateId(dirId);
+    await loadAllData(dirId);
+    window.dispatchEvent(new CustomEvent('directorateChanged', { detail: dirId }));
+    toast.success(`تم التحويل إلى: ${targetDir?.name || dirId}`);
   };
 
   useEffect(() => {
@@ -1429,6 +1449,29 @@ export const Login: React.FC = () => {
 
       </div>
 
+      {/* Tournament Guides Button */}
+      <button
+        type="button"
+        onClick={() => {
+          setActivePublicTab('TOURNAMENTS');
+          const resultsSection = document.getElementById('public-results-section');
+          resultsSection?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }}
+        className={`w-full py-3.5 px-4 rounded-2xl text-xs font-black transition-all cursor-pointer flex items-center justify-between border-2 shadow-xs ${
+          activePublicTab === 'TOURNAMENTS'
+            ? 'bg-emerald-600 text-white border-emerald-500 shadow-md ring-2 ring-emerald-400/20'
+            : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800'
+        }`}
+      >
+        <div className="flex items-center gap-2">
+          <Layers className={`w-4 h-4 ${activePublicTab === 'TOURNAMENTS' ? 'text-white' : 'text-emerald-600 dark:text-emerald-400'}`} />
+          <span>دليل البطولات والمحاضر</span>
+        </div>
+        <span className="text-[10px] font-mono font-bold bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-full text-slate-600 dark:text-slate-300">
+          {filteredTournaments.length}
+        </span>
+      </button>
+
       {/* Sport Gallery (نافذة الصور الصغيرة) */}
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-sm space-y-2.5">
         <div className="flex items-center gap-1.5 border-b border-slate-100 dark:border-slate-800 pb-2">
@@ -1478,10 +1521,21 @@ export const Login: React.FC = () => {
                 <h1 className="text-xs sm:text-sm md:text-base font-black text-slate-900 dark:text-white tracking-tight truncate">
                   نتائج البطولات الإقليمية للرياضة المدرسية
                 </h1>
-                <p className="text-[10px] sm:text-xs text-emerald-700 dark:text-emerald-400 font-bold flex items-center gap-1 truncate">
-                  <Sparkles className="w-3 h-3 text-emerald-500 shrink-0" />
-                  <span>{activeDirectorate?.name || 'المديرية الإقليمية تاوريرت'}</span>
-                </p>
+                <div className="flex items-center gap-1.5 mt-0.5">
+                  <Building2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                  <select
+                    value={activeDirectorate?.id || 'taourirt'}
+                    onChange={(e) => handleDirectorateChange(e.target.value)}
+                    className="text-[11px] sm:text-xs font-bold text-emerald-800 dark:text-emerald-300 bg-emerald-50/90 dark:bg-emerald-950/70 border border-emerald-300/80 dark:border-emerald-700 rounded-lg px-2 py-0.5 focus:outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer max-w-[200px] sm:max-w-xs truncate shadow-3xs"
+                    title="تغيير واختيار المديرية الإقليمية"
+                  >
+                    {directorates.map(dir => (
+                      <option key={dir.id} value={dir.id} className="text-slate-900 bg-white">
+                        {dir.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
               </div>
             </div>
 
@@ -1679,7 +1733,11 @@ export const Login: React.FC = () => {
                 {/* All Sports Option */}
                 <button
                   type="button"
-                  onClick={() => setSelectedSport('ALL')}
+                  onClick={() => {
+                    setSelectedSport('ALL');
+                    setActivePublicTab('MATCHES');
+                    setSelectedCategory('ALL');
+                  }}
                   className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer flex items-center gap-1.5 shrink-0 ${
                     selectedSport === 'ALL'
                       ? 'bg-emerald-500 text-white shadow-md shadow-emerald-500/20'
@@ -1697,7 +1755,17 @@ export const Login: React.FC = () => {
                     <button
                       key={sportKey}
                       type="button"
-                      onClick={() => setSelectedSport(sportKey)}
+                      onClick={() => {
+                        setSelectedSport(sportKey);
+                        if (sportKey === 'cross_country') {
+                          setActivePublicTab('CC_PODIUM');
+                        } else if (sportKey === 'athletics') {
+                          setActivePublicTab('ATHLETICS');
+                        } else {
+                          setActivePublicTab('MATCHES');
+                        }
+                        setSelectedCategory('ALL');
+                      }}
                       className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer flex items-center gap-1.5 shrink-0 ${
                         isSelected
                           ? 'bg-emerald-500 text-white shadow-md shadow-emerald-500/20'
@@ -1844,83 +1912,20 @@ export const Login: React.FC = () => {
               : 'lg:col-span-9 lg:col-start-4'
           }`}>
             
-            {/* FILTER BAR & SEARCH - Reordered: Sports -> Affiliation -> Guides (Categories moved inside tabs) */}
+            {/* FILTER BAR & SEARCH */}
             <div id="public-results-section" className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-sm space-y-4 transition-colors scroll-mt-24">
               
-              {/* PART 1: MAIN SPORT TABS (Cross Country, Athletics, Collective) */}
-              <div className="flex flex-wrap sm:flex-nowrap items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setActivePublicTab('CC_PODIUM');
-                    setSelectedCategory('ALL');
-                    setSelectedGender('ALL');
-                    setSelectedSport('ALL');
-                  }}
-                  className={`flex-1 py-3 px-3 rounded-2xl text-sm font-black transition-all cursor-pointer flex items-center justify-center gap-2 border-2 ${
-                    activePublicTab === 'CC_PODIUM'
-                      ? (selectedAffiliation === 'CLUB' ? 'bg-amber-500 text-slate-950 border-amber-400' : 'bg-emerald-600 text-white border-emerald-500') + ' shadow-md ring-2 ring-emerald-400/20'
-                      : 'bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-100 dark:border-slate-800 hover:bg-slate-100'
-                  }`}
-                >
-                  <Trophy className={`w-5 h-5 ${activePublicTab === 'CC_PODIUM' ? (selectedAffiliation === 'CLUB' ? 'text-slate-900' : 'text-amber-400') : 'text-emerald-500'}`} />
-                  <span>العدو الريفي</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    setActivePublicTab('ATHLETICS');
-                    setSelectedCategory('ALL');
-                    setSelectedSport('ALL');
-                  }}
-                  className={`flex-1 py-3 px-3 rounded-2xl text-sm font-black transition-all cursor-pointer flex items-center justify-center gap-2 border-2 ${
-                    activePublicTab === 'ATHLETICS'
-                      ? (selectedAffiliation === 'CLUB' ? 'bg-amber-500 text-slate-950 border-amber-400' : 'bg-emerald-600 text-white border-emerald-500') + ' shadow-md ring-2 ring-emerald-400/20'
-                      : 'bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-100 dark:border-slate-800 hover:bg-slate-100'
-                  }`}
-                >
-                  <Award className={`w-5 h-5 ${activePublicTab === 'ATHLETICS' ? (selectedAffiliation === 'CLUB' ? 'text-slate-900' : 'text-amber-300') : 'text-emerald-500'}`} />
-                  <span>ألعاب القوى</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    setActivePublicTab('MATCHES');
-                    setSelectedCategory('ALL');
-                    setSelectedSport('ALL');
-                  }}
-                  className={`flex-1 py-3 px-3 rounded-2xl text-sm font-black transition-all cursor-pointer flex items-center justify-center gap-2 border-2 ${
-                    activePublicTab === 'MATCHES'
-                      ? (selectedAffiliation === 'CLUB' ? 'bg-amber-500 text-slate-950 border-amber-400' : 'bg-emerald-600 text-white border-emerald-500') + ' shadow-md ring-2 ring-emerald-400/20'
-                      : 'bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-100 dark:border-slate-800 hover:bg-slate-100'
-                  }`}
-                >
-                  <div className="relative">
-                    <Calendar className={`w-5 h-5 ${activePublicTab === 'MATCHES' ? (selectedAffiliation === 'CLUB' ? 'text-slate-900' : 'text-white') : 'text-emerald-500'}`} />
-                    {activePublicTab !== 'MATCHES' && (
-                      <span className="absolute -top-1 -right-1 flex h-2 w-2">
-                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                        <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-                      </span>
-                    )}
-                  </div>
-                  <span>النتائج الجماعية</span>
-                </button>
-              </div>
-
-              {/* PART 2: AFFILIATION (Club vs Non-club) */}
+              {/* PART 1: AFFILIATION (Club vs Non-club) */}
               <div className="flex items-center gap-2">
                 {[
-                  { id: 'CLUB', label: 'منتمين للأندية 🏅', color: 'bg-amber-500 border-amber-400 text-slate-950' },
-                  { id: 'NON_CLUB', label: 'مدرسي (غير منتمين) 🏫', color: 'bg-emerald-700 border-emerald-500 text-white' }
+                  { id: 'CLUB', label: 'منتمين للأندية', color: 'bg-amber-500 border-amber-400 text-slate-950' },
+                  { id: 'NON_CLUB', label: 'مدرسي (غير منتمين)', color: 'bg-emerald-700 border-emerald-500 text-white' }
                 ].map(aff => (
                   <button
                     key={aff.id}
                     type="button"
                     onClick={() => setSelectedAffiliation(aff.id as any)}
-                    className={`flex-1 py-3 px-3 rounded-2xl text-xs font-black transition-all cursor-pointer border-2 ${
+                    className={`flex-1 py-3 px-2 rounded-2xl text-[11px] sm:text-xs font-black transition-all cursor-pointer border-2 ${
                       selectedAffiliation === aff.id
                         ? aff.color + ' shadow-inner'
                         : 'bg-white dark:bg-slate-800 text-slate-500 dark:text-slate-400 border-slate-100 dark:border-slate-800 hover:bg-slate-50'
@@ -1996,21 +2001,6 @@ export const Login: React.FC = () => {
                   </div>
                 </div>
               )}
-
-              {/* PART 4: TOURNAMENT GUIDES (Bottom) */}
-              <button
-                type="button"
-                onClick={() => setActivePublicTab('TOURNAMENTS')}
-                className={`w-full py-3.5 px-4 rounded-2xl text-sm font-black transition-all cursor-pointer flex items-center justify-center gap-3 border-2 ${
-                  activePublicTab === 'TOURNAMENTS'
-                    ? 'bg-emerald-600 text-white border-emerald-500 shadow-md'
-                    : 'bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-slate-100 dark:border-slate-800 hover:bg-slate-100'
-                }`}
-              >
-                <Layers className={`w-5 h-5 ${activePublicTab === 'TOURNAMENTS' ? 'text-white' : 'text-emerald-600'}`} />
-                <span>دليل البطولات والمحاضر ({filteredTournaments.length})</span>
-                <Trophy className="w-5 h-5 text-amber-500" />
-              </button>
 
             </div>
 
@@ -2090,8 +2080,8 @@ export const Login: React.FC = () => {
                             return (
                               <div className={`flex flex-col items-center justify-end w-full min-w-0 ${isGold ? '-translate-y-1.5 sm:-translate-y-4 z-10' : 'z-0'}`}>
                                 {/* Circular Medal Badge at top with crown */}
-                                <div className="relative -mb-4 sm:-mb-8 z-10">
-                                  <div className={`w-20 h-20 sm:w-32 sm:h-32 rounded-full border-2 sm:border-4 overflow-hidden bg-gradient-to-b ${medalBg} shadow-md sm:shadow-xl flex flex-col items-center justify-center relative shrink-0 select-none`}>
+                                <div className="relative -mb-4 sm:-mb-6 z-10">
+                                  <div className={`w-14 h-14 sm:w-20 sm:h-20 rounded-full border-2 sm:border-4 overflow-hidden bg-gradient-to-b ${medalBg} shadow-md sm:shadow-xl flex flex-col items-center justify-center relative shrink-0 select-none hover:scale-[1.5] active:scale-[1.5] transition-all duration-300 cursor-pointer hover:z-50`}>
                                     {(() => {
                                       const matchedStud = students.find(s => 
                                         (runner?.studentId && s.id === runner.studentId) ||
@@ -2540,8 +2530,8 @@ export const Login: React.FC = () => {
                               return (
                                 <div key={rank} className={`flex flex-col items-center justify-end w-full min-w-0 ${isGold ? '-translate-y-1 sm:-translate-y-2 z-10' : 'z-0'}`}>
                                   {/* Medal Badge / Photo */}
-                                  <div className="relative -mb-4 sm:-mb-8 z-10">
-                                    <div className={`w-16 h-16 sm:w-24 sm:h-24 rounded-full border-2 sm:border-3 overflow-hidden bg-gradient-to-b ${medalBg} shadow-md flex flex-col items-center justify-center relative shrink-0 select-none`}>
+                                  <div className="relative -mb-3 sm:-mb-4 z-10">
+                                    <div className={`w-12 h-12 sm:w-16 sm:h-16 rounded-full border-2 sm:border-3 overflow-hidden bg-gradient-to-b ${medalBg} shadow-md flex flex-col items-center justify-center relative shrink-0 select-none hover:scale-[1.5] active:scale-[1.5] transition-all duration-300 cursor-pointer hover:z-50`}>
                                       {(() => {
                                         const matchedStud = students.find(s => 
                                           (winner?.studentId && s.id === winner.studentId) ||

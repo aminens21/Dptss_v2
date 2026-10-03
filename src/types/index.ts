@@ -301,6 +301,8 @@ export interface AthleticsWinner {
   performance: string; // e.g., '11.85 ث' or '5.65 م' or '12.40 م'
   bibNumber?: string;
   affiliation?: 'non_club' | 'club_affiliated';
+  studentId?: string;
+  photoUrl?: string;
 }
 
 export interface AthleticsCategoryResult {
