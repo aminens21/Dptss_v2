@@ -983,16 +983,18 @@ export const Tournaments: React.FC = () => {
                 </button>
               )}
 
-              {/* Demo Data Generator Button */}
-              <button
-                type="button"
-                onClick={() => setIsDemoDataModalOpen(true)}
-                className="px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 text-white shadow-xs flex items-center gap-1.5"
-                title="توليد بيانات تجريبية وبطولات ونتائج للمنصة"
-              >
-                <Sparkles className="w-3.5 h-3.5 text-emerald-200" />
-                <span>توليد بيانات ونتائج افتراضية</span>
-              </button>
+              {/* Demo Data Generator Button (Hidden for teachers) */}
+              {!isTeacherRole && userProfile?.role !== 'TEACHER' && (
+                <button
+                  type="button"
+                  onClick={() => setIsDemoDataModalOpen(true)}
+                  className="px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 text-white shadow-xs flex items-center gap-1.5"
+                  title="توليد بيانات تجريبية وبطولات ونتائج للمنصة"
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-emerald-200" />
+                  <span>توليد بيانات ونتائج افتراضية</span>
+                </button>
+              )}
             </div>
           </div>
 

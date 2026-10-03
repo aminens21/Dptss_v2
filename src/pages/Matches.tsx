@@ -762,14 +762,16 @@ export const Matches: React.FC = () => {
 
           {/* Actions */}
           <div className="flex items-center gap-2">
-            <button
-              onClick={() => setIsDemoDataModalOpen(true)}
-              className="inline-flex items-center justify-center gap-1.5 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 px-3.5 py-2 text-xs font-black text-white shadow-xs transition-colors cursor-pointer"
-              title="توليد وتعبئة نتائج ومباريات افتراضية لكافة الرياضات الجماعية"
-            >
-              <Sparkles className="h-3.5 w-3.5 text-emerald-200" />
-              <span>توليد نتائج وبيانات افتراضية</span>
-            </button>
+            {!isTeacher && userProfile?.role !== 'TEACHER' && (
+              <button
+                onClick={() => setIsDemoDataModalOpen(true)}
+                className="inline-flex items-center justify-center gap-1.5 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 px-3.5 py-2 text-xs font-black text-white shadow-xs transition-colors cursor-pointer"
+                title="توليد وتعبئة نتائج ومباريات افتراضية لكافة الرياضات الجماعية"
+              >
+                <Sparkles className="h-3.5 w-3.5 text-emerald-200" />
+                <span>توليد نتائج وبيانات افتراضية</span>
+              </button>
+            )}
 
             {canCreate && (
               <button
