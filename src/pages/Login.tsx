@@ -520,18 +520,20 @@ export const Login: React.FC = () => {
   }, [loading, currentUser, isProfileComplete, loginMode, navigate]);
 
   // Filtered approved schools by directorate and cycle
-  const selectedCycleType = regTeachingCadre === 'PRIMARY' ? 'ابتدائي' : regTeachingCadre === 'MIDDLE' ? 'إعدادي' : 'تأهيلي';
   const filteredSchools = useMemo(() => {
     return [...schools]
-      .filter(s => 
-        s && 
-        s.name && 
-        !s.name.includes('غير محدد') &&
-        (s.directorateId === regDirectorateId || (!s.directorateId && regDirectorateId === 'taourirt')) &&
-        s.type === selectedCycleType
-      )
+      .filter(s => {
+        if (!s || !s.name || s.name.includes('غير محدد')) return false;
+        const matchesDir = s.directorateId === regDirectorateId || (!s.directorateId && regDirectorateId === 'taourirt');
+        if (!matchesDir) return false;
+        const t = (s.type || '').trim();
+        if (regTeachingCadre === 'PRIMARY') return t.includes('ابتدائي') || t === 'PRIMARY';
+        if (regTeachingCadre === 'MIDDLE') return t.includes('إعدادي') || t === 'MIDDLE';
+        if (regTeachingCadre === 'HIGH') return t.includes('تأهيلي') || t === 'HIGH' || t.includes('ثانوي تأهيلي');
+        return false;
+      })
       .sort((a, b) => a.name.localeCompare(b.name, 'ar'));
-  }, [schools, regDirectorateId, selectedCycleType]);
+  }, [schools, regDirectorateId, regTeachingCadre]);
 
   const selectedDirObj = directorates.find(d => d.id === regDirectorateId);
 
@@ -765,7 +767,7 @@ export const Login: React.FC = () => {
         </p>
       </div>
 
-      {/* MODE 1: LOGIN (GOOGLE SIGN IN & DEMO) */}
+      {/* MODE 1: LOGIN (GOOGLE SIGN IN) */}
       {loginMode === 'PUBLIC' && (
         <div className="space-y-4">
           <button
@@ -782,53 +784,6 @@ export const Login: React.FC = () => {
             </svg>
             <span>{isSubmitting ? 'جاري التحقق عبر Google...' : 'المتابعة بحساب Google (Gmail)'}</span>
           </button>
-
-          <div className="relative py-1">
-            <div className="absolute inset-0 flex items-center">
-              <div className="w-full border-t border-slate-200 dark:border-slate-800"></div>
-            </div>
-            <div className="relative flex justify-center text-[10px]">
-              <span className="bg-white dark:bg-slate-900 px-2 text-slate-400 font-bold">أو الدخول بصفة تجريبية (Demo)</span>
-            </div>
-          </div>
-
-          <div className="space-y-2">
-            <button
-              type="button"
-              onClick={() => loginAsDemo('CENTRAL_ADMIN')}
-              className="w-full p-2.5 bg-slate-50 hover:bg-emerald-50 dark:bg-slate-800/60 dark:hover:bg-emerald-950/40 border border-slate-200 dark:border-slate-700 hover:border-emerald-400 rounded-2xl text-right transition-colors cursor-pointer group flex items-center justify-between"
-            >
-              <div>
-                <p className="text-xs font-bold text-slate-800 dark:text-slate-100 group-hover:text-emerald-600 dark:group-hover:text-emerald-400">المسير المركزي</p>
-                <p className="text-[10px] text-slate-500 dark:text-slate-400">المشرف العام ومتابعة الأنشطة</p>
-              </div>
-              <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
-            </button>
-
-            <button
-              type="button"
-              onClick={() => loginAsDemo('SPORT_MANAGER')}
-              className="w-full p-2.5 bg-slate-50 hover:bg-emerald-50 dark:bg-slate-800/60 dark:hover:bg-emerald-950/40 border border-slate-200 dark:border-slate-700 hover:border-emerald-400 rounded-2xl text-right transition-colors cursor-pointer group flex items-center justify-between"
-            >
-              <div>
-                <p className="text-xs font-bold text-slate-800 dark:text-slate-100 group-hover:text-emerald-600 dark:group-hover:text-emerald-400">مسؤول رياضة</p>
-                <p className="text-[10px] text-slate-500 dark:text-slate-400">تدبير بطولات التخصصات</p>
-              </div>
-              <Trophy className="w-4 h-4 text-amber-500 shrink-0" />
-            </button>
-
-            <button
-              type="button"
-              onClick={() => loginAsDemo('TEACHER')}
-              className="w-full p-2.5 bg-slate-50 hover:bg-emerald-50 dark:bg-slate-800/60 dark:hover:bg-emerald-950/40 border border-slate-200 dark:border-slate-700 hover:border-emerald-400 rounded-2xl text-right transition-colors cursor-pointer group flex items-center justify-between"
-            >
-              <div>
-                <p className="text-xs font-bold text-slate-800 dark:text-slate-100 group-hover:text-emerald-600 dark:group-hover:text-emerald-400">أستاذ التربية البدنية</p>
-                <p className="text-[10px] text-slate-500 dark:text-slate-400">تسجيل التلاميذ والفرق المدرسية</p>
-              </div>
-              <UserIcon className="w-4 h-4 text-blue-500 shrink-0" />
-            </button>
-          </div>
 
           <div className="p-3 bg-blue-50/80 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800 rounded-2xl text-[11px] text-blue-900 dark:text-blue-300 font-bold leading-relaxed flex items-start gap-2">
             <Info className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
@@ -861,40 +816,85 @@ export const Login: React.FC = () => {
 
           <div className="grid grid-cols-2 gap-2">
             <div>
-              <label className="block text-[11px] font-bold mb-1">رقم التأجير (SOM) *</label>
+              <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">رقم التأجير (SOM) *</label>
               <input
                 type="text"
                 required
                 value={regLeaseNumber}
                 onChange={(e) => setRegLeaseNumber(e.target.value)}
                 placeholder="123456"
-                className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border rounded-xl text-xs font-bold"
+                className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-800 dark:text-slate-100"
               />
             </div>
 
             <div>
-              <label className="block text-[11px] font-bold mb-1">القن السري للمديرية *</label>
+              <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">القن السري للمديرية *</label>
               <input
                 type="password"
                 required
                 value={regDirectorateCode}
                 onChange={(e) => setRegDirectorateCode(e.target.value)}
                 placeholder="القن السري"
-                className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border rounded-xl text-xs font-bold"
+                className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-800 dark:text-slate-100"
               />
             </div>
           </div>
 
+          {/* Cycle Selector Buttons: تأهيلي / إعدادي / ابتدائي */}
           <div>
-            <label className="block text-[11px] font-bold mb-1">المؤسسة التعليمية *</label>
+            <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5 flex items-center justify-between">
+              <span className="flex items-center gap-1.5">
+                <Award className="h-3.5 w-3.5 text-slate-400" />
+                <span>السلك التعليمي للأستاذ(ة) *</span>
+              </span>
+              <span className="text-[10px] text-slate-500 font-normal">
+                اختر السلك لتصفية المؤسسات
+              </span>
+            </label>
+            <div className="grid grid-cols-3 gap-2">
+              {[
+                { id: 'HIGH', label: 'تأهيلي', fullLabel: 'الثانوي التأهيلي', icon: '🎓' },
+                { id: 'MIDDLE', label: 'إعدادي', fullLabel: 'الثانوي الإعدادي', icon: '📘' },
+                { id: 'PRIMARY', label: 'ابتدائي', fullLabel: 'التعليم الابتدائي', icon: '🏫' }
+              ].map(cycle => (
+                <button
+                  key={cycle.id}
+                  type="button"
+                  onClick={() => {
+                    setRegTeachingCadre(cycle.id as any);
+                    setRegWorkLocation('');
+                  }}
+                  className={`flex flex-col items-center justify-center p-2 rounded-xl border text-xs font-bold transition-all cursor-pointer ${
+                    regTeachingCadre === cycle.id
+                      ? 'bg-emerald-50 dark:bg-emerald-950/60 border-emerald-500 text-emerald-900 dark:text-emerald-300 ring-2 ring-emerald-500/20 shadow-xs'
+                      : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700'
+                  }`}
+                >
+                  <span className="text-sm mb-0.5">{cycle.icon}</span>
+                  <span className="text-center text-[11px]">{cycle.label}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* School Select Dropdown filtered by cycle */}
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300">المؤسسة التعليمية *</label>
+              <span className="text-[10px] font-bold text-blue-700 bg-blue-50 dark:bg-blue-950/60 px-2 py-0.5 rounded border border-blue-200 dark:border-blue-800">
+                {filteredSchools.length} مؤسسة مسجلة بالسلك
+              </span>
+            </div>
             <select
               value={regWorkLocation}
               onChange={(e) => setRegWorkLocation(e.target.value)}
-              className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border rounded-xl text-xs font-bold"
+              className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-800 dark:text-slate-100 cursor-pointer"
             >
-              <option value="">-- اختر مؤسستك --</option>
+              <option value="">-- اختر مؤسستك ({regTeachingCadre === 'PRIMARY' ? 'الابتدائي' : regTeachingCadre === 'MIDDLE' ? 'الإعدادي' : 'التأهيلي'}) --</option>
               {filteredSchools.map(sch => (
-                <option key={sch.id} value={sch.name}>{sch.name}</option>
+                <option key={sch.id} value={sch.name}>
+                  {sch.name} {sch.commune ? `(${sch.commune})` : ''}
+                </option>
               ))}
             </select>
           </div>
@@ -902,7 +902,7 @@ export const Login: React.FC = () => {
           <button
             type="submit"
             disabled={isSubmitting || !regWorkLocation}
-            className="w-full py-3 bg-emerald-600 text-white font-bold rounded-2xl text-xs cursor-pointer hover:bg-emerald-700"
+            className="w-full py-3 bg-emerald-600 text-white font-bold rounded-2xl text-xs cursor-pointer hover:bg-emerald-700 disabled:opacity-50"
           >
             تأكيد التسجيل والدخول
           </button>
