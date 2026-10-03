@@ -33,6 +33,7 @@ import {
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { formatMatchDate } from '../lib/utils';
+import { useAuth } from '../contexts/AuthContext';
 
 export interface CalendarEventItem {
   id: string;
@@ -340,6 +341,10 @@ export const ChampionshipCalendarView: React.FC<ChampionshipCalendarViewProps> =
   onOpenCreateMatch,
   onOpenMatchDetail
 }) => {
+  const { userProfile: authUser } = useAuth();
+  const activeUser = userProfile || authUser;
+  const isTeacher = activeUser?.role === 'TEACHER' && !activeUser?.isTechCommitteeHead;
+
   // Hover Popover & Quick Modal States
   const [hoveredDateKey, setHoveredDateKey] = useState<string | null>(null);
   const [activeQuickModalDate, setActiveQuickModalDate] = useState<string | null>(null);
@@ -651,18 +656,20 @@ export const ChampionshipCalendarView: React.FC<ChampionshipCalendarViewProps> =
               <span>طباعة البرنامج</span>
             </button>
 
-            {/* 4. GRANULAR SELECTION MODAL BUTTON */}
-            <button
-              onClick={() => {
-                setExportModalInitialSports(sportFilter !== 'ALL' ? [sportFilter] : []);
-                setIsExportModalOpen(true);
-              }}
-              className="flex items-center gap-2 px-3.5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs shadow-md transition-all cursor-pointer hover:scale-102"
-              title="تخصيص استخراج وتنزيل برنامج بطولة واحدة معينة أو بطولتين أو أكثر"
-            >
-              <Layers className="h-4 w-4" />
-              <span>تخصيص بطولة معينة...</span>
-            </button>
+            {/* 4. GRANULAR SELECTION MODAL BUTTON (Hidden for teachers) */}
+            {!isTeacher && (
+              <button
+                onClick={() => {
+                  setExportModalInitialSports(sportFilter !== 'ALL' ? [sportFilter] : []);
+                  setIsExportModalOpen(true);
+                }}
+                className="flex items-center gap-2 px-3.5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs shadow-md transition-all cursor-pointer hover:scale-102"
+                title="تخصيص استخراج وتنزيل برنامج بطولة واحدة معينة أو بطولتين أو أكثر"
+              >
+                <Layers className="h-4 w-4" />
+                <span>تخصيص بطولة معينة...</span>
+              </button>
+            )}
           </div>
         </div>
 
@@ -965,7 +972,7 @@ export const ChampionshipCalendarView: React.FC<ChampionshipCalendarViewProps> =
                     يمكنك استعراض الأيام المميزة في الرزنامة، أو برمجة نشاط أو مباراة جديدة في هذا التاريخ.
                   </p>
 
-                  {onOpenCreateMatch && (
+                  {!isTeacher && onOpenCreateMatch && (
                     <button
                       onClick={() => onOpenCreateMatch(selectedDateStr)}
                       className="mt-3.5 inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition-all cursor-pointer"
@@ -1111,7 +1118,7 @@ export const ChampionshipCalendarView: React.FC<ChampionshipCalendarViewProps> =
                 <div className="text-center py-10 bg-white rounded-2xl border border-dashed border-slate-200 p-6">
                   <CalendarIcon className="w-12 h-12 text-slate-300 mx-auto mb-2" />
                   <p className="text-xs font-bold text-slate-700">لم يتم تسجيل أية مباراة مبرمجة لهذا اليوم</p>
-                  {onOpenCreateMatch && (
+                  {!isTeacher && onOpenCreateMatch && (
                     <button
                       onClick={() => {
                         const d = activeQuickModalDate;
@@ -1208,7 +1215,7 @@ export const ChampionshipCalendarView: React.FC<ChampionshipCalendarViewProps> =
 
             {/* Footer */}
             <div className="p-3.5 bg-slate-100 border-t border-slate-200 flex items-center justify-between">
-              {onOpenCreateMatch ? (
+              {!isTeacher && onOpenCreateMatch ? (
                 <button
                   onClick={() => {
                     const d = activeQuickModalDate;

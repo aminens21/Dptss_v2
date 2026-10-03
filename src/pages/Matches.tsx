@@ -798,19 +798,17 @@ export const Matches: React.FC = () => {
           schools={schools}
           venues={venues}
           activeSeason={activeSeason}
-          user={userProfile}
+          userProfile={userProfile}
           onOpenMatchDetail={(match) => {
             if (canCreate) {
               setEditingMatch(match);
               setIsCreateMatchOpen(true);
             }
           }}
-          onOpenCreateMatch={() => {
-            if (canCreate) {
-              setEditingMatch(null);
-              setIsCreateMatchOpen(true);
-            }
-          }}
+          onOpenCreateMatch={canCreate ? () => {
+            setEditingMatch(null);
+            setIsCreateMatchOpen(true);
+          } : undefined}
         />
       ) : activeTab === 'referee' ? (
         <RefereeMatchesView
