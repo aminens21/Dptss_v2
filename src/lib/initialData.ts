@@ -203,7 +203,10 @@ export const INITIAL_SCHOOLS: School[] = [
   { id: 'sch-3', name: 'إعدادية ابن سينا', type: 'إعدادي', commune: 'تاوريرت', teacherName: 'ذة. فاطمة الزهراء بنعلي', coordinatorName: 'ذة. فاطمة الزهراء بنعلي', phone: '0663456789', principalName: 'ذ. حسن المنصوري', principalPhone: '0663776655', directorateId: 'taourirt' },
   { id: 'sch-4', name: 'إعدادية سيدي لحسن', type: 'إعدادي', commune: 'سيدي لحسن', teacherName: 'ذ. حميد بنعيسى', coordinatorName: 'ذ. حميد بنعيسى', phone: '0664567890', principalName: 'ذ. إبراهيم الزايدي', principalPhone: '0664665544', directorateId: 'taourirt' },
   { id: 'sch-5', name: 'مجموعة مدارس دبدو', type: 'ابتدائي', commune: 'دبدو', teacherName: 'ذ. يوسف المراكشي', coordinatorName: 'ذ. يوسف المراكشي', phone: '0665678901', principalName: 'ذ. عبد القادر الفاسي', principalPhone: '0665554433', directorateId: 'taourirt' },
-  { id: 'sch-6', name: 'ثانوية الزيتون التأهيلية', type: 'تأهيلي', commune: 'تاوريرت', teacherName: 'ذ. مصطفى الغازي', coordinatorName: 'ذ. مصطفى الغازي', phone: '0666789012', principalName: 'ذ. عمر الشريف', principalPhone: '0666443322', directorateId: 'taourirt' }
+  { id: 'sch-6', name: 'ثانوية الزيتون التأهيلية', type: 'تأهيلي', commune: 'تاوريرت', teacherName: 'ذ. مصطفى الغازي', coordinatorName: 'ذ. مصطفى الغازي', phone: '0666789012', principalName: 'ذ. عمر الشريف', principalPhone: '0666443322', directorateId: 'taourirt' },
+  { id: 'sch-priv-1', name: 'مؤسسة النخبة الخاصة', type: 'تأهيلي خاص', commune: 'تاوريرت', teacherName: 'ذ. كريم الفاسي', coordinatorName: 'ذ. كريم الفاسي', phone: '0667889900', principalName: 'ذ. كريم الفاسي', principalPhone: '0667889900', directorateId: 'taourirt' },
+  { id: 'sch-priv-2', name: 'مؤسسة المعرفة للتعليم الخصوصي', type: 'إعدادي خاص', commune: 'تاوريرت', teacherName: 'ذة. سميرة العلمي', coordinatorName: 'ذة. سميرة العلمي', phone: '0668990011', principalName: 'ذة. سميرة العلمي', principalPhone: '0668990011', directorateId: 'taourirt' },
+  { id: 'sch-priv-3', name: 'مؤسسة أجيال الغد الخاصة', type: 'ابتدائي خاص', commune: 'تاوريرت', teacherName: 'ذ. طارق بنجلون', coordinatorName: 'ذ. طارق بنجلون', phone: '0669001122', principalName: 'ذ. طارق بنجلون', principalPhone: '0669001122', directorateId: 'taourirt' }
 ];
 
 export const INITIAL_VENUES: Venue[] = [

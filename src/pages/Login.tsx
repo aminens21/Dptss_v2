@@ -59,12 +59,11 @@ import { Role, Directorate, School, Tournament, Match, Student, CrossCountryCate
 import { DataService, SPORTS_MAP, getAgeCategoriesForSeason, getCategoryYearsLabel } from '../lib/dataService';
 import { calculateTeamRankings, resolveRunnerParticipationType } from '../lib/crossCountryConfig';
 import { AppLogo } from '../components/AppLogo';
-import { DemoDataModal } from '../components/DemoDataModal';
 import toast from 'react-hot-toast';
 import { cn } from '../lib/utils';
 
 export const Login: React.FC = () => {
-  const { currentUser, userProfile, loading, updateProfileState, loginAsDemo } = useAuth();
+  const { currentUser, userProfile, loading, updateProfileState } = useAuth();
   const { isDarkMode, toggleDarkMode } = useTheme();
   const navigate = useNavigate();
 
@@ -76,7 +75,6 @@ export const Login: React.FC = () => {
 
   // Data states for Public View
   const [activeDirectorate, setActiveDirectorate] = useState<Directorate | null>(null);
-  const [isDemoDataModalOpen, setIsDemoDataModalOpen] = useState(false);
   const [isAboutModalOpen, setIsAboutModalOpen] = useState(false);
   const [directorates, setDirectorates] = useState<Directorate[]>([]);
   const [schools, setSchools] = useState<School[]>([]);
@@ -519,20 +517,49 @@ export const Login: React.FC = () => {
     }
   }, [loading, currentUser, isProfileComplete, loginMode, navigate]);
 
-  // Filtered approved schools by directorate and cycle
-  const filteredSchools = useMemo(() => {
-    return [...schools]
+  // Filtered approved schools by directorate and cycle (including private schools)
+  const { filteredSchools, publicSchools, privateSchools } = useMemo(() => {
+    const list = [...schools]
       .filter(s => {
         if (!s || !s.name || s.name.includes('غير محدد')) return false;
         const matchesDir = s.directorateId === regDirectorateId || (!s.directorateId && regDirectorateId === 'taourirt');
         if (!matchesDir) return false;
-        const t = (s.type || '').trim();
-        if (regTeachingCadre === 'PRIMARY') return t.includes('ابتدائي') || t === 'PRIMARY';
-        if (regTeachingCadre === 'MIDDLE') return t.includes('إعدادي') || t === 'MIDDLE';
-        if (regTeachingCadre === 'HIGH') return t.includes('تأهيلي') || t === 'HIGH' || t.includes('ثانوي تأهيلي');
+        const t = (s.type || '').trim().toLowerCase();
+        const n = (s.name || '').trim().toLowerCase();
+        const isPrivate = t.includes('خاص') || t.includes('خصوص') || n.includes('خاص') || n.includes('خصوص') || (s as any).isPrivate;
+
+        if (regTeachingCadre === 'PRIMARY') {
+          return t.includes('ابتدائي') || t === 'primary' || n.includes('ابتدائي') || n.includes('م/م') || n.includes('مجموعة مدارس') || n.includes('مدرسة') || (isPrivate && (t.includes('ابتدائي') || !t.includes('إعدادي') && !t.includes('تأهيلي')));
+        }
+        if (regTeachingCadre === 'MIDDLE') {
+          return t.includes('إعدادي') || t === 'middle' || n.includes('إعدادي') || n.includes('إعدادية') || (isPrivate && (t.includes('إعدادي') || !n.includes('م/م') && !n.includes('مدرسة ابتدائية')));
+        }
+        if (regTeachingCadre === 'HIGH') {
+          return t.includes('تأهيلي') || t === 'high' || t.includes('ثانوي تأهيلي') || n.includes('تأهيلي') || n.includes('ثانوية') || (isPrivate && (t.includes('تأهيلي') || !n.includes('م/م') && !n.includes('مدرسة ابتدائية')));
+        }
         return false;
       })
       .sort((a, b) => a.name.localeCompare(b.name, 'ar'));
+
+    const pub: School[] = [];
+    const priv: School[] = [];
+
+    list.forEach(s => {
+      const t = (s.type || '').trim().toLowerCase();
+      const n = (s.name || '').trim().toLowerCase();
+      const isPriv = t.includes('خاص') || t.includes('خصوص') || n.includes('خاص') || n.includes('خصوص') || (s as any).isPrivate;
+      if (isPriv) {
+        priv.push(s);
+      } else {
+        pub.push(s);
+      }
+    });
+
+    return {
+      filteredSchools: list,
+      publicSchools: pub,
+      privateSchools: priv
+    };
   }, [schools, regDirectorateId, regTeachingCadre]);
 
   const selectedDirObj = directorates.find(d => d.id === regDirectorateId);
@@ -877,12 +904,12 @@ export const Login: React.FC = () => {
             </div>
           </div>
 
-          {/* School Select Dropdown filtered by cycle */}
+          {/* School Select Dropdown filtered by cycle and showing private schools */}
           <div>
             <div className="flex items-center justify-between mb-1">
               <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300">المؤسسة التعليمية *</label>
               <span className="text-[10px] font-bold text-blue-700 bg-blue-50 dark:bg-blue-950/60 px-2 py-0.5 rounded border border-blue-200 dark:border-blue-800">
-                {filteredSchools.length} مؤسسة مسجلة بالسلك
+                {filteredSchools.length} مؤسسة مسجلة بالسلك (عمومي وخاص)
               </span>
             </div>
             <select
@@ -890,12 +917,32 @@ export const Login: React.FC = () => {
               onChange={(e) => setRegWorkLocation(e.target.value)}
               className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-800 dark:text-slate-100 cursor-pointer"
             >
-              <option value="">-- اختر مؤسستك ({regTeachingCadre === 'PRIMARY' ? 'الابتدائي' : regTeachingCadre === 'MIDDLE' ? 'الإعدادي' : 'التأهيلي'}) --</option>
-              {filteredSchools.map(sch => (
-                <option key={sch.id} value={sch.name}>
-                  {sch.name} {sch.commune ? `(${sch.commune})` : ''}
-                </option>
-              ))}
+              <option value="">-- اختر مؤسستك ({regTeachingCadre === 'PRIMARY' ? 'التعليم الابتدائي' : regTeachingCadre === 'MIDDLE' ? 'الثانوي الإعدادي' : 'الثانوي التأهيلي'}) --</option>
+              {publicSchools.length > 0 && (
+                <optgroup label={regTeachingCadre === 'PRIMARY' ? '🏛️ مؤسسات التعليم الابتدائي العمومي' : regTeachingCadre === 'MIDDLE' ? '🏛️ الثانويات الإعدادية العمومية' : '🏛️ الثانويات التأهيلية العمومية'}>
+                  {publicSchools.map(sch => (
+                    <option key={sch.id} value={sch.name}>
+                      {sch.name} {sch.commune ? `(${sch.commune})` : ''}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+              {privateSchools.length > 0 && (
+                <optgroup label={regTeachingCadre === 'PRIMARY' ? '⭐ مؤسسات التعليم المدرسي الخصوصي (ابتدائي)' : regTeachingCadre === 'MIDDLE' ? '⭐ مؤسسات التعليم المدرسي الخصوصي (إعدادي)' : '⭐ مؤسسات التعليم المدرسي الخصوصي (تأهيلي)'}>
+                  {privateSchools.map(sch => (
+                    <option key={sch.id} value={sch.name}>
+                      {sch.name} [خصوصي] {sch.commune ? `(${sch.commune})` : ''}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+              {publicSchools.length === 0 && privateSchools.length === 0 && (
+                filteredSchools.map(sch => (
+                  <option key={sch.id} value={sch.name}>
+                    {sch.name} {sch.commune ? `(${sch.commune})` : ''}
+                  </option>
+                ))
+              )}
             </select>
           </div>
 
@@ -1558,16 +1605,6 @@ export const Login: React.FC = () => {
                   )}
                 </button>
 
-                {/* Generate Demo Data Button */}
-                <button
-                  type="button"
-                  onClick={() => setIsDemoDataModalOpen(true)}
-                  className="px-3 py-1.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white rounded-full text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-sm border border-amber-400/40 shrink-0"
-                >
-                  <Sparkles className="w-3.5 h-3.5 text-amber-200 animate-pulse" />
-                  <span>توليد بيانات افتراضية</span>
-                </button>
-
                 {/* Teacher Login Button */}
                 <button
                   type="button"
@@ -1579,7 +1616,7 @@ export const Login: React.FC = () => {
                       setTimeout(() => loginPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 100);
                     }
                   }}
-                  className={`px-3 py-1.5 rounded-full text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-sm ${
+                  className={`px-3.5 py-1.5 rounded-full text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-sm ${
                     showLoginPanel 
                       ? 'bg-emerald-700 text-white ring-2 ring-emerald-400' 
                       : 'bg-emerald-600 hover:bg-emerald-700 text-white'
@@ -1687,17 +1724,6 @@ export const Login: React.FC = () => {
                         ))}
 
                         <div className="h-px bg-slate-100 dark:bg-slate-800 my-1 mx-2" />
-
-                        <button
-                          onClick={() => {
-                            setIsDemoDataModalOpen(true);
-                            setIsMobileMenuOpen(false);
-                          }}
-                          className="w-full flex items-center gap-3 px-3 py-3 text-right text-xs font-black text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-950/30 rounded-xl transition-colors"
-                        >
-                          <Sparkles className="w-4 h-4 animate-pulse" />
-                          <span>توليد بيانات تجريبية ومباريات ⚡</span>
-                        </button>
 
                         <button
                           onClick={() => {
@@ -2451,17 +2477,9 @@ export const Login: React.FC = () => {
                             لا توجد نتائج مسجلة لألعاب القوى تطابق الفلترة المحددة
                           </p>
                           <p className="text-xs text-slate-400 mt-1">
-                            يمكنك توليد بيانات تجريبية لمعاينة عرض مسابقات القفز والرمي وسباقات السرعة
+                            لم يتم نشر نتائج منافسات ألعاب القوى لهذه الفئة حتى الآن من طرف اللجنة التقنية والمنظمين.
                           </p>
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => setIsDemoDataModalOpen(true)}
-                          className="px-4 py-2 bg-gradient-to-r from-amber-500 to-teal-600 text-white rounded-xl text-xs font-black shadow-md hover:shadow-lg transition-all cursor-pointer inline-flex items-center gap-2"
-                        >
-                          <Sparkles className="w-4 h-4 text-amber-200" />
-                          <span>⚡ توليد نتائج ألعاب القوى افتراضياً</span>
-                        </button>
                       </div>
                     );
                   }
@@ -2823,16 +2841,6 @@ export const Login: React.FC = () => {
           </div>
         </div>
       )}
-
-      {/* DEMO DATA MODAL */}
-      <DemoDataModal
-        isOpen={isDemoDataModalOpen}
-        onClose={() => setIsDemoDataModalOpen(false)}
-        activeDirectorateId={activeDirectorate?.id || 'taourirt'}
-        activeDirectorateName={activeDirectorate?.name || 'تاوريرت'}
-        activeSeason="2026/2027"
-        onDataLoaded={loadAllData}
-      />
 
       {/* ABOUT APPLICATION MODAL */}
       {isAboutModalOpen && (

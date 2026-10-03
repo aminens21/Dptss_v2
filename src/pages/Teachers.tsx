@@ -5,7 +5,10 @@ import { User, Student, School } from '../types';
 import { TeacherDetailModal } from '../components/TeacherDetailModal';
 import { EditTeacherRoleModal } from '../components/EditTeacherRoleModal';
 import { ConfirmDeleteModal } from '../components/ConfirmDeleteModal';
+import { TeacherBadgesModal } from '../components/TeacherBadgesModal';
 import { useAuth } from '../contexts/AuthContext';
+import { Directorate } from '../types';
+import { OfficialLogos } from '../lib/dataService';
 import {
   GraduationCap,
   Search,
@@ -111,6 +114,13 @@ export const Teachers: React.FC = () => {
   const [selectedTeacherForEdit, setSelectedTeacherForEdit] = useState<User | null>(null);
   const [isEditRoleModalOpen, setIsEditRoleModalOpen] = useState(false);
 
+  // Badges Modal State
+  const [isBadgesModalOpen, setIsBadgesModalOpen] = useState(false);
+  const [preselectedTeacherId, setPreselectedTeacherId] = useState<string | undefined>(undefined);
+  const [activeDirObj, setActiveDirObj] = useState<Directorate | null>(null);
+  const [officialLogos, setOfficialLogos] = useState<OfficialLogos | undefined>(undefined);
+  const [activeSeason, setActiveSeason] = useState<string>('2026/2027');
+
   // Deletion Modal State
   const [teacherToDelete, setTeacherToDelete] = useState<User | null>(null);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
@@ -144,10 +154,13 @@ export const Teachers: React.FC = () => {
     setLoading(true);
     try {
       const activeDirId = DataService.getActiveDirectorateId();
-      const [teachersData, studentsData, schoolsData] = await Promise.all([
+      const [teachersData, studentsData, schoolsData, activeDir, logos, curSeason] = await Promise.all([
         DataService.getTeachers(),
         DataService.getStudents(),
-        DataService.getSchools()
+        DataService.getSchools(),
+        DataService.getActiveDirectorate(),
+        DataService.getOfficialLogos(),
+        DataService.getActiveSeason()
       ]);
       const dirTeachers = teachersData.filter(t => (t.directorateId || 'taourirt') === activeDirId);
       const dirStudents = studentsData.filter(st => (st.directorateId || 'taourirt') === activeDirId);
@@ -156,6 +169,9 @@ export const Teachers: React.FC = () => {
       setTeachers(dirTeachers);
       setStudents(dirStudents);
       setSchools(dirSchools);
+      if (activeDir) setActiveDirObj(activeDir);
+      if (logos) setOfficialLogos(logos);
+      if (curSeason) setActiveSeason(curSeason);
     } catch (error) {
       console.error('Error loading teachers:', error);
       toast.error('حدث خطأ أثناء تحميل قائمة الأساتذة');
@@ -290,24 +306,39 @@ export const Teachers: React.FC = () => {
             إدارة ومتابعة ملفات أساتذة التربية البدنية والرياضية المسجلين بالمديرية. اضغط على أي أستاذ لعرض بطاقته التفصيلية.
           </p>
         </div>
-        <button
-          onClick={loadTeachersAndStudents}
-          className="self-start md:self-auto flex items-center gap-1.5 px-3 py-2 border border-slate-200 hover:bg-slate-50 rounded-xl text-xs font-semibold text-slate-600 cursor-pointer transition-all bg-white shadow-3xs"
-        >
-          <RefreshCw className="h-3.5 w-3.5" />
-          <span>تحديث القائمة</span>
-        </button>
-
-        {userProfile?.role === 'CENTRAL_ADMIN' && teachers.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Print Badges Button */}
           <button
-            onClick={() => setShowDeleteAllModal(true)}
-            className="self-start md:self-auto flex items-center gap-1.5 px-3 py-2 bg-red-50 border border-red-200 hover:bg-red-100 rounded-xl text-xs font-bold text-red-600 transition-all shadow-3xs cursor-pointer"
-            title="حذف جميع حسابات الأطر التربوية في هذه المديرية"
+            onClick={() => {
+              setPreselectedTeacherId(undefined);
+              setIsBadgesModalOpen(true);
+            }}
+            className="flex items-center gap-2 px-3.5 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl text-xs font-black transition-all shadow-sm hover:shadow-md cursor-pointer"
+            title="إنشاء وطباعة شارات وبادجات الأساتذة (8 في الورقة A4)"
           >
-            <Trash2 className="h-3.5 w-3.5" />
-            <span>حذف الكل</span>
+            <span className="text-sm">🪪</span>
+            <span>إنشاء شارات وبادجات الأساتذة (A4)</span>
           </button>
-        )}
+
+          <button
+            onClick={loadTeachersAndStudents}
+            className="flex items-center gap-1.5 px-3 py-2 border border-slate-200 hover:bg-slate-50 rounded-xl text-xs font-semibold text-slate-600 cursor-pointer transition-all bg-white shadow-3xs"
+          >
+            <RefreshCw className="h-3.5 w-3.5" />
+            <span>تحديث القائمة</span>
+          </button>
+
+          {userProfile?.role === 'CENTRAL_ADMIN' && teachers.length > 0 && (
+            <button
+              onClick={() => setShowDeleteAllModal(true)}
+              className="flex items-center gap-1.5 px-3 py-2 bg-red-50 border border-red-200 hover:bg-red-100 rounded-xl text-xs font-bold text-red-600 transition-all shadow-3xs cursor-pointer"
+              title="حذف جميع حسابات الأطر التربوية في هذه المديرية"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              <span>حذف الكل</span>
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Stats Cards Dashboard Section */}
@@ -554,6 +585,18 @@ export const Teachers: React.FC = () => {
                             type="button"
                             onClick={(e) => {
                               e.stopPropagation();
+                              setPreselectedTeacherId(teacher.id);
+                              setIsBadgesModalOpen(true);
+                            }}
+                            className="p-2 bg-amber-50 hover:bg-amber-100 text-amber-700 rounded-xl border border-amber-200 transition-all cursor-pointer shadow-3xs"
+                            title="توليد شارة الاعتماد الرسمية"
+                          >
+                            <span className="text-xs">🪪</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
                               handleOpenTeacherDetail(teacher);
                             }}
                             className="p-2 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-xl border border-blue-200 transition-all cursor-pointer shadow-3xs"
@@ -642,6 +685,19 @@ export const Teachers: React.FC = () => {
                         type="button"
                         onClick={(e) => {
                           e.stopPropagation();
+                          setPreselectedTeacherId(teacher.id);
+                          setIsBadgesModalOpen(true);
+                        }}
+                        className="px-2.5 py-1 bg-amber-50 hover:bg-amber-100 text-amber-700 font-bold text-[11px] rounded-lg border border-amber-200 flex items-center gap-1 cursor-pointer transition-colors"
+                        title="توليد شارة الاعتماد"
+                      >
+                        <span>🪪</span>
+                        <span>الشارة</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
                           handleOpenTeacherDetail(teacher);
                         }}
                         className="px-2.5 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold text-[11px] rounded-lg border border-blue-200 flex items-center gap-1 cursor-pointer transition-colors"
@@ -724,6 +780,23 @@ export const Teachers: React.FC = () => {
           message={`تحذير خطير: أنت على وشك حذف جميع حسابات الأطر التربوية (${teachers.length}) المسجلين في مديريتك الحالية. هذا الإجراء سيؤدي لحذف وصولهم للنظام وبياناتهم الشخصية بشكل نهائي. هل أنت متأكد؟`}
           itemName="جميع الأطر التربوية"
           isDeleting={isDeletingAll}
+        />
+      )}
+
+      {/* Teacher Badges Modal */}
+      {isBadgesModalOpen && (
+        <TeacherBadgesModal
+          isOpen={isBadgesModalOpen}
+          onClose={() => {
+            setIsBadgesModalOpen(false);
+            setPreselectedTeacherId(undefined);
+          }}
+          teachers={teachers}
+          schools={schools}
+          directorateObj={activeDirObj}
+          officialLogos={officialLogos}
+          activeSeason={activeSeason}
+          preselectedTeacherId={preselectedTeacherId}
         />
       )}
     </div>

@@ -25,6 +25,8 @@ import { useAuth } from '../contexts/AuthContext';
 import { Tournament, Sport, Directorate } from '../types';
 import { TournamentPosterModal } from '../components/TournamentPosterModal';
 import { TournamentCertificateModal } from '../components/TournamentCertificateModal';
+import { TeacherBadgesModal } from '../components/TeacherBadgesModal';
+import { User, School } from '../types';
 
 // Helper to safely format dates (handles Firestore Timestamps, Date objects, strings, numbers)
 const safeFormatDate = (val: any): string | null => {
@@ -83,23 +85,34 @@ export const PostersCertificates: React.FC = () => {
   const [selectedSportForCertificate, setSelectedSportForCertificate] = useState<Sport | null>(null);
   const [isCertificateModalOpen, setIsCertificateModalOpen] = useState(false);
 
+  // Badges State
+  const [isBadgesModalOpen, setIsBadgesModalOpen] = useState(false);
+  const [teachers, setTeachers] = useState<User[]>([]);
+  const [schools, setSchools] = useState<School[]>([]);
+
   // Load Data
   const loadData = async () => {
     setLoading(true);
     try {
       const activeDirId = DataService.getActiveDirectorateId();
-      const [tournList, sportsList, season, activeDir, logos] = await Promise.all([
+      const [tournList, sportsList, season, activeDir, logos, teachersList, schoolsList] = await Promise.all([
         DataService.getTournaments(),
         DataService.getSportsConfig(),
         DataService.getActiveSeason(),
         DataService.getActiveDirectorate(),
-        DataService.getOfficialLogos().catch(() => undefined)
+        DataService.getOfficialLogos().catch(() => undefined),
+        DataService.getTeachers().catch(() => []),
+        DataService.getSchools().catch(() => [])
       ]);
 
       const dirTournaments = tournList.filter(t => (t.directorateId || 'taourirt') === activeDirId);
+      const dirTeachers = teachersList.filter(t => (t.directorateId || 'taourirt') === activeDirId);
+      const dirSchools = schoolsList.filter(s => (s.directorateId || 'taourirt') === activeDirId);
 
       setTournaments(dirTournaments);
       setSportsConfig(sportsList);
+      setTeachers(dirTeachers);
+      setSchools(dirSchools);
       if (season) setActiveSeason(season);
       if (activeDir) setActiveDirObj(activeDir);
       if (logos) setOfficialLogos(logos);
@@ -201,8 +214,17 @@ export const PostersCertificates: React.FC = () => {
             </div>
           </div>
 
-          {/* Quick Refresh */}
-          <div className="flex items-center gap-2 self-start md:self-center">
+          {/* Badges & Quick Refresh */}
+          <div className="flex flex-wrap items-center gap-2 self-start md:self-center">
+            <button
+              onClick={() => setIsBadgesModalOpen(true)}
+              className="px-4 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl text-xs font-black transition-all border border-emerald-400/40 flex items-center gap-2 cursor-pointer shadow-md"
+              title="إنشاء وطباعة شارات وبادجات الأساتذة (8 في الورقة A4)"
+            >
+              <span className="text-sm">🪪</span>
+              <span>شارات وبادجات الأساتذة (A4)</span>
+            </button>
+
             <button
               onClick={loadData}
               disabled={loading}
@@ -413,6 +435,19 @@ export const PostersCertificates: React.FC = () => {
           directorateName={directorateName}
           directorateObj={activeDirObj}
           tournaments={tournaments}
+          officialLogos={officialLogos}
+          activeSeason={activeSeason}
+        />
+      )}
+
+      {/* Teacher Badges Modal */}
+      {isBadgesModalOpen && (
+        <TeacherBadgesModal
+          isOpen={isBadgesModalOpen}
+          onClose={() => setIsBadgesModalOpen(false)}
+          teachers={teachers}
+          schools={schools}
+          directorateObj={activeDirObj}
           officialLogos={officialLogos}
           activeSeason={activeSeason}
         />
