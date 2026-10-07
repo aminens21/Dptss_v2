@@ -19,6 +19,15 @@ export interface CommitteeTeacherMember {
   roleInCommittee: string; // 'رئيس اللجنة', 'حكم الانطلاق', 'حكم خط النهاية', 'مسجل المراتب والتوقيت', 'قاضي المحاولات والقياس', 'مؤطر الفريق'
 }
 
+export interface AthleticsCommitteePermissions {
+  allowedTabs: ('events' | 'committees' | 'stopwatch' | 'field' | 'podium' | 'school_registration')[];
+  allowedDisciplineIds: string[];
+  canRecordResults: boolean;
+  canValidateResults: boolean;
+  canPrintReports: boolean;
+  canExportData: boolean;
+}
+
 export interface AthleticsCommitteeDef {
   id: string;
   titleAr: string;
@@ -28,6 +37,7 @@ export interface AthleticsCommitteeDef {
   colorTheme: string;
   gradientBg: string;
   disciplines: string[];
+  permissions?: AthleticsCommitteePermissions;
   isCustom?: boolean;
 }
 
@@ -36,41 +46,91 @@ export const INITIAL_ATHLETICS_COMMITTEES: AthleticsCommitteeDef[] = [
     id: 'sprint_committee',
     titleAr: 'لجنة الجري السريع للمسافات القصيرة',
     titleFr: 'Commission des Courses de Vitesse / Sprint',
-    description: 'الإشراف والتحكيم في سباقات السرعة القصيرة (60م، 80م، 100م) وإدارة الانطلاقة وخط النهاية.',
+    description: 'الإشراف والتحكيم في سباقات السرعة القصيرة (60م، 80م، 100م، 200م) وإدارة الانطلاقة وخط النهاية.',
     icon: '⚡',
     colorTheme: 'from-amber-500 to-orange-600',
     gradientBg: 'bg-gradient-to-br from-amber-50 to-orange-50 dark:from-amber-950/40 dark:to-orange-950/40 border-amber-200 dark:border-amber-800',
-    disciplines: ['sprint_60m', 'sprint_80m', 'sprint_100m']
+    disciplines: ['sprint_60m', 'sprint_80m', 'sprint_100m', 'sprint_200m'],
+    permissions: {
+      allowedTabs: ['stopwatch'],
+      allowedDisciplineIds: ['sprint_60m', 'sprint_80m', 'sprint_100m', 'sprint_200m'],
+      canRecordResults: true,
+      canValidateResults: true,
+      canPrintReports: true,
+      canExportData: true
+    }
   },
   {
     id: 'middle_distance_committee',
     titleAr: 'لجنة المسافات المتوسطة والجري بالتناوب',
     titleFr: 'Commission Demi-fond & Relais',
-    description: 'الإشراف على سباقات النصف طويل (600م، 1000م، 1500م) وسباقات التتابع للفرق المدرسية.',
+    description: 'الإشراف على سباقات النصف طويل (400م، 600م، 800م، 1000م، 1500م) وسباقات التتابع للفرق المدرسية.',
     icon: '🏃‍♂️',
     colorTheme: 'from-emerald-500 to-teal-600',
     gradientBg: 'bg-gradient-to-br from-emerald-50 to-teal-50 dark:from-emerald-950/40 dark:to-teal-950/40 border-emerald-200 dark:border-emerald-800',
-    disciplines: ['middle_600m', 'middle_1000m', 'middle_1500m', 'relay_4x60m', 'relay_4x100m']
+    disciplines: ['middle_400m', 'middle_600m', 'middle_800m', 'middle_1000m', 'middle_1500m', 'relay_4x60m', 'relay_4x100m', 'relay_4x400m'],
+    permissions: {
+      allowedTabs: ['stopwatch'],
+      allowedDisciplineIds: ['middle_400m', 'middle_600m', 'middle_800m', 'middle_1000m', 'middle_1500m', 'relay_4x60m', 'relay_4x100m', 'relay_4x400m'],
+      canRecordResults: true,
+      canValidateResults: true,
+      canPrintReports: true,
+      canExportData: true
+    }
   },
   {
     id: 'long_jump_committee',
-    titleAr: 'لجنة مسابقة القفز الطولي',
-    titleFr: 'Commission Saut en Longueur',
-    description: 'تحكيم مسابقات القفز الطولي، تسجيل المسافات بالمتر والسنتيمتر، قياس المحاولات الناجحة والملغاة.',
+    titleAr: 'لجنة مسابقة القفز (الطولي والثلاثي والعالي)',
+    titleFr: 'Commission des Concours de Sauts',
+    description: 'تحكيم مسابقات القفز، قياس المسافات والارتفاعات بالمتر والسنتيمتر، وإدارة المحاولات الرسمية.',
     icon: '🦘',
     colorTheme: 'from-blue-500 to-indigo-600',
     gradientBg: 'bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-blue-950/40 dark:to-indigo-950/40 border-blue-200 dark:border-blue-800',
-    disciplines: ['long_jump']
+    disciplines: ['long_jump', 'triple_jump', 'high_jump'],
+    permissions: {
+      allowedTabs: ['field'],
+      allowedDisciplineIds: ['long_jump', 'triple_jump', 'high_jump'],
+      canRecordResults: true,
+      canValidateResults: true,
+      canPrintReports: true,
+      canExportData: true
+    }
   },
   {
     id: 'shot_put_committee',
-    titleAr: 'لجنة مسابقة دفع الجلة',
-    titleFr: 'Commission Lancer de Poids',
+    titleAr: 'لجنة مسابقة الرمي ودفع الجلة',
+    titleFr: 'Commission Lancers & Poids',
     description: 'الإشراف على محاولات دفع الجلة بالأوزان القانونية المعتمدة لكل فئة عمرية وتحديد الفائزين.',
     icon: '☄️',
     colorTheme: 'from-rose-500 to-red-600',
     gradientBg: 'bg-gradient-to-br from-rose-50 to-red-50 dark:from-rose-950/40 dark:to-red-950/40 border-rose-200 dark:border-rose-800',
-    disciplines: ['shot_put']
+    disciplines: ['shot_put'],
+    permissions: {
+      allowedTabs: ['field'],
+      allowedDisciplineIds: ['shot_put'],
+      canRecordResults: true,
+      canValidateResults: true,
+      canPrintReports: true,
+      canExportData: true
+    }
+  },
+  {
+    id: 'podium_committee',
+    titleAr: 'لجنة التتويج والمراسيم والجوائز',
+    titleFr: 'Commission du Podium, Cérémonies & Récompenses',
+    description: 'الإشراف على منصة التتويج، تسليم الميداليات، إعداد المحاضر الرسمية للنتائج النهائية، وتكريم الأبطال والفرق الفائزة.',
+    icon: '🏆',
+    colorTheme: 'from-amber-500 to-yellow-600',
+    gradientBg: 'bg-gradient-to-br from-amber-50 to-yellow-50 dark:from-amber-950/40 dark:to-yellow-950/40 border-amber-200 dark:border-amber-800',
+    disciplines: [],
+    permissions: {
+      allowedTabs: ['podium'],
+      allowedDisciplineIds: [],
+      canRecordResults: false,
+      canValidateResults: true,
+      canPrintReports: true,
+      canExportData: true
+    }
   }
 ];
 

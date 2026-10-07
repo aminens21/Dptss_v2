@@ -58,7 +58,37 @@ export class AthleticsService {
   static getCommittees(): AthleticsCommitteeDef[] {
     try {
       const data = localStorage.getItem(STORAGE_KEYS.COMMITTEES_DEF);
-      if (data) return JSON.parse(data);
+      if (data) {
+        const parsed: AthleticsCommitteeDef[] = JSON.parse(data);
+        // Ensure podium_committee exists
+        const hasPodium = parsed.some(c => c.id === 'podium_committee');
+        let updated = parsed;
+        if (!hasPodium) {
+          const podiumDef = INITIAL_ATHLETICS_COMMITTEES.find(c => c.id === 'podium_committee');
+          if (podiumDef) {
+            updated = [...parsed, podiumDef];
+          }
+        }
+        // Ensure permissions property exists for all committees
+        updated = updated.map(c => {
+          if (!c.permissions) {
+            const initial = INITIAL_ATHLETICS_COMMITTEES.find(ic => ic.id === c.id);
+            return {
+              ...c,
+              permissions: initial?.permissions || {
+                allowedTabs: ['events', 'committees'],
+                allowedDisciplineIds: c.disciplines || [],
+                canRecordResults: true,
+                canValidateResults: true,
+                canPrintReports: true,
+                canExportData: true
+              }
+            };
+          }
+          return c;
+        });
+        return updated;
+      }
     } catch (e) {
       console.error('Failed to parse athletics committees:', e);
     }
@@ -70,11 +100,55 @@ export class AthleticsService {
     window.dispatchEvent(new CustomEvent('athleticsCommitteesChanged', { detail: committees }));
   }
 
+  static updateCommitteePermissions(
+    committeeId: string,
+    permissions: import('./athleticsConfig').AthleticsCommitteePermissions
+  ): AthleticsCommitteeDef | null {
+    const list = this.getCommittees();
+    const idx = list.findIndex(c => c.id === committeeId);
+    if (idx === -1) return null;
+    list[idx] = {
+      ...list[idx],
+      permissions
+    };
+    this.saveCommittees(list);
+    return list[idx];
+  }
+
   // 3. Committees Assignments & Teachers Tasks
   static getCommitteeAssignments(): Record<string, AthleticsCommitteeAssignment> {
     try {
       const data = localStorage.getItem(STORAGE_KEYS.COMMITTEE_ASSIGNMENTS);
-      if (data) return JSON.parse(data);
+      if (data) {
+        const parsed = JSON.parse(data);
+        if (!parsed.podium_committee) {
+          parsed.podium_committee = {
+            committeeId: 'podium_committee',
+            teacherId: 'tch-default-5',
+            teacherName: 'ذ. يوسف الشرايبي',
+            teacherSchool: 'ثانوية الفتح التأهيلية',
+            teacherPhone: '0665566778',
+            members: [
+              {
+                teacherId: 'tch-default-5',
+                teacherName: 'ذ. يوسف الشرايبي',
+                schoolName: 'ثانوية الفتح التأهيلية',
+                phone: '0665566778',
+                roleInCommittee: 'رئيس لجنة التتويج والمراسيم'
+              },
+              {
+                teacherId: 'tch-default-5b',
+                teacherName: 'ذة. حسناء الودغيري',
+                schoolName: 'ثانوية الفتح التأهيلية',
+                phone: '0665991122',
+                roleInCommittee: 'مكلفة بالميداليات والشواهد الرسمية'
+              }
+            ],
+            updatedAt: new Date().toISOString()
+          };
+        }
+        return parsed;
+      }
     } catch (e) {
       console.error('Failed to parse committee assignments:', e);
     }
@@ -151,6 +225,30 @@ export class AthleticsService {
             schoolName: 'ثانوية صلاح الدين الأيوبي',
             phone: '0664455667',
             roleInCommittee: 'رئيس اللجنة وقاضي الرمي'
+          }
+        ],
+        updatedAt: new Date().toISOString()
+      },
+      podium_committee: {
+        committeeId: 'podium_committee',
+        teacherId: 'tch-default-5',
+        teacherName: 'ذ. يوسف الشرايبي',
+        teacherSchool: 'ثانوية الفتح التأهيلية',
+        teacherPhone: '0665566778',
+        members: [
+          {
+            teacherId: 'tch-default-5',
+            teacherName: 'ذ. يوسف الشرايبي',
+            schoolName: 'ثانوية الفتح التأهيلية',
+            phone: '0665566778',
+            roleInCommittee: 'رئيس لجنة التتويج والمراسيم'
+          },
+          {
+            teacherId: 'tch-default-5b',
+            teacherName: 'ذة. حسناء الودغيري',
+            schoolName: 'ثانوية الفتح التأهيلية',
+            phone: '0665991122',
+            roleInCommittee: 'مكلفة بالميداليات والشواهد الرسمية'
           }
         ],
         updatedAt: new Date().toISOString()
@@ -423,5 +521,613 @@ export class AthleticsService {
       return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}.${String(hundredths).padStart(2, '0')}`;
     }
     return `${String(seconds).padStart(2, '0')}.${String(hundredths).padStart(2, '0')}`;
+  }
+
+  // 7. Generate & Seed Realistic Default Mock Data (بيانات افتراضية نموذجية)
+  static loadDefaultMockData(): {
+    participantsCount: number;
+    committeesCount: number;
+    disciplinesCount: number;
+  } {
+    // 1. Reset Disciplines to full official set
+    this.saveDisciplines(INITIAL_ATHLETICS_DISCIPLINES);
+
+    // 2. Reset Committees
+    this.saveCommittees(INITIAL_ATHLETICS_COMMITTEES);
+
+    // 3. Rich Default Committee Assignments with real teachers and tasks
+    const defaultAssignments: Record<string, AthleticsCommitteeAssignment> = {
+      sprint_committee: {
+        committeeId: 'sprint_committee',
+        teacherId: 'tch-default-1',
+        teacherName: 'ذ. عبد الرحيم بلقاسم',
+        teacherSchool: 'ثانوية الفتح التأهيلية',
+        teacherPhone: '0661122334',
+        members: [
+          {
+            teacherId: 'tch-default-1',
+            teacherName: 'ذ. عبد الرحيم بلقاسم',
+            schoolName: 'ثانوية الفتح التأهيلية',
+            phone: '0661122334',
+            roleInCommittee: 'رئيس اللجنة'
+          },
+          {
+            teacherId: 'tch-default-1b',
+            teacherName: 'ذ. كريم الإدريسي',
+            schoolName: 'ثانوية الفتح التأهيلية',
+            phone: '0661998877',
+            roleInCommittee: 'حكم خط النهاية (Juge d\'arrivée)'
+          },
+          {
+            teacherId: 'tch-default-1c',
+            teacherName: 'ذ. سمير بنجلون',
+            schoolName: 'مؤسسة النخبة الخاصة',
+            phone: '0661334455',
+            roleInCommittee: 'حكم الانطلاق (Starter)'
+          }
+        ],
+        updatedAt: new Date().toISOString()
+      },
+      middle_distance_committee: {
+        committeeId: 'middle_distance_committee',
+        teacherId: 'tch-default-2',
+        teacherName: 'ذ. محمد المنصوري',
+        teacherSchool: 'إعدادية علال الفاسي',
+        teacherPhone: '0662233445',
+        members: [
+          {
+            teacherId: 'tch-default-2',
+            teacherName: 'ذ. محمد المنصوري',
+            schoolName: 'إعدادية علال الفاسي',
+            phone: '0662233445',
+            roleInCommittee: 'رئيس اللجنة'
+          },
+          {
+            teacherId: 'tch-default-2b',
+            teacherName: 'ذ. عثمان التازي',
+            schoolName: 'إعدادية علال الفاسي',
+            phone: '0662778899',
+            roleInCommittee: 'مسجل المراتب والتوقيت (Chronométreur)'
+          }
+        ],
+        updatedAt: new Date().toISOString()
+      },
+      long_jump_committee: {
+        committeeId: 'long_jump_committee',
+        teacherId: 'tch-default-3',
+        teacherName: 'ذة. فاطمة الزهراء الإدريسي',
+        teacherSchool: 'مدرسة ابن خلدون الابتدائية',
+        teacherPhone: '0663344556',
+        members: [
+          {
+            teacherId: 'tch-default-3',
+            teacherName: 'ذة. فاطمة الزهراء الإدريسي',
+            schoolName: 'مدرسة ابن خلدون الابتدائية',
+            phone: '0663344556',
+            roleInCommittee: 'رئيسة اللجنة وقاضية القياس'
+          },
+          {
+            teacherId: 'tch-default-3b',
+            teacherName: 'ذة. مريم الصالحي',
+            schoolName: 'مدرسة ابن خلدون الابتدائية',
+            phone: '0663889900',
+            roleInCommittee: 'قاضية المحاولات والراية (Juge de concours)'
+          }
+        ],
+        updatedAt: new Date().toISOString()
+      },
+      shot_put_committee: {
+        committeeId: 'shot_put_committee',
+        teacherId: 'tch-default-4',
+        teacherName: 'ذ. رشيد الحسيني',
+        teacherSchool: 'ثانوية صلاح الدين الأيوبي',
+        teacherPhone: '0664455667',
+        members: [
+          {
+            teacherId: 'tch-default-4',
+            teacherName: 'ذ. رشيد الحسيني',
+            schoolName: 'ثانوية صلاح الدين الأيوبي',
+            phone: '0664455667',
+            roleInCommittee: 'رئيس اللجنة وقاضي الرمي'
+          },
+          {
+            teacherId: 'tch-default-4b',
+            teacherName: 'ذ. طارق العلمي',
+            schoolName: 'ثانوية صلاح الدين الأيوبي',
+            phone: '0664112233',
+            roleInCommittee: 'مكلف بالأمانة والنتائج (Secrétariat)'
+          }
+        ],
+        updatedAt: new Date().toISOString()
+      },
+      podium_committee: {
+        committeeId: 'podium_committee',
+        teacherId: 'tch-default-5',
+        teacherName: 'ذ. يوسف الشرايبي',
+        teacherSchool: 'ثانوية الفتح التأهيلية',
+        teacherPhone: '0665566778',
+        members: [
+          {
+            teacherId: 'tch-default-5',
+            teacherName: 'ذ. يوسف الشرايبي',
+            schoolName: 'ثانوية الفتح التأهيلية',
+            phone: '0665566778',
+            roleInCommittee: 'رئيس لجنة التتويج والمراسيم'
+          },
+          {
+            teacherId: 'tch-default-5b',
+            teacherName: 'ذة. حسناء الودغيري',
+            schoolName: 'ثانوية الفتح التأهيلية',
+            phone: '0665991122',
+            roleInCommittee: 'مكلفة بالميداليات والشواهد الرسمية'
+          }
+        ],
+        updatedAt: new Date().toISOString()
+      }
+    };
+    localStorage.setItem(STORAGE_KEYS.COMMITTEE_ASSIGNMENTS, JSON.stringify(defaultAssignments));
+    window.dispatchEvent(new CustomEvent('athleticsCommitteeUpdated', { detail: defaultAssignments }));
+
+    // 4. Comprehensive Default Participants Roster (20 Moroccan student athletes)
+    const mockParticipants: AthleticsParticipantRecord[] = [
+      // Fath High School (U18 & U20)
+      {
+        id: 'ath-demo-1',
+        disciplineId: 'sprint_100m',
+        secondDisciplineId: 'long_jump',
+        category: 'U18',
+        gender: 'Male',
+        bibNumber: '101',
+        studentName: 'ياسين الفيلالي',
+        schoolName: 'ثانوية الفتح التأهيلية',
+        birthYear: '2008',
+        birthDate: '2008-03-15',
+        massarNumber: 'F132890432',
+        affiliationType: 'non_club',
+        coachName: 'ذ. عبد الرحيم بلقاسم',
+        coachPhone: '0661122334',
+        createdAt: new Date().toISOString()
+      },
+      {
+        id: 'ath-demo-2',
+        disciplineId: 'sprint_100m',
+        secondDisciplineId: 'sprint_200m',
+        category: 'U18',
+        gender: 'Female',
+        bibNumber: '102',
+        studentName: 'أميمة بلحسن',
+        schoolName: 'ثانوية الفتح التأهيلية',
+        birthYear: '2008',
+        birthDate: '2008-06-22',
+        massarNumber: 'F139045612',
+        affiliationType: 'non_club',
+        coachName: 'ذ. عبد الرحيم بلقاسم',
+        coachPhone: '0661122334',
+        createdAt: new Date().toISOString()
+      },
+      {
+        id: 'ath-demo-3',
+        disciplineId: 'middle_1500m',
+        secondDisciplineId: 'middle_800m',
+        category: 'U18',
+        gender: 'Male',
+        bibNumber: '104',
+        studentName: 'سفيان البوشيخي',
+        schoolName: 'ثانوية الفتح التأهيلية',
+        birthYear: '2008',
+        birthDate: '2008-11-05',
+        massarNumber: 'F138901234',
+        affiliationType: 'club_affiliated',
+        coachName: 'ذ. عبد الرحيم بلقاسم',
+        coachPhone: '0661122334',
+        createdAt: new Date().toISOString()
+      },
+      {
+        id: 'ath-demo-4',
+        disciplineId: 'shot_put',
+        secondDisciplineId: 'discus_throw',
+        category: 'U18',
+        gender: 'Male',
+        bibNumber: '301',
+        studentName: 'بلال اليعقوبي',
+        schoolName: 'ثانوية الفتح التأهيلية',
+        birthYear: '2008',
+        birthDate: '2008-02-28',
+        massarNumber: 'F135678901',
+        affiliationType: 'non_club',
+        coachName: 'ذ. عبد الرحيم بلقاسم',
+        coachPhone: '0661122334',
+        createdAt: new Date().toISOString()
+      },
+      {
+        id: 'ath-demo-5',
+        disciplineId: 'sprint_200m',
+        secondDisciplineId: 'middle_400m',
+        category: 'U20',
+        gender: 'Male',
+        bibNumber: '501',
+        studentName: 'رضا الوردي',
+        schoolName: 'ثانوية الفتح التأهيلية',
+        birthYear: '2006',
+        birthDate: '2006-05-12',
+        massarNumber: 'F121234567',
+        affiliationType: 'non_club',
+        coachName: 'ذ. عبد الرحيم بلقاسم',
+        coachPhone: '0661122334',
+        createdAt: new Date().toISOString()
+      },
+      {
+        id: 'ath-demo-6',
+        disciplineId: 'triple_jump',
+        secondDisciplineId: 'long_jump',
+        category: 'U20',
+        gender: 'Male',
+        bibNumber: '503',
+        studentName: 'معاد الناصري',
+        schoolName: 'ثانوية الفتح التأهيلية',
+        birthYear: '2005',
+        birthDate: '2005-12-14',
+        massarNumber: 'F123456789',
+        affiliationType: 'club_affiliated',
+        coachName: 'ذ. عبد الرحيم بلقاسم',
+        coachPhone: '0661122334',
+        createdAt: new Date().toISOString()
+      },
+
+      // Salah Eddine High School
+      {
+        id: 'ath-demo-7',
+        disciplineId: 'sprint_100m',
+        secondDisciplineId: 'sprint_200m',
+        category: 'U18',
+        gender: 'Male',
+        bibNumber: '103',
+        studentName: 'أمين العمراني',
+        schoolName: 'ثانوية صلاح الدين الأيوبي',
+        birthYear: '2008',
+        birthDate: '2008-01-10',
+        massarNumber: 'F134590123',
+        affiliationType: 'club_affiliated',
+        coachName: 'ذ. رشيد الحسيني',
+        coachPhone: '0664455667',
+        createdAt: new Date().toISOString()
+      },
+      {
+        id: 'ath-demo-8',
+        disciplineId: 'middle_800m',
+        secondDisciplineId: 'middle_400m',
+        category: 'U18',
+        gender: 'Female',
+        bibNumber: '106',
+        studentName: 'فاطمة الزهراء بنعلي',
+        schoolName: 'ثانوية صلاح الدين الأيوبي',
+        birthYear: '2008',
+        birthDate: '2008-04-12',
+        massarNumber: 'F136789012',
+        affiliationType: 'non_club',
+        coachName: 'ذ. رشيد الحسيني',
+        coachPhone: '0664455667',
+        createdAt: new Date().toISOString()
+      },
+      {
+        id: 'ath-demo-9',
+        disciplineId: 'middle_1500m',
+        secondDisciplineId: 'middle_800m',
+        category: 'U20',
+        gender: 'Female',
+        bibNumber: '502',
+        studentName: 'خديجة برادة',
+        schoolName: 'ثانوية صلاح الدين الأيوبي',
+        birthYear: '2006',
+        birthDate: '2006-09-08',
+        massarNumber: 'F122345678',
+        affiliationType: 'non_club',
+        coachName: 'ذ. رشيد الحسيني',
+        coachPhone: '0664455667',
+        createdAt: new Date().toISOString()
+      },
+
+      // Allal El Fassi Middle School (U15)
+      {
+        id: 'ath-demo-10',
+        disciplineId: 'sprint_80m',
+        secondDisciplineId: 'long_jump',
+        category: 'U15',
+        gender: 'Male',
+        bibNumber: '201',
+        studentName: 'عمر القاسمي',
+        schoolName: 'إعدادية علال الفاسي',
+        birthYear: '2011',
+        birthDate: '2011-05-14',
+        massarNumber: 'F141234567',
+        affiliationType: 'non_club',
+        coachName: 'ذ. محمد المنصوري',
+        coachPhone: '0662233445',
+        createdAt: new Date().toISOString()
+      },
+      {
+        id: 'ath-demo-11',
+        disciplineId: 'sprint_80m',
+        secondDisciplineId: 'middle_600m',
+        category: 'U15',
+        gender: 'Female',
+        bibNumber: '202',
+        studentName: 'مريم الشاوي',
+        schoolName: 'إعدادية علال الفاسي',
+        birthYear: '2011',
+        birthDate: '2011-09-30',
+        massarNumber: 'F142345678',
+        affiliationType: 'non_club',
+        coachName: 'ذ. محمد المنصوري',
+        coachPhone: '0662233445',
+        createdAt: new Date().toISOString()
+      },
+      {
+        id: 'ath-demo-12',
+        disciplineId: 'long_jump',
+        secondDisciplineId: 'sprint_80m',
+        category: 'U15',
+        gender: 'Male',
+        bibNumber: '203',
+        studentName: 'أيوب البوعناني',
+        schoolName: 'إعدادية علال الفاسي',
+        birthYear: '2010',
+        birthDate: '2010-12-08',
+        massarNumber: 'F143456789',
+        affiliationType: 'non_club',
+        coachName: 'ذ. محمد المنصوري',
+        coachPhone: '0662233445',
+        createdAt: new Date().toISOString()
+      },
+      {
+        id: 'ath-demo-13',
+        disciplineId: 'long_jump',
+        secondDisciplineId: 'sprint_80m',
+        category: 'U15',
+        gender: 'Female',
+        bibNumber: '204',
+        studentName: 'هدى الإدريسي',
+        schoolName: 'إعدادية علال الفاسي',
+        birthYear: '2011',
+        birthDate: '2011-03-21',
+        massarNumber: 'F144567890',
+        affiliationType: 'non_club',
+        coachName: 'ذ. محمد المنصوري',
+        coachPhone: '0662233445',
+        createdAt: new Date().toISOString()
+      },
+      {
+        id: 'ath-demo-14',
+        disciplineId: 'middle_1000m',
+        secondDisciplineId: 'middle_600m',
+        category: 'U15',
+        gender: 'Male',
+        bibNumber: '205',
+        studentName: 'أنس الشرقاوي',
+        schoolName: 'إعدادية علال الفاسي',
+        birthYear: '2010',
+        birthDate: '2010-07-16',
+        massarNumber: 'F145678901',
+        affiliationType: 'club_affiliated',
+        coachName: 'ذ. محمد المنصوري',
+        coachPhone: '0662233445',
+        createdAt: new Date().toISOString()
+      },
+      {
+        id: 'ath-demo-15',
+        disciplineId: 'shot_put',
+        category: 'U15',
+        gender: 'Female',
+        bibNumber: '206',
+        studentName: 'سارة المنصوري',
+        schoolName: 'إعدادية علال الفاسي',
+        birthYear: '2011',
+        birthDate: '2011-08-05',
+        massarNumber: 'F146789012',
+        affiliationType: 'non_club',
+        coachName: 'ذ. محمد المنصوري',
+        coachPhone: '0662233445',
+        createdAt: new Date().toISOString()
+      },
+
+      // Ibn Khaldoun Primary School (U12)
+      {
+        id: 'ath-demo-16',
+        disciplineId: 'sprint_60m',
+        secondDisciplineId: 'long_jump',
+        category: 'U12',
+        gender: 'Male',
+        bibNumber: '401',
+        studentName: 'آدم الصالحي',
+        schoolName: 'مدرسة ابن خلدون',
+        birthYear: '2014',
+        birthDate: '2014-04-18',
+        massarNumber: 'F151234567',
+        affiliationType: 'non_club',
+        coachName: 'ذة. فاطمة الزهراء الإدريسي',
+        coachPhone: '0663344556',
+        createdAt: new Date().toISOString()
+      },
+      {
+        id: 'ath-demo-17',
+        disciplineId: 'sprint_60m',
+        secondDisciplineId: 'middle_600m',
+        category: 'U12',
+        gender: 'Female',
+        bibNumber: '402',
+        studentName: 'ملاك الرحماني',
+        schoolName: 'مدرسة ابن خلدون',
+        birthYear: '2014',
+        birthDate: '2014-07-25',
+        massarNumber: 'F152345678',
+        affiliationType: 'non_club',
+        coachName: 'ذة. فاطمة الزهراء الإدريسي',
+        coachPhone: '0663344556',
+        createdAt: new Date().toISOString()
+      },
+      {
+        id: 'ath-demo-18',
+        disciplineId: 'middle_600m',
+        category: 'U12',
+        gender: 'Male',
+        bibNumber: '403',
+        studentName: 'إلياس بنجلون',
+        schoolName: 'مدرسة ابن خلدون',
+        birthYear: '2013',
+        birthDate: '2013-11-10',
+        massarNumber: 'F153456789',
+        affiliationType: 'non_club',
+        coachName: 'ذة. فاطمة الزهراء الإدريسي',
+        coachPhone: '0663344556',
+        createdAt: new Date().toISOString()
+      },
+      {
+        id: 'ath-demo-19',
+        disciplineId: 'long_jump',
+        secondDisciplineId: 'sprint_60m',
+        category: 'U12',
+        gender: 'Female',
+        bibNumber: '404',
+        studentName: 'دعاء العلمي',
+        schoolName: 'مدرسة ابن خلدون',
+        birthYear: '2014',
+        birthDate: '2014-01-30',
+        massarNumber: 'F154567890',
+        affiliationType: 'non_club',
+        coachName: 'ذة. فاطمة الزهراء الإدريسي',
+        coachPhone: '0663344556',
+        createdAt: new Date().toISOString()
+      },
+
+      // Elite Private School
+      {
+        id: 'ath-demo-20',
+        disciplineId: 'sprint_100m',
+        secondDisciplineId: 'shot_put',
+        category: 'U18',
+        gender: 'Male',
+        bibNumber: '105',
+        studentName: 'حمزة التازي',
+        schoolName: 'مؤسسة النخبة الخاصة',
+        birthYear: '2008',
+        birthDate: '2008-08-19',
+        massarNumber: 'F137890456',
+        affiliationType: 'non_club',
+        coachName: 'ذ. سمير بنجلون',
+        coachPhone: '0661334455',
+        createdAt: new Date().toISOString()
+      }
+    ];
+    this.saveParticipants(mockParticipants);
+
+    // 5. Sample Live/Completed Event Results for Demo
+    const sampleResults: Record<string, AthleticsEventResult> = {
+      'sprint_100m_U18_Male': {
+        id: 'sprint_100m_U18_Male',
+        disciplineId: 'sprint_100m',
+        category: 'U18',
+        gender: 'Male',
+        committeeId: 'sprint_committee',
+        type: 'track',
+        status: 'completed',
+        trackLaps: [
+          {
+            rank: 1,
+            timeMs: 11420,
+            formattedTime: '00:11.42',
+            participantId: 'ath-demo-1',
+            bibNumber: '101',
+            studentName: 'ياسين الفيلالي',
+            schoolName: 'ثانوية الفتح التأهيلية',
+            confirmed: true
+          },
+          {
+            rank: 2,
+            timeMs: 11680,
+            formattedTime: '00:11.68',
+            participantId: 'ath-demo-7',
+            bibNumber: '103',
+            studentName: 'أمين العمراني',
+            schoolName: 'ثانوية صلاح الدين الأيوبي',
+            confirmed: true
+          },
+          {
+            rank: 3,
+            timeMs: 11950,
+            formattedTime: '00:11.95',
+            participantId: 'ath-demo-20',
+            bibNumber: '105',
+            studentName: 'حمزة التازي',
+            schoolName: 'مؤسسة النخبة الخاصة',
+            confirmed: true
+          },
+          {
+            rank: 4,
+            timeMs: 12300,
+            formattedTime: '00:12.30',
+            participantId: 'ath-demo-3',
+            bibNumber: '104',
+            studentName: 'سفيان البوشيخي',
+            schoolName: 'ثانوية الفتح التأهيلية',
+            confirmed: true
+          }
+        ],
+        recordedByTeacherName: 'ذ. عبد الرحيم بلقاسم',
+        directorateName: 'المديرية الإقليمية تاوريرت',
+        season: '2026/2027',
+        lastUpdated: new Date().toISOString()
+      },
+      'long_jump_U15_Male': {
+        id: 'long_jump_U15_Male',
+        disciplineId: 'long_jump',
+        category: 'U15',
+        gender: 'Male',
+        committeeId: 'long_jump_committee',
+        type: 'field',
+        status: 'completed',
+        fieldEntries: [
+          {
+            participantId: 'ath-demo-10',
+            bibNumber: '201',
+            studentName: 'عمر القاسمي',
+            schoolName: 'إعدادية علال الفاسي',
+            attempts: [4.90, 5.15, 5.05],
+            bestAttempt: 5.15,
+            rank: 1
+          },
+          {
+            participantId: 'ath-demo-12',
+            bibNumber: '203',
+            studentName: 'أيوب البوعناني',
+            schoolName: 'إعدادية علال الفاسي',
+            attempts: [4.60, 4.85, 'X'],
+            bestAttempt: 4.85,
+            rank: 2
+          },
+          {
+            participantId: 'ath-demo-14',
+            bibNumber: '205',
+            studentName: 'أنس الشرقاوي',
+            schoolName: 'إعدادية علال الفاسي',
+            attempts: [4.40, 'X', 4.55],
+            bestAttempt: 4.55,
+            rank: 3
+          }
+        ],
+        recordedByTeacherName: 'ذة. فاطمة الزهراء الإدريسي',
+        directorateName: 'المديرية الإقليمية تاوريرت',
+        season: '2026/2027',
+        lastUpdated: new Date().toISOString()
+      }
+    };
+    localStorage.setItem(STORAGE_KEYS.RESULTS, JSON.stringify(sampleResults));
+    window.dispatchEvent(new CustomEvent('athleticsResultsUpdated', { detail: sampleResults }));
+    window.dispatchEvent(new CustomEvent('resultsChanged'));
+
+    return {
+      participantsCount: mockParticipants.length,
+      committeesCount: INITIAL_ATHLETICS_COMMITTEES.length,
+      disciplinesCount: INITIAL_ATHLETICS_DISCIPLINES.length
+    };
   }
 }

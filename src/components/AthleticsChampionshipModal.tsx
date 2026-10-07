@@ -53,7 +53,8 @@ import {
   AthleticsEventResult,
   TrackRankEntry,
   FieldAttemptEntry,
-  COMMITTEE_ROLE_OPTIONS
+  COMMITTEE_ROLE_OPTIONS,
+  AthleticsCommitteePermissions
 } from '../lib/athleticsConfig';
 import { AthleticsService } from '../lib/athleticsService';
 import { User, School, Student } from '../types';
@@ -88,6 +89,19 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                          currentUser?.role === 'SPORT_MANAGER' || 
                          currentUser?.isTechCommitteeHead === true;
   const isTeacher = currentUser?.role === 'TEACHER' && !isSuperOrAdmin;
+
+  // Active Role / Committee Permission Simulator Mode: 'AUTO' | 'ADMIN' | 'TEACHER' | committeeId (e.g. 'long_jump_committee')
+  const [activeRoleMode, setActiveRoleMode] = useState<string>('AUTO');
+
+  // Committee Permissions Edit Modal State
+  const [isPermissionsModalOpen, setIsPermissionsModalOpen] = useState(false);
+  const [editingPermissionsCommittee, setEditingPermissionsCommittee] = useState<AthleticsCommitteeDef | null>(null);
+  const [tempAllowedTabs, setTempAllowedTabs] = useState<('events' | 'committees' | 'stopwatch' | 'field' | 'podium' | 'school_registration')[]>([]);
+  const [tempAllowedDiscIds, setTempAllowedDiscIds] = useState<string[]>([]);
+  const [tempCanRecord, setTempCanRecord] = useState(true);
+  const [tempCanValidate, setTempCanValidate] = useState(true);
+  const [tempCanPrint, setTempCanPrint] = useState(true);
+  const [tempCanExport, setTempCanExport] = useState(true);
 
   // Navigation Tabs: 'school_registration' | 'events' | 'committees' | 'stopwatch' | 'field' | 'podium'
   type AthleticsTab = 'school_registration' | 'events' | 'committees' | 'stopwatch' | 'field' | 'podium';
@@ -220,13 +234,71 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
     };
   }, [isTimerRunning]);
 
+  // Core Effective Role determination:
+  const effectiveRole = useMemo(() => {
+    if (activeRoleMode !== 'AUTO') return activeRoleMode;
+    if (isTeacher) return 'TEACHER';
+    if (currentUser) {
+      for (const [cId, assign] of Object.entries(assignments) as [string, AthleticsCommitteeAssignment][]) {
+        if (assign.teacherId === currentUser.id || assign.teacherName === currentUser.fullName ||
+            assign.members?.some(m => m.teacherId === currentUser.id || m.teacherName === currentUser.fullName)) {
+          return cId;
+        }
+      }
+    }
+    return isSuperOrAdmin ? 'ADMIN' : (currentUser?.role === 'TEACHER' ? 'TEACHER' : 'ADMIN');
+  }, [activeRoleMode, isTeacher, isSuperOrAdmin, currentUser, assignments]);
+
+  const activeCommitteePermissionDef = useMemo(() => {
+    if (effectiveRole === 'ADMIN' || effectiveRole === 'TEACHER') return null;
+    return committees.find(c => c.id === effectiveRole) || null;
+  }, [effectiveRole, committees]);
+
+  // Allowed tabs based on effective role / committee permission
+  const allowedTabs = useMemo<AthleticsTab[]>(() => {
+    if (effectiveRole === 'TEACHER') {
+      return ['school_registration'];
+    }
+    if (effectiveRole === 'ADMIN') {
+      return ['school_registration', 'events', 'committees', 'stopwatch', 'field', 'podium'];
+    }
+    if (activeCommitteePermissionDef) {
+      const tabs = (activeCommitteePermissionDef.permissions?.allowedTabs as AthleticsTab[]) || [];
+      if (tabs.length > 0) return tabs;
+      if (activeCommitteePermissionDef.id === 'podium_committee') return ['podium'];
+      if (activeCommitteePermissionDef.id === 'long_jump_committee' || activeCommitteePermissionDef.id === 'shot_put_committee') return ['field'];
+      return ['stopwatch'];
+    }
+    return ['school_registration', 'events', 'committees', 'stopwatch', 'field', 'podium'];
+  }, [effectiveRole, activeCommitteePermissionDef]);
+
+  // Ensure activeTab stays in sync with allowed tabs
+  useEffect(() => {
+    if (allowedTabs.length > 0 && !allowedTabs.includes(activeTab)) {
+      setActiveTab(allowedTabs[0]);
+    }
+  }, [allowedTabs, activeTab]);
+
   // Filtered disciplines list allowed for the currently selected category & gender
+  // AND filtered strictly according to the active committee permission (e.g. Jump Committee only sees Jump competitions!)
   const currentCategoryGendersDisciplines = useMemo(() => {
-    return disciplines.filter(d => 
+    let list = disciplines.filter(d => 
       (!d.allowedCategories || d.allowedCategories.includes(selectedCategory)) &&
       (!d.allowedGenders || d.allowedGenders.includes(selectedGender))
     );
-  }, [disciplines, selectedCategory, selectedGender]);
+
+    // If a specific committee permission is active (e.g. Jump committee)
+    if (activeCommitteePermissionDef) {
+      const allowedIds = activeCommitteePermissionDef.permissions?.allowedDisciplineIds || activeCommitteePermissionDef.disciplines || [];
+      if (allowedIds.length > 0) {
+        list = list.filter(d => allowedIds.includes(d.id) || d.committeeId === activeCommitteePermissionDef.id);
+      } else if (activeCommitteePermissionDef.disciplines?.length > 0) {
+        list = list.filter(d => activeCommitteePermissionDef.disciplines.includes(d.id));
+      }
+    }
+
+    return list;
+  }, [disciplines, selectedCategory, selectedGender, activeCommitteePermissionDef]);
 
   // Current Active Discipline (Ensuring it is one of the allowed disciplines for this category/gender)
   const activeDiscipline = selectedDiscipline && currentCategoryGendersDisciplines.some(d => d.id === selectedDiscipline.id)
@@ -253,11 +325,53 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
   const currentCommitteeDef = committees.find(c => c.id === activeDiscipline?.committeeId);
   const currentCommitteeAssignment = currentCommitteeDef ? assignments[currentCommitteeDef.id] : null;
 
+  // Action Permissions according to effective role / committee
+  const canRecordResults = useMemo(() => {
+    if (effectiveRole === 'ADMIN') return true;
+    if (effectiveRole === 'TEACHER') return false;
+    if (activeCommitteePermissionDef) {
+      return activeCommitteePermissionDef.permissions?.canRecordResults ?? true;
+    }
+    return true;
+  }, [effectiveRole, activeCommitteePermissionDef]);
+
+  const canValidateResults = useMemo(() => {
+    if (effectiveRole === 'ADMIN') return true;
+    if (effectiveRole === 'TEACHER') return false;
+    if (activeCommitteePermissionDef) {
+      return activeCommitteePermissionDef.permissions?.canValidateResults ?? true;
+    }
+    return true;
+  }, [effectiveRole, activeCommitteePermissionDef]);
+
+  const canPrintReports = useMemo(() => {
+    if (effectiveRole === 'ADMIN') return true;
+    if (effectiveRole === 'TEACHER') return true; // Teacher can print school roster!
+    if (activeCommitteePermissionDef) {
+      return activeCommitteePermissionDef.permissions?.canPrintReports ?? true;
+    }
+    return true;
+  }, [effectiveRole, activeCommitteePermissionDef]);
+
+  const canExportData = useMemo(() => {
+    if (effectiveRole === 'ADMIN') return true;
+    if (effectiveRole === 'TEACHER') return true; // Teacher can export school roster!
+    if (activeCommitteePermissionDef) {
+      return activeCommitteePermissionDef.permissions?.canExportData ?? true;
+    }
+    return true;
+  }, [effectiveRole, activeCommitteePermissionDef]);
+
   // Permission Check for current user on the active event/committee
   const userAccess = useMemo(() => {
-    if (!currentCommitteeDef) return { canManage: true };
+    if (effectiveRole === 'ADMIN') return { canManage: true };
+    if (!currentCommitteeDef) return { canManage: canRecordResults };
+    if (activeCommitteePermissionDef) {
+      const match = activeCommitteePermissionDef.id === currentCommitteeDef.id;
+      return { canManage: match && canRecordResults };
+    }
     return AthleticsService.canUserManageCommittee(currentUser, currentCommitteeDef.id, assignments);
-  }, [currentUser, currentCommitteeDef, assignments]);
+  }, [effectiveRole, currentCommitteeDef, canRecordResults, activeCommitteePermissionDef, currentUser, assignments]);
 
   // Sync field trials when selecting discipline/category/gender
   useEffect(() => {
@@ -871,6 +985,53 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
     setMemberToDelete(null);
   };
 
+  const handleLoadDemoData = () => {
+    const res = AthleticsService.loadDefaultMockData();
+    setCommittees(AthleticsService.getCommittees());
+    setDisciplines(AthleticsService.getDisciplines());
+    setAssignments(AthleticsService.getCommitteeAssignments());
+    setParticipants(AthleticsService.getParticipants());
+    setResults(AthleticsService.getAllResults());
+    toast.success(`تم بنجاح تحميل البيانات الافتراضية (${res.disciplinesCount} مسابقة، ${res.committeesCount} لجان بما فيها لجنة التتويج، و${res.participantsCount} مشارك)`);
+  };
+
+  const handleOpenCommitteePermissionsModal = (comm: AthleticsCommitteeDef) => {
+    setEditingPermissionsCommittee(comm);
+    const perms = comm.permissions || {
+      allowedTabs: comm.id === 'podium_committee' ? ['podium'] : comm.id.includes('jump') || comm.id.includes('shot') ? ['field'] : ['stopwatch'],
+      allowedDisciplineIds: comm.disciplines || [],
+      canRecordResults: true,
+      canValidateResults: true,
+      canPrintReports: true,
+      canExportData: true
+    };
+    setTempAllowedTabs(perms.allowedTabs);
+    setTempAllowedDiscIds(perms.allowedDisciplineIds || comm.disciplines || []);
+    setTempCanRecord(perms.canRecordResults);
+    setTempCanValidate(perms.canValidateResults);
+    setTempCanPrint(perms.canPrintReports);
+    setTempCanExport(perms.canExportData);
+    setIsPermissionsModalOpen(true);
+  };
+
+  const handleSaveCommitteePermissions = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingPermissionsCommittee) return;
+    const updated = AthleticsService.updateCommitteePermissions(editingPermissionsCommittee.id, {
+      allowedTabs: tempAllowedTabs.length > 0 ? tempAllowedTabs : ['events'],
+      allowedDisciplineIds: tempAllowedDiscIds,
+      canRecordResults: tempCanRecord,
+      canValidateResults: tempCanValidate,
+      canPrintReports: tempCanPrint,
+      canExportData: tempCanExport
+    });
+    if (updated) {
+      setCommittees(AthleticsService.getCommittees());
+      toast.success(`تم بنجاح تحديث وتثبيت صلاحيات «${editingPermissionsCommittee.titleAr}»`);
+    }
+    setIsPermissionsModalOpen(false);
+  };
+
   const handleExportSchoolExcel = () => {
     try {
       const targetSchool = (isTeacher ? detectedTeacherSchool : selectedSchoolForView) || 'جميع المؤسسات';
@@ -949,10 +1110,42 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             
+            {/* Committee / Role Permission Selector */}
+            <div className="flex items-center gap-1.5 bg-slate-900 border border-slate-700/80 rounded-xl px-2.5 py-1.5 text-xs shadow-inner">
+              <ShieldCheck className="w-4 h-4 text-amber-400 shrink-0" />
+              <span className="text-[11px] text-slate-300 font-bold hidden lg:inline">صلاحية العرض:</span>
+              <select
+                value={activeRoleMode}
+                onChange={(e) => setActiveRoleMode(e.target.value)}
+                className="bg-transparent text-amber-300 font-black text-xs border-none focus:outline-none cursor-pointer"
+                title="تحديد الصلاحيات النشطة لتطبيق ألعاب القوى"
+              >
+                <option value="AUTO" className="bg-slate-900 text-white">🔄 الكشف التلقائي (حسب الحساب)</option>
+                <option value="ADMIN" className="bg-slate-900 text-white">👑 الإدارة والمشرف العام (صلاحيات كاملة)</option>
+                <option value="TEACHER" className="bg-slate-900 text-white">🏫 أستاذ مؤسسة (تسجيل المشاركين فقط)</option>
+                <option value="long_jump_committee" className="bg-slate-900 text-white">🦘 لجنة القفز (مسابقة القفز فقط)</option>
+                <option value="shot_put_committee" className="bg-slate-900 text-white">☄️ لجنة دفع الجلة (مسابقة الجلة فقط)</option>
+                <option value="sprint_committee" className="bg-slate-900 text-white">⚡ لجنة الجري السريع (سباقات السرعة فقط)</option>
+                <option value="middle_distance_committee" className="bg-slate-900 text-white">🏃‍♂️ لجنة المسافات المتوسطة (المسافات المتوسطة فقط)</option>
+                <option value="podium_committee" className="bg-slate-900 text-white">🏆 لجنة التتويج والمراسيم (منصة التتويج فقط)</option>
+              </select>
+            </div>
+
+            {/* Quick Demo Data Button (بيانات افتراضية) */}
+            <button
+              type="button"
+              onClick={handleLoadDemoData}
+              className="px-3 py-2 bg-gradient-to-r from-purple-600 via-indigo-600 to-blue-600 hover:from-purple-500 hover:to-blue-500 text-white rounded-xl text-xs font-black flex items-center gap-1.5 shadow-md shadow-indigo-600/25 transition-all cursor-pointer active:scale-95"
+              title="تحميل وتحديث بيانات افتراضية نموذجية (مسابقات، لجان، تتويج، ومشاركون)"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-amber-300 animate-pulse" />
+              <span className="hidden sm:inline">بيانات افتراضية</span>
+            </button>
+
             {/* If Teacher, prominent Action buttons */}
-            {isTeacher ? (
+            {effectiveRole === 'TEACHER' ? (
               <>
                 <button
                   type="button"
@@ -986,24 +1179,28 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
               </>
             ) : (
               <>
-                {/* For Admins: Settings and Auto-import */}
-                <button
-                  onClick={() => setIsSettingsModalOpen(true)}
-                  className="px-3.5 py-2 bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-600 hover:to-orange-700 text-white rounded-xl text-xs font-black flex items-center gap-1.5 shadow-md shadow-orange-500/20 transition-all cursor-pointer group"
-                  title="إعدادات اللجان والمسابقات وتوزيع المهام"
-                >
-                  <SettingsIcon className="w-4 h-4 group-hover:rotate-45 transition-transform" />
-                  <span>الإعدادات</span>
-                </button>
+                {/* For Admins & Committee Heads: Settings and Auto-import */}
+                {effectiveRole === 'ADMIN' && (
+                  <>
+                    <button
+                      onClick={() => setIsSettingsModalOpen(true)}
+                      className="px-3.5 py-2 bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-600 hover:to-orange-700 text-white rounded-xl text-xs font-black flex items-center gap-1.5 shadow-md shadow-orange-500/20 transition-all cursor-pointer group"
+                      title="إعدادات اللجان والمسابقات وتوزيع المهام"
+                    >
+                      <SettingsIcon className="w-4 h-4 group-hover:rotate-45 transition-transform" />
+                      <span>الإعدادات</span>
+                    </button>
 
-                <button
-                  onClick={handleTriggerAutoImport}
-                  className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer"
-                  title="مزامنة واستيراد المشاركين من المنظومة"
-                >
-                  <RefreshCw className="w-3.5 h-3.5 text-blue-400" />
-                  <span className="hidden sm:inline">مزامنة المشاركين</span>
-                </button>
+                    <button
+                      onClick={handleTriggerAutoImport}
+                      className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer"
+                      title="مزامنة واستيراد المشاركين من المنظومة"
+                    >
+                      <RefreshCw className="w-3.5 h-3.5 text-blue-400" />
+                      <span className="hidden sm:inline">مزامنة المشاركين</span>
+                    </button>
+                  </>
+                )}
               </>
             )}
 
@@ -1017,105 +1214,116 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
           </div>
         </div>
 
+        {/* Active Committee Permission Notification Banner */}
+        {activeCommitteePermissionDef && (
+          <div className="bg-gradient-to-r from-indigo-950 via-slate-900 to-indigo-950 border-b border-indigo-800/80 px-4 sm:px-6 py-2 flex items-center justify-between text-xs text-indigo-200 shrink-0">
+            <div className="flex items-center gap-2">
+              <span className="text-base p-1 bg-indigo-900/60 rounded-lg">{activeCommitteePermissionDef.icon}</span>
+              <span>
+                أنت في وضع صلاحيات: <strong className="text-amber-300">{activeCommitteePermissionDef.titleAr}</strong> • تظهر لك المسابقات الخاصة بهذه اللجنة فقط والأزرار المسموح بها.
+              </span>
+            </div>
+            <button
+              onClick={() => setActiveRoleMode('ADMIN')}
+              className="px-2.5 py-1 bg-indigo-900/80 hover:bg-indigo-800 text-indigo-100 rounded-lg text-[11px] font-bold border border-indigo-700 transition-all cursor-pointer"
+            >
+              العودة للوضع الكامل 👑
+            </button>
+          </div>
+        )}
+
         {/* ========================================================================= */}
         {/* TOP TAB NAVIGATION BAR */}
         {/* ========================================================================= */}
         <div className="bg-slate-950 px-4 sm:px-6 py-2 border-b border-slate-800 flex items-center justify-between gap-2 overflow-x-auto shrink-0 scrollbar-none">
           <div className="flex items-center gap-1.5">
-            {/* If Teacher, ONLY show School Registration Tab */}
-            {isTeacher ? (
+            {allowedTabs.includes('school_registration') && (
               <button
                 onClick={() => setActiveTab('school_registration')}
-                className={`px-4 py-2 rounded-xl text-xs font-black transition-all flex items-center gap-2 cursor-pointer ${
+                className={`px-3.5 py-2 rounded-xl text-xs font-black transition-all flex items-center gap-2 cursor-pointer ${
                   activeTab === 'school_registration'
                     ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/25 ring-2 ring-emerald-400/40'
                     : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
                 }`}
               >
                 <Building className="w-4 h-4 text-emerald-200" />
-                <span>تسجيل مشاركي المؤسسة واللائحة الرسمية</span>
+                <span>{effectiveRole === 'TEACHER' ? 'تسجيل مشاركي المؤسسة واللائحة الرسمية' : 'لوائح ومشاركو المؤسسات'}</span>
                 <span className="px-2 py-0.5 bg-emerald-500/40 text-emerald-100 rounded-full text-[10px] font-black">
                   {currentSchoolParticipants.length} مشارك
                 </span>
               </button>
-            ) : (
-              <>
-                {/* For Admins / Tech Heads: Show ALL tabs including School Registration */}
-                <button
-                  onClick={() => setActiveTab('school_registration')}
-                  className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
-                    activeTab === 'school_registration'
-                      ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/25 ring-2 ring-emerald-400/30'
-                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
-                  }`}
-                >
-                  <Building className="w-4 h-4" />
-                  <span>لوائح ومشاركو المؤسسات</span>
-                  <span className="px-1.5 py-0.2 bg-emerald-500/30 text-emerald-200 rounded text-[10px]">{participants.length}</span>
-                </button>
+            )}
 
-                <button
-                  onClick={() => setActiveTab('events')}
-                  className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
-                    activeTab === 'events'
-                      ? 'bg-blue-600 text-white shadow-md shadow-blue-600/25'
-                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
-                  }`}
-                >
-                  <Layers className="w-4 h-4" />
-                  <span>المسابقات والتخصصات</span>
-                  <span className="px-1.5 py-0.2 bg-blue-500/30 text-blue-200 rounded text-[10px]">{disciplines.length}</span>
-                </button>
+            {allowedTabs.includes('events') && (
+              <button
+                onClick={() => setActiveTab('events')}
+                className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
+                  activeTab === 'events'
+                    ? 'bg-blue-600 text-white shadow-md shadow-blue-600/25'
+                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+                }`}
+              >
+                <Layers className="w-4 h-4" />
+                <span>المسابقات والتخصصات</span>
+                <span className="px-1.5 py-0.2 bg-blue-500/30 text-blue-200 rounded text-[10px]">{disciplines.length}</span>
+              </button>
+            )}
 
-                <button
-                  onClick={() => setActiveTab('committees')}
-                  className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
-                    activeTab === 'committees'
-                      ? 'bg-amber-600 text-white shadow-md shadow-amber-600/25'
-                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
-                  }`}
-                >
-                  <Users className="w-4 h-4" />
-                  <span>اللجان ومهام الأساتذة</span>
-                  <span className="px-1.5 py-0.2 bg-amber-500/30 text-amber-200 rounded text-[10px]">{committees.length}</span>
-                </button>
+            {allowedTabs.includes('committees') && (
+              <button
+                onClick={() => setActiveTab('committees')}
+                className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
+                  activeTab === 'committees'
+                    ? 'bg-amber-600 text-white shadow-md shadow-amber-600/25'
+                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+                }`}
+              >
+                <Users className="w-4 h-4" />
+                <span>اللجان ومهام الأساتذة</span>
+                <span className="px-1.5 py-0.2 bg-amber-500/30 text-amber-200 rounded text-[10px]">{committees.length}</span>
+              </button>
+            )}
 
-                <button
-                  onClick={() => setActiveTab('stopwatch')}
-                  className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
-                    activeTab === 'stopwatch'
-                      ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/25 ring-2 ring-emerald-400/30'
-                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
-                  }`}
-                >
-                  <Timer className="w-4 h-4 text-emerald-400 animate-pulse" />
-                  <span>الميقاتي الذكي للسباقات</span>
-                </button>
+            {allowedTabs.includes('stopwatch') && (
+              <button
+                onClick={() => setActiveTab('stopwatch')}
+                className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
+                  activeTab === 'stopwatch'
+                    ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/25 ring-2 ring-emerald-400/30'
+                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+                }`}
+              >
+                <Timer className="w-4 h-4 text-emerald-400 animate-pulse" />
+                <span>الميقاتي الذكي للسباقات</span>
+              </button>
+            )}
 
-                <button
-                  onClick={() => setActiveTab('field')}
-                  className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
-                    activeTab === 'field'
-                      ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/25'
-                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
-                  }`}
-                >
-                  <Award className="w-4 h-4" />
-                  <span>مسابقات الميدان (القفز والجلة)</span>
-                </button>
+            {allowedTabs.includes('field') && (
+              <button
+                onClick={() => setActiveTab('field')}
+                className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
+                  activeTab === 'field'
+                    ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/25'
+                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+                }`}
+              >
+                <Award className="w-4 h-4" />
+                <span>مسابقات الميدان (القفز والجلة)</span>
+              </button>
+            )}
 
-                <button
-                  onClick={() => setActiveTab('podium')}
-                  className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
-                    activeTab === 'podium'
-                      ? 'bg-rose-600 text-white shadow-md shadow-rose-600/25'
-                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
-                  }`}
-                >
-                  <Trophy className="w-4 h-4 text-amber-400" />
-                  <span>منصة التتويج والنتائج</span>
-                </button>
-              </>
+            {allowedTabs.includes('podium') && (
+              <button
+                onClick={() => setActiveTab('podium')}
+                className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
+                  activeTab === 'podium'
+                    ? 'bg-rose-600 text-white shadow-md shadow-rose-600/25'
+                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+                }`}
+              >
+                <Trophy className="w-4 h-4 text-amber-400" />
+                <span>منصة التتويج والنتائج</span>
+              </button>
             )}
           </div>
 
@@ -1724,20 +1932,79 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                             </div>
                           )}
                         </div>
+                        {/* Committee Permissions and Allowed Buttons Badge */}
+                        <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-3 mb-3 text-xs space-y-1.5">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[11px] font-bold text-amber-400 flex items-center gap-1">
+                              <ShieldCheck className="w-3.5 h-3.5 text-amber-400" />
+                              <span>الصلاحيات والأزرار المصرح بها:</span>
+                            </span>
+                            <span className="text-[10px] text-slate-400 font-mono">
+                              {comm.permissions?.allowedTabs?.length || 1} تبويب مصرح
+                            </span>
+                          </div>
+                          
+                          <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
+                            {comm.permissions?.allowedTabs?.map(t => (
+                              <span key={t} className="px-2 py-0.5 bg-slate-800 border border-slate-700 text-slate-200 rounded-lg text-[10px] font-bold">
+                                {t === 'stopwatch' ? 'الميقاتي الذكي' : t === 'field' ? 'مسابقات الميدان' : t === 'podium' ? 'منصة التتويج' : t === 'school_registration' ? 'لوائح المؤسسات' : 'المسابقات'}
+                              </span>
+                            ))}
+                            {comm.permissions?.canRecordResults && (
+                              <span className="px-1.5 py-0.5 bg-emerald-950/80 border border-emerald-800 text-emerald-300 rounded text-[9px] font-bold">
+                                إدخال النتائج
+                              </span>
+                            )}
+                            {comm.permissions?.canValidateResults && (
+                              <span className="px-1.5 py-0.5 bg-blue-950/80 border border-blue-800 text-blue-300 rounded text-[9px] font-bold">
+                                اعتماد النتائج
+                              </span>
+                            )}
+                            {comm.permissions?.canPrintReports && (
+                              <span className="px-1.5 py-0.5 bg-purple-950/80 border border-purple-800 text-purple-300 rounded text-[9px] font-bold">
+                                طباعة
+                              </span>
+                            )}
+                          </div>
+                        </div>
                       </div>
 
                       {/* Footer Actions */}
-                      <div className="pt-3 border-t border-slate-800 flex items-center justify-between">
-                        <span className="text-xs font-bold text-slate-400">
-                          👥 إجمالي المشاركين: <span className="text-white font-black">{totalCommParticipants}</span>
-                        </span>
+                      <div className="pt-3 border-t border-slate-800 flex items-center justify-between gap-2 flex-wrap">
                         <button
-                          onClick={() => handleOpenCommitteeEdit(comm)}
-                          className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer"
+                          type="button"
+                          onClick={() => setActiveRoleMode(comm.id)}
+                          className={`px-2.5 py-1.5 rounded-xl text-[11px] font-black flex items-center gap-1 transition-all cursor-pointer ${
+                            activeRoleMode === comm.id
+                              ? 'bg-amber-500 text-slate-950 shadow-md font-black ring-2 ring-amber-400'
+                              : 'bg-indigo-950/60 hover:bg-indigo-900 border border-indigo-800 text-indigo-300 hover:text-white'
+                          }`}
+                          title="تفعيل تجربة واجهة التطبيق بصلاحيات هذه اللجنة حصراً"
                         >
-                          <Edit2 className="w-3 h-3 text-amber-400" />
-                          <span>تعديل الطاقم والمهام</span>
+                          <ShieldCheck className="w-3.5 h-3.5" />
+                          <span>{activeRoleMode === comm.id ? 'الصلاحية نشطة حالياً ✓' : 'معاينة بهذه الصلاحية'}</span>
                         </button>
+
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => handleOpenCommitteePermissionsModal(comm)}
+                            className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-amber-300 hover:text-white rounded-xl text-xs font-bold flex items-center gap-1 border border-slate-700 transition-all cursor-pointer"
+                            title="تحديد وتعديل الصلاحيات والأزرار والمسابقات المتاحة لهذه اللجنة"
+                          >
+                            <SlidersHorizontal className="w-3 h-3 text-amber-400" />
+                            <span>تحديد الصلاحيات والأزرار</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => handleOpenCommitteeEdit(comm)}
+                            className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer"
+                          >
+                            <Edit2 className="w-3 h-3 text-slate-400" />
+                            <span>المهام</span>
+                          </button>
+                        </div>
                       </div>
                     </div>
                   );
@@ -3302,6 +3569,221 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
               </div>
 
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* 🛡️ MODAL: CONFIGURE COMMITTEE PERMISSIONS & ACCESSIBLE BUTTONS 🛡️ */}
+      {/* ========================================================================= */}
+      {isPermissionsModalOpen && editingPermissionsCommittee && (
+        <div className="fixed inset-0 z-[60] bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+          <div className="bg-slate-900 border border-slate-700 rounded-3xl max-w-2xl w-full p-5 sm:p-6 shadow-2xl space-y-5 animate-in fade-in zoom-in-95 duration-150">
+            {/* Modal Header */}
+            <div className="flex items-start justify-between border-b border-slate-800 pb-4">
+              <div className="flex items-center gap-3">
+                <span className="text-3xl p-2.5 bg-slate-800 border border-slate-700 rounded-2xl">
+                  {editingPermissionsCommittee.icon}
+                </span>
+                <div>
+                  <h3 className="text-base sm:text-lg font-black text-white flex items-center gap-2">
+                    <ShieldCheck className="w-5 h-5 text-amber-400" />
+                    <span>تحديد صلاحيات وأزرار «{editingPermissionsCommittee.titleAr}»</span>
+                  </h3>
+                  <p className="text-xs text-slate-400 font-mono mt-0.5">
+                    {editingPermissionsCommittee.titleFr}
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setIsPermissionsModalOpen(false)}
+                className="p-1.5 hover:bg-slate-800 text-slate-400 hover:text-white rounded-xl transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveCommitteePermissions} className="space-y-5">
+              {/* Section 1: Allowed Tabs */}
+              <div className="space-y-2.5">
+                <label className="text-xs font-black text-amber-300 block">
+                  1. التبويبات المسموح بالولوج إليها لأعضاء هذه اللجنة:
+                </label>
+                <p className="text-[11px] text-slate-400">
+                  عند تفعيل الصلاحية، ستظهر فقط التبويبات المحددة هنا ولن يتمكن العضو من رؤية التبويبات الأخرى.
+                </p>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                  {[
+                    { id: 'stopwatch', label: 'الميقاتي الذكي للسباقات', icon: '⚡' },
+                    { id: 'field', label: 'مسابقات الميدان (القفز والجلة)', icon: '🦘' },
+                    { id: 'podium', label: 'منصة التتويج والنتائج الرسمية', icon: '🏆' },
+                    { id: 'school_registration', label: 'تسجيل ومشاركو المؤسسات', icon: '🏫' },
+                    { id: 'events', label: 'المسابقات والتخصصات', icon: '📑' },
+                    { id: 'committees', label: 'اللجان وتوزيع المهام', icon: '👥' }
+                  ].map(tab => {
+                    const isChecked = tempAllowedTabs.includes(tab.id as any);
+                    return (
+                      <label
+                        key={tab.id}
+                        className={`p-3 rounded-2xl border transition-all flex items-center justify-between cursor-pointer ${
+                          isChecked
+                            ? 'bg-slate-850 border-amber-500/80 ring-1 ring-amber-500/40 text-white'
+                            : 'bg-slate-950/60 border-slate-800 text-slate-400 hover:border-slate-700'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2.5">
+                          <span className="text-base">{tab.icon}</span>
+                          <span className="text-xs font-bold">{tab.label}</span>
+                        </div>
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setTempAllowedTabs(prev => [...prev, tab.id as any]);
+                            } else {
+                              setTempAllowedTabs(prev => prev.filter(t => t !== tab.id));
+                            }
+                          }}
+                          className="w-4 h-4 rounded text-amber-500 focus:ring-0 cursor-pointer"
+                        />
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Section 2: Allowed Disciplines */}
+              <div className="space-y-2.5 pt-2 border-t border-slate-800">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-black text-blue-300 block">
+                    2. المسابقات الخاصة بهذه اللجنة (تظهر له هذه المسابقات فقط):
+                  </label>
+                  <span className="text-[10px] text-slate-400 font-mono">
+                    {tempAllowedDiscIds.length} مسابقة محددة
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-400">
+                  مثال: عند تحديد مسابقات القفز فقط للجنة القفز، فلن تظهر له أي مسابقة أخرى كدفع الجلة أو سباقات الجري.
+                </p>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-48 overflow-y-auto pr-1">
+                  {disciplines.map(disc => {
+                    const isChecked = tempAllowedDiscIds.includes(disc.id);
+                    return (
+                      <label
+                        key={disc.id}
+                        className={`p-2.5 rounded-xl border transition-all flex items-center justify-between cursor-pointer ${
+                          isChecked
+                            ? 'bg-slate-850 border-blue-500/70 text-white'
+                            : 'bg-slate-950/60 border-slate-800 text-slate-400 hover:border-slate-700'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <span>{disc.icon}</span>
+                          <span className="text-xs font-bold">{disc.nameAr}</span>
+                        </div>
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setTempAllowedDiscIds(prev => [...prev, disc.id]);
+                            } else {
+                              setTempAllowedDiscIds(prev => prev.filter(id => id !== disc.id));
+                            }
+                          }}
+                          className="w-4 h-4 rounded text-blue-500 focus:ring-0 cursor-pointer"
+                        />
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Section 3: Allowed Action Buttons */}
+              <div className="space-y-2.5 pt-2 border-t border-slate-800">
+                <label className="text-xs font-black text-emerald-300 block">
+                  3. صلاحيات الأزرار والعمليات المتاحة لهذه اللجنة:
+                </label>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  <label className="p-3 bg-slate-950/70 border border-slate-800 rounded-2xl flex items-center justify-between cursor-pointer hover:border-slate-700">
+                    <div>
+                      <span className="text-xs font-black text-white block">تسجيل وإدخال النتائج والمحاولات</span>
+                      <span className="text-[10px] text-slate-400 block">تفعيل أزرار إدخال المسافة / التوقيت</span>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={tempCanRecord}
+                      onChange={(e) => setTempCanRecord(e.target.checked)}
+                      className="w-4 h-4 rounded text-emerald-500 focus:ring-0 cursor-pointer"
+                    />
+                  </label>
+
+                  <label className="p-3 bg-slate-950/70 border border-slate-800 rounded-2xl flex items-center justify-between cursor-pointer hover:border-slate-700">
+                    <div>
+                      <span className="text-xs font-black text-white block">اعتماد وإقفال النتائج الرسمية</span>
+                      <span className="text-[10px] text-slate-400 block">تفعيل زر اعتماد وحفظ النتائج</span>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={tempCanValidate}
+                      onChange={(e) => setTempCanValidate(e.target.checked)}
+                      className="w-4 h-4 rounded text-emerald-500 focus:ring-0 cursor-pointer"
+                    />
+                  </label>
+
+                  <label className="p-3 bg-slate-950/70 border border-slate-800 rounded-2xl flex items-center justify-between cursor-pointer hover:border-slate-700">
+                    <div>
+                      <span className="text-xs font-black text-white block">طباعة المحاضر والشواهد</span>
+                      <span className="text-[10px] text-slate-400 block">إظهار أزرار الطباعة الرسمية</span>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={tempCanPrint}
+                      onChange={(e) => setTempCanPrint(e.target.checked)}
+                      className="w-4 h-4 rounded text-emerald-500 focus:ring-0 cursor-pointer"
+                    />
+                  </label>
+
+                  <label className="p-3 bg-slate-950/70 border border-slate-800 rounded-2xl flex items-center justify-between cursor-pointer hover:border-slate-700">
+                    <div>
+                      <span className="text-xs font-black text-white block">تصدير البيانات إلى Excel</span>
+                      <span className="text-[10px] text-slate-400 block">إظهار أزرار تصدير ملفات Excel</span>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={tempCanExport}
+                      onChange={(e) => setTempCanExport(e.target.checked)}
+                      className="w-4 h-4 rounded text-emerald-500 focus:ring-0 cursor-pointer"
+                    />
+                  </label>
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="pt-4 border-t border-slate-800 flex items-center justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => setIsPermissionsModalOpen(false)}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold transition-all cursor-pointer"
+                >
+                  إلغاء
+                </button>
+
+                <button
+                  type="submit"
+                  className="px-6 py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-xl text-xs font-black shadow-lg shadow-amber-500/20 transition-all cursor-pointer flex items-center gap-1.5 active:scale-95"
+                >
+                  <Check className="w-4 h-4 stroke-[3]" />
+                  <span>حفظ الصلاحيات والأزرار</span>
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

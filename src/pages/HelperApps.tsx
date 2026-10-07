@@ -32,6 +32,7 @@ import { CrossCountryPodiumView } from '../components/CrossCountryPodiumView';
 import { ElectronicDrawModal } from '../components/ElectronicDrawModal';
 import { BibGeneratorModal } from '../components/BibGeneratorModal';
 import { AthleticsChampionshipModal } from '../components/AthleticsChampionshipModal';
+import { AthleticsService } from '../lib/athleticsService';
 import { useAuth } from '../contexts/AuthContext';
 import toast from 'react-hot-toast';
 
@@ -587,23 +588,40 @@ export const HelperApps: React.FC = () => {
                 تدبير البطولة المدرسية لألعاب القوى
               </h4>
               <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed font-medium mb-3">
-                إدارة اللجان الأربع، تسجيل المشاركين، والميقاتي الذكي متعدد المراتب للسرعة والمسافات المتوسطة والقفز والجلة.
+                إدارة لجان ألعاب القوى الخمس (بما فيها لجنة التتويج)، ضبط الصلاحيات والأزرار لكل لجنة، تسجيل المشاركين، والميقاتي الذكي للسباقات والقفز والجلة.
               </p>
 
               <div className="flex flex-wrap gap-1 mb-4">
-                <span className="px-2 py-0.5 bg-amber-100 text-amber-900 rounded text-[10px] font-bold">4 لجان متخصصة</span>
-                <span className="px-2 py-0.5 bg-orange-100 text-orange-900 rounded text-[10px] font-bold">ميقاتي مراتب ذكي</span>
-                <span className="px-2 py-0.5 bg-rose-100 text-rose-900 rounded text-[10px] font-bold">بوديوم ومحاضر</span>
+                <span className="px-2 py-0.5 bg-amber-100 text-amber-900 rounded text-[10px] font-bold">5 لجان + التتويج</span>
+                <span className="px-2 py-0.5 bg-indigo-100 text-indigo-900 rounded text-[10px] font-bold">ضبط الصلاحيات</span>
+                <span className="px-2 py-0.5 bg-emerald-100 text-emerald-900 rounded text-[10px] font-bold">تسجيل المشاركين</span>
               </div>
             </div>
 
-            <button
-              onClick={() => setIsAthleticsModalOpen(true)}
-              className="w-full py-2.5 px-3 bg-gradient-to-r from-amber-500 via-orange-600 to-rose-600 hover:from-amber-600 hover:to-rose-700 text-white rounded-xl text-xs font-black transition-all flex items-center justify-center gap-1.5 shadow-md shadow-orange-500/25 cursor-pointer group-hover:scale-102 active:scale-98"
-            >
-              <Trophy className="w-3.5 h-3.5" />
-              <span>دخول لتطبيق ألعاب القوى</span>
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setIsAthleticsModalOpen(true)}
+                className="flex-1 py-2.5 px-3 bg-gradient-to-r from-amber-500 via-orange-600 to-rose-600 hover:from-amber-600 hover:to-rose-700 text-white rounded-xl text-xs font-black transition-all flex items-center justify-center gap-1.5 shadow-md shadow-orange-500/25 cursor-pointer active:scale-98"
+              >
+                <Trophy className="w-3.5 h-3.5" />
+                <span>دخول للتطبيق</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  const res = AthleticsService.loadDefaultMockData();
+                  toast.success(`تم تحميل البيانات الافتراضية لألعاب القوى (${res.participantsCount} مشارك و${res.committeesCount} لجان)`);
+                  setIsAthleticsModalOpen(true);
+                }}
+                className="py-2.5 px-3 bg-purple-50 hover:bg-purple-100 border border-purple-200 text-purple-900 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-1 cursor-pointer active:scale-98"
+                title="تحميل بيانات افتراضية نموذجية وفتح التطبيق"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-purple-600" />
+                <span>بيانات افتراضية</span>
+              </button>
+            </div>
           </div>
 
           {/* App 2: Electronic Draw Tool */}
