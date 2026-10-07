@@ -513,6 +513,16 @@ export class AthleticsService {
     window.dispatchEvent(new CustomEvent('resultsChanged'));
   }
 
+  static deleteEventResult(resultId: string): void {
+    const all = this.getAllResults();
+    if (all[resultId]) {
+      delete all[resultId];
+      localStorage.setItem(STORAGE_KEYS.RESULTS, JSON.stringify(all));
+      window.dispatchEvent(new CustomEvent('athleticsResultsUpdated', { detail: all }));
+      window.dispatchEvent(new CustomEvent('resultsChanged'));
+    }
+  }
+
   static formatMilliseconds(ms: number): string {
     const minutes = Math.floor(ms / 60000);
     const seconds = Math.floor((ms % 60000) / 1000);
