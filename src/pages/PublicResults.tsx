@@ -2,6 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { DataService, SPORTS_MAP } from '../lib/dataService';
 import { Match, School, Venue, CrossCountryCategoryResult, AthleticsCategoryResult, Student, Directorate, Sport, Tournament } from '../types';
 import { CROSS_COUNTRY_CATEGORIES } from '../lib/crossCountryConfig';
+import { AthleticsService } from '../lib/athleticsService';
 import { MapPin, Trophy, Goal, Users, Award, Calendar, ChevronDown, X, Medal, Sparkles, Filter, Activity, Building2, Search, CheckCircle2, Clock } from 'lucide-react';
 import { cn, formatMatchDate } from '../lib/utils';
 import toast from 'react-hot-toast';
@@ -169,8 +170,51 @@ export const PublicResults: React.FC = () => {
 
   // Athletics List Processing
   const athleticsList = useMemo(() => {
-    return (Object.values(athResults) as AthleticsCategoryResult[]).filter(res => res && res.podium && res.podium.length > 0);
-  }, [athResults]);
+    const list = (Object.values(athResults) as AthleticsCategoryResult[]).filter(res => res && res.podium && res.podium.length > 0);
+    
+    // Also include completed results from AthleticsService
+    const customAthResults = AthleticsService.getAllResults();
+    const disciplines = AthleticsService.getDisciplines();
+
+    Object.values(customAthResults).forEach(res => {
+      if (res.status === 'completed') {
+        const disc = disciplines.find(d => d.id === res.disciplineId);
+        const specName = disc?.nameAr || res.disciplineId;
+        
+        let podiumItems: any[] = [];
+        if (res.type === 'track' && res.trackLaps) {
+          podiumItems = res.trackLaps.slice(0, 3).map((lap, idx) => ({
+            rank: (idx + 1) as 1 | 2 | 3,
+            fullName: lap.studentName || 'عداء',
+            schoolName: lap.schoolName || '',
+            performance: lap.formattedTime
+          }));
+        } else if (res.fieldEntries) {
+          podiumItems = res.fieldEntries.slice(0, 3).map((f, idx) => ({
+            rank: (idx + 1) as 1 | 2 | 3,
+            fullName: f.studentName || 'متسابق',
+            schoolName: f.schoolName || '',
+            performance: f.bestAttempt ? `${f.bestAttempt.toFixed(2)} م` : '-'
+          }));
+        }
+
+        if (podiumItems.length > 0) {
+          list.push({
+            id: res.id,
+            category: res.category,
+            gender: res.gender,
+            specialtyName: specName,
+            specialtyType: res.type === 'field' ? 'field' : 'track',
+            status: 'completed',
+            directorateId: selectedDirId,
+            podium: podiumItems
+          });
+        }
+      }
+    });
+
+    return list;
+  }, [athResults, selectedDirId]);
 
   if (loading) {
     return (

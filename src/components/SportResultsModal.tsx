@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { Sport, Tournament, Match, School, Venue, Student, User } from '../types';
 import { DataService, isClubTournament, GENDER_MAP, getAgeCategoriesForSeason, normalizeCategoryKey } from '../lib/dataService';
 import { CrossCountryPodiumView } from './CrossCountryPodiumView';
+import { AthleticsResultsView } from './AthleticsResultsView';
 import { CrossCountryCategoryResult } from '../types';
 import {
   X,
@@ -312,8 +313,18 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
         {/* Modal Scrollable Content */}
         <div className="p-4 sm:p-6 overflow-y-auto flex-1 bg-slate-50/60 space-y-6">
 
-          {/* Special view for Cross Country */}
-          {sport.id === 'cross_country' ? (
+          {/* Special view for Athletics */}
+          {sport.id === 'athletics' || sport.id === 'track_field' ? (
+            <AthleticsResultsView
+              onBack={onClose}
+              canEdit={canManage}
+              activeSeason={activeSeason}
+              directorateName="المديرية الإقليمية"
+              students={students}
+              schools={schools}
+              currentUser={userProfile}
+            />
+          ) : sport.id === 'cross_country' ? (
             <CrossCountryPodiumView
               results={crossCountryResults}
               onUpdateResult={onUpdateCrossCountryResult || (async () => {})}

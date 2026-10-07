@@ -17,12 +17,24 @@ import {
   Sparkles,
   AlertCircle,
   Plus,
-  Trash2
+  Trash2,
+  Filter,
+  Search,
+  UserCheck,
+  ShieldCheck,
+  Lock,
+  Unlock,
+  CheckSquare,
+  Square,
+  ShieldAlert,
+  Volleyball
 } from 'lucide-react';
-import { Tournament, School, Team, Match, User, Venue, Sport } from '../types';
-import { DataService, SPORTS_MAP } from '../lib/dataService';
+import { Tournament, School, Team, Match, User, Venue, Sport, Referee } from '../types';
+import { DataService, SPORTS_MAP, deduplicateById } from '../lib/dataService';
 import * as XLSX from 'xlsx';
 import toast from 'react-hot-toast';
+
+export const TEAM_SPORTS_IDS = ['football', 'basketball', 'handball', 'volleyball', 'rugby', 'futsal'];
 
 export interface GeneratedDrawMatch {
   id: string;
@@ -36,6 +48,10 @@ export interface GeneratedDrawMatch {
   time: string;
   venueId: string;
   venueName: string;
+  refereeId?: string;
+  refereeName?: string;
+  referee2Id?: string;
+  referee2Name?: string;
 }
 
 interface ElectronicDrawModalProps {
@@ -44,6 +60,7 @@ interface ElectronicDrawModalProps {
   currentUser?: User | null;
   onMatchesCreated?: () => void;
   initialTournamentId?: string;
+  initialSportId?: string;
 }
 
 export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
@@ -51,54 +68,81 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
   onClose,
   currentUser,
   onMatchesCreated,
-  initialTournamentId
+  initialTournamentId,
+  initialSportId
 }) => {
   // Data State
   const [tournaments, setTournaments] = useState<Tournament[]>([]);
+  const [sportsConfig, setSportsConfig] = useState<Sport[]>([]);
   const [schools, setSchools] = useState<School[]>([]);
   const [teams, setTeams] = useState<Team[]>([]);
   const [venues, setVenues] = useState<Venue[]>([]);
+  const [referees, setReferees] = useState<Referee[]>([]);
+  const [teachers, setTeachers] = useState<User[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
 
-  // Workflow State: 1 = Choose Tournament, 2 = Review Teams & Draw Config, 3 = Draw & Schedule Matches
+  // Workflow State: 1 = Choose Tournament & Filter, 2 = Review Teams & Draw Config, 3 = Draw & Schedule Matches with Referees
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [selectedTournamentId, setSelectedTournamentId] = useState<string>(initialTournamentId || '');
 
-  // Draw Configuration
+  // Step 1 Filtering Options
+  const [sportsCategoryFilter, setSportsCategoryFilter] = useState<'TEAM_SPORTS' | 'ALL'>('TEAM_SPORTS');
+  const [selectedSportFilter, setSelectedSportFilter] = useState<string>(initialSportId || 'ALL');
+  const [selectedAgeCategoryFilter, setSelectedAgeCategoryFilter] = useState<string>('ALL');
+  const [selectedGenderFilter, setSelectedGenderFilter] = useState<string>('ALL');
+  const [tournamentSearchQuery, setTournamentSearchQuery] = useState<string>('');
+
+  // Step 2: Draw Configuration & Participating Schools
   const [participatingSchoolIds, setParticipatingSchoolIds] = useState<string[]>([]);
   const [customTeamNames, setCustomTeamNames] = useState<string[]>([]);
   const [newTeamInput, setNewTeamInput] = useState<string>('');
   const [drawSystem, setDrawSystem] = useState<'groups' | 'knockout'>('groups');
   const [groupsCount, setGroupsCount] = useState<number>(2);
+  const [schoolSearchQuery, setSchoolSearchQuery] = useState<string>('');
 
-  // Draw Result & Scheduled Matches
+  // Step 3: Draw Result & Scheduled Matches with Referees
   const [isDrawing, setIsDrawing] = useState<boolean>(false);
   const [drawnGroups, setDrawnGroups] = useState<{ groupName: string; teams: { id: string; name: string }[] }[]>([]);
   const [generatedMatches, setGeneratedMatches] = useState<GeneratedDrawMatch[]>([]);
   const [isSaving, setIsSaving] = useState<boolean>(false);
 
-  // Batch edit helper
+  // Batch edit helpers
   const [bulkDate, setBulkDate] = useState<string>(new Date().toISOString().slice(0, 10));
   const [bulkTime, setBulkTime] = useState<string>('10:00');
   const [bulkVenueName, setBulkVenueName] = useState<string>('');
+  const [bulkRefereeId, setBulkRefereeId] = useState<string>('');
 
-  // Load Tournaments & Data
+  // Load Tournaments, Referees, Teachers & Data
   useEffect(() => {
     if (!isOpen) return;
 
     const loadData = async () => {
       setIsLoading(true);
       try {
-        const [loadedTournaments, loadedSchools, loadedStudents, loadedVenues] = await Promise.all([
+        const [
+          loadedTournaments,
+          loadedSports,
+          loadedSchools,
+          loadedStudents,
+          loadedVenues,
+          loadedReferees,
+          loadedTeachers
+        ] = await Promise.all([
           DataService.getTournaments(),
+          DataService.getSportsConfig(),
           DataService.getSchools(),
           DataService.getStudents(),
-          DataService.getVenues()
+          DataService.getVenues(),
+          DataService.getReferees(),
+          DataService.getTeachers()
         ]);
 
         setTournaments(loadedTournaments);
+        setSportsConfig(loadedSports);
         setSchools(loadedSchools);
         setVenues(loadedVenues);
+        setReferees(loadedReferees);
+        setTeachers(loadedTeachers);
 
         // Derive team records from students
         const derivedTeams: Team[] = [];
@@ -127,10 +171,30 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
           setBulkVenueName(loadedVenues[0].name);
         }
 
+        // Auto restrict sport filter for Technical Committee Head
+        if (currentUser) {
+          const isTechHead = currentUser.isTechCommitteeHead || currentUser.role === 'SPORT_MANAGER';
+          const isCentralAdmin = currentUser.role === 'CENTRAL_ADMIN' || currentUser.isSuperAdmin;
+
+          if (isTechHead && !isCentralAdmin) {
+            const assignedSport = currentUser.sportId || (currentUser.techCommitteeSports && currentUser.techCommitteeSports[0]);
+            if (assignedSport) {
+              setSelectedSportFilter(assignedSport);
+            }
+          }
+        }
+
         // If initialTournamentId passed, select it
         if (initialTournamentId) {
           setSelectedTournamentId(initialTournamentId);
           setStep(2);
+        } else if (initialSportId) {
+          setSelectedSportFilter(initialSportId);
+          const matchingTourns = loadedTournaments.filter(t => t.sportId === initialSportId);
+          if (matchingTourns.length === 1) {
+            setSelectedTournamentId(matchingTourns[0].id);
+            setStep(2);
+          }
         }
       } catch (err) {
         console.error('Failed to load draw data:', err);
@@ -141,31 +205,109 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
     };
 
     loadData();
-  }, [isOpen, initialTournamentId]);
+  }, [isOpen, initialTournamentId, initialSportId, currentUser]);
 
-  // Filter Tournaments based on User Role (بالنسبة لرئيس اللجنة تظهر له فقط البطولة الخاصة به)
-  const accessibleTournaments = useMemo(() => {
-    if (!currentUser) return tournaments;
+  // Combined Referees List (Official Referees + Qualified Teachers)
+  const combinedRefereesList = useMemo(() => {
+    const list: { id: string; name: string; phone?: string; specialty?: string; type: 'referee' | 'teacher' }[] = [];
 
-    const userRole = currentUser.role;
+    referees.forEach(r => {
+      list.push({
+        id: r.id,
+        name: `حكم: ${r.fullName}`,
+        phone: r.phone,
+        specialty: r.specialty?.join('، '),
+        type: 'referee'
+      });
+    });
 
-    // Super Admins & Central Admins see all tournaments
-    if (userRole === 'CENTRAL_ADMIN' || currentUser.isSuperAdmin) {
-      return tournaments;
+    teachers.forEach(t => {
+      list.push({
+        id: t.id,
+        name: `أستاذ(ة): ${t.fullName} (${t.workLocation || 'مؤسسة'})`,
+        phone: t.phone,
+        specialty: t.refereeSpecialty?.join('، '),
+        type: 'teacher'
+      });
+    });
+
+    return list;
+  }, [referees, teachers]);
+
+  // Check if current user has restricted sport permissions
+  const userSportRestriction = useMemo(() => {
+    if (!currentUser) return null;
+    const isCentralAdmin = currentUser.role === 'CENTRAL_ADMIN' || currentUser.isSuperAdmin;
+    if (isCentralAdmin) return null;
+
+    const isTechHead = currentUser.isTechCommitteeHead || currentUser.role === 'SPORT_MANAGER';
+    if (isTechHead) {
+      const allowedSports = new Set<string>();
+      if (currentUser.sportId) allowedSports.add(currentUser.sportId);
+      if (currentUser.techCommitteeSports) currentUser.techCommitteeSports.forEach(s => allowedSports.add(s));
+      return Array.from(allowedSports);
     }
 
-    // Sport Managers / Tech Committee Heads: Show only their assigned sport or assigned tournaments
-    const userSportId = currentUser.sportId;
-    const userTechSports = currentUser.techCommitteeSports || [];
-    const assignedTourId = currentUser.assignedTournamentId;
+    return null;
+  }, [currentUser]);
 
+  // Filter Tournaments based on User Role, Team Sports, Sport, Category & Gender
+  const filteredTournaments = useMemo(() => {
     return tournaments.filter(t => {
-      if (assignedTourId && t.id === assignedTourId) return true;
-      if (userSportId && t.sportId === userSportId) return true;
-      if (userTechSports.includes(t.sportId)) return true;
-      return false;
+      // 1. Role-Based Permission Filter (بالنسبة لرئيس اللجنة التقنية تظهر له فقط الرياضة الخاصة به)
+      if (userSportRestriction && userSportRestriction.length > 0) {
+        if (!userSportRestriction.includes(t.sportId)) {
+          return false;
+        }
+      }
+
+      // 2. Team Sports Filter (الرياضات الجماعية)
+      if (sportsCategoryFilter === 'TEAM_SPORTS') {
+        const isTeamSport = TEAM_SPORTS_IDS.includes(t.sportId) || (t.name && (
+          t.name.includes('قدم') || t.name.includes('سلة') || t.name.includes('يد') || t.name.includes('طائرة') || t.name.includes('ريكبي')
+        ));
+        if (!isTeamSport) return false;
+      }
+
+      // 3. Sport Type Filter
+      if (selectedSportFilter !== 'ALL' && t.sportId !== selectedSportFilter) {
+        return false;
+      }
+
+      // 4. Age Category Filter
+      if (selectedAgeCategoryFilter !== 'ALL') {
+        const tCat = (t.ageCategory || '').toUpperCase();
+        if (!tCat.includes(selectedAgeCategoryFilter.toUpperCase())) {
+          return false;
+        }
+      }
+
+      // 5. Gender Filter
+      if (selectedGenderFilter !== 'ALL') {
+        if (t.gender && t.gender !== selectedGenderFilter && t.gender !== 'Mixed') {
+          return false;
+        }
+      }
+
+      // 6. Search Query
+      if (tournamentSearchQuery.trim()) {
+        const q = tournamentSearchQuery.toLowerCase();
+        const matchName = (t.name || '').toLowerCase().includes(q);
+        const matchSport = (SPORTS_MAP[t.sportId]?.name || '').toLowerCase().includes(q);
+        if (!matchName && !matchSport) return false;
+      }
+
+      return true;
     });
-  }, [tournaments, currentUser]);
+  }, [
+    tournaments,
+    userSportRestriction,
+    sportsCategoryFilter,
+    selectedSportFilter,
+    selectedAgeCategoryFilter,
+    selectedGenderFilter,
+    tournamentSearchQuery
+  ]);
 
   // Selected Tournament Object
   const selectedTournament = useMemo(() => {
@@ -208,6 +350,14 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
     );
   };
 
+  const handleSelectAllSchools = () => {
+    setParticipatingSchoolIds(schools.map(s => s.id));
+  };
+
+  const handleDeselectAllSchools = () => {
+    setParticipatingSchoolIds([]);
+  };
+
   // Add custom manual team name
   const handleAddCustomTeam = () => {
     if (!newTeamInput.trim()) return;
@@ -228,7 +378,6 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
   const allDrawTeams = useMemo(() => {
     const list: { id: string; name: string; schoolName?: string }[] = [];
 
-    // From schools
     participatingSchoolIds.forEach(sId => {
       const school = schools.find(s => s.id === sId);
       if (school) {
@@ -240,7 +389,6 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
       }
     });
 
-    // From custom names
     customTeamNames.forEach((cName, idx) => {
       list.push({
         id: `custom-team-${idx}`,
@@ -251,6 +399,17 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
 
     return list;
   }, [participatingSchoolIds, customTeamNames, schools]);
+
+  // Filtered Schools for step 2 search
+  const filteredSchoolsList = useMemo(() => {
+    if (!schoolSearchQuery.trim()) return schools;
+    const q = schoolSearchQuery.toLowerCase();
+    return schools.filter(s => 
+      (s.name || '').toLowerCase().includes(q) || 
+      (s.commune || '').toLowerCase().includes(q) ||
+      (s.type || '').toLowerCase().includes(q)
+    );
+  }, [schools, schoolSearchQuery]);
 
   // Execute Electronic Draw (سحب القرعة آلياً)
   const handleExecuteDraw = () => {
@@ -289,6 +448,7 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
         let matchCounter = 1;
         const defaultVenue = venues[0]?.name || 'القاعة المغطاة';
         const defaultDate = new Date().toISOString().slice(0, 10);
+        const defaultRef = combinedRefereesList[0];
 
         groups.forEach(grp => {
           const grpTeams = grp.teams;
@@ -305,7 +465,9 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
                 date: defaultDate,
                 time: `${9 + (matchCounter % 6)}:00`,
                 venueId: venues[0]?.id || 'v1',
-                venueName: defaultVenue
+                venueName: defaultVenue,
+                refereeId: defaultRef?.id,
+                refereeName: defaultRef?.name
               });
             }
           }
@@ -318,6 +480,7 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
         let matchCounter = 1;
         const defaultVenue = venues[0]?.name || 'القاعة المغطاة';
         const defaultDate = new Date().toISOString().slice(0, 10);
+        const defaultRef = combinedRefereesList[0];
 
         const totalMatches = Math.floor(shuffled.length / 2);
         for (let i = 0; i < totalMatches; i++) {
@@ -333,7 +496,9 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
             date: defaultDate,
             time: `${9 + i * 2}:00`,
             venueId: venues[0]?.id || 'v1',
-            venueName: defaultVenue
+            venueName: defaultVenue,
+            refereeId: defaultRef?.id,
+            refereeName: defaultRef?.name
           });
         }
 
@@ -352,29 +517,44 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
     }, 700);
   };
 
-  // Update match details (date, time, venue)
+  // Update match details (date, time, venue, referee)
   const handleUpdateMatchField = (matchId: string, field: keyof GeneratedDrawMatch, value: string) => {
     setGeneratedMatches(prev => 
-      prev.map(m => m.id === matchId ? { ...m, [field]: value } : m)
+      prev.map(m => {
+        if (m.id !== matchId) return m;
+        if (field === 'refereeId') {
+          const ref = combinedRefereesList.find(r => r.id === value);
+          return {
+            ...m,
+            refereeId: value,
+            refereeName: ref?.name || value
+          };
+        }
+        return { ...m, [field]: value };
+      })
     );
   };
 
-  // Apply batch date & venue to all matches
+  // Apply batch date, venue & referee to all matches
   const handleApplyBatchSchedule = () => {
-    if (!bulkDate && !bulkVenueName) {
-      toast.error('يرجى تحديد التاريخ أو مكان الإجراء');
+    if (!bulkDate && !bulkVenueName && !bulkRefereeId) {
+      toast.error('يرجى تحديد التاريخ، المكان أو الحكم لتعميمه');
       return;
     }
+
+    const ref = combinedRefereesList.find(r => r.id === bulkRefereeId);
 
     setGeneratedMatches(prev => 
       prev.map(m => ({
         ...m,
         date: bulkDate || m.date,
         time: bulkTime || m.time,
-        venueName: bulkVenueName || m.venueName
+        venueName: bulkVenueName || m.venueName,
+        refereeId: bulkRefereeId || m.refereeId,
+        refereeName: ref ? ref.name : m.refereeName
       }))
     );
-    toast.success('تم تعميم التاريخ والمكان على جميع المباريات');
+    toast.success('تم تعميم التوقيت والمكان والحكام على جميع المباريات');
   };
 
   // Save all matches to database
@@ -389,7 +569,7 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
     }
 
     setIsSaving(true);
-    const toastId = toast.loading(`جاري حفظ ${generatedMatches.length} مباراة في جدول البطولة...`);
+    const toastId = toast.loading(`جاري حفظ ${generatedMatches.length} مباراة مع تعيين الحكام في جدول البطولة...`);
 
     try {
       for (const gm of generatedMatches) {
@@ -404,13 +584,15 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
           date: gm.date,
           startTime: gm.time || '10:00',
           venueId: gm.venueId || 'default-venue',
+          venueName: gm.venueName,
+          referee1Id: gm.refereeId,
           status: 'Scheduled',
           updatedAt: new Date()
         });
       }
 
       toast.dismiss(toastId);
-      toast.success('تم حفظ واعتماد جميع المباريات في المنظومة بنجاح!');
+      toast.success('تم حفظ واعتماد جميع المباريات والحكام في المنظومة بنجاح!');
       if (onMatchesCreated) onMatchesCreated();
       onClose();
     } catch (err) {
@@ -434,12 +616,13 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
       'الفريق الثاني': m.team2Name,
       'تاريخ الإجراء': m.date,
       'توقيت الانطلاق': m.time,
-      'مكان الإجراء': m.venueName
+      'مكان الإجراء': m.venueName,
+      'حكم المقابلة': m.refereeName || 'غير محدد'
     }));
 
     const ws = XLSX.utils.json_to_sheet(data);
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'برنامج المباريات');
+    XLSX.utils.book_append_sheet(wb, ws, 'برنامج المباريات والحكام');
     XLSX.writeFile(wb, `برنامج_مباريات_${selectedTournament?.name || 'القرعة'}.xlsx`);
     toast.success('تم تصدير ملف Excel بنجاح');
   };
@@ -457,11 +640,17 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
               <Shuffle className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="text-base font-black text-white">القرعة الإلكترونية وبرمجة المباريات</h3>
+              <div className="flex items-center gap-2">
+                <h3 className="text-base font-black text-white">القرعة الإلكترونية وبرمجة المباريات وتعيين الحكام</h3>
+                {userSportRestriction && userSportRestriction.length > 0 && (
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-amber-400 text-slate-950 flex items-center gap-1">
+                    <Lock className="w-3 h-3" />
+                    <span>صلاحية محددة برياضتك</span>
+                  </span>
+                )}
+              </div>
               <p className="text-xs text-emerald-100/90 mt-0.5 font-medium">
-                {currentUser?.role === 'SPORT_MANAGER' 
-                  ? `خاص برئيس اللجنة / المسؤول الرياضي (${currentUser.fullName})` 
-                  : 'توزيع المجموعات وتحديد مواعيد وأماكن إجراء المقابلات'}
+                فلترة الرياضات الجماعية، إجراء القرعة العادلة، تحديد المواعيد والملاعب وتعيين الحكام
               </p>
             </div>
           </div>
@@ -479,21 +668,21 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
         <div className="bg-slate-100 px-6 py-2.5 border-b border-slate-200 flex items-center justify-between text-xs font-bold shrink-0">
           <div className={`flex items-center gap-2 ${step >= 1 ? 'text-emerald-800 font-black' : 'text-slate-400'}`}>
             <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs ${step >= 1 ? 'bg-emerald-600 text-white' : 'bg-slate-300 text-slate-600'}`}>1</span>
-            <span>اختيار نوع البطولة</span>
+            <span>1. اختيار نوع البطولة والفلترة</span>
           </div>
 
           <div className="w-12 h-0.5 bg-slate-300" />
 
           <div className={`flex items-center gap-2 ${step >= 2 ? 'text-emerald-800 font-black' : 'text-slate-400'}`}>
             <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs ${step >= 2 ? 'bg-emerald-600 text-white' : 'bg-slate-300 text-slate-600'}`}>2</span>
-            <span>المؤسسات ونظام القرعة</span>
+            <span>2. المؤسسات ونظام القرعة</span>
           </div>
 
           <div className="w-12 h-0.5 bg-slate-300" />
 
           <div className={`flex items-center gap-2 ${step >= 3 ? 'text-emerald-800 font-black' : 'text-slate-400'}`}>
             <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs ${step >= 3 ? 'bg-emerald-600 text-white' : 'bg-slate-300 text-slate-600'}`}>3</span>
-            <span>نتائج القرعة وتحديد المواعيد والأماكن</span>
+            <span>3. المواعيد والملاعب وتعيين الحكام</span>
           </div>
         </div>
 
@@ -501,48 +690,175 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
         <div className="p-4 sm:p-6 overflow-y-auto flex-1 bg-slate-50 space-y-6">
           
           {/* ========================================================================= */}
-          {/* STEP 1: CHOOSE TOURNAMENT (اختيار نوع البطولة) */}
+          {/* STEP 1: CHOOSE TOURNAMENT & MULTI-CRITERIA FILTERING */}
           {/* ========================================================================= */}
           {step === 1 && (
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h4 className="text-sm font-black text-slate-900">اختر البطولة المعنية بإجراء القرعة:</h4>
-                  <p className="text-xs text-slate-500 mt-0.5">
-                    {accessibleTournaments.length === 0 
-                      ? 'لا توجد بطولات مسندة لك حالياً' 
-                      : `يتم عرض البطولات المتاحة لك (${accessibleTournaments.length} بطولة)`}
-                  </p>
+            <div className="space-y-5">
+              
+              {/* Role restriction banner for Tech Committee Head */}
+              {userSportRestriction && userSportRestriction.length > 0 && (
+                <div className="p-3.5 bg-amber-500/10 border border-amber-300 rounded-2xl flex items-center justify-between gap-3 text-amber-950">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-8 h-8 rounded-xl bg-amber-500 text-white flex items-center justify-center font-bold text-sm shrink-0 shadow-xs">
+                      🔒
+                    </div>
+                    <div>
+                      <h5 className="text-xs font-black">حساب رئيس لجنة تقنية معتمد</h5>
+                      <p className="text-[11px] text-amber-900 font-medium">
+                        تم تقييد القرعة للرياضات المسندة لك فقط ({userSportRestriction.map(s => SPORTS_MAP[s]?.name || s).join('، ')}). لا يحق إجراء القرعة لرياضات أخرى التزاماً بضوابط الصلاحيات.
+                      </p>
+                    </div>
+                  </div>
+                  <span className="text-[10px] font-black bg-amber-200/80 text-amber-900 px-2 py-0.5 rounded-md shrink-0">
+                    صلاحية مؤمنة
+                  </span>
+                </div>
+              )}
+
+              {/* FILTERS TOOLBAR */}
+              <div className="bg-white p-4 rounded-3xl border border-slate-200 shadow-xs space-y-3">
+                <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+                  <div className="flex items-center gap-2 text-xs font-black text-slate-800">
+                    <Filter className="w-4 h-4 text-emerald-600" />
+                    <span>فلترة البطولات المستهدفة للقرعة:</span>
+                  </div>
+                  <span className="text-[11px] font-bold text-slate-400">
+                    {filteredTournaments.length} بطولة مطابقة للفلترة
+                  </span>
+                </div>
+
+                {/* Filter Row 1: Team Sports vs All */}
+                <div className="flex flex-wrap items-center gap-2 pt-1">
+                  <span className="text-xs font-bold text-slate-600 ml-1">نوع المنافسة:</span>
+                  
+                  <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-2xl">
+                    <button
+                      onClick={() => setSportsCategoryFilter('TEAM_SPORTS')}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                        sportsCategoryFilter === 'TEAM_SPORTS'
+                          ? 'bg-emerald-600 text-white shadow-xs font-black'
+                          : 'text-slate-700 hover:text-slate-900'
+                      }`}
+                    >
+                      <span>⚽ الرياضات الجماعية (Team Sports)</span>
+                    </button>
+
+                    <button
+                      onClick={() => setSportsCategoryFilter('ALL')}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                        sportsCategoryFilter === 'ALL'
+                          ? 'bg-slate-900 text-white shadow-xs font-black'
+                          : 'text-slate-700 hover:text-slate-900'
+                      }`}
+                    >
+                      <span>🏆 جميع الرياضات المبرمجة</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Filter Row 2: Specific Sport, Age Category & Gender */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
+                  
+                  {/* Specific Sport Select */}
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-600 mb-1">
+                      {userSportRestriction && userSportRestriction.length > 0 ? '🔒 رياضتك المصرح بها فقط:' : 'نوع الرياضة:'}
+                    </label>
+                    <select
+                      value={selectedSportFilter}
+                      onChange={(e) => setSelectedSportFilter(e.target.value)}
+                      disabled={Boolean(userSportRestriction && userSportRestriction.length === 1)}
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 cursor-pointer disabled:bg-slate-100 disabled:opacity-80"
+                    >
+                      {(!userSportRestriction || userSportRestriction.length > 1) && (
+                        <option value="ALL">-- كل الرياضات --</option>
+                      )}
+                      {(sportsCategoryFilter === 'TEAM_SPORTS' 
+                        ? sportsConfig.filter(s => TEAM_SPORTS_IDS.includes(s.id))
+                        : sportsConfig
+                      )
+                      .filter(s => !userSportRestriction || userSportRestriction.length === 0 || userSportRestriction.includes(s.id))
+                      .map(s => (
+                        <option key={s.id} value={s.id}>
+                          {s.icon || '🏆'} {s.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Age Category Filter */}
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-600 mb-1">الفئة العمرية المشاركة:</label>
+                    <select
+                      value={selectedAgeCategoryFilter}
+                      onChange={(e) => setSelectedAgeCategoryFilter(e.target.value)}
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 cursor-pointer"
+                    >
+                      <option value="ALL">-- جميع الفئات --</option>
+                      <option value="U12">براعم (U12) - مواليد 2015 فما فوق</option>
+                      <option value="U15">صغار (U15) - مواليد 2012/2013/2014</option>
+                      <option value="U18">فتيان (U18) - مواليد 2009/2010/2011</option>
+                      <option value="U20">شبان (U20) - مواليد 2009 وما بعد</option>
+                    </select>
+                  </div>
+
+                  {/* Gender Filter */}
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-600 mb-1">الجنس:</label>
+                    <select
+                      value={selectedGenderFilter}
+                      onChange={(e) => setSelectedGenderFilter(e.target.value)}
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 cursor-pointer"
+                    >
+                      <option value="ALL">-- ذكور وإناث --</option>
+                      <option value="Male">🏃‍♂️ ذكور</option>
+                      <option value="Female">🏃‍♀️ إناث</option>
+                    </select>
+                  </div>
+
+                </div>
+
+                {/* Search Bar */}
+                <div className="relative pt-1">
+                  <Search className="w-4 h-4 text-slate-400 absolute right-3 top-3.5" />
+                  <input
+                    type="text"
+                    value={tournamentSearchQuery}
+                    onChange={(e) => setTournamentSearchQuery(e.target.value)}
+                    placeholder="ابحث باسم البطولة أو التخصص الرياضي..."
+                    className="w-full pr-9 pl-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:ring-2 focus:ring-emerald-500"
+                  />
                 </div>
               </div>
 
-              {accessibleTournaments.length === 0 ? (
-                <div className="bg-amber-50 border border-amber-200 rounded-2xl p-6 text-center text-amber-800 space-y-2">
-                  <AlertCircle className="w-8 h-8 mx-auto text-amber-600" />
-                  <h5 className="font-black text-sm">لم يتم العثور على بطولات مخصصة</h5>
-                  <p className="text-xs text-amber-700">
-                    يرجى التأكد من إنشاء البطولة أولاً في صفحة "البطولات" أو إسناد التخصص الرياضي لحسابك.
+              {/* Tournaments Grid */}
+              {filteredTournaments.length === 0 ? (
+                <div className="bg-amber-50 border border-amber-200 rounded-3xl p-8 text-center text-amber-900 space-y-2">
+                  <AlertCircle className="w-10 h-10 mx-auto text-amber-600" />
+                  <h5 className="font-black text-sm">لا توجد بطولات مطابقة لمعايير الفلترة المحددة</h5>
+                  <p className="text-xs text-amber-700 max-w-md mx-auto">
+                    يرجى تغيير معايير الفلترة أو التأكد من إسناد البطولة والتخصص الرياضي لحسابك.
                   </p>
                 </div>
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                  {accessibleTournaments.map(t => {
+                  {filteredTournaments.map(t => {
                     const isSelected = selectedTournamentId === t.id;
                     const sportInfo = SPORTS_MAP[t.sportId] || { name: t.sportId, icon: '🏆' };
                     return (
                       <div
                         key={t.id}
                         onClick={() => setSelectedTournamentId(t.id)}
-                        className={`p-4 rounded-2xl border-2 transition-all cursor-pointer flex flex-col justify-between ${
+                        className={`p-4 rounded-3xl border-2 transition-all cursor-pointer flex flex-col justify-between ${
                           isSelected
-                            ? 'bg-blue-50 border-blue-600 shadow-md ring-2 ring-blue-400/30'
+                            ? 'bg-emerald-50/80 border-emerald-600 shadow-md ring-2 ring-emerald-400/30'
                             : 'bg-white hover:bg-slate-50 border-slate-200 shadow-xs'
                         }`}
                       >
-                        <div className="space-y-2">
+                        <div className="space-y-2.5">
                           <div className="flex items-center justify-between">
-                            <span className="text-2xl">{sportInfo.icon}</span>
-                            <span className="px-2 py-0.5 text-[10px] font-black rounded-full bg-slate-100 text-slate-700 border border-slate-200">
+                            <span className="text-2xl p-2 bg-slate-50 rounded-xl border border-slate-100">{sportInfo.icon}</span>
+                            <span className="px-2.5 py-0.5 text-[10px] font-black rounded-full bg-slate-100 text-slate-700 border border-slate-200">
                               {t.scope || 'إقليمية'}
                             </span>
                           </div>
@@ -556,9 +872,9 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
                         </div>
 
                         <div className="mt-3 pt-3 border-t border-slate-100 flex items-center justify-between text-xs">
-                          <span className="text-slate-400 font-medium">{t.seasonId || '2025/2026'}</span>
-                          <span className={`font-black ${isSelected ? 'text-blue-700' : 'text-slate-600'}`}>
-                            {isSelected ? '✓ محددة' : 'اختر البطولة'}
+                          <span className="text-slate-400 font-medium">{t.seasonId || '2026/2027'}</span>
+                          <span className={`font-black ${isSelected ? 'text-emerald-700' : 'text-slate-600'}`}>
+                            {isSelected ? '✓ محددة للقرعة' : 'اختر البطولة'}
                           </span>
                         </div>
                       </div>
@@ -571,15 +887,15 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
                 <button
                   onClick={() => {
                     if (!selectedTournamentId) {
-                      toast.error('يرجى اختيار البطولة أولاً');
+                      toast.error('يرجى اختيار البطولة أولاً للمتابعة');
                       return;
                     }
                     setStep(2);
                   }}
                   disabled={!selectedTournamentId}
-                  className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 active:scale-98 text-white rounded-xl text-xs font-black flex items-center gap-2 shadow-md disabled:opacity-50 cursor-pointer"
+                  className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 active:scale-98 text-white rounded-xl text-xs font-black flex items-center gap-2 shadow-md disabled:opacity-50 cursor-pointer"
                 >
-                  <span>التالي: معاينة المؤسسات المشاركة</span>
+                  <span>التالي: تحديد المؤسسات المشاركة ونظام القرعة</span>
                   <ArrowRight className="w-4 h-4 rotate-180" />
                 </button>
               </div>
@@ -593,389 +909,447 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
             <div className="space-y-5">
               
               {/* Tournament Summary Banner */}
-              <div className="bg-blue-50 border border-blue-200 rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+              <div className="bg-emerald-50 border border-emerald-200 rounded-3xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
                 <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-blue-600 text-white flex items-center justify-center text-xl shadow-xs">
+                  <div className="w-10 h-10 rounded-2xl bg-emerald-600 text-white flex items-center justify-center text-xl shadow-xs">
                     {SPORTS_MAP[selectedTournament.sportId]?.icon || '🏆'}
                   </div>
                   <div>
-                    <h4 className="font-black text-slate-900 text-sm">{selectedTournament.name}</h4>
-                    <p className="text-xs text-blue-800 font-bold">
-                      {SPORTS_MAP[selectedTournament.sportId]?.name || selectedTournament.sportId} • الفئة: {selectedTournament.ageCategory} • {selectedTournament.gender === 'Female' ? 'إناث' : 'ذكور'}
+                    <h4 className="text-sm font-black text-emerald-950">{selectedTournament.name}</h4>
+                    <p className="text-xs text-emerald-800 font-bold">
+                      {SPORTS_MAP[selectedTournament.sportId]?.name} • {selectedTournament.ageCategory} • {selectedTournament.gender === 'Female' ? 'إناث' : 'ذكور'}
                     </p>
                   </div>
                 </div>
 
                 <button
                   onClick={() => setStep(1)}
-                  className="text-xs text-blue-700 hover:underline font-bold"
+                  className="px-3 py-1.5 bg-white text-emerald-800 hover:bg-emerald-100 rounded-xl text-xs font-bold border border-emerald-200 cursor-pointer"
                 >
                   تغيير البطولة
                 </button>
               </div>
 
-              {/* Participating Schools Selection Card */}
-              <div className="bg-white border border-slate-200 rounded-2xl p-4 sm:p-5 shadow-xs space-y-3">
+              {/* Draw System Selector (مجموعات أو خروج مغلوب) */}
+              <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-xs space-y-4">
+                <h4 className="text-sm font-black text-slate-900 flex items-center gap-2">
+                  <Shuffle className="w-4 h-4 text-emerald-600" />
+                  <span>نظام القرعة والتوزيع:</span>
+                </h4>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div
+                    onClick={() => setDrawSystem('groups')}
+                    className={`p-4 rounded-2xl border-2 transition-all cursor-pointer flex items-start gap-3 ${
+                      drawSystem === 'groups'
+                        ? 'bg-emerald-50 border-emerald-600 ring-2 ring-emerald-400/20'
+                        : 'bg-slate-50 border-slate-200 hover:bg-slate-100'
+                    }`}
+                  >
+                    <span className="text-2xl">👥</span>
+                    <div>
+                      <h5 className="font-black text-xs text-slate-900">نظام المجموعات (دور المجموعات)</h5>
+                      <p className="text-[11px] text-slate-500 font-medium mt-0.5">
+                        توزيع الفرق عشوائياً على مجموعات (A, B, C...) مع توليد مباريات كل دور.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div
+                    onClick={() => setDrawSystem('knockout')}
+                    className={`p-4 rounded-2xl border-2 transition-all cursor-pointer flex items-start gap-3 ${
+                      drawSystem === 'knockout'
+                        ? 'bg-emerald-50 border-emerald-600 ring-2 ring-emerald-400/20'
+                        : 'bg-slate-50 border-slate-200 hover:bg-slate-100'
+                    }`}
+                  >
+                    <span className="text-2xl">⚔️</span>
+                    <div>
+                      <h5 className="font-black text-xs text-slate-900">نظام خروج المغلوب المباشر (Knockout)</h5>
+                      <p className="text-[11px] text-slate-500 font-medium mt-0.5">
+                        مواجهات إقصائية مباشرة (نصف نهائي، نهائي...) مع تأهل الفائز.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {drawSystem === 'groups' && (
+                  <div className="flex items-center gap-3 pt-2 border-t border-slate-100">
+                    <span className="text-xs font-bold text-slate-700">عدد المجموعات المراد تكوينها:</span>
+                    <div className="flex items-center gap-2">
+                      {[2, 3, 4].map(num => (
+                        <button
+                          key={num}
+                          type="button"
+                          onClick={() => setGroupsCount(num)}
+                          className={`w-9 h-9 rounded-xl font-black text-xs transition-all cursor-pointer ${
+                            groupsCount === num
+                              ? 'bg-emerald-600 text-white shadow-xs'
+                              : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                          }`}
+                        >
+                          {num}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Participating Schools Selection Box */}
+              <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-xs space-y-4">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                   <div>
-                    <h5 className="font-black text-sm text-slate-900">
-                      المؤسسات والفرق المشاركة في القرعة ({allDrawTeams.length} مؤسسة):
-                    </h5>
-                    <p className="text-xs text-slate-500 mt-0.5">
-                      حدد المؤسسات التي ستدخل وعاء القرعة الإلكترونية
+                    <h4 className="text-sm font-black text-slate-900 flex items-center gap-2">
+                      <Building2 className="w-4 h-4 text-emerald-600" />
+                      <span>تحديد المؤسسات المشاركة في القرعة ({allDrawTeams.length} فريق محدد):</span>
+                    </h4>
+                    <p className="text-xs text-slate-500 font-medium mt-0.5">
+                      حدد المؤسسات التعليمية التي ستدخل في وعاء السحب الإلكتروني للقرعة
                     </p>
                   </div>
 
                   <div className="flex items-center gap-2">
                     <button
-                      onClick={() => setParticipatingSchoolIds(schools.map(s => s.id))}
-                      className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-bold"
+                      onClick={handleSelectAllSchools}
+                      className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-[11px] font-bold cursor-pointer"
                     >
                       تحديد الكل
                     </button>
                     <button
-                      onClick={() => setParticipatingSchoolIds([])}
-                      className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-bold"
+                      onClick={handleDeselectAllSchools}
+                      className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-[11px] font-bold cursor-pointer"
                     >
                       إلغاء التحديد
                     </button>
                   </div>
                 </div>
 
-                {/* Schools Grid Selector */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2 max-h-56 overflow-y-auto p-1">
-                  {schools.map(school => {
-                    const isChecked = participatingSchoolIds.includes(school.id);
+                {/* School Search */}
+                <div className="relative">
+                  <Search className="w-3.5 h-3.5 text-slate-400 absolute right-3 top-3" />
+                  <input
+                    type="text"
+                    value={schoolSearchQuery}
+                    onChange={(e) => setSchoolSearchQuery(e.target.value)}
+                    placeholder="ابحث باسم المؤسسة أو الجماعة..."
+                    className="w-full pr-8 pl-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-xl"
+                  />
+                </div>
+
+                {/* Schools Grid */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 max-h-64 overflow-y-auto pr-1">
+                  {filteredSchoolsList.map(school => {
+                    const isSelected = participatingSchoolIds.includes(school.id);
                     return (
                       <div
                         key={school.id}
                         onClick={() => toggleSchoolParticipation(school.id)}
-                        className={`p-2.5 rounded-xl border text-xs flex items-center justify-between cursor-pointer transition-all ${
-                          isChecked 
-                            ? 'bg-blue-50/70 border-blue-400 text-blue-950 font-bold' 
-                            : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
+                        className={`p-2.5 rounded-2xl border transition-all cursor-pointer flex items-center justify-between text-xs ${
+                          isSelected
+                            ? 'bg-emerald-50 border-emerald-500 text-emerald-950 font-bold'
+                            : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
                         }`}
                       >
                         <div className="flex items-center gap-2 truncate">
-                          <Building2 className={`w-3.5 h-3.5 shrink-0 ${isChecked ? 'text-blue-600' : 'text-slate-400'}`} />
+                          <span className="text-sm">🏫</span>
                           <span className="truncate">{school.name}</span>
                         </div>
-                        <input
-                          type="checkbox"
-                          checked={isChecked}
-                          onChange={() => {}} // Handled by parent div
-                          className="rounded-sm text-blue-600 focus:ring-blue-500 cursor-pointer"
-                        />
+                        {isSelected ? (
+                          <CheckSquare className="w-4 h-4 text-emerald-600 shrink-0" />
+                        ) : (
+                          <Square className="w-4 h-4 text-slate-400 shrink-0" />
+                        )}
                       </div>
                     );
                   })}
                 </div>
 
-                {/* Manual custom team input */}
+                {/* Add Custom Manual Team */}
                 <div className="pt-3 border-t border-slate-100 flex items-center gap-2">
                   <input
                     type="text"
                     value={newTeamInput}
                     onChange={(e) => setNewTeamInput(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && handleAddCustomTeam()}
-                    placeholder="أو أضف اسم فريق / مؤسسة إضافية يدوياً..."
-                    className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold focus:outline-hidden focus:ring-2 focus:ring-blue-500 focus:bg-white"
+                    placeholder="أو إضافة اسم فريق مخصص..."
+                    className="flex-1 px-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-xl"
                   />
                   <button
                     onClick={handleAddCustomTeam}
-                    className="px-3 py-2 bg-slate-800 hover:bg-slate-900 text-white rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer"
+                    className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-bold cursor-pointer"
                   >
-                    <Plus className="w-3.5 h-3.5" />
-                    <span>إضافة</span>
+                    إضافة فريق
                   </button>
                 </div>
 
+                {/* Custom teams pills */}
                 {customTeamNames.length > 0 && (
-                  <div className="flex flex-wrap gap-1.5 pt-2">
-                    {customTeamNames.map((name, i) => (
-                      <span key={i} className="bg-amber-50 border border-amber-200 text-amber-800 text-[11px] font-bold px-2 py-1 rounded-lg flex items-center gap-1.5">
-                        <span>{name}</span>
-                        <button onClick={() => handleRemoveCustomTeam(name)} className="text-amber-600 hover:text-amber-900">
-                          ✕
-                        </button>
+                  <div className="flex flex-wrap gap-1.5 pt-1">
+                    {customTeamNames.map((cName, idx) => (
+                      <span
+                        key={idx}
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-amber-50 border border-amber-200 text-amber-900 rounded-lg text-xs font-bold"
+                      >
+                        <span>{cName}</span>
+                        <X
+                          onClick={() => handleRemoveCustomTeam(cName)}
+                          className="w-3 h-3 hover:text-rose-600 cursor-pointer"
+                        />
                       </span>
                     ))}
                   </div>
                 )}
               </div>
 
-              {/* Draw Options (نظام القرعة) */}
-              <div className="bg-white border border-slate-200 rounded-2xl p-4 sm:p-5 shadow-xs space-y-4">
-                <h5 className="font-black text-sm text-slate-900">نظام وتوزيع القرعة الإلكترونية:</h5>
-                
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div
-                    onClick={() => setDrawSystem('groups')}
-                    className={`p-3.5 rounded-2xl border-2 cursor-pointer transition-all ${
-                      drawSystem === 'groups'
-                        ? 'bg-amber-50 border-amber-500 shadow-sm'
-                        : 'bg-slate-50 border-slate-200 hover:bg-slate-100'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="font-black text-xs text-slate-900">نظام المجموعات (Group Stage)</span>
-                      <Layers className="w-4 h-4 text-amber-600" />
-                    </div>
-                    <p className="text-[11px] text-slate-500">
-                      تقسيم الفرق إلى مجموعات متكافئة وإجراء دوري داخل كل مجموعة.
-                    </p>
-                  </div>
-
-                  <div
-                    onClick={() => setDrawSystem('knockout')}
-                    className={`p-3.5 rounded-2xl border-2 cursor-pointer transition-all ${
-                      drawSystem === 'knockout'
-                        ? 'bg-amber-50 border-amber-500 shadow-sm'
-                        : 'bg-slate-50 border-slate-200 hover:bg-slate-100'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="font-black text-xs text-slate-900">نظام خروج المغلوب (Knockout)</span>
-                      <Trophy className="w-4 h-4 text-amber-600" />
-                    </div>
-                    <p className="text-[11px] text-slate-500">
-                      مواجهات إقصائية مباشرة (نصف النهائي، النهائي، أو دور الـ 8).
-                    </p>
-                  </div>
-                </div>
-
-                {drawSystem === 'groups' && (
-                  <div className="flex items-center gap-3 pt-2">
-                    <label className="text-xs font-black text-slate-700">عدد المجموعات المطلوبة:</label>
-                    <div className="flex gap-2">
-                      {[2, 3, 4].map(num => (
-                        <button
-                          key={num}
-                          onClick={() => setGroupsCount(num)}
-                          className={`px-3 py-1.5 rounded-xl text-xs font-black border transition-all cursor-pointer ${
-                            groupsCount === num
-                              ? 'bg-amber-500 text-white border-amber-600 shadow-xs'
-                              : 'bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200'
-                          }`}
-                        >
-                          {num} مجموعات
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* Action Buttons */}
-              <div className="flex items-center justify-between pt-3 border-t border-slate-200">
+              {/* Bottom Actions */}
+              <div className="flex items-center justify-between pt-4 border-t border-slate-200">
                 <button
                   onClick={() => setStep(1)}
-                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold"
+                  className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-xl text-xs font-bold cursor-pointer"
                 >
-                  رجوع
+                  الرجوع للخطوة 1
                 </button>
 
                 <button
                   onClick={handleExecuteDraw}
-                  disabled={isDrawing || allDrawTeams.length < 2}
-                  className="px-6 py-2.5 bg-amber-500 hover:bg-amber-600 active:scale-98 text-slate-950 font-black rounded-xl text-xs flex items-center gap-2 shadow-md shadow-amber-500/20 disabled:opacity-50 cursor-pointer"
+                  disabled={allDrawTeams.length < 2 || isDrawing}
+                  className="px-6 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 text-white rounded-xl text-xs font-black flex items-center gap-2 shadow-lg shadow-emerald-600/25 cursor-pointer disabled:opacity-50"
                 >
                   <Shuffle className={`w-4 h-4 ${isDrawing ? 'animate-spin' : ''}`} />
-                  <span>{isDrawing ? 'جاري سحب القرعة الإلكترونية...' : 'سحب القرعة آلياً وتوليد المباريات 🎲'}</span>
+                  <span>{isDrawing ? 'جاري السحب العشوائي...' : 'إجراء القرعة الإلكترونية وتوليد المباريات'}</span>
                 </button>
               </div>
+
             </div>
           )}
 
           {/* ========================================================================= */}
-          {/* STEP 3: DRAW RESULTS & SCHEDULING (تحديد التواريخ ومكان الإجراء) */}
+          {/* STEP 3: DRAW RESULTS, DATES, VENUES & REFEREES ASSIGNMENT */}
           {/* ========================================================================= */}
-          {step === 3 && (
+          {step === 3 && selectedTournament && (
             <div className="space-y-6">
               
               {/* Groups Distribution Overview */}
-              {drawnGroups.length > 0 && (
-                <div className="bg-white border border-slate-200 rounded-2xl p-4 sm:p-5 shadow-xs space-y-3">
-                  <div className="flex items-center justify-between">
-                    <h5 className="font-black text-sm text-slate-900 flex items-center gap-2">
-                      <Sparkles className="w-4 h-4 text-amber-500" />
-                      <span>نتائج القرعة الإلكترونية المعتمدة:</span>
-                    </h5>
-                    <button
-                      onClick={handleExecuteDraw}
-                      className="text-xs text-amber-700 font-bold hover:underline flex items-center gap-1"
+              <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-xs space-y-3">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-sm font-black text-slate-900 flex items-center gap-2">
+                    <Trophy className="w-4 h-4 text-amber-500" />
+                    <span>نتائج قرعة المجموعات والمسارات:</span>
+                  </h4>
+                  <span className="text-xs font-black text-emerald-700 bg-emerald-50 px-3 py-1 rounded-full border border-emerald-200">
+                    تم التوزيع العشوائي بنجاح
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 pt-1">
+                  {drawnGroups.map((grp, idx) => (
+                    <div key={idx} className="bg-slate-50 border border-slate-200 rounded-2xl p-3.5 space-y-2">
+                      <div className="flex items-center justify-between pb-1.5 border-b border-slate-200">
+                        <span className="text-xs font-black text-slate-900">{grp.groupName}</span>
+                        <span className="text-[10px] font-bold bg-slate-200 text-slate-700 px-1.5 py-0.2 rounded">
+                          {grp.teams.length} فرق
+                        </span>
+                      </div>
+
+                      <div className="space-y-1">
+                        {grp.teams.map((t, tIdx) => (
+                          <div key={t.id} className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                            <span className="w-4 h-4 rounded-full bg-emerald-600 text-white text-[10px] flex items-center justify-center font-bold">
+                              {tIdx + 1}
+                            </span>
+                            <span className="truncate">{t.name}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* BATCH SCHEDULING & REFEREE TOOLBAR */}
+              <div className="bg-gradient-to-r from-emerald-50 via-teal-50 to-blue-50 p-4 rounded-3xl border border-emerald-200 shadow-xs space-y-3">
+                <div className="flex items-center gap-2 text-xs font-black text-emerald-950">
+                  <Sparkles className="w-4 h-4 text-emerald-600" />
+                  <span>تعميم التاريخ، الملعب، وتعيين الحكم على جميع المباريات دفعة واحدة:</span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 text-xs">
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-600 mb-1">التاريخ الموحد:</label>
+                    <input
+                      type="date"
+                      value={bulkDate}
+                      onChange={(e) => setBulkDate(e.target.value)}
+                      className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-xl font-bold text-slate-800"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-600 mb-1">التوقيت الافتراضي:</label>
+                    <input
+                      type="time"
+                      value={bulkTime}
+                      onChange={(e) => setBulkTime(e.target.value)}
+                      className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-xl font-bold text-slate-800"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-600 mb-1">مكان الإجراء (الملعب/القاعة):</label>
+                    <input
+                      type="text"
+                      value={bulkVenueName}
+                      onChange={(e) => setBulkVenueName(e.target.value)}
+                      placeholder="القاعة المغطاة تاوريرت"
+                      className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-xl font-bold text-slate-800"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-600 mb-1">تعيين الحكم لجميع المباريات:</label>
+                    <select
+                      value={bulkRefereeId}
+                      onChange={(e) => setBulkRefereeId(e.target.value)}
+                      className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-xl font-bold text-slate-800 cursor-pointer"
                     >
-                      <Shuffle className="w-3.5 h-3.5" />
-                      <span>إعادة السحب</span>
+                      <option value="">-- اختر حكماً لتعميمه --</option>
+                      {combinedRefereesList.map(ref => (
+                        <option key={ref.id} value={ref.id}>{ref.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <div className="flex justify-end pt-1">
+                  <button
+                    type="button"
+                    onClick={handleApplyBatchSchedule}
+                    className="px-4 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold cursor-pointer"
+                  >
+                    تطبيق على كل المباريات
+                  </button>
+                </div>
+              </div>
+
+              {/* GENERATED MATCHES LIST WITH DATES, VENUES & REFEREES */}
+              <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-xs space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <h4 className="text-sm font-black text-slate-900 flex items-center gap-2">
+                    <Calendar className="w-4 h-4 text-emerald-600" />
+                    <span>جدول المباريات المبرمجة وتعيين الحكام ({generatedMatches.length} مباراة):</span>
+                  </h4>
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={handleExportExcel}
+                      className="px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
+                      <span>تصدير Excel</span>
                     </button>
                   </div>
+                </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                    {drawnGroups.map((grp, gIdx) => (
-                      <div key={gIdx} className="bg-slate-50 border border-slate-200 rounded-2xl p-3.5 space-y-2">
-                        <div className="flex items-center justify-between border-b border-slate-200 pb-2">
-                          <span className="font-black text-blue-700 text-xs">{grp.groupName}</span>
-                          <span className="text-[10px] font-bold text-slate-500 bg-white px-2 py-0.5 rounded-full border border-slate-200">
-                            {grp.teams.length} فرق
-                          </span>
+                {/* Match Cards */}
+                <div className="space-y-3 max-h-[380px] overflow-y-auto pr-1">
+                  {generatedMatches.map((match, mIdx) => (
+                    <div
+                      key={match.id}
+                      className="p-4 bg-slate-50 border border-slate-200 rounded-2xl flex flex-col lg:flex-row lg:items-center justify-between gap-3 text-xs"
+                    >
+                      {/* Match Teams & Stage */}
+                      <div className="space-y-1.5 min-w-[240px]">
+                        <span className="px-2 py-0.5 bg-slate-200 text-slate-700 rounded-md font-bold text-[10px]">
+                          {match.stage} • مقابلة #{mIdx + 1}
+                        </span>
+                        <div className="font-black text-sm text-slate-900 flex items-center gap-2">
+                          <span className="text-emerald-700">{match.team1Name}</span>
+                          <span className="text-slate-400 font-mono">VS</span>
+                          <span className="text-blue-700">{match.team2Name}</span>
                         </div>
-                        <ul className="space-y-1.5">
-                          {grp.teams.map((t, ti) => (
-                            <li key={ti} className="text-xs font-bold text-slate-800 flex items-center gap-2 bg-white p-2 rounded-xl border border-slate-200/80">
-                              <span className="w-5 h-5 rounded-full bg-blue-100 text-blue-800 text-[10px] font-black flex items-center justify-center shrink-0">
-                                {ti + 1}
-                              </span>
-                              <span className="truncate">{t.name}</span>
-                            </li>
-                          ))}
-                        </ul>
                       </div>
-                    ))}
-                  </div>
-                </div>
-              )}
 
-              {/* Batch Match Schedule Fast-Fill */}
-              <div className="bg-blue-50/80 border border-blue-200 rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-                <div>
-                  <h6 className="font-black text-xs text-blue-950">تعميم سريع للتاريخ ومكان الإجراء:</h6>
-                  <p className="text-[11px] text-blue-800 mt-0.5">
-                    حدد تاريخاً ومكاناً موحداً لملء كافة المقابلات بضغطة زر
-                  </p>
-                </div>
+                      {/* Inputs: Date, Time, Venue & Referee */}
+                      <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 flex-1">
+                        <div>
+                          <label className="block text-[10px] font-bold text-slate-500 mb-0.5">التاريخ:</label>
+                          <input
+                            type="date"
+                            value={match.date}
+                            onChange={(e) => handleUpdateMatchField(match.id, 'date', e.target.value)}
+                            className="w-full px-2 py-1.5 bg-white border border-slate-200 rounded-xl font-bold text-slate-800"
+                          />
+                        </div>
 
-                <div className="flex flex-wrap items-center gap-2">
-                  <input
-                    type="date"
-                    value={bulkDate}
-                    onChange={(e) => setBulkDate(e.target.value)}
-                    className="bg-white border border-blue-300 rounded-xl px-2.5 py-1.5 text-xs font-bold text-slate-800 focus:outline-hidden"
-                  />
-                  <input
-                    type="time"
-                    value={bulkTime}
-                    onChange={(e) => setBulkTime(e.target.value)}
-                    className="bg-white border border-blue-300 rounded-xl px-2 py-1.5 text-xs font-bold text-slate-800 focus:outline-hidden font-mono"
-                  />
-                  <input
-                    type="text"
-                    value={bulkVenueName}
-                    onChange={(e) => setBulkVenueName(e.target.value)}
-                    placeholder="مكان الإجراء..."
-                    className="bg-white border border-blue-300 rounded-xl px-2.5 py-1.5 text-xs font-bold text-slate-800 focus:outline-hidden w-36"
-                  />
-                  <button
-                    onClick={handleApplyBatchSchedule}
-                    className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black shadow-xs cursor-pointer"
-                  >
-                    تطبيق على الكل
-                  </button>
-                </div>
-              </div>
+                        <div>
+                          <label className="block text-[10px] font-bold text-slate-500 mb-0.5">التوقيت:</label>
+                          <input
+                            type="time"
+                            value={match.time}
+                            onChange={(e) => handleUpdateMatchField(match.id, 'time', e.target.value)}
+                            className="w-full px-2 py-1.5 bg-white border border-slate-200 rounded-xl font-bold text-slate-800"
+                          />
+                        </div>
 
-              {/* Generated Matches Table with Interactive Scheduling Controls */}
-              <div className="bg-white border border-slate-200 rounded-2xl p-4 sm:p-5 shadow-xs space-y-3">
-                <div className="flex items-center justify-between">
-                  <h5 className="font-black text-sm text-slate-900">
-                    جدول المقابلات وتحديد التواريخ والأماكن ({generatedMatches.length} مباراة):
-                  </h5>
-                  <button
-                    onClick={handleExportExcel}
-                    className="px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer"
-                  >
-                    <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
-                    <span>تصدير Excel</span>
-                  </button>
-                </div>
+                        <div>
+                          <label className="block text-[10px] font-bold text-slate-500 mb-0.5">الملعب / المكان:</label>
+                          <input
+                            type="text"
+                            value={match.venueName}
+                            onChange={(e) => handleUpdateMatchField(match.id, 'venueName', e.target.value)}
+                            placeholder="اسم القاعة / الملعب"
+                            className="w-full px-2 py-1.5 bg-white border border-slate-200 rounded-xl font-bold text-slate-800"
+                          />
+                        </div>
 
-                {/* Matches Table */}
-                <div className="overflow-x-auto border border-slate-200 rounded-2xl">
-                  <table className="w-full text-right text-xs">
-                    <thead className="bg-slate-900 text-white font-black">
-                      <tr>
-                        <th className="py-3 px-3 w-12 text-center">#</th>
-                        <th className="py-3 px-3">المرحلة / الدور</th>
-                        <th className="py-3 px-3">المواجهة (الفريق 1 ضد الفريق 2)</th>
-                        <th className="py-3 px-3 w-36">تاريخ المقابلة</th>
-                        <th className="py-3 px-3 w-28">التوقيت</th>
-                        <th className="py-3 px-3 w-48">مكان الإجراء</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {generatedMatches.map((m, idx) => (
-                        <tr key={m.id} className="hover:bg-slate-50 transition-all">
-                          <td className="py-2.5 px-3 text-center font-bold text-slate-400">
-                            {idx + 1}
-                          </td>
-                          <td className="py-2.5 px-3 font-bold text-slate-700">
-                            <span className="bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200 text-[11px]">
-                              {m.stage}
-                            </span>
-                          </td>
-                          <td className="py-2.5 px-3">
-                            <div className="flex items-center gap-2 font-black text-slate-900">
-                              <span className="text-blue-700 truncate max-w-[140px]">{m.team1Name}</span>
-                              <span className="text-[10px] text-slate-400 font-bold">ضد</span>
-                              <span className="text-amber-700 truncate max-w-[140px]">{m.team2Name}</span>
-                            </div>
-                          </td>
-                          <td className="py-2.5 px-3">
-                            <input
-                              type="date"
-                              value={m.date}
-                              onChange={(e) => handleUpdateMatchField(m.id, 'date', e.target.value)}
-                              className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-xs font-bold text-slate-800 focus:bg-white"
-                            />
-                          </td>
-                          <td className="py-2.5 px-3">
-                            <input
-                              type="time"
-                              value={m.time}
-                              onChange={(e) => handleUpdateMatchField(m.id, 'time', e.target.value)}
-                              className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-xs font-bold text-slate-800 focus:bg-white font-mono"
-                            />
-                          </td>
-                          <td className="py-2.5 px-3">
-                            <input
-                              type="text"
-                              value={m.venueName}
-                              onChange={(e) => handleUpdateMatchField(m.id, 'venueName', e.target.value)}
-                              placeholder="القاعة / الملعب..."
-                              className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-xs font-bold text-slate-800 focus:bg-white"
-                            />
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                        {/* ⭐ REFEREE ASSIGNMENT FIELD ⭐ */}
+                        <div>
+                          <label className="block text-[10px] font-bold text-amber-700 mb-0.5 flex items-center gap-1">
+                            <UserCheck className="w-3 h-3" />
+                            <span>حكم المقابلة:</span>
+                          </label>
+                          <select
+                            value={match.refereeId || ''}
+                            onChange={(e) => handleUpdateMatchField(match.id, 'refereeId', e.target.value)}
+                            className="w-full px-2 py-1.5 bg-amber-50/60 border border-amber-300 rounded-xl font-bold text-amber-950 cursor-pointer text-[11px]"
+                          >
+                            <option value="">-- تعيين الحكم --</option>
+                            {combinedRefereesList.map(ref => (
+                              <option key={ref.id} value={ref.id}>{ref.name}</option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+
+                    </div>
+                  ))}
                 </div>
               </div>
 
-              {/* Bottom Final Action Bar */}
-              <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-3 border-t border-slate-200">
+              {/* Final Submit & Save to Database */}
+              <div className="flex items-center justify-between pt-4 border-t border-slate-200">
                 <button
                   onClick={() => setStep(2)}
-                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold cursor-pointer"
+                  className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-xl text-xs font-bold cursor-pointer"
                 >
-                  تعديل المؤسسات والقرعة
+                  إعادة ضبط القرعة
                 </button>
 
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={handleSaveMatchesToDatabase}
-                    disabled={isSaving || generatedMatches.length === 0}
-                    className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 active:scale-98 text-white font-black rounded-xl text-xs flex items-center gap-2 shadow-md shadow-emerald-600/25 disabled:opacity-50 cursor-pointer"
-                  >
-                    <Save className="w-4 h-4" />
-                    <span>{isSaving ? 'جاري حفظ واعتماد المباريات...' : 'حفظ واعتماد المقابلات في جدول البطولة ✓'}</span>
-                  </button>
-                </div>
+                <button
+                  onClick={handleSaveMatchesToDatabase}
+                  disabled={isSaving || generatedMatches.length === 0}
+                  className="px-7 py-3 bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 text-white rounded-2xl text-xs font-black flex items-center gap-2 shadow-xl shadow-emerald-600/30 cursor-pointer disabled:opacity-50"
+                >
+                  <Save className="w-4 h-4" />
+                  <span>{isSaving ? 'جاري الحفظ والاعتماد...' : 'حفظ واعتماد جدول المباريات والحكام في المنظومة'}</span>
+                </button>
               </div>
 
             </div>
           )}
 
         </div>
+
       </div>
     </div>
   );

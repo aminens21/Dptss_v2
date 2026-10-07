@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Sport, Student, School, Tournament } from '../types';
 import { DataService, getAgeCategoriesForSeason, SPORTS_MAP, getCategoryGenderLabel, validateBirthDateForCategory, normalizeCategoryKey, isSchoolLevelAllowedForTournament, getTournamentLevelAr, isTeacherLevelAllowedForTournament } from '../lib/dataService';
+import { AthleticsService } from '../lib/athleticsService';
 import { useAuth } from '../contexts/AuthContext';
 import { X, GraduationCap, User, Calendar, Upload, AlertCircle, Lock, ShieldCheck, CheckCircle2, Camera } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -127,10 +128,8 @@ export const RegisterStudentModal: React.FC<RegisterStudentModalProps> = ({
     return validateBirthDateForCategory(birthDate, category, currentSeason, gender, sport?.id);
   }, [birthDate, category, currentSeason, gender, sport?.id]);
 
-  if (!isOpen || !sport) return null;
-
   const seasonalCategories = getAgeCategoriesForSeason(currentSeason, undefined, sport?.id);
-  const baseCategories = (sport.ageCategories && sport.ageCategories.length > 0)
+  const baseCategories = (sport?.ageCategories && sport.ageCategories.length > 0)
     ? sport.ageCategories.map(normalizeCategoryKey)
     : seasonalCategories.map(c => c.id);
 
@@ -148,6 +147,14 @@ export const RegisterStudentModal: React.FC<RegisterStudentModalProps> = ({
       return true;
     });
   }, [baseCategories, userProfile]);
+
+  const availableAthleticsDisciplines = useMemo(() => {
+    if (sport?.id !== 'athletics') return [];
+    const allDisc = AthleticsService.getDisciplines();
+    return allDisc.filter(d => !d.allowedCategories || d.allowedCategories.includes(normalizeCategoryKey(category) as any));
+  }, [sport, category]);
+
+  if (!isOpen || !sport) return null;
 
   const handleBirthDateChange = (newDate: string) => {
     setBirthDate(newDate);
@@ -708,7 +715,7 @@ export const RegisterStudentModal: React.FC<RegisterStudentModalProps> = ({
           {sport.id === 'athletics' && (
             <div>
               <label className="block text-xs font-bold text-purple-900 mb-1">
-                تخصص ألعاب القوى الفرعي <span className="text-red-500">*</span>
+                تخصص ألعاب القوى الفرعي (حسب فئة {category}) <span className="text-red-500">*</span>
               </label>
               <select
                 disabled={isExpired}
@@ -716,17 +723,20 @@ export const RegisterStudentModal: React.FC<RegisterStudentModalProps> = ({
                 onChange={(e) => setAthleticsSpecialty(e.target.value)}
                 className="w-full text-xs rounded-xl border border-purple-200 bg-purple-50/40 px-3 py-2 text-slate-800 focus:outline-none focus:ring-2 focus:ring-purple-500"
               >
-                <option value="">-- اختر التخصص (مثل القفز الطولي / جري 80م) --</option>
-                {(sport.athleticsSpecialties || [
-                  'سباق 80 متر حواجز',
-                  'سباق 100 متر',
-                  'سباق 800 متر',
-                  'القفز الطولي',
-                  'القفز العالي',
-                  'رمي الجلة (Poids)',
-                  'رمي القرص (Disque)',
-                  'رمي الرمح (Javelot)'
-                ]).map(spec => (
+                <option value="">-- اختر التخصص المتاح لهذه الفئة --</option>
+                {(availableAthleticsDisciplines.length > 0
+                  ? availableAthleticsDisciplines.map(d => d.nameAr)
+                  : (sport.athleticsSpecialties || [
+                      'سباق 80 متر حواجز',
+                      'سباق 100 متر',
+                      'سباق 800 متر',
+                      'القفز الطولي',
+                      'القفز العالي',
+                      'رمي الجلة (Poids)',
+                      'رمي القرص (Disque)',
+                      'رمي الرمح (Javelot)'
+                    ])
+                ).map(spec => (
                   <option key={spec} value={spec}>{spec}</option>
                 ))}
               </select>

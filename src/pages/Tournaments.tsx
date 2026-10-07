@@ -34,6 +34,7 @@ import { EditTournamentModal } from '../components/EditTournamentModal';
 import { ConfirmDeleteModal } from '../components/ConfirmDeleteModal';
 import { CrossCountryChampionshipModal } from '../components/CrossCountryChampionshipModal';
 import { SportChampionshipModal } from '../components/SportChampionshipModal';
+import { AthleticsChampionshipModal } from '../components/AthleticsChampionshipModal';
 import { EditTournamentScheduleModal } from '../components/EditTournamentScheduleModal';
 import { ProgramExportModal } from '../components/ProgramExportModal';
 import { ElectronicDrawModal } from '../components/ElectronicDrawModal';
@@ -98,6 +99,8 @@ export const Tournaments: React.FC = () => {
 
   // Electronic Draw and Demo Data Modal states
   const [isDrawModalOpen, setIsDrawModalOpen] = useState(false);
+  const [selectedSportForDraw, setSelectedSportForDraw] = useState<string | undefined>(undefined);
+  const [selectedTournamentForDraw, setSelectedTournamentForDraw] = useState<string | undefined>(undefined);
   const [isDemoDataModalOpen, setIsDemoDataModalOpen] = useState(false);
 
   // Program Export Modal State
@@ -124,8 +127,9 @@ export const Tournaments: React.FC = () => {
   }, [teachers, userProfile]);
 
   // Only CENTRAL_ADMIN and Technical Committee Heads can create, assign or delete tournaments
+  const isSuperAdmin = userProfile?.isSuperAdmin === true || currentTeacherProfile?.isSuperAdmin === true || userProfile?.role === 'SUPER_ADMIN';
   const effectiveRole = currentTeacherProfile?.role || userProfile?.role;
-  const isCentralAdmin = effectiveRole === 'CENTRAL_ADMIN';
+  const isCentralAdmin = effectiveRole === 'CENTRAL_ADMIN' || isSuperAdmin;
   const isSportManager = effectiveRole === 'SPORT_MANAGER';
   const isTechCommitteeHead = userProfile?.isTechCommitteeHead === true || currentTeacherProfile?.isTechCommitteeHead === true;
   const isTeacherRole = effectiveRole === 'TEACHER';
@@ -983,16 +987,45 @@ export const Tournaments: React.FC = () => {
                 </button>
               )}
 
+              {/* Add New Championship Button */}
+              {canCreate && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPreselectedSportId(undefined);
+                    setIsModalOpen(true);
+                  }}
+                  className="px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer bg-blue-600 hover:bg-blue-700 text-white shadow-xs flex items-center gap-1.5"
+                  title="إضافة بطولة إقليمية جديدة وبرمجتها"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>إضافة بطولة جديدة</span>
+                </button>
+              )}
+
+              {/* Electronic Draw Button */}
+              {!isTeacherRole && userProfile?.role !== 'TEACHER' && (
+                <button
+                  type="button"
+                  onClick={() => setIsDrawModalOpen(true)}
+                  className="px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 text-white shadow-xs flex items-center gap-1.5"
+                  title="إجراء القرعة الإلكترونية وبرمجة المباريات وتعيين الحكام"
+                >
+                  <Shuffle className="w-3.5 h-3.5" />
+                  <span>القرعة الإلكترونية والمباريات</span>
+                </button>
+              )}
+
               {/* Demo Data Generator Button (Hidden for teachers) */}
               {!isTeacherRole && userProfile?.role !== 'TEACHER' && (
                 <button
                   type="button"
                   onClick={() => setIsDemoDataModalOpen(true)}
-                  className="px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 text-white shadow-xs flex items-center gap-1.5"
+                  className="px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer bg-slate-800 hover:bg-slate-900 text-white shadow-xs flex items-center gap-1.5"
                   title="توليد بيانات تجريبية وبطولات ونتائج للمنصة"
                 >
                   <Sparkles className="w-3.5 h-3.5 text-emerald-200" />
-                  <span>توليد بيانات ونتائج افتراضية</span>
+                  <span>توليد بيانات افتراضية</span>
                 </button>
               )}
             </div>
@@ -1576,6 +1609,21 @@ export const Tournaments: React.FC = () => {
 
                     {canManageThis && (
                       <div className="flex items-center gap-1.5">
+                        {/* Direct Electronic Draw Button for this Sport (Icon only) */}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSelectedSportForDraw(sport.id);
+                            setSelectedTournamentForDraw(undefined);
+                            setIsDrawModalOpen(true);
+                          }}
+                          title={`إجراء القرعة الإلكترونية لبطولة ${sport.name}`}
+                          className="p-2 text-emerald-700 hover:text-emerald-900 hover:bg-emerald-100/90 bg-emerald-50 border border-emerald-300 rounded-xl transition-colors cursor-pointer shrink-0 flex items-center justify-center shadow-3xs"
+                        >
+                          <Shuffle className="h-4 w-4" />
+                        </button>
+
                         {isCentralAdmin && (
                           <button
                             onClick={() => setSportToDeleteAll({ id: sport.id, name: sport.name })}
@@ -1695,7 +1743,7 @@ export const Tournaments: React.FC = () => {
 
       {/* General Sport Championship Modal for viewing categories, controls & rosters */}
       <SportChampionshipModal
-        isOpen={isSportModalOpen}
+        isOpen={isSportModalOpen && selectedSportForModal?.id !== 'athletics'}
         onClose={() => setIsSportModalOpen(false)}
         sport={selectedSportForModal}
         tournaments={tournaments}
@@ -1717,6 +1765,18 @@ export const Tournaments: React.FC = () => {
         teacherSchoolName={effectiveRole === 'TEACHER' && userProfile ? userProfile.workLocation : undefined}
       />
 
+      {/* Athletics Championship dedicated manager modal */}
+      <AthleticsChampionshipModal
+        isOpen={isSportModalOpen && selectedSportForModal?.id === 'athletics'}
+        onClose={() => setIsSportModalOpen(false)}
+        teachers={teachers}
+        schools={schools}
+        students={allStudents}
+        currentUser={userProfile}
+        directorateName={activeDirObj?.name || undefined}
+        season={activeSeason}
+      />
+
       {/* Edit Tournament Schedule & Dates Modal */}
       <EditTournamentScheduleModal
         isOpen={isScheduleModalOpen}
@@ -1732,9 +1792,15 @@ export const Tournaments: React.FC = () => {
       {/* Electronic Draw and Schedule Wizard */}
       <ElectronicDrawModal
         isOpen={isDrawModalOpen}
-        onClose={() => setIsDrawModalOpen(false)}
+        onClose={() => {
+          setIsDrawModalOpen(false);
+          setSelectedSportForDraw(undefined);
+          setSelectedTournamentForDraw(undefined);
+        }}
         currentUser={userProfile}
         onMatchesCreated={loadData}
+        initialSportId={selectedSportForDraw}
+        initialTournamentId={selectedTournamentForDraw}
       />
 
       {/* Demo Data Seeder Modal for Testing */}

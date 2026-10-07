@@ -8,6 +8,7 @@ import { RegisterStudentModal } from './RegisterStudentModal';
 import { SportBulkRegisterModal } from './SportBulkRegisterModal';
 import { EditDeadlineModal } from './EditDeadlineModal';
 import { ParticipationFormPdfModal } from './ParticipationFormPdfModal';
+import { ElectronicDrawModal } from './ElectronicDrawModal';
 import * as XLSX from 'xlsx';
 import {
   X,
@@ -45,7 +46,8 @@ import {
   Camera,
   Upload,
   Image as ImageIcon,
-  Palette
+  Palette,
+  Shuffle
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { compressImageToBase64 } from '../lib/imageUtils';
@@ -141,6 +143,7 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
   const [isHeaderCollapsed, setIsHeaderCollapsed] = useState(false);
   const [isFullScreen, setIsFullScreen] = useState(false);
   const [isPdfModalOpen, setIsPdfModalOpen] = useState(false);
+  const [isDrawModalOpen, setIsDrawModalOpen] = useState(false);
   const [selectedSchoolNameForView, setSelectedSchoolNameForView] = useState<string | null>(null);
   const [pdfSchoolName, setPdfSchoolName] = useState<string | null>(null);
   const [pdfPreselectedCat, setPdfPreselectedCat] = useState<string>('ALL');
@@ -876,6 +879,19 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
           </div>
 
           <div className="flex items-center gap-2 shrink-0 mr-auto">
+            {/* Direct Electronic Draw Button for Managers / Tech Committee */}
+            {canManage && isProgrammed && (
+              <button
+                type="button"
+                onClick={() => setIsDrawModalOpen(true)}
+                className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 text-white text-xs font-black shadow-xs flex items-center gap-1.5 transition-all cursor-pointer select-none"
+                title="إجراء القرعة الإلكترونية وبرمجة المباريات وتعيين الحكام لهذه الرياضة"
+              >
+                <Shuffle className="w-3.5 h-3.5" />
+                <span>إجراء القرعة الإلكترونية</span>
+              </button>
+            )}
+
             {/* Toggle Collapse/Expand */}
             <button
               type="button"
@@ -2501,6 +2517,19 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
         </div>
       )}
 
+
+      {/* Electronic Draw and Match Scheduling Modal */}
+      {isDrawModalOpen && (
+        <ElectronicDrawModal
+          isOpen={isDrawModalOpen}
+          onClose={() => setIsDrawModalOpen(false)}
+          currentUser={userProfile}
+          initialSportId={sport.id}
+          onMatchesCreated={() => {
+            if (onRefreshData) onRefreshData();
+          }}
+        />
+      )}
 
     </div>
   );

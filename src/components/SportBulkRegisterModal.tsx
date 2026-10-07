@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { School, Student, Sport, User, Tournament } from '../types';
 import { DataService, validateBirthDateForCategory, normalizeCategoryKey, getCategoryGenderLabel, getCategoryYearsLabel, isSchoolLevelAllowedForTournament, getTournamentLevelAr, isTeacherLevelAllowedForTournament } from '../lib/dataService';
+import { AthleticsService } from '../lib/athleticsService';
 import { useAuth } from '../contexts/AuthContext';
 import * as XLSX from 'xlsx';
 import {
@@ -107,6 +108,13 @@ export const SportBulkRegisterModal: React.FC<SportBulkRegisterModalProps> = ({
 
   // Selected school
   const [selectedSchoolId, setSelectedSchoolId] = useState<string>('');
+
+  // Available athletics disciplines filtered by selected category
+  const availableAthleticsDisciplines = useMemo(() => {
+    if (sport?.id !== 'athletics') return [];
+    const allDisc = AthleticsService.getDisciplines();
+    return allDisc.filter(d => !d.allowedCategories || d.allowedCategories.includes(normalizeCategoryKey(selectedCategory) as any));
+  }, [sport, selectedCategory]);
 
   // Coach Details
   const [coachName, setCoachName] = useState<string>('');
@@ -968,13 +976,17 @@ export const SportBulkRegisterModal: React.FC<SportBulkRegisterModalProps> = ({
                           {/* Specialty (only if athletics) */}
                           {sport.id === 'athletics' && (
                             <div>
-                              <label className="block text-[10px] font-bold text-slate-500 mb-1">التخصص الفرعي</label>
+                              <label className="block text-[10px] font-bold text-slate-500 mb-1">التخصص الفرعي (حسب فئة {selectedCategory})</label>
                               <select
                                 value={slot.athleticsSpecialty || ''}
                                 onChange={(e) => handleUpdateSlot(slot.slotIndex, 'athleticsSpecialty', e.target.value)}
                                 className="w-full text-xs font-bold px-2.5 py-2 bg-white border border-slate-200 rounded-lg text-slate-800 focus:ring-1 focus:ring-blue-500"
                               >
-                                {(sport.athleticsSpecialties || ['القفز الطولي', 'القفز الطولي العلوي', 'جري 80 متر']).map(spec => (
+                                <option value="">-- اختر التخصص المتاح لهذه الفئة --</option>
+                                {(availableAthleticsDisciplines.length > 0
+                                  ? availableAthleticsDisciplines.map(d => d.nameAr)
+                                  : (sport.athleticsSpecialties || ['القفز الطولي', 'جري 100 متر'])
+                                ).map(spec => (
                                   <option key={spec} value={spec}>{spec}</option>
                                 ))}
                               </select>

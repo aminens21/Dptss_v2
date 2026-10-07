@@ -25,14 +25,34 @@ import {
   X
 } from 'lucide-react';
 import { CROSS_COUNTRY_CATEGORIES, CrossCountryCategoryDef } from '../lib/crossCountryConfig';
-import { CrossCountryCategoryResult, School, Student } from '../types';
+import { CrossCountryCategoryResult, School, Student, User } from '../types';
 import { DataService } from '../lib/dataService';
 import { FinishLineScannerModal } from '../components/FinishLineScannerModal';
 import { CrossCountryPodiumView } from '../components/CrossCountryPodiumView';
 import { ElectronicDrawModal } from '../components/ElectronicDrawModal';
 import { BibGeneratorModal } from '../components/BibGeneratorModal';
+import { AthleticsChampionshipModal } from '../components/AthleticsChampionshipModal';
 import { useAuth } from '../contexts/AuthContext';
 import toast from 'react-hot-toast';
+
+// Custom App Icon for "تدبير البطولة المدرسية لألعاب القوى"
+export const AthleticsAppIcon: React.FC<{ size?: number; className?: string }> = ({ size = 64, className = '' }) => {
+  return (
+    <div 
+      className={`relative rounded-3xl overflow-hidden shadow-lg border border-white/20 flex items-center justify-center select-none shrink-0 ${className}`}
+      style={{
+        width: size,
+        height: size,
+        background: 'linear-gradient(135deg, #f59e0b 0%, #ea580c 50%, #dc2626 100%)',
+      }}
+    >
+      <div className="absolute inset-0 bg-gradient-to-b from-white/25 via-transparent to-black/30 pointer-events-none" />
+      <div className="relative z-10 flex flex-col items-center justify-center">
+        <span className="text-2xl sm:text-3xl">🏃‍♂️</span>
+      </div>
+    </div>
+  );
+};
 
 // Custom App Icon for "ماسح الصدريات لخط النهاية"
 export const BibScannerAppIcon: React.FC<{ size?: number; className?: string }> = ({ size = 64, className = '' }) => {
@@ -94,18 +114,15 @@ export const HelperApps: React.FC = () => {
   const [results, setResults] = useState<Record<string, CrossCountryCategoryResult>>({});
   const [schools, setSchools] = useState<School[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
+  const [teachers, setTeachers] = useState<User[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<CrossCountryCategoryDef | null>(null);
   const [isScannerOpen, setIsScannerOpen] = useState<boolean>(false);
   const [resultsCategory, setResultsCategory] = useState<CrossCountryCategoryDef | null>(null);
-  const [isBibScannerExpanded, setIsBibScannerExpanded] = useState<boolean>(false);
+  const [isBibScannerExpanded, setIsBibScannerExpanded] = useState<boolean>(true);
+  const [isAthleticsModalOpen, setIsAthleticsModalOpen] = useState<boolean>(false);
 
   // Auxiliary Interactive Tools states
-  const [activeSecondaryModal, setActiveSecondaryModal] = useState<'stopwatch' | 'draw' | 'bib_generator' | null>(null);
-
-  // Stopwatch Tool State
-  const [stopwatchTime, setStopwatchTime] = useState<number>(0);
-  const [isStopwatchRunning, setIsStopwatchRunning] = useState<boolean>(false);
-  const [laps, setLaps] = useState<number[]>([]);
+  const [activeSecondaryModal, setActiveSecondaryModal] = useState<'draw' | 'bib_generator' | null>(null);
 
   // Electronic Draw Tool State
   const [drawPool, setDrawPool] = useState<string[]>([]);
@@ -116,10 +133,11 @@ export const HelperApps: React.FC = () => {
   // Load results, students and schools
   const loadData = async () => {
     try {
-      const [ccResults, scList, stList] = await Promise.all([
+      const [ccResults, scList, stList, tcList] = await Promise.all([
         DataService.getCrossCountryResults(),
         DataService.getSchools(),
-        DataService.getStudents()
+        DataService.getStudents(),
+        DataService.getTeachers()
       ]);
       
       setResults(prev => {
@@ -131,6 +149,7 @@ export const HelperApps: React.FC = () => {
 
       setSchools(prev => scList.length > prev.length ? scList : (prev.length > 0 ? prev : scList));
       setStudents(prev => stList.length > prev.length ? stList.filter(s => s.sportId === 'cross_country') : (prev.length > 0 ? prev : stList.filter(s => s.sportId === 'cross_country')));
+      setTeachers(tcList || []);
       
       if (scList.length > 0 && drawPool.length === 0) {
         setDrawPool(scList.slice(0, 8).map(s => s.name));
@@ -178,26 +197,6 @@ export const HelperApps: React.FC = () => {
       bc.close();
     };
   }, []);
-
-  // Stopwatch timer logic
-  useEffect(() => {
-    let interval: any = null;
-    if (isStopwatchRunning) {
-      interval = setInterval(() => {
-        setStopwatchTime(prev => prev + 10);
-      }, 10);
-    } else {
-      clearInterval(interval);
-    }
-    return () => clearInterval(interval);
-  }, [isStopwatchRunning]);
-
-  const formatStopwatch = (ms: number) => {
-    const minutes = Math.floor(ms / 60000);
-    const seconds = Math.floor((ms % 60000) / 1000);
-    const hundredths = Math.floor((ms % 1000) / 10);
-    return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}.${String(hundredths).padStart(2, '0')}`;
-  };
 
   const handleOpenScanner = (cat?: CrossCountryCategoryDef) => {
     setSelectedCategory(cat || CROSS_COUNTRY_CATEGORIES[0]);
@@ -323,6 +322,31 @@ export const HelperApps: React.FC = () => {
       {/* ========================================================================= */}
       {/* ⭐ HERO SECTION: APP #1 - ماسح الصدريات لخط النهاية (The Primary App) ⭐ */}
       {/* ========================================================================= */}
+      {!isBibScannerExpanded && (
+        <div 
+          onClick={() => setIsBibScannerExpanded(true)}
+          className="bg-gradient-to-r from-blue-900 via-indigo-950 to-slate-900 border-2 border-blue-500/50 rounded-2xl p-4 shadow-md flex items-center justify-between cursor-pointer hover:border-blue-400 transition-all text-white group"
+        >
+          <div className="flex items-center gap-3">
+            <BibScannerAppIcon size={44} className="shadow-xs" />
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="text-sm font-black">ماسح الصدريات لخط النهاية (Bib Scanner)</h3>
+                <span className="px-2 py-0.5 text-[9px] font-black bg-emerald-500 text-white rounded-full">جاهز للتحكيم</span>
+              </div>
+              <p className="text-xs text-slate-300 mt-0.5">انقر هنا لإظهار لوحة المسح المباشرة بالفئات الـ 8</p>
+            </div>
+          </div>
+          <button 
+            type="button" 
+            className="px-4 py-2 bg-blue-600 group-hover:bg-blue-500 rounded-xl text-xs font-black flex items-center gap-1.5 transition-colors"
+          >
+            <Camera className="w-4 h-4" />
+            <span>إظهار لوحة المسح</span>
+          </button>
+        </div>
+      )}
+
       {isBibScannerExpanded && (
         <div className="bg-linear-to-br from-white via-slate-50 to-blue-50/40 dark:from-slate-900 dark:via-slate-900 dark:to-blue-950/30 border-2 border-blue-200/90 dark:border-blue-900/60 rounded-3xl p-6 sm:p-8 shadow-md relative overflow-hidden transition-all hover:shadow-xl animate-in fade-in slide-in-from-top-4 duration-300">
           {/* Decorative corner accent */}
@@ -547,34 +571,40 @@ export const HelperApps: React.FC = () => {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
 
-          {/* App 1: Bib Scanner (Compact Card) */}
-          {!isBibScannerExpanded && (
-            <div className="bg-white border border-slate-200 rounded-3xl p-5 shadow-xs flex flex-col justify-between hover:shadow-md transition-all group animate-in fade-in zoom-in-95">
-              <div>
-                <div className="flex items-center justify-between mb-3">
-                  <BibScannerAppIcon size={48} />
-                  <span className="px-2 py-0.5 text-[10px] font-black bg-blue-100 text-blue-800 rounded-full border border-blue-200">
-                    التطبيق الرئيسي
-                  </span>
-                </div>
-
-                <h4 className="text-sm font-black text-slate-900 mb-1">ماسح الصدريات لخط النهاية (Bib Scanner)</h4>
-                <p className="text-xs text-slate-500 leading-relaxed font-medium mb-4">
-                  تطبيق مخصص لقضاة وحكام خط النهاية لمسح أرقام صدريات العدائين بكاميرا الهاتف أو الإدخال اليدوي.
-                </p>
+          {/* App 1: Athletics Championship Manager (Featured New App) */}
+          <div className="bg-gradient-to-br from-amber-500/10 via-orange-500/5 to-rose-500/10 border-2 border-amber-500/40 rounded-3xl p-5 shadow-sm flex flex-col justify-between hover:shadow-md hover:border-amber-500 transition-all group">
+            <div>
+              <div className="flex items-center justify-between mb-3">
+                <AthleticsAppIcon size={48} />
+                <span className="px-2.5 py-0.5 text-[10px] font-black bg-gradient-to-r from-amber-500 to-rose-600 text-white rounded-full shadow-xs">
+                  جديد • ألعاب القوى
+                </span>
               </div>
 
-              <button
-                onClick={() => setIsBibScannerExpanded(true)}
-                className="w-full py-2.5 px-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 shadow-xs cursor-pointer group-hover:scale-102 active:scale-98"
-              >
-                <Camera className="w-3.5 h-3.5" />
-                <span>تشغيل ماسح الصدريات</span>
-              </button>
+              <h4 className="text-sm font-black text-slate-900 dark:text-white mb-1">
+                تدبير البطولة المدرسية لألعاب القوى
+              </h4>
+              <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed font-medium mb-3">
+                إدارة اللجان الأربع، تسجيل المشاركين، والميقاتي الذكي متعدد المراتب للسرعة والمسافات المتوسطة والقفز والجلة.
+              </p>
+
+              <div className="flex flex-wrap gap-1 mb-4">
+                <span className="px-2 py-0.5 bg-amber-100 text-amber-900 rounded text-[10px] font-bold">4 لجان متخصصة</span>
+                <span className="px-2 py-0.5 bg-orange-100 text-orange-900 rounded text-[10px] font-bold">ميقاتي مراتب ذكي</span>
+                <span className="px-2 py-0.5 bg-rose-100 text-rose-900 rounded text-[10px] font-bold">بوديوم ومحاضر</span>
+              </div>
             </div>
-          )}
+
+            <button
+              onClick={() => setIsAthleticsModalOpen(true)}
+              className="w-full py-2.5 px-3 bg-gradient-to-r from-amber-500 via-orange-600 to-rose-600 hover:from-amber-600 hover:to-rose-700 text-white rounded-xl text-xs font-black transition-all flex items-center justify-center gap-1.5 shadow-md shadow-orange-500/25 cursor-pointer group-hover:scale-102 active:scale-98"
+            >
+              <Trophy className="w-3.5 h-3.5" />
+              <span>دخول لتطبيق ألعاب القوى</span>
+            </button>
+          </div>
 
           {/* App 2: Electronic Draw Tool */}
           <div className="bg-white border border-slate-200 rounded-3xl p-5 shadow-xs flex flex-col justify-between hover:shadow-md transition-all">
@@ -588,9 +618,9 @@ export const HelperApps: React.FC = () => {
                 </span>
               </div>
 
-              <h4 className="text-sm font-black text-slate-900 mb-1">القرعة الإلكترونية وتوزيع المجموعات</h4>
+              <h4 className="text-sm font-black text-slate-900 mb-1">القرعة الإلكترونية وبرمجة المباريات</h4>
               <p className="text-xs text-slate-500 leading-relaxed font-medium mb-4">
-                توليد قرعة نزيهة وشفافة للفرق والمؤسسات المشاركة في المنافسات المدرسية مع توزيع المجموعات والمسارات عشوائياً.
+                فلترة البطولات حسب الرياضات الجماعية، إجراء القرعة التلقائية وتحديد مواعيد وملاعب وحكام المباريات.
               </p>
             </div>
 
@@ -603,34 +633,7 @@ export const HelperApps: React.FC = () => {
             </button>
           </div>
 
-          {/* App 3: Stopwatch Pro */}
-          <div className="bg-white border border-slate-200 rounded-3xl p-5 shadow-xs flex flex-col justify-between hover:shadow-md transition-all">
-            <div>
-              <div className="flex items-center justify-between mb-3">
-                <div className="w-12 h-12 rounded-2xl bg-emerald-50 border border-emerald-100 text-emerald-600 flex items-center justify-center shadow-xs">
-                  <Clock className="w-6 h-6" />
-                </div>
-                <span className="px-2 py-0.5 text-[10px] font-black bg-emerald-100 text-emerald-800 rounded-full border border-emerald-200">
-                  ساعة إلكترونية
-                </span>
-              </div>
-
-              <h4 className="text-sm font-black text-slate-900 mb-1">ساعة التوقيت الرقمية المتعددة (Stopwatch)</h4>
-              <p className="text-xs text-slate-500 leading-relaxed font-medium mb-4">
-                أداة توقيت دقيقة بالميلي ثانية مع تسجيل اللفات (Laps) وأزمنة المتسابقين في سباقات المضمار والميدان.
-              </p>
-            </div>
-
-            <button
-              onClick={() => setActiveSecondaryModal('stopwatch')}
-              className="w-full py-2.5 px-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 shadow-xs cursor-pointer"
-            >
-              <Timer className="w-3.5 h-3.5" />
-              <span>فتح ساعة التوقيت الرقمية</span>
-            </button>
-          </div>
-
-          {/* App 4: Bib Numbers Generator */}
+          {/* App 3: Bib Numbers Generator */}
           <div className="bg-white border border-slate-200 rounded-3xl p-5 shadow-xs flex flex-col justify-between hover:shadow-md transition-all">
             <div>
               <div className="flex items-center justify-between mb-3">
@@ -655,6 +658,31 @@ export const HelperApps: React.FC = () => {
             </button>
           </div>
 
+          {/* App 4: Bib Scanner App Card (Restored) */}
+          <div className="bg-white border border-slate-200 rounded-3xl p-5 shadow-xs flex flex-col justify-between hover:shadow-md transition-all">
+            <div>
+              <div className="flex items-center justify-between mb-3">
+                <BibScannerAppIcon size={48} />
+                <span className="px-2 py-0.5 text-[10px] font-black bg-blue-100 text-blue-800 rounded-full border border-blue-200">
+                  ماسح خط النهاية
+                </span>
+              </div>
+
+              <h4 className="text-sm font-black text-slate-900 mb-1">ماسح الصدريات لخط النهاية</h4>
+              <p className="text-xs text-slate-500 leading-relaxed font-medium mb-4">
+                تطبيق مخصص لقضاة وحكام خط النهاية لمسح أرقام صدريات العدائين بكاميرا الهاتف أو الإدخال اليدوي.
+              </p>
+            </div>
+
+            <button
+              onClick={() => handleOpenScanner(CROSS_COUNTRY_CATEGORIES[0])}
+              className="w-full py-2.5 px-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 shadow-xs cursor-pointer"
+            >
+              <Camera className="w-3.5 h-3.5" />
+              <span>تشغيل ماسح الصدريات</span>
+            </button>
+          </div>
+
         </div>
       </div>
 
@@ -672,82 +700,6 @@ export const HelperApps: React.FC = () => {
           </div>
         </div>
       </div>
-
-      {/* ========================================================================= */}
-      {/* ⏱️ MODAL 1: STOPWATCH PRO ⏱️ */}
-      {/* ========================================================================= */}
-      {activeSecondaryModal === 'stopwatch' && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 text-center animate-in fade-in zoom-in-95">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-4">
-              <div className="flex items-center gap-2">
-                <Timer className="w-5 h-5 text-emerald-600" />
-                <h3 className="text-sm font-black text-slate-900">ساعة التوقيت الرقمية المتعددة</h3>
-              </div>
-              <button 
-                onClick={() => setActiveSecondaryModal(null)}
-                className="text-slate-400 hover:text-slate-600 p-1 cursor-pointer"
-              >
-                ✕
-              </button>
-            </div>
-
-            {/* Time display */}
-            <div className="my-6 py-6 bg-slate-950 text-emerald-400 rounded-2xl font-mono text-4xl sm:text-5xl font-black tracking-wider shadow-inner">
-              {formatStopwatch(stopwatchTime)}
-            </div>
-
-            {/* Controls */}
-            <div className="flex items-center justify-center gap-3">
-              <button
-                onClick={() => setIsStopwatchRunning(!isStopwatchRunning)}
-                className={`flex-1 py-3 px-4 rounded-xl font-bold text-xs flex items-center justify-center gap-2 text-white shadow-md transition-all cursor-pointer ${
-                  isStopwatchRunning ? 'bg-amber-600 hover:bg-amber-700' : 'bg-emerald-600 hover:bg-emerald-700'
-                }`}
-              >
-                {isStopwatchRunning ? 'إيقاف مؤقت' : 'انطلاق / تشغيل'}
-              </button>
-
-              <button
-                onClick={() => {
-                  if (stopwatchTime > 0) {
-                    setLaps(prev => [stopwatchTime, ...prev]);
-                  }
-                }}
-                disabled={stopwatchTime === 0}
-                className="py-3 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-bold text-xs disabled:opacity-40 cursor-pointer"
-              >
-                تسجيل لفة (Lap)
-              </button>
-
-              <button
-                onClick={() => {
-                  setIsStopwatchRunning(false);
-                  setStopwatchTime(0);
-                  setLaps([]);
-                }}
-                className="p-3 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-xl cursor-pointer"
-                title="تصفير"
-              >
-                <RotateCcw className="w-4 h-4" />
-              </button>
-            </div>
-
-            {/* Laps list */}
-            {laps.length > 0 && (
-              <div className="mt-4 pt-4 border-t border-slate-100 max-h-40 overflow-y-auto space-y-1.5 text-right">
-                <span className="text-[10px] font-bold text-slate-400 block mb-1">سجل اللفات:</span>
-                {laps.map((lap, idx) => (
-                  <div key={idx} className="flex justify-between items-center text-xs bg-slate-50 px-3 py-1.5 rounded-lg font-mono">
-                    <span className="text-slate-500 font-sans font-bold">اللفة {laps.length - idx}</span>
-                    <span className="text-slate-900 font-black">{formatStopwatch(lap)}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
 
       {/* ========================================================================= */}
       {/* 🎲 MODAL 2: ADVANCED ELECTRONIC DRAW & MATCH SCHEDULING TOOL 🎲 */}
@@ -857,6 +809,22 @@ export const HelperApps: React.FC = () => {
             </div>
           </div>
         </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* 🏃‍♂️ MODAL: ATHLETICS CHAMPIONSHIP MANAGER (تدبير بطولة ألعاب القوى) 🏃‍♂️ */}
+      {/* ========================================================================= */}
+      {isAthleticsModalOpen && (
+        <AthleticsChampionshipModal
+          isOpen={isAthleticsModalOpen}
+          onClose={() => setIsAthleticsModalOpen(false)}
+          teachers={teachers}
+          schools={schools}
+          students={students}
+          currentUser={userProfile}
+          directorateName={userProfile?.directorateName || "المديرية الإقليمية"}
+          season="2026/2027"
+        />
       )}
     </div>
   );

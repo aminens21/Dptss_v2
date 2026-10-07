@@ -37,7 +37,8 @@ import {
   Settings,
   Star,
   LayoutGrid,
-  Table as TableIcon
+  Table as TableIcon,
+  Shuffle
 } from 'lucide-react';
 import { CreateMatchModal } from '../components/CreateMatchModal';
 import { ScoreModal } from '../components/ScoreModal';
@@ -48,8 +49,11 @@ import { EditTournamentModal } from '../components/EditTournamentModal';
 import { EditTournamentScheduleModal } from '../components/EditTournamentScheduleModal';
 import { RefereeMatchesView } from '../components/RefereeMatchesView';
 import { DemoDataModal } from '../components/DemoDataModal';
+import { ElectronicDrawModal } from '../components/ElectronicDrawModal';
 import { CrossCountryCategoryResult } from '../types';
 import { CROSS_COUNTRY_CATEGORIES, INITIAL_CROSS_COUNTRY_RESULTS } from '../lib/crossCountryConfig';
+import { AthleticsService } from '../lib/athleticsService';
+import { AthleticsEventResult } from '../lib/athleticsConfig';
 import { cn } from '../lib/utils';
 import toast from 'react-hot-toast';
 
@@ -63,6 +67,7 @@ export const Matches: React.FC = () => {
   const [teachers, setTeachers] = useState<User[]>([]);
   const [sportsConfig, setSportsConfig] = useState<Sport[]>([]);
   const [crossCountryResults, setCrossCountryResults] = useState<Record<string, CrossCountryCategoryResult>>(INITIAL_CROSS_COUNTRY_RESULTS);
+  const [athleticsResults, setAthleticsResults] = useState<Record<string, AthleticsEventResult>>(() => AthleticsService.getAllResults());
   const [activeSeason, setActiveSeason] = useState('2026/2027');
   const [loading, setLoading] = useState(true);
 
@@ -89,6 +94,8 @@ export const Matches: React.FC = () => {
   const [selectedSportForResults, setSelectedSportForResults] = useState<Sport | null>(null);
   const [isResultsModalOpen, setIsResultsModalOpen] = useState(false);
   const [isDemoDataModalOpen, setIsDemoDataModalOpen] = useState(false);
+  const [isDrawModalOpen, setIsDrawModalOpen] = useState(false);
+  const [selectedSportForDraw, setSelectedSportForDraw] = useState<string | undefined>(undefined);
 
   // Modals for Match / Tournament operations
   const [isCreateMatchOpen, setIsCreateMatchOpen] = useState(false);
@@ -249,7 +256,12 @@ export const Matches: React.FC = () => {
       }
     };
 
+    const handleAthleticsUpdate = () => {
+      setAthleticsResults(AthleticsService.getAllResults());
+    };
+
     window.addEventListener('crossCountryResultsUpdated', handleCCUpdate);
+    window.addEventListener('athleticsResultsUpdated', handleAthleticsUpdate);
     window.addEventListener('tournamentDataChanged', handleDataSync);
     window.addEventListener('matchesDataChanged', handleDataSync);
     window.addEventListener('sportsConfigChanged', handleDataSync);
@@ -265,6 +277,7 @@ export const Matches: React.FC = () => {
       window.removeEventListener('sportsConfigChanged', handleDataSync);
       window.removeEventListener('resultsChanged', handleDataSync);
       window.removeEventListener('crossCountryResultsUpdated', handleCCUpdate);
+      window.removeEventListener('athleticsResultsUpdated', handleAthleticsUpdate);
       bc.close();
       if (unsubscribeCC) unsubscribeCC();
       if (unsubscribeTournaments) unsubscribeTournaments();
@@ -488,8 +501,8 @@ export const Matches: React.FC = () => {
 
       // Determine if programmed / open
       // A sport is programmed only if active tournaments exist for it
-      const isProgrammed = sport.id === 'cross_country'
-        ? (tournaments.some(t => t.sportId === 'cross_country') || sportTournaments.length > 0)
+      let isProgrammed = (sport.id === 'cross_country' || sport.id === 'athletics' || sport.id === 'track_field')
+        ? (tournaments.some(t => t.sportId === sport.id) || sportTournaments.length > 0 || true)
         : (sportTournaments.length > 0);
 
       const sportMatches = isProgrammed ? matches.filter(m => {
@@ -577,6 +590,16 @@ export const Matches: React.FC = () => {
           totalMatches = 0;
           scheduledCount = 0;
         }
+      } else if (sport.id === 'athletics' || sport.id === 'track_field') {
+        const totalDisciplines = AthleticsService.getDisciplines().length;
+        const athCompleted = (Object.values(athleticsResults) as AthleticsEventResult[]).filter(r => r && r.status === 'completed').length;
+        const athOngoing = (Object.values(athleticsResults) as AthleticsEventResult[]).filter(r => r && r.status === 'running').length;
+
+        completedCount = athCompleted;
+        ongoingCount = athOngoing;
+        totalMatches = Math.max(totalDisciplines, athCompleted + athOngoing);
+        scheduledCount = Math.max(0, totalMatches - athCompleted - athOngoing);
+        isProgrammed = true;
       }
 
       const nonClubCount = sportMatches.filter(m => {
@@ -762,6 +785,20 @@ export const Matches: React.FC = () => {
 
           {/* Actions */}
           <div className="flex items-center gap-2">
+            {canCreate && (
+              <button
+                onClick={() => {
+                  setSelectedSportForDraw(undefined);
+                  setIsDrawModalOpen(true);
+                }}
+                className="inline-flex items-center justify-center gap-1.5 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 px-3.5 py-2 text-xs font-black text-white shadow-xs transition-colors cursor-pointer"
+                title="إجراء القرعة الإلكترونية وبرمجة المباريات وتعيين الحكام"
+              >
+                <Shuffle className="h-3.5 w-3.5" />
+                <span>القرعة الإلكترونية</span>
+              </button>
+            )}
+
             {!isTeacher && userProfile?.role !== 'TEACHER' && (
               <button
                 onClick={() => setIsDemoDataModalOpen(true)}
@@ -1521,6 +1558,19 @@ export const Matches: React.FC = () => {
                             type="button"
                             onClick={(e) => {
                               e.stopPropagation();
+                              setSelectedSportForDraw(sport.id);
+                              setIsDrawModalOpen(true);
+                            }}
+                            className="p-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 hover:text-emerald-900 border border-emerald-300 rounded-xl text-xs font-bold transition-colors cursor-pointer shrink-0 flex items-center justify-center shadow-3xs"
+                            title={`إجراء القرعة الإلكترونية لبطولة ${sport.name}`}
+                          >
+                            <Shuffle className="w-4 h-4" />
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
                               setSelectedSportForSchedule(sport);
                               setIsScheduleModalOpen(true);
                             }}
@@ -1790,6 +1840,17 @@ export const Matches: React.FC = () => {
         activeDirectorateName="المديرية الإقليمية بتاوريرت"
         activeSeason={activeSeason}
         onDataLoaded={loadData}
+      />
+      {/* Electronic Draw and Match Scheduling Modal */}
+      <ElectronicDrawModal
+        isOpen={isDrawModalOpen}
+        onClose={() => {
+          setIsDrawModalOpen(false);
+          setSelectedSportForDraw(undefined);
+        }}
+        currentUser={userProfile}
+        initialSportId={selectedSportForDraw}
+        onMatchesCreated={loadData}
       />
     </div>
   );
