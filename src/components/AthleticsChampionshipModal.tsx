@@ -42,8 +42,12 @@ import {
   Phone,
   School as SchoolIcon,
   User as UserIcon,
-  CheckCircle
+  Filter,
+  CheckCircle,
+  Sun,
+  Moon
 } from 'lucide-react';
+import { useTheme } from '../contexts/ThemeContext';
 import {
   AthleticsCommitteeDef,
   AthleticsDisciplineDef,
@@ -82,6 +86,7 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
   directorateName = 'المديرية الإقليمية تاوريرت',
   season = '2026/2027'
 }) => {
+  const { isDarkMode, toggleDarkMode } = useTheme();
   // Role determination
   const isSuperOrAdmin = currentUser?.isSuperAdmin === true || 
                          currentUser?.role === 'SUPER_ADMIN' || 
@@ -237,7 +242,10 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
   // Core Effective Role determination:
   const effectiveRole = useMemo(() => {
     if (activeRoleMode !== 'AUTO') return activeRoleMode;
-    if (isTeacher) return 'TEACHER';
+    if (isSuperOrAdmin) return 'ADMIN';
+    
+    // If teacher is assigned to a committee, they get that committee's role
+    // BUT we will ensure they keep their teacher tabs below in allowedTabs
     if (currentUser) {
       for (const [cId, assign] of Object.entries(assignments) as [string, AthleticsCommitteeAssignment][]) {
         if (assign.teacherId === currentUser.id || assign.teacherName === currentUser.fullName ||
@@ -246,31 +254,46 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
         }
       }
     }
-    return isSuperOrAdmin ? 'ADMIN' : (currentUser?.role === 'TEACHER' ? 'TEACHER' : 'ADMIN');
+    return isTeacher ? 'TEACHER' : 'ADMIN';
   }, [activeRoleMode, isTeacher, isSuperOrAdmin, currentUser, assignments]);
 
   const activeCommitteePermissionDef = useMemo(() => {
-    if (effectiveRole === 'ADMIN' || effectiveRole === 'TEACHER') return null;
+    if (effectiveRole === 'ADMIN' || (effectiveRole === 'TEACHER' && isTeacher)) return null;
     return committees.find(c => c.id === effectiveRole) || null;
-  }, [effectiveRole, committees]);
+  }, [effectiveRole, committees, isTeacher]);
 
   // Allowed tabs based on effective role / committee permission
   const allowedTabs = useMemo<AthleticsTab[]>(() => {
-    if (effectiveRole === 'TEACHER') {
-      return ['school_registration', 'my_participations'];
+    const tabs: AthleticsTab[] = [];
+    
+    // Teachers ALWAYS get their base tabs regardless of committee assignment
+    if (isTeacher) {
+      tabs.push('school_registration', 'my_participations');
     }
+
     if (effectiveRole === 'ADMIN') {
       return ['school_registration', 'my_participations', 'events', 'committees', 'stopwatch', 'field', 'podium'];
     }
+    
     if (activeCommitteePermissionDef) {
-      const tabs = (activeCommitteePermissionDef.permissions?.allowedTabs as AthleticsTab[]) || [];
-      if (tabs.length > 0) return tabs;
-      if (activeCommitteePermissionDef.id === 'podium_committee') return ['podium'];
-      if (activeCommitteePermissionDef.id === 'long_jump_committee' || activeCommitteePermissionDef.id === 'shot_put_committee') return ['field'];
-      return ['stopwatch'];
+      const commTabs = (activeCommitteePermissionDef.permissions?.allowedTabs as AthleticsTab[]) || [];
+      commTabs.forEach(t => {
+        if (!tabs.includes(t)) tabs.push(t);
+      });
+      
+      // Fallbacks if no tabs defined
+      if (tabs.length === (isTeacher ? 2 : 0)) {
+        if (activeCommitteePermissionDef.id === 'podium_committee') tabs.push('podium');
+        else if (activeCommitteePermissionDef.id === 'long_jump_committee' || activeCommitteePermissionDef.id === 'shot_put_committee') tabs.push('field');
+        else tabs.push('stopwatch');
+      }
+      return tabs;
     }
+    
+    if (effectiveRole === 'TEACHER') return ['school_registration', 'my_participations'];
+    
     return ['school_registration', 'events', 'committees', 'stopwatch', 'field', 'podium'];
-  }, [effectiveRole, activeCommitteePermissionDef]);
+  }, [effectiveRole, activeCommitteePermissionDef, isTeacher]);
 
   // Ensure activeTab stays in sync with allowed tabs
   useEffect(() => {
@@ -992,7 +1015,18 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
     setAssignments(AthleticsService.getCommitteeAssignments());
     setParticipants(AthleticsService.getParticipants());
     setResults(AthleticsService.getAllResults());
-    toast.success(`تم بنجاح تحميل البيانات الافتراضية (${res.disciplinesCount} مسابقة، ${res.committeesCount} لجان بما فيها لجنة التتويج، و${res.participantsCount} مشارك)`);
+    toast.success(`تم بنجاح تحميل البيانات الافتراضية الشاملة (${res.disciplinesCount} مسابقة، ${res.committeesCount} لجان، و${res.participantsCount} مشارك)`);
+  };
+
+  const handleLoadSchoolDemoData = () => {
+    const school = (isTeacher ? detectedTeacherSchool : selectedSchoolForView) || 'المؤسسة التعليمية';
+    if (!school || school === 'ALL') {
+      toast.error('يرجى اختيار مؤسسة تعليمية محددة أولاً');
+      return;
+    }
+    const res = AthleticsService.loadDefaultSchoolData(school);
+    setParticipants(AthleticsService.getParticipants());
+    toast.success(`تم بنجاح توليد ${res.participantsCount} مشارك افتراضي لمؤسسة «${school}»`);
   };
 
   const handleOpenCommitteePermissionsModal = (comm: AthleticsCommitteeDef) => {
@@ -1073,12 +1107,12 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-2 sm:p-4 overflow-y-auto" dir="rtl">
-      <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-7xl h-[92vh] flex flex-col shadow-2xl overflow-hidden text-slate-100">
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl w-full max-w-7xl h-[92vh] flex flex-col shadow-2xl overflow-hidden text-slate-900 dark:text-slate-100 transition-colors duration-300">
         
         {/* ========================================================================= */}
         {/* MODAL HEADER WITH APP IDENTITY & SETTINGS BUTTON */}
         {/* ========================================================================= */}
-        <div className="bg-gradient-to-r from-blue-900 via-slate-900 to-indigo-950 border-b border-slate-800 px-4 sm:px-6 py-3.5 flex items-center justify-between shrink-0">
+        <div className="bg-gradient-to-r from-blue-700 via-slate-700 to-indigo-900 dark:from-blue-900 dark:via-slate-900 dark:to-indigo-950 border-b border-slate-200 dark:border-slate-800 px-4 sm:px-6 py-3.5 flex items-center justify-between shrink-0 transition-colors">
           <div className="flex items-center gap-3">
             <div className="w-11 h-11 rounded-2xl bg-gradient-to-tr from-amber-500 via-orange-500 to-rose-600 text-white flex items-center justify-center shadow-lg shadow-orange-500/20 text-2xl font-black">
               🏃‍♂️
@@ -1088,7 +1122,7 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                 <h2 className="text-base sm:text-lg font-black text-white">
                   تدبير البطولة المدرسية لألعاب القوى (Athletics Manager)
                 </h2>
-                <span className="px-2.5 py-0.5 text-[10px] font-black bg-amber-500/20 text-amber-300 border border-amber-500/30 rounded-full">
+                <span className="px-2.5 py-0.5 text-[10px] font-black bg-white/20 dark:bg-amber-500/20 text-white dark:text-amber-300 border border-white/30 dark:border-amber-500/30 rounded-full">
                   الموسم الرياضي {season}
                 </span>
 
@@ -1096,15 +1130,15 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                 {currentUser && (
                   <span className={`px-2 py-0.5 text-[10px] font-bold rounded-lg border flex items-center gap-1 ${
                     userAccess.canManage
-                      ? 'bg-emerald-950/80 text-emerald-300 border-emerald-800'
-                      : 'bg-amber-950/80 text-amber-300 border-amber-800'
+                      ? 'bg-emerald-500/20 dark:bg-emerald-950/80 text-white dark:text-emerald-300 border-emerald-400/30 dark:border-emerald-800'
+                      : 'bg-amber-500/20 dark:bg-amber-950/80 text-white dark:text-amber-300 border-amber-400/30 dark:border-amber-800'
                   }`}>
-                    {userAccess.canManage ? <Unlock className="w-3 h-3 text-emerald-400" /> : <Lock className="w-3 h-3 text-amber-400" />}
+                    {userAccess.canManage ? <Unlock className="w-3 h-3 text-emerald-200 dark:text-emerald-400" /> : <Lock className="w-3 h-3 text-amber-200 dark:text-amber-400" />}
                     <span>{userAccess.canManage ? 'صلاحية التحكيم مفعلة' : 'وضع القراءة فقط'}</span>
                   </span>
                 )}
               </div>
-              <p className="text-xs text-slate-300 font-medium">
+              <p className="text-xs text-white/80 dark:text-slate-300 font-medium">
                 إدارة اللجان، توزيع مهام الأساتذة، تسجيل المشاركين، والميقاتي الذكي للسباقات
               </p>
             </div>
@@ -1112,15 +1146,18 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
 
           <div className="flex items-center gap-2 flex-wrap">
             
-            {/* Admin Controls consolidated into Settings */}
-            {effectiveRole === 'ADMIN' && (
+            {/* Admin/Teacher Controls consolidated into Settings */}
+            {(effectiveRole === 'ADMIN' || isTeacher) && (
               <button
-                onClick={() => setIsSettingsModalOpen(true)}
-                className="px-4 py-2 bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-600 hover:to-orange-700 text-white rounded-xl text-xs font-black flex items-center gap-2 shadow-lg shadow-orange-500/20 transition-all cursor-pointer group active:scale-95"
-                title="إعدادات اللجان والمسابقات، مزامنة البيانات، وتحميل البيانات الافتراضية"
+                onClick={() => {
+                  setIsSettingsModalOpen(true);
+                  if (isTeacher) setSettingsActiveTab('auto_import');
+                }}
+                className="px-4 py-2 bg-gradient-to-r from-slate-700 to-slate-800 hover:from-slate-600 hover:to-slate-700 text-white border border-slate-600 rounded-xl text-xs font-black flex items-center gap-2 shadow-lg transition-all cursor-pointer group active:scale-95"
+                title="إعدادات وأدوات التحكم، مزامنة البيانات، وتحميل البيانات الافتراضية"
               >
-                <SettingsIcon className="w-4 h-4 group-hover:rotate-45 transition-transform" />
-                <span>الإعدادات والتحكم</span>
+                <SettingsIcon className="w-4 h-4 group-hover:rotate-45 transition-transform text-amber-400" />
+                <span>{effectiveRole === 'ADMIN' ? 'الإعدادات والتحكم' : 'أدوات التحكم'}</span>
               </button>
             )}
 
@@ -1159,6 +1196,19 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
               </>
             )}
 
+            {/* Theme Toggle Button */}
+            <button
+              onClick={toggleDarkMode}
+              className="p-2 bg-slate-100 dark:bg-slate-800/50 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white rounded-xl transition-all cursor-pointer group active:scale-90 border border-slate-200 dark:border-slate-700 shadow-sm dark:shadow-none"
+              title={isDarkMode ? 'التحويل للوضع النهاري' : 'التحويل للوضع الليلي'}
+            >
+              {isDarkMode ? (
+                <Sun className="w-5 h-5 text-amber-400 group-hover:rotate-45 transition-transform" />
+              ) : (
+                <Moon className="w-5 h-5 text-indigo-500 group-hover:-rotate-12 transition-transform" />
+              )}
+            </button>
+
             <button
               onClick={onClose}
               className="p-2 hover:bg-slate-800 text-slate-400 hover:text-white rounded-xl transition-colors cursor-pointer"
@@ -1190,7 +1240,7 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
         {/* ========================================================================= */}
         {/* TOP TAB NAVIGATION BAR */}
         {/* ========================================================================= */}
-        <div className="bg-slate-950 px-4 sm:px-6 py-2 border-b border-slate-800 flex items-center justify-between gap-2 overflow-x-auto shrink-0 scrollbar-none">
+        <div className="bg-slate-100 dark:bg-slate-950 px-4 sm:px-6 py-2 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between gap-2 overflow-x-auto shrink-0 scrollbar-none transition-colors">
           <div className="flex items-center gap-1.5">
             {allowedTabs.includes('school_registration') && (
               <button
@@ -1198,10 +1248,10 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                 className={`px-3.5 py-2 rounded-xl text-xs font-black transition-all flex items-center gap-2 cursor-pointer ${
                   activeTab === 'school_registration'
                     ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/25 ring-2 ring-emerald-400/40'
-                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+                    : 'text-slate-500 dark:text-slate-400 hover:text-emerald-700 dark:hover:text-slate-200 hover:bg-white dark:hover:bg-slate-800'
                 }`}
               >
-                <Building className="w-4 h-4 text-emerald-200" />
+                <Building className="w-4 h-4 text-emerald-600 dark:text-emerald-200" />
                 <span>{effectiveRole === 'TEACHER' ? 'تسجيل مشاركي المؤسسة' : 'لوائح ومشاركو المؤسسات'}</span>
               </button>
             )}
@@ -1212,10 +1262,10 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                 className={`px-3.5 py-2 rounded-xl text-xs font-black transition-all flex items-center gap-2 cursor-pointer ${
                   activeTab === 'my_participations'
                     ? 'bg-purple-600 text-white shadow-md shadow-purple-600/25 ring-2 ring-purple-400/40'
-                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+                    : 'text-slate-500 dark:text-slate-400 hover:text-purple-700 dark:hover:text-slate-200 hover:bg-white dark:hover:bg-slate-800'
                 }`}
               >
-                <UserCheck className="w-4 h-4 text-purple-200" />
+                <UserCheck className="w-4 h-4 text-purple-600 dark:text-purple-200" />
                 <span>مشاركاتي ونتائج تلاميذي</span>
               </button>
             )}
@@ -1295,13 +1345,13 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
 
           {/* Quick Active Event Summary Pill */}
           {activeDiscipline && (
-            <div className="hidden lg:flex items-center gap-2 bg-slate-900 border border-slate-800 px-3 py-1.5 rounded-xl text-xs">
-              <span className="text-slate-400">المسابقة:</span>
-              <span className="font-black text-amber-400">{activeDiscipline.nameAr}</span>
-              <span className="text-slate-600">•</span>
-              <span className="font-bold text-blue-400">{selectedCategory}</span>
-              <span className="text-slate-600">•</span>
-              <span className="font-bold text-pink-400">{selectedGender === 'Male' ? 'ذكور' : 'إناث'}</span>
+            <div className="hidden lg:flex items-center gap-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 px-3 py-1.5 rounded-xl text-xs shadow-sm dark:shadow-none">
+              <span className="text-slate-500 dark:text-slate-400">المسابقة:</span>
+              <span className="font-black text-amber-600 dark:text-amber-400">{activeDiscipline.nameAr}</span>
+              <span className="text-slate-300 dark:text-slate-600">•</span>
+              <span className="font-bold text-blue-600 dark:text-blue-400">{selectedCategory}</span>
+              <span className="text-slate-300 dark:text-slate-600">•</span>
+              <span className="font-bold text-rose-500 dark:text-pink-400">{selectedGender === 'Male' ? 'ذكور' : 'إناث'}</span>
             </div>
           )}
         </div>
@@ -1331,24 +1381,24 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
           {/* ======================================================================= */}
           {activeTab === 'my_participations' && (
             <div className="space-y-6">
-              <div className="bg-gradient-to-r from-purple-900/40 to-indigo-900/40 border border-purple-500/30 rounded-3xl p-6 relative overflow-hidden">
+              <div className="bg-gradient-to-r from-purple-50 dark:from-purple-900/40 to-indigo-50 dark:to-indigo-900/40 border border-purple-100 dark:border-purple-500/30 rounded-3xl p-6 relative overflow-hidden transition-colors shadow-sm dark:shadow-none">
                 <div className="absolute top-0 right-0 p-4 opacity-10 rotate-12">
-                  <Trophy className="w-32 h-32" />
+                  <Trophy className="w-32 h-32 text-purple-600 dark:text-white" />
                 </div>
                 <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-4">
                   <div>
-                    <h3 className="text-xl font-black text-white flex items-center gap-2">
-                      <UserCheck className="w-6 h-6 text-purple-400" />
+                    <h3 className="text-xl font-black text-slate-900 dark:text-white flex items-center gap-2">
+                      <UserCheck className="w-6 h-6 text-purple-600 dark:text-purple-400" />
                       <span>تتبع مشاركات ونتائج تلاميذ مؤسسة: «{detectedTeacherSchool || 'مؤسستي'}»</span>
                     </h3>
-                    <p className="text-sm text-purple-200/70 mt-1">
+                    <p className="text-sm text-purple-700/70 dark:text-purple-200/70 mt-1">
                       يمكنك هنا متابعة حالة تلاميذك في مختلف المسابقات والاطلاع على النتائج المحققة فور المصادقة عليها.
                     </p>
                   </div>
                   <div className="flex items-center gap-3">
-                    <div className="bg-slate-900/60 px-4 py-2 rounded-2xl border border-purple-500/20 text-center">
-                      <span className="text-[10px] text-purple-300 block font-bold uppercase tracking-wider">إجمالي المشاركات</span>
-                      <span className="text-xl font-black text-white">{currentSchoolParticipants.length}</span>
+                    <div className="bg-white/80 dark:bg-slate-900/60 px-4 py-2 rounded-2xl border border-purple-200 dark:border-purple-500/20 text-center shadow-sm dark:shadow-none">
+                      <span className="text-[10px] text-purple-600 dark:text-purple-300 block font-bold uppercase tracking-wider">إجمالي المشاركات</span>
+                      <span className="text-xl font-black text-slate-900 dark:text-white">{currentSchoolParticipants.length}</span>
                     </div>
                   </div>
                 </div>
@@ -1367,18 +1417,18 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                   );
 
                   return (
-                    <div key={participant.id} className="bg-slate-950 border border-slate-800 rounded-2xl overflow-hidden flex flex-col shadow-lg hover:border-purple-500/40 transition-all group">
-                      <div className="p-4 border-b border-slate-800 flex items-center justify-between bg-slate-900/50">
+                    <div key={participant.id} className="bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden flex flex-col shadow-lg dark:shadow-purple-500/5 hover:border-purple-500/40 transition-all group">
+                      <div className="p-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-slate-50 dark:bg-slate-900/50">
                         <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 rounded-full bg-slate-800 flex items-center justify-center text-xl font-black border border-slate-700 text-purple-400">
+                          <div className="w-10 h-10 rounded-full bg-white dark:bg-slate-800 flex items-center justify-center text-xl font-black border border-slate-200 dark:border-slate-700 text-purple-600 dark:text-purple-400 shadow-sm">
                             {participant.studentName.charAt(0)}
                           </div>
                           <div>
-                            <h4 className="text-sm font-black text-white leading-tight">{participant.studentName}</h4>
-                            <span className="text-[10px] text-slate-500 font-bold uppercase">صدريـة: {participant.bibNumber} • {participant.category} • {participant.gender === 'Male' ? 'ذكر' : 'أنثى'}</span>
+                            <h4 className="text-sm font-black text-slate-900 dark:text-white leading-tight">{participant.studentName}</h4>
+                            <span className="text-[10px] text-slate-500 dark:text-slate-500 font-bold uppercase">صدريـة: {participant.bibNumber} • {participant.category} • {participant.gender === 'Male' ? 'ذكر' : 'أنثى'}</span>
                           </div>
                         </div>
-                        <div className="bg-purple-500/10 text-purple-400 px-2 py-1 rounded-lg text-[10px] font-black border border-purple-500/20">
+                        <div className="bg-purple-100 dark:bg-purple-500/10 text-purple-700 dark:text-purple-400 px-2 py-1 rounded-lg text-[10px] font-black border border-purple-200 dark:border-purple-500/20">
                           تلميذ مشارك
                         </div>
                       </div>
@@ -1386,18 +1436,18 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                       <div className="p-4 flex-1 space-y-4">
                         {/* Discipline 1 */}
                         <div className="space-y-2">
-                          <div className="flex items-center justify-between text-[10px] font-bold text-slate-400">
+                          <div className="flex items-center justify-between text-[10px] font-bold text-slate-500 dark:text-slate-400">
                             <span className="flex items-center gap-1">
                               {disc1?.icon} المسابقة الأساسية:
                             </span>
-                            <span className="text-blue-400">{disc1?.nameAr}</span>
+                            <span className="text-blue-600 dark:text-blue-400">{disc1?.nameAr}</span>
                           </div>
                           
                           {/* Result for Disc 1 */}
                           {(() => {
                             const res = pResults.find(r => r.disciplineId === participant.disciplineId);
                             if (!res) return (
-                              <div className="flex items-center gap-2 text-[10px] bg-slate-900 p-2 rounded-xl border border-slate-800 text-slate-500 italic">
+                              <div className="flex items-center gap-2 text-[10px] bg-slate-50 dark:bg-slate-900 p-2 rounded-xl border border-slate-100 dark:border-slate-800 text-slate-400 dark:text-slate-500 italic">
                                 <Timer className="w-3 h-3" />
                                 <span>في انتظار انطلاق المنافسة...</span>
                               </div>
@@ -1406,27 +1456,27 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                             if (res.type === 'track') {
                               const entry = res.trackLaps?.find(l => l.participantId === participant.id);
                               return (
-                                <div className="flex items-center justify-between bg-emerald-500/5 p-2 rounded-xl border border-emerald-500/20">
+                                <div className="flex items-center justify-between bg-emerald-50 dark:bg-emerald-500/5 p-2 rounded-xl border border-emerald-100 dark:border-emerald-500/20">
                                   <div className="flex items-center gap-2">
-                                    <div className={`w-6 h-6 rounded-lg flex items-center justify-center text-xs font-black ${entry?.rank === 1 ? 'bg-amber-500 text-white' : entry?.rank === 2 ? 'bg-slate-300 text-slate-900' : entry?.rank === 3 ? 'bg-orange-400 text-white' : 'bg-slate-800 text-slate-400'}`}>
+                                    <div className={`w-6 h-6 rounded-lg flex items-center justify-center text-xs font-black ${entry?.rank === 1 ? 'bg-amber-500 text-white shadow-md' : entry?.rank === 2 ? 'bg-slate-200 dark:bg-slate-300 text-slate-700 dark:text-slate-900' : entry?.rank === 3 ? 'bg-orange-400 text-white shadow-sm' : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400'}`}>
                                       {entry?.rank || '-'}
                                     </div>
-                                    <span className="text-xs font-black text-emerald-400">{entry?.formattedTime}</span>
+                                    <span className="text-xs font-black text-emerald-600 dark:text-emerald-400">{entry?.formattedTime}</span>
                                   </div>
-                                  <span className="text-[10px] font-bold text-slate-500">الرتبة النهائية</span>
+                                  <span className="text-[10px] font-bold text-slate-500 dark:text-slate-500">الرتبة النهائية</span>
                                 </div>
                               );
                             } else {
                               const entry = res.fieldAttempts?.find(a => a.participantId === participant.id);
                               return (
-                                <div className="flex items-center justify-between bg-emerald-500/5 p-2 rounded-xl border border-emerald-500/20">
+                                <div className="flex items-center justify-between bg-emerald-50 dark:bg-emerald-500/5 p-2 rounded-xl border border-emerald-100 dark:border-emerald-500/20">
                                   <div className="flex items-center gap-2">
-                                    <div className={`w-6 h-6 rounded-lg flex items-center justify-center text-xs font-black ${entry?.rank === 1 ? 'bg-amber-500 text-white' : entry?.rank === 2 ? 'bg-slate-300 text-slate-900' : entry?.rank === 3 ? 'bg-orange-400 text-white' : 'bg-slate-800 text-slate-400'}`}>
+                                    <div className={`w-6 h-6 rounded-lg flex items-center justify-center text-xs font-black ${entry?.rank === 1 ? 'bg-amber-500 text-white shadow-md' : entry?.rank === 2 ? 'bg-slate-200 dark:bg-slate-300 text-slate-700 dark:text-slate-900' : entry?.rank === 3 ? 'bg-orange-400 text-white shadow-sm' : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400'}`}>
                                       {entry?.rank || '-'}
                                     </div>
-                                    <span className="text-xs font-black text-emerald-400">{entry?.bestMark} {entry?.unit || 'م'}</span>
+                                    <span className="text-xs font-black text-emerald-600 dark:text-emerald-400">{entry?.bestMark} {entry?.unit || 'م'}</span>
                                   </div>
-                                  <span className="text-[10px] font-bold text-slate-500">أفضل علامة</span>
+                                  <span className="text-[10px] font-bold text-slate-500 dark:text-slate-500">أفضل علامة</span>
                                 </div>
                               );
                             }
@@ -1586,8 +1636,18 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                     </div>
                   </div>
 
-                  {/* Action Buttons: Add, Print, Excel */}
+                    {/* Action Buttons: Add, Print, Excel, MockData */}
                   <div className="flex items-center gap-2.5 flex-wrap w-full lg:w-auto">
+                    <button
+                      type="button"
+                      onClick={handleLoadSchoolDemoData}
+                      className="px-4 py-2.5 bg-purple-600/20 hover:bg-purple-600 text-purple-300 hover:text-white border border-purple-500/30 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                      title="ملأ لائحة المؤسسة ببيانات افتراضية للتجربة"
+                    >
+                      <Sparkles className="w-4 h-4 text-amber-300" />
+                      <span>بيانات افتراضية</span>
+                    </button>
+
                     <button
                       type="button"
                       onClick={handleOpenAddSchoolParticipant}
@@ -1842,10 +1902,10 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
             <div className="space-y-6">
               
               {/* Filter Bar: Category & Gender */}
-              <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800 flex flex-wrap items-center justify-between gap-4">
+              <div className="bg-white dark:bg-slate-950 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-4 transition-colors">
                 <div className="flex items-center gap-3">
-                  <span className="text-xs font-black text-slate-300">الفئة العمرية:</span>
-                  <div className="flex items-center gap-1.5 bg-slate-900 p-1 rounded-xl border border-slate-800">
+                  <span className="text-xs font-black text-slate-700 dark:text-slate-300">الفئة العمرية:</span>
+                  <div className="flex items-center gap-1.5 bg-slate-100 dark:bg-slate-900 p-1 rounded-xl border border-slate-200 dark:border-slate-800">
                     {(['U12', 'U15', 'U18', 'U20'] as const).map(cat => (
                       <button
                         key={cat}
@@ -1853,7 +1913,7 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                         className={`px-3 py-1 rounded-lg text-xs font-black transition-all cursor-pointer ${
                           selectedCategory === cat
                             ? 'bg-blue-600 text-white shadow-xs'
-                            : 'text-slate-400 hover:text-white'
+                            : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                         }`}
                       >
                         {cat === 'U12' ? 'براعم (U12)' : cat === 'U15' ? 'صغار (U15)' : cat === 'U18' ? 'فتيان (U18)' : 'شبان (U20)'}
@@ -1863,14 +1923,14 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                 </div>
 
                 <div className="flex items-center gap-3">
-                  <span className="text-xs font-black text-slate-300">الجنس:</span>
-                  <div className="flex items-center gap-1.5 bg-slate-900 p-1 rounded-xl border border-slate-800">
+                  <span className="text-xs font-black text-slate-700 dark:text-slate-300">الجنس:</span>
+                  <div className="flex items-center gap-1.5 bg-slate-100 dark:bg-slate-900 p-1 rounded-xl border border-slate-200 dark:border-slate-800">
                     <button
                       onClick={() => setSelectedGender('Male')}
                       className={`px-3.5 py-1 rounded-lg text-xs font-black transition-all cursor-pointer ${
                         selectedGender === 'Male'
                           ? 'bg-blue-600 text-white shadow-xs'
-                          : 'text-slate-400 hover:text-white'
+                          : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                       }`}
                     >
                       🏃‍♂️ ذكور
@@ -1880,7 +1940,7 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                       className={`px-3.5 py-1 rounded-lg text-xs font-black transition-all cursor-pointer ${
                         selectedGender === 'Female'
                           ? 'bg-pink-600 text-white shadow-xs'
-                          : 'text-slate-400 hover:text-white'
+                          : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                       }`}
                     >
                       🏃‍♀️ إناث
@@ -1914,8 +1974,8 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                       }}
                       className={`p-5 rounded-2xl border transition-all cursor-pointer flex flex-col justify-between group relative overflow-hidden ${
                         isSelected
-                          ? 'bg-slate-800/90 border-blue-500 shadow-lg ring-2 ring-blue-500/20'
-                          : 'bg-slate-950 hover:bg-slate-850 border-slate-800'
+                          ? 'bg-blue-50 dark:bg-slate-800/90 border-blue-500 shadow-lg ring-2 ring-blue-500/20'
+                          : 'bg-white dark:bg-slate-950 hover:bg-slate-50 dark:hover:bg-slate-850 border-slate-200 dark:border-slate-800'
                       }`}
                     >
                       <div>
@@ -1924,8 +1984,8 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                           <div className="flex items-center gap-1.5">
                             <span className={`text-[10px] font-black px-2 py-0.5 rounded-full border ${
                               isCompleted
-                                ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
-                                : 'bg-slate-800 text-slate-400 border-slate-700'
+                                ? 'bg-emerald-50 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-500/30'
+                                : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-700'
                             }`}>
                               {isCompleted ? '✓ معتمد بالنتائج' : 'مفتوح للتحكيم'}
                             </span>
@@ -1938,48 +1998,48 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                                     setIsSettingsModalOpen(true);
                                     setSettingsActiveTab('disciplines');
                                   }}
-                                  className="p-1 bg-amber-500/10 hover:bg-amber-500 text-amber-300 hover:text-white rounded-lg transition-colors border border-amber-500/30 cursor-pointer"
+                                  className="p-1.5 text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors"
                                   title="تعديل هذا السباق"
                                 >
-                                  <Edit2 className="w-3 h-3" />
+                                  <Edit2 className="w-3.5 h-3.5" />
                                 </button>
                                 <button
                                   type="button"
                                   onClick={() => handleDeleteDiscipline(disc)}
-                                  className="p-1 bg-rose-500/10 hover:bg-rose-500 text-rose-300 hover:text-white rounded-lg transition-colors border border-rose-500/30 cursor-pointer"
+                                  className="p-1.5 text-slate-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors"
                                   title="حذف هذا السباق"
                                 >
-                                  <Trash2 className="w-3 h-3" />
+                                  <Trash2 className="w-3.5 h-3.5" />
                                 </button>
                               </div>
                             )}
                           </div>
                         </div>
 
-                        <h3 className="text-base font-black text-white group-hover:text-blue-400 transition-colors">
+                        <h3 className={`text-base font-black transition-colors ${isSelected ? 'text-blue-700 dark:text-white' : 'text-slate-900 dark:text-white group-hover:text-blue-600 dark:group-hover:text-blue-400'}`}>
                           {disc.nameAr}
                         </h3>
-                        <p className="text-xs text-slate-400 font-medium mt-0.5">
+                        <p className="text-xs text-slate-500 dark:text-slate-400 font-medium mt-0.5">
                           {disc.nameFr} • {disc.distanceOrUnit}
                         </p>
 
-                        <div className="mt-3 pt-3 border-t border-slate-800/80 space-y-1.5 text-xs text-slate-400">
+                        <div className="mt-3 pt-3 border-t border-slate-100 dark:border-slate-800/80 space-y-1.5 text-xs text-slate-500 dark:text-slate-400">
                           <div className="flex items-center justify-between">
                             <span>اللجنة المشرفة:</span>
-                            <span className="font-bold text-amber-300">{committee?.titleAr.replace('لجنة ', '')}</span>
+                            <span className="font-bold text-amber-600 dark:text-amber-300">{committee?.titleAr.replace('لجنة ', '')}</span>
                           </div>
                           <div className="flex items-center justify-between">
                             <span>الأستاذ المسؤول:</span>
-                            <span className="font-bold text-slate-200">{assignment?.teacherName || 'لم يعين بعد'}</span>
+                            <span className="font-bold text-slate-700 dark:text-slate-200">{assignment?.teacherName || 'لم يعين بعد'}</span>
                           </div>
                         </div>
                       </div>
 
-                      <div className="mt-4 pt-3 border-t border-slate-800 flex items-center justify-between">
-                        <span className="text-[11px] font-bold text-slate-400">
+                      <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between">
+                        <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400">
                           {partCount} مشارك مسجل
                         </span>
-                        <div className="flex items-center gap-1 text-xs font-black text-blue-400 group-hover:translate-x-[-2px] transition-transform">
+                        <div className="flex items-center gap-1 text-xs font-black text-blue-600 dark:text-blue-400 group-hover:translate-x-[-2px] transition-transform">
                           <span>{disc.type.startsWith('track') ? 'فتح الميقاتي' : 'إدخال المحاولات'}</span>
                           <ChevronRight className="w-3.5 h-3.5" />
                         </div>
@@ -1996,13 +2056,13 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
           {/* ======================================================================= */}
           {activeTab === 'committees' && (
             <div className="space-y-6">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-950 p-4 rounded-2xl border border-slate-800">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white dark:bg-slate-950 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 transition-colors">
                 <div>
-                  <h3 className="text-base font-black text-white flex items-center gap-2">
+                  <h3 className="text-base font-black text-slate-900 dark:text-white flex items-center gap-2">
                     <Users className="w-5 h-5 text-amber-500" />
                     <span>اللجان وتوزيع المهام على الأساتذة المؤطرين</span>
                   </h3>
-                  <p className="text-xs text-slate-400 mt-0.5">
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
                     الأساتذة يتم استدعاؤهم مباشرة من قاعدة بيانات الأطر المسجلة مع تحديد دور ومهمة كل أستاذ في لجنته
                   </p>
                 </div>
@@ -2012,7 +2072,7 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                     setIsSettingsModalOpen(true);
                     setSettingsActiveTab('committees');
                   }}
-                  className="px-3.5 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 self-start sm:self-auto cursor-pointer"
+                  className="px-3.5 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 self-start sm:self-auto cursor-pointer shadow-md transition-all active:scale-95"
                 >
                   <Edit2 className="w-3.5 h-3.5" />
                   <span>تعديل اللجان والمهام</span>
@@ -2024,44 +2084,43 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                 {committees.map(comm => {
                   const assignment = assignments[comm.id];
                   const commDisciplines = disciplines.filter(d => d.committeeId === comm.id);
-                  const totalCommParticipants = participants.filter(p => comm.disciplines.includes(p.disciplineId)).length;
                   const members = assignment?.members || [];
 
                   return (
                     <div
                       key={comm.id}
-                      className="bg-slate-950 border border-slate-800 rounded-3xl p-5 flex flex-col justify-between hover:border-slate-700 transition-all relative overflow-hidden"
+                      className="bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 flex flex-col justify-between hover:border-blue-300 dark:hover:border-slate-700 transition-all relative overflow-hidden shadow-sm hover:shadow-md"
                     >
                       <div>
                         {/* Header */}
                         <div className="flex items-start justify-between gap-3 mb-3">
                           <div className="flex items-center gap-3">
-                            <span className="text-3xl p-2.5 bg-slate-900 border border-slate-800 rounded-2xl">
+                            <span className="text-3xl p-2.5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl">
                               {comm.icon}
                             </span>
                             <div>
-                              <h4 className="text-base font-black text-white">{comm.titleAr}</h4>
-                              <p className="text-xs text-slate-400 font-mono">{comm.titleFr}</p>
+                              <h4 className="text-base font-black text-slate-900 dark:text-white">{comm.titleAr}</h4>
+                              <p className="text-[10px] text-slate-400 font-mono uppercase tracking-wider">{comm.titleFr}</p>
                             </div>
                           </div>
-                          <span className="px-2.5 py-1 text-[10px] font-black bg-blue-500/20 text-blue-300 border border-blue-500/30 rounded-xl">
+                          <span className="px-2.5 py-1 text-[10px] font-black bg-blue-50 dark:bg-blue-500/20 text-blue-600 dark:text-blue-300 border border-blue-200 dark:border-blue-500/30 rounded-xl">
                             {commDisciplines.length} مسابقات
                           </span>
                         </div>
 
                         {/* Head of Committee */}
-                        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3 mb-3">
+                        <div className="bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-3 mb-3">
                           <div className="flex items-center justify-between">
-                            <span className="text-[11px] text-slate-400 font-bold flex items-center gap-1">
-                              <UserCheck className="w-3.5 h-3.5 text-emerald-400" />
+                            <span className="text-[11px] text-slate-500 dark:text-slate-400 font-bold flex items-center gap-1">
+                              <UserCheck className="w-3.5 h-3.5 text-emerald-500 dark:text-emerald-400" />
                               <span>رئيس اللجنة الرئيسي:</span>
                             </span>
-                            <span className="text-xs font-black text-amber-400">
+                            <span className="text-xs font-black text-amber-600 dark:text-amber-400">
                               {assignment?.teacherName || 'لم يعين بعد'}
                             </span>
                           </div>
                           {assignment?.teacherSchool && (
-                            <p className="text-[11px] text-slate-400 font-medium mt-0.5">
+                            <p className="text-[11px] text-slate-400 font-medium mt-0.5 pr-4.5">
                               🏢 {assignment.teacherSchool}
                             </p>
                           )}
@@ -2069,27 +2128,27 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
 
                         {/* Members & Tasks in Committee */}
                         <div className="space-y-1.5 mb-4">
-                          <span className="text-[11px] text-slate-400 font-bold block">
+                          <span className="text-[11px] text-slate-500 dark:text-slate-400 font-bold block pr-1">
                             طاقم التحكيم والمهام المحددة ({members.length} أستاذ):
                           </span>
                           {members.length === 0 ? (
-                            <p className="text-[11px] text-slate-500 italic">
-                              لم يتم تعيين أعضاء إضافيين بعد. افتح الإعدادات لإضافة أساتذة وتحديد مهامهم.
+                            <p className="text-[11px] text-slate-400 italic pr-1">
+                              لم يتم تعيين أعضاء إضافيين بعد.
                             </p>
                           ) : (
                             <div className="space-y-1.5">
                               {members.map((m, idx) => (
                                 <div
                                   key={idx}
-                                  className="px-3 py-1.5 bg-slate-900/80 border border-slate-800/80 rounded-xl flex items-center justify-between text-xs"
+                                  className="px-3 py-1.5 bg-slate-50/80 dark:bg-slate-900/80 border border-slate-200/80 dark:border-slate-800/80 rounded-xl flex items-center justify-between text-xs transition-colors"
                                 >
                                   <div>
-                                    <span className="font-bold text-white block">{m.teacherName}</span>
+                                    <span className="font-bold text-slate-800 dark:text-white block">{m.teacherName}</span>
                                     {m.schoolName && (
                                       <span className="text-[10px] text-slate-400">{m.schoolName}</span>
                                     )}
                                   </div>
-                                  <span className="px-2 py-0.5 bg-blue-950/80 border border-blue-800 text-blue-300 rounded-lg text-[10px] font-black">
+                                  <span className="px-2 py-0.5 bg-blue-100 dark:bg-blue-950/80 border border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-300 rounded-lg text-[10px] font-black">
                                     {m.roleInCommittee}
                                   </span>
                                 </div>
@@ -2097,54 +2156,36 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                             </div>
                           )}
                         </div>
+
                         {/* Committee Permissions and Allowed Buttons Badge */}
-                        <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-3 mb-3 text-xs space-y-1.5">
+                        <div className="bg-amber-50/50 dark:bg-slate-900/80 border border-amber-200/50 dark:border-slate-800 rounded-2xl p-3 mb-3 text-xs space-y-1.5 transition-colors">
                           <div className="flex items-center justify-between">
-                            <span className="text-[11px] font-bold text-amber-400 flex items-center gap-1">
-                              <ShieldCheck className="w-3.5 h-3.5 text-amber-400" />
+                            <span className="text-[11px] font-bold text-amber-700 dark:text-amber-400 flex items-center gap-1">
+                              <ShieldCheck className="w-3.5 h-3.5 text-amber-500" />
                               <span>الصلاحيات والأزرار المصرح بها:</span>
-                            </span>
-                            <span className="text-[10px] text-slate-400 font-mono">
-                              {comm.permissions?.allowedTabs?.length || 1} تبويب مصرح
                             </span>
                           </div>
                           
                           <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
                             {comm.permissions?.allowedTabs?.map(t => (
-                              <span key={t} className="px-2 py-0.5 bg-slate-800 border border-slate-700 text-slate-200 rounded-lg text-[10px] font-bold">
+                              <span key={t} className="px-2 py-0.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-200 rounded-lg text-[9px] font-bold shadow-xs">
                                 {t === 'stopwatch' ? 'الميقاتي الذكي' : t === 'field' ? 'مسابقات الميدان' : t === 'podium' ? 'منصة التتويج' : t === 'school_registration' ? 'لوائح المؤسسات' : 'المسابقات'}
                               </span>
                             ))}
-                            {comm.permissions?.canRecordResults && (
-                              <span className="px-1.5 py-0.5 bg-emerald-950/80 border border-emerald-800 text-emerald-300 rounded text-[9px] font-bold">
-                                إدخال النتائج
-                              </span>
-                            )}
-                            {comm.permissions?.canValidateResults && (
-                              <span className="px-1.5 py-0.5 bg-blue-950/80 border border-blue-800 text-blue-300 rounded text-[9px] font-bold">
-                                اعتماد النتائج
-                              </span>
-                            )}
-                            {comm.permissions?.canPrintReports && (
-                              <span className="px-1.5 py-0.5 bg-purple-950/80 border border-purple-800 text-purple-300 rounded text-[9px] font-bold">
-                                طباعة
-                              </span>
-                            )}
                           </div>
                         </div>
                       </div>
 
                       {/* Footer Actions */}
-                      <div className="pt-3 border-t border-slate-800 flex items-center justify-between gap-2 flex-wrap">
+                      <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between gap-2 flex-wrap transition-colors">
                         <button
                           type="button"
                           onClick={() => setActiveRoleMode(comm.id)}
                           className={`px-2.5 py-1.5 rounded-xl text-[11px] font-black flex items-center gap-1 transition-all cursor-pointer ${
                             activeRoleMode === comm.id
-                              ? 'bg-amber-500 text-slate-950 shadow-md font-black ring-2 ring-amber-400'
-                              : 'bg-indigo-950/60 hover:bg-indigo-900 border border-indigo-800 text-indigo-300 hover:text-white'
+                              ? 'bg-amber-500 text-white shadow-md ring-2 ring-amber-400'
+                              : 'bg-indigo-50 dark:bg-indigo-950/60 hover:bg-indigo-100 dark:hover:bg-indigo-900 border border-indigo-100 dark:border-indigo-800 text-indigo-700 dark:text-indigo-300'
                           }`}
-                          title="تفعيل تجربة واجهة التطبيق بصلاحيات هذه اللجنة حصراً"
                         >
                           <ShieldCheck className="w-3.5 h-3.5" />
                           <span>{activeRoleMode === comm.id ? 'الصلاحية نشطة حالياً ✓' : 'معاينة بهذه الصلاحية'}</span>
@@ -2154,17 +2195,16 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                           <button
                             type="button"
                             onClick={() => handleOpenCommitteePermissionsModal(comm)}
-                            className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-amber-300 hover:text-white rounded-xl text-xs font-bold flex items-center gap-1 border border-slate-700 transition-all cursor-pointer"
-                            title="تحديد وتعديل الصلاحيات والأزرار والمسابقات المتاحة لهذه اللجنة"
+                            className="px-2.5 py-1.5 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-amber-300 rounded-xl text-[10px] font-bold flex items-center gap-1 border border-slate-200 dark:border-slate-700 transition-all cursor-pointer"
                           >
-                            <SlidersHorizontal className="w-3 h-3 text-amber-400" />
-                            <span>تحديد الصلاحيات والأزرار</span>
+                            <SlidersHorizontal className="w-3 h-3 text-slate-500 dark:text-amber-400" />
+                            <span>الصلاحيات</span>
                           </button>
 
                           <button
                             type="button"
                             onClick={() => handleOpenCommitteeEdit(comm)}
-                            className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer"
+                            className="px-2.5 py-1.5 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-xl text-[10px] font-bold flex items-center gap-1 border border-slate-200 dark:border-slate-700 cursor-pointer transition-all"
                           >
                             <Edit2 className="w-3 h-3 text-slate-400" />
                             <span>المهام</span>
@@ -2185,25 +2225,25 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
             <div className="space-y-6">
               
               {/* Event Selector & Info Header */}
-              <div className="bg-slate-950 p-4 rounded-3xl border border-slate-800 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+              <div className="bg-white dark:bg-slate-950 p-4 rounded-3xl border border-slate-200 dark:border-slate-800 flex flex-col lg:flex-row lg:items-center justify-between gap-4 transition-colors">
                 <div className="flex items-center gap-3">
-                  <span className="text-3xl p-3 bg-emerald-950/60 border border-emerald-800 rounded-2xl text-emerald-400">
+                  <span className="text-3xl p-3 bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-100 dark:border-emerald-800 rounded-2xl text-emerald-600 dark:text-emerald-400">
                     ⚡
                   </span>
                   <div>
                     <div className="flex items-center gap-2 flex-wrap">
-                      <h3 className="text-lg font-black text-white">
+                      <h3 className="text-lg font-black text-slate-900 dark:text-white">
                         {activeDiscipline.nameAr}
                       </h3>
-                      <span className="px-2.5 py-0.5 text-xs font-black bg-blue-500/20 text-blue-300 border border-blue-500/30 rounded-lg">
+                      <span className="px-2.5 py-0.5 text-xs font-black bg-blue-100 dark:bg-blue-500/20 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-500/30 rounded-lg">
                         {selectedCategory}
                       </span>
-                      <span className="px-2.5 py-0.5 text-xs font-black bg-pink-500/20 text-pink-300 border border-pink-500/30 rounded-lg">
+                      <span className="px-2.5 py-0.5 text-xs font-black bg-pink-100 dark:bg-pink-500/20 text-pink-700 dark:text-pink-300 border border-pink-200 dark:border-pink-500/30 rounded-lg">
                         {selectedGender === 'Male' ? 'ذكور' : 'إناث'}
                       </span>
                     </div>
-                    <p className="text-xs text-slate-400 mt-0.5">
-                      الأستاذ المسؤول: <span className="text-amber-400 font-bold">{currentCommitteeAssignment?.teacherName || 'غير معين'}</span>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                      الأستاذ المسؤول: <span className="text-amber-600 dark:text-amber-400 font-bold">{currentCommitteeAssignment?.teacherName || 'غير معين'}</span>
                     </p>
                   </div>
                 </div>
@@ -2216,7 +2256,7 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                       const disc = currentCategoryGendersDisciplines.find(d => d.id === e.target.value);
                       if (disc) setSelectedDiscipline(disc);
                     }}
-                    className="px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs font-bold text-white cursor-pointer"
+                    className="px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white cursor-pointer"
                   >
                     {currentCategoryGendersDisciplines.filter(d => d.type.startsWith('track')).map(d => (
                       <option key={d.id} value={d.id}>{d.nameAr}</option>
@@ -2226,7 +2266,7 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                   <select
                     value={selectedCategory}
                     onChange={(e) => setSelectedCategory(e.target.value as any)}
-                    className="px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs font-bold text-white cursor-pointer"
+                    className="px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white cursor-pointer"
                   >
                     <option value="U12">براعم (U12)</option>
                     <option value="U15">صغار (U15)</option>
@@ -2237,7 +2277,7 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                   <select
                     value={selectedGender}
                     onChange={(e) => setSelectedGender(e.target.value as any)}
-                    className="px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs font-bold text-white cursor-pointer"
+                    className="px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white cursor-pointer"
                   >
                     <option value="Male">ذكور</option>
                     <option value="Female">إناث</option>
@@ -2251,7 +2291,7 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                         setIsSettingsModalOpen(true);
                         setSettingsActiveTab('disciplines');
                       }}
-                      className="px-3 py-2 bg-amber-500/20 hover:bg-amber-500 border border-amber-500/40 text-amber-300 hover:text-white rounded-xl text-xs font-black transition-all flex items-center gap-1.5 cursor-pointer shadow-xs"
+                      className="px-3 py-2 bg-amber-500/20 hover:bg-amber-500 border border-amber-500/40 text-amber-700 dark:text-amber-300 hover:text-white rounded-xl text-xs font-black transition-all flex items-center gap-1.5 cursor-pointer shadow-xs"
                       title="تعديل بيانات هذا السباق"
                     >
                       <Edit2 className="w-3.5 h-3.5" />
@@ -2618,14 +2658,110 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
           {activeTab === 'podium' && activeDiscipline && (
             <div className="space-y-6">
               
+              {/* Event Results Quick Filter Bar */}
+              <div className="bg-slate-900/60 p-4 rounded-3xl border border-slate-800 flex flex-col gap-4">
+                <div className="flex items-center justify-between">
+                   <h4 className="text-xs font-black text-slate-300 flex items-center gap-2">
+                     <Filter className="w-3.5 h-3.5 text-indigo-400" />
+                     <span>تصفية واختيار نتائج المسابقات المعتمدة:</span>
+                   </h4>
+                   <div className="flex items-center gap-2">
+                     <span className="px-2 py-0.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-lg text-[9px] font-black">
+                       {Object.values(results).filter(r => r.status === 'completed').length} نتائج معتمدة
+                     </span>
+                   </div>
+                </div>
+                
+                <div className="grid grid-cols-1 sm:grid-cols-12 gap-3">
+                  {/* Discipline Select */}
+                  <div className="sm:col-span-5 space-y-1.5">
+                    <label className="text-[10px] font-bold text-slate-500 pr-1 flex items-center gap-1">
+                      <Layers className="w-3 h-3" />
+                      <span>نوع المسابقة:</span>
+                    </label>
+                    <select
+                      value={selectedDiscipline?.id}
+                      onChange={(e) => {
+                        const d = disciplines.find(item => item.id === e.target.value);
+                        if (d) setSelectedDiscipline(d);
+                      }}
+                      className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs font-bold text-white focus:ring-1 focus:ring-indigo-500 outline-none cursor-pointer"
+                    >
+                      {disciplines.map(d => {
+                        // Check if this specific discipline has ANY results in ANY category/gender
+                        const hasAnyResults = Object.values(results).some(r => r.disciplineId === d.id && r.status === 'completed');
+                        return (
+                          <option key={d.id} value={d.id}>
+                            {d.icon} {d.nameAr} {hasAnyResults ? '✓' : ''}
+                          </option>
+                        );
+                      })}
+                    </select>
+                  </div>
+
+                  {/* Category Select */}
+                  <div className="sm:col-span-4 space-y-1.5">
+                    <label className="text-[10px] font-bold text-slate-500 pr-1 flex items-center gap-1">
+                      <Users className="w-3 h-3" />
+                      <span>الفئة العمرية:</span>
+                    </label>
+                    <div className="flex items-center gap-1">
+                      {['U12', 'U15', 'U18', 'U20'].map(cat => (
+                        <button
+                          key={cat}
+                          onClick={() => setSelectedCategory(cat as any)}
+                          className={`flex-1 py-2 rounded-xl text-[10px] font-black transition-all ${
+                            selectedCategory === cat 
+                              ? 'bg-indigo-600 text-white shadow-md ring-2 ring-indigo-400/30' 
+                              : 'bg-slate-950 text-slate-400 hover:text-slate-200 border border-slate-800'
+                          }`}
+                        >
+                          {cat}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Gender Select */}
+                  <div className="sm:col-span-3 space-y-1.5">
+                    <label className="text-[10px] font-bold text-slate-500 pr-1 flex items-center gap-1">
+                      <UserIcon className="w-3 h-3" />
+                      <span>الجنس:</span>
+                    </label>
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => setSelectedGender('Male')}
+                        className={`flex-1 py-2 rounded-xl text-[10px] font-black transition-all flex items-center justify-center gap-1 ${
+                          selectedGender === 'Male' 
+                            ? 'bg-blue-600 text-white shadow-md ring-2 ring-blue-400/30' 
+                            : 'bg-slate-950 text-slate-400 hover:text-slate-200 border border-slate-800'
+                        }`}
+                      >
+                        ذكور
+                      </button>
+                      <button
+                        onClick={() => setSelectedGender('Female')}
+                        className={`flex-1 py-2 rounded-xl text-[10px] font-black transition-all flex items-center justify-center gap-1 ${
+                          selectedGender === 'Female' 
+                            ? 'bg-rose-600 text-white shadow-md ring-2 ring-rose-400/30' 
+                            : 'bg-slate-950 text-slate-400 hover:text-slate-200 border border-slate-800'
+                        }`}
+                      >
+                        إناث
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              
               {/* Podium View Card */}
-              <div className="bg-slate-950 border border-slate-800 rounded-3xl p-6 text-center space-y-6">
+              <div className="bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 text-center space-y-6 shadow-xl dark:shadow-none transition-colors">
                 <div>
-                  <h3 className="text-xl font-black text-white flex items-center justify-center gap-2">
-                    <Trophy className="w-6 h-6 text-amber-400" />
+                  <h3 className="text-xl font-black text-slate-900 dark:text-white flex items-center justify-center gap-2">
+                    <Trophy className="w-6 h-6 text-amber-500 dark:text-amber-400" />
                     <span>منصة التتويج والنتائج المعتمدة (Podium)</span>
                   </h3>
-                  <p className="text-xs text-slate-400 mt-1">
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
                     {activeDiscipline.nameAr} • {selectedCategory} • {selectedGender === 'Male' ? 'ذكور' : 'إناث'}
                   </p>
                 </div>
@@ -2637,7 +2773,7 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                     {/* 2nd Place */}
                     <div className="flex-1 flex flex-col items-center">
                       <div className="text-2xl mb-1">🥈</div>
-                      <span className="text-xs font-black text-slate-300">
+                      <span className="text-xs font-black text-slate-700 dark:text-slate-300">
                         {currentEventResult.type === 'track'
                           ? currentEventResult.trackLaps?.[1]?.studentName || 'لا يوجد'
                           : currentEventResult.fieldEntries?.[1]?.studentName || 'لا يوجد'}
@@ -2647,12 +2783,12 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                           ? currentEventResult.trackLaps?.[1]?.schoolName
                           : currentEventResult.fieldEntries?.[1]?.schoolName}
                       </span>
-                      <span className="text-xs font-mono font-bold text-slate-300 mt-1">
+                      <span className="text-xs font-mono font-bold text-slate-600 dark:text-slate-300 mt-1">
                         {currentEventResult.type === 'track'
                           ? currentEventResult.trackLaps?.[1]?.formattedTime
                           : currentEventResult.fieldEntries?.[1]?.bestAttempt ? `${currentEventResult.fieldEntries[1].bestAttempt}م` : ''}
                       </span>
-                      <div className="w-full h-24 bg-gradient-to-t from-slate-800 to-slate-700 rounded-t-2xl border-t-2 border-slate-400 flex items-center justify-center text-slate-200 font-black text-lg mt-2">
+                      <div className="w-full h-24 bg-gradient-to-t from-slate-200 to-slate-100 dark:from-slate-800 dark:to-slate-700 rounded-t-2xl border-t-2 border-slate-300 dark:border-slate-400 flex items-center justify-center text-slate-500 dark:text-slate-200 font-black text-lg mt-2 shadow-sm">
                         2
                       </div>
                     </div>
@@ -2660,22 +2796,22 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                     {/* 1st Place (Champion) */}
                     <div className="flex-1 flex flex-col items-center -translate-y-4">
                       <div className="text-4xl mb-1 animate-bounce">👑</div>
-                      <span className="text-sm font-black text-amber-300">
+                      <span className="text-sm font-black text-amber-600 dark:text-amber-300">
                         {currentEventResult.type === 'track'
                           ? currentEventResult.trackLaps?.[0]?.studentName || 'لا يوجد'
                           : currentEventResult.fieldEntries?.[0]?.studentName || 'لا يوجد'}
                       </span>
-                      <span className="text-xs text-amber-500/80 font-bold truncate max-w-[140px]">
+                      <span className="text-xs text-amber-700/80 dark:text-amber-500/80 font-bold truncate max-w-[140px]">
                         {currentEventResult.type === 'track'
                           ? currentEventResult.trackLaps?.[0]?.schoolName
                           : currentEventResult.fieldEntries?.[0]?.schoolName}
                       </span>
-                      <span className="text-sm font-mono font-black text-amber-400 mt-1">
+                      <span className="text-sm font-mono font-black text-amber-600 dark:text-amber-400 mt-1">
                         {currentEventResult.type === 'track'
                           ? currentEventResult.trackLaps?.[0]?.formattedTime
                           : currentEventResult.fieldEntries?.[0]?.bestAttempt ? `${currentEventResult.fieldEntries[0].bestAttempt}م` : ''}
                       </span>
-                      <div className="w-full h-32 bg-gradient-to-t from-amber-600 to-amber-500 rounded-t-2xl border-t-2 border-amber-300 flex items-center justify-center text-slate-950 font-black text-2xl mt-2 shadow-lg shadow-amber-500/30">
+                      <div className="w-full h-32 bg-gradient-to-t from-amber-500 to-amber-400 dark:from-amber-600 dark:to-amber-500 rounded-t-2xl border-t-2 border-amber-200 dark:border-amber-300 flex items-center justify-center text-white dark:text-slate-950 font-black text-2xl mt-2 shadow-lg shadow-amber-500/30">
                         1 🥇
                       </div>
                     </div>
@@ -2683,7 +2819,7 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                     {/* 3rd Place */}
                     <div className="flex-1 flex flex-col items-center">
                       <div className="text-2xl mb-1">🥉</div>
-                      <span className="text-xs font-black text-orange-300">
+                      <span className="text-xs font-black text-orange-600 dark:text-orange-300">
                         {currentEventResult.type === 'track'
                           ? currentEventResult.trackLaps?.[2]?.studentName || 'لا يوجد'
                           : currentEventResult.fieldEntries?.[2]?.studentName || 'لا يوجد'}
@@ -2693,22 +2829,59 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                           ? currentEventResult.trackLaps?.[2]?.schoolName
                           : currentEventResult.fieldEntries?.[2]?.schoolName}
                       </span>
-                      <span className="text-xs font-mono font-bold text-orange-400 mt-1">
+                      <span className="text-xs font-mono font-bold text-orange-600 dark:text-orange-400 mt-1">
                         {currentEventResult.type === 'track'
                           ? currentEventResult.trackLaps?.[2]?.formattedTime
                           : currentEventResult.fieldEntries?.[2]?.bestAttempt ? `${currentEventResult.fieldEntries[2].bestAttempt}م` : ''}
                       </span>
-                      <div className="w-full h-18 bg-gradient-to-t from-orange-800 to-orange-700 rounded-t-2xl border-t-2 border-orange-400 flex items-center justify-center text-orange-100 font-black text-base mt-2">
+                      <div className="w-full h-18 bg-gradient-to-t from-orange-200 to-orange-100 dark:from-orange-800 dark:to-orange-700 rounded-t-2xl border-t-2 border-orange-300 dark:border-orange-400 flex items-center justify-center text-orange-600 dark:text-orange-100 font-black text-base mt-2 shadow-sm">
                         3
                       </div>
                     </div>
 
                   </div>
                 ) : (
-                  <div className="p-8 bg-slate-900 border border-slate-800 rounded-2xl">
-                    <p className="text-xs font-bold text-slate-400">
-                      لم يتم اعتماد نتائج هذه المسابقة بعد. قم بفتح الميقاتي أو جدول المحاولات وحفظ النتائج أولاً.
-                    </p>
+                  <div className="p-8 bg-slate-50 dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-3xl space-y-6 transition-colors">
+                    <div className="space-y-2">
+                      <div className="w-16 h-16 bg-white dark:bg-slate-800 rounded-full flex items-center justify-center mx-auto text-3xl grayscale opacity-50 shadow-sm transition-all">🏆</div>
+                      <h4 className="text-sm font-black text-slate-500 dark:text-slate-300">لم يتم اعتماد نتائج هذه المسابقة بعد</h4>
+                      <p className="text-xs text-slate-500 max-w-sm mx-auto">
+                        قم بفتح الميقاتي أو جدول المحاولات لهذه المسابقة وحفظ النتائج ليتم عرض منصة التتويج هنا.
+                      </p>
+                    </div>
+
+                    {Object.values(results).filter(r => r.status === 'completed').length > 0 && (
+                      <div className="space-y-3 pt-4 border-t border-slate-800/50">
+                        <h5 className="text-[10px] font-black text-amber-500/80 flex items-center justify-center gap-1.5 uppercase tracking-wider">
+                          <CheckCircle2 className="w-3 h-3" />
+                          <span>النتائج المتوفرة حالياً:</span>
+                        </h5>
+                        <div className="flex flex-wrap items-center justify-center gap-2">
+                          {Object.values(results)
+                            .filter(r => r.status === 'completed')
+                            .map(res => {
+                              const d = disciplines.find(item => item.id === res.disciplineId);
+                              return (
+                                <button
+                                  key={res.id}
+                                  onClick={() => {
+                                    if (d) setSelectedDiscipline(d);
+                                    setSelectedCategory(res.category as any);
+                                    setSelectedGender(res.gender as any);
+                                  }}
+                                  className="px-3 py-1.5 bg-slate-800 hover:bg-indigo-600 hover:text-white text-slate-300 border border-slate-700 rounded-xl text-[10px] font-bold transition-all cursor-pointer flex items-center gap-1.5"
+                                >
+                                  <span>{d?.icon || '🏅'}</span>
+                                  <span>{d?.nameAr || res.disciplineId}</span>
+                                  <span className="opacity-60">•</span>
+                                  <span>{res.category}</span>
+                                  <span>{res.gender === 'Male' ? 'ذكر' : 'أنثى'}</span>
+                                </button>
+                              );
+                            })}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -2756,27 +2929,31 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
 
               {/* Settings Tabs */}
               <div className="bg-slate-900 px-6 py-2 border-b border-slate-800 flex items-center gap-2">
-                <button
-                  onClick={() => setSettingsActiveTab('committees')}
-                  className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                    settingsActiveTab === 'committees'
-                      ? 'bg-amber-600 text-white shadow-xs'
-                      : 'text-slate-400 hover:text-white'
-                  }`}
-                >
-                  👥 إعدادات اللجان والمهام
-                </button>
+                {!isTeacher && (
+                  <>
+                    <button
+                      onClick={() => setSettingsActiveTab('committees')}
+                      className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                        settingsActiveTab === 'committees'
+                          ? 'bg-amber-600 text-white shadow-xs'
+                          : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      👥 إعدادات اللجان والمهام
+                    </button>
 
-                <button
-                  onClick={() => setSettingsActiveTab('disciplines')}
-                  className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                    settingsActiveTab === 'disciplines'
-                      ? 'bg-blue-600 text-white shadow-xs'
-                      : 'text-slate-400 hover:text-white'
-                  }`}
-                >
-                  ⚡ إعدادات المسابقات (إضافة / حذف)
-                </button>
+                    <button
+                      onClick={() => setSettingsActiveTab('disciplines')}
+                      className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                        settingsActiveTab === 'disciplines'
+                          ? 'bg-blue-600 text-white shadow-xs'
+                          : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      ⚡ إعدادات المسابقات (إضافة / حذف)
+                    </button>
+                  </>
+                )}
 
                 <button
                   onClick={() => setSettingsActiveTab('auto_import')}
@@ -3077,61 +3254,74 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
 
                 {/* TAB C: DATA & TOOLS */}
                 {settingsActiveTab === 'auto_import' && (
-                  <div className="space-y-6 max-w-2xl mx-auto">
+                  <div className="space-y-6 max-w-2xl mx-auto py-4">
                     
-                    {/* 1. Auto Import Section */}
-                    <div className="bg-slate-950 p-6 rounded-3xl border border-slate-800 text-center space-y-4">
-                      <div className="w-16 h-16 rounded-3xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center justify-center mx-auto text-2xl">
-                        🔄
-                      </div>
-                      <div>
-                        <h4 className="text-base font-black text-white">الاستيراد التلقائي للمشاركين من المنظومة</h4>
-                        <p className="text-xs text-slate-400 mt-1 leading-relaxed">
-                          تقوم هذه الخاصية بالبحث في قاعدة بيانات التلاميذ المسجلين من طرف الأساتذة والمؤسسات في تخصصات ألعاب القوى والعدو، وإدراجهم وتوزيعهم تلقائياً على المسابقات المتوافقة مع فئاتهم العمرية وجنسهم.
-                        </p>
-                      </div>
-
-                      <div className="p-4 bg-slate-900 rounded-2xl border border-slate-850 text-xs text-slate-300 flex items-center justify-around">
-                        <div>
-                          <span className="text-slate-500 block">التلاميذ في المنظومة:</span>
-                          <span className="text-base font-black text-white">{students.length}</span>
+                    {/* 1. School Specific Mock Data (For Teachers) */}
+                    {(isTeacher || selectedSchoolForView !== 'ALL') && (
+                      <div className="bg-slate-950 p-6 rounded-3xl border border-indigo-500/20 text-center space-y-4">
+                        <div className="w-16 h-16 rounded-3xl bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 flex items-center justify-center mx-auto text-2xl">
+                          🏫
                         </div>
                         <div>
-                          <span className="text-slate-500 block">المشاركون الحاليون:</span>
-                          <span className="text-base font-black text-emerald-400">{participants.length}</span>
+                          <h4 className="text-base font-black text-white">ملء لائحة المؤسسة ببيانات افتراضية</h4>
+                          <p className="text-xs text-slate-400 mt-1 leading-relaxed">
+                            تقوم هذه الأداة بتوليد مشاركين وهميين لمؤسسة «<strong className="text-indigo-300">{(isTeacher ? detectedTeacherSchool : selectedSchoolForView)}</strong>» وتوزيعهم على مختلف المسابقات لاختبار عملية التسجيل والطباعة.
+                          </p>
                         </div>
+                        <button
+                          onClick={handleLoadSchoolDemoData}
+                          className="w-full px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl text-xs font-black shadow-lg shadow-indigo-600/30 flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-95"
+                        >
+                          <Sparkles className="w-4 h-4 text-amber-300" />
+                          <span>تعبئة بيانات المؤسسة الافتراضية</span>
+                        </button>
                       </div>
+                    )}
 
-                      <button
-                        onClick={handleTriggerAutoImport}
-                        className="w-full px-6 py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl text-xs font-black shadow-lg shadow-emerald-600/30 flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-95"
-                      >
-                        <RefreshCw className="w-4 h-4" />
-                        <span>مزامنة واستيراد المشاركين الآن</span>
-                      </button>
-                    </div>
+                    {!isTeacher && (
+                      <>
+                        {/* 2. Auto Import Section */}
+                        <div className="bg-slate-950 p-6 rounded-3xl border border-slate-800 text-center space-y-4">
+                          <div className="w-16 h-16 rounded-3xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center justify-center mx-auto text-2xl">
+                            🔄
+                          </div>
+                          <div>
+                            <h4 className="text-base font-black text-white">الاستيراد التلقائي للمشاركين من المنظومة</h4>
+                            <p className="text-xs text-slate-400 mt-1 leading-relaxed">
+                              تقوم هذه الخاصية بالبحث في قاعدة بيانات التلاميذ المسجلين من طرف الأساتذة والمؤسسات في تخصصات ألعاب القوى والعدو، وإدراجهم وتوزيعهم تلقائياً.
+                            </p>
+                          </div>
+                          <button
+                            onClick={handleTriggerAutoImport}
+                            className="w-full px-6 py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl text-xs font-black shadow-lg shadow-emerald-600/30 flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-95"
+                          >
+                            <RefreshCw className="w-4 h-4" />
+                            <span>مزامنة واستيراد المشاركين الآن</span>
+                          </button>
+                        </div>
 
-                    {/* 2. Demo Data Section */}
-                    <div className="bg-slate-950 p-6 rounded-3xl border border-slate-800 text-center space-y-4">
-                      <div className="w-16 h-16 rounded-3xl bg-purple-500/20 text-purple-400 border border-purple-500/30 flex items-center justify-center mx-auto text-2xl">
-                        ✨
-                      </div>
-                      <div>
-                        <h4 className="text-base font-black text-white">تحميل بيانات افتراضية نموذجية</h4>
-                        <p className="text-xs text-slate-400 mt-1 leading-relaxed">
-                          هذه الأداة مخصصة للمعاينة والاختبار؛ تقوم بتوليد لوائح مشاركين افتراضية، توزيع اللجان، وإنشاء نتائج وهمية لمختلف المسابقات لتجربة كافة وظائف التطبيق.
-                        </p>
-                      </div>
+                        {/* 3. Demo Data Section */}
+                        <div className="bg-slate-950 p-6 rounded-3xl border border-slate-800 text-center space-y-4">
+                          <div className="w-16 h-16 rounded-3xl bg-purple-500/20 text-purple-400 border border-purple-500/30 flex items-center justify-center mx-auto text-2xl">
+                            ✨
+                          </div>
+                          <div>
+                            <h4 className="text-base font-black text-white">تحميل بيانات افتراضية شاملة (System-wide)</h4>
+                            <p className="text-xs text-slate-400 mt-1 leading-relaxed">
+                              هذه الأداة مخصصة للمعاينة الشاملة؛ تقوم بتوليد لوائح مشاركين لجميع المؤسسات، توزيع اللجان، وإنشاء نتائج وهمية لمختلف المسابقات.
+                            </p>
+                          </div>
 
-                      <button
-                        onClick={handleLoadDemoData}
-                        className="w-full px-6 py-3 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white rounded-2xl text-xs font-black shadow-lg shadow-indigo-600/30 flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-95"
-                      >
-                        <Sparkles className="w-4 h-4 text-amber-300" />
-                        <span>تعبئة لوائح وبيانات افتراضية</span>
-                      </button>
-                    </div>
-
+                          <button
+                            onClick={handleLoadDemoData}
+                            className="w-full px-6 py-3 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white rounded-2xl text-xs font-black shadow-lg shadow-indigo-600/30 flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-95"
+                          >
+                            <Sparkles className="w-4 h-4 text-amber-300" />
+                            <span>تعبئة النظام ببيانات شاملة افتراضية</span>
+                          </button>
+                        </div>
+                      </>
+                    )}
                   </div>
                 )}
 
@@ -3922,10 +4112,51 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                 </div>
               </div>
 
-              {/* Section 3: Allowed Action Buttons */}
+              {/* Section 3: Allowed Viewing Tabs */}
+              <div className="space-y-2.5 pt-2 border-t border-slate-800">
+                <label className="text-xs font-black text-indigo-300 block">
+                  3. تبويبات العرض المصرح بدخولها (صلاحيات العرض):
+                </label>
+
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                  {[
+                    { id: 'school_registration', label: 'لوائح المؤسسة', icon: <SchoolIcon className="w-3 h-3" /> },
+                    { id: 'my_participations', label: 'مشاركات تلاميذي', icon: <UserCheck className="w-3 h-3" /> },
+                    { id: 'stopwatch', label: 'الميقاتي الذكي', icon: <Timer className="w-3 h-3" /> },
+                    { id: 'field', label: 'مسابقات الميدان', icon: <Award className="w-3 h-3" /> },
+                    { id: 'podium', label: 'منصة التتويج', icon: <Trophy className="w-3 h-3" /> },
+                    { id: 'events', label: 'إدارة المسابقات', icon: <Layers className="w-3 h-3" /> }
+                  ].map(tab => (
+                    <label 
+                      key={tab.id}
+                      className={`flex items-center gap-2 p-2 rounded-xl border transition-all cursor-pointer ${
+                        tempAllowedTabs.includes(tab.id as any)
+                          ? 'bg-indigo-500/10 border-indigo-500 text-indigo-200'
+                          : 'bg-slate-950/60 border-slate-800 text-slate-500 hover:border-slate-700'
+                      }`}
+                    >
+                      <input 
+                        type="checkbox"
+                        checked={tempAllowedTabs.includes(tab.id as any)}
+                        onChange={(e) => {
+                          if (e.target.checked) setTempAllowedTabs([...tempAllowedTabs, tab.id as any]);
+                          else setTempAllowedTabs(tempAllowedTabs.filter(t => t !== tab.id));
+                        }}
+                        className="w-3.5 h-3.5 rounded border-slate-700 bg-slate-900 text-indigo-500 focus:ring-0"
+                      />
+                      <div className="flex items-center gap-1.5 overflow-hidden">
+                        <span className="shrink-0 opacity-70">{tab.icon}</span>
+                        <span className="text-[10px] font-bold truncate">{tab.label}</span>
+                      </div>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              {/* Section 4: Allowed Action Buttons */}
               <div className="space-y-2.5 pt-2 border-t border-slate-800">
                 <label className="text-xs font-black text-emerald-300 block">
-                  3. صلاحيات الأزرار والعمليات المتاحة لهذه اللجنة:
+                  4. صلاحيات الأزرار والعمليات المتاحة لهذه اللجنة:
                 </label>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">

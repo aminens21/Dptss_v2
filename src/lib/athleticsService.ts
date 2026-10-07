@@ -1130,4 +1130,39 @@ export class AthleticsService {
       disciplinesCount: INITIAL_ATHLETICS_DISCIPLINES.length
     };
   }
+
+  static loadDefaultSchoolData(schoolName: string): { participantsCount: number } {
+    const current = this.getParticipants();
+    const disciplines = this.getDisciplines();
+    
+    // Generate 12-15 mock students for this specific school across different categories
+    const mockStudents: AthleticsParticipantRecord[] = [
+      { id: 'm-1', name: 'أحمد العلمي', cat: 'U12', gen: 'Male', d1: 'sprint_60m', d2: 'long_jump' },
+      { id: 'm-2', name: 'فاطمة الزهراء بناني', cat: 'U12', gen: 'Female', d1: 'sprint_60m', d2: 'middle_600m' },
+      { id: 'm-3', name: 'ياسين الوردي', cat: 'U15', gen: 'Male', d1: 'sprint_80m', d2: 'long_jump' },
+      { id: 'm-4', name: 'سلمى الإدريسي', cat: 'U15', gen: 'Female', d1: 'sprint_80m', d2: 'middle_600m' },
+      { id: 'm-5', name: 'مهدي القاسمي', cat: 'U15', gen: 'Male', d1: 'middle_1000m', d2: 'shot_put' },
+      { id: 'm-6', name: 'ليلى الشاوي', cat: 'U18', gen: 'Female', d1: 'sprint_100m', d2: 'middle_800m' },
+      { id: 'm-7', name: 'حمزة البوشيخي', cat: 'U18', gen: 'Male', d1: 'sprint_100m', d2: 'sprint_200m' },
+      { id: 'm-8', name: 'سناء المتوكل', cat: 'U18', gen: 'Female', d1: 'middle_400m', d2: 'middle_800m' },
+      { id: 'm-9', name: 'رضوان التازي', cat: 'U20', gen: 'Male', d1: 'sprint_200m', d2: 'middle_1500m' },
+      { id: 'm-10', name: 'كوثر العمراني', cat: 'U20', gen: 'Female', d1: 'middle_800m', d2: 'middle_1500m' }
+    ].map((m, idx) => ({
+      id: `ath-mock-${Date.now()}-${idx}`,
+      disciplineId: m.d1,
+      secondDisciplineId: m.d2,
+      category: m.cat as any,
+      gender: m.gen as any,
+      bibNumber: `${200 + current.length + idx}`,
+      studentName: m.name,
+      schoolName: schoolName,
+      birthYear: m.cat === 'U12' ? '2014' : m.cat === 'U15' ? '2011' : m.cat === 'U18' ? '2008' : '2006',
+      affiliationType: 'non_club',
+      createdAt: new Date().toISOString()
+    }));
+
+    const updated = [...current, ...mockStudents];
+    this.saveParticipants(updated);
+    return { participantsCount: mockStudents.length };
+  }
 }
