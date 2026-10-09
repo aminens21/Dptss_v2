@@ -415,3 +415,11 @@ export interface AthleticsEventResult {
   season?: string;
   lastUpdated: string;
 }
+
+export interface AthleticsAttendanceRecord {
+  participantId: string;
+  status: 'present' | 'absent' | 'pending';
+  lane?: number;
+  checkInTime?: string;
+  notes?: string;
+}

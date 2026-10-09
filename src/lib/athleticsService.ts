@@ -8,7 +8,8 @@ import {
   AthleticsParticipantRecord,
   AthleticsEventResult,
   TrackRankEntry,
-  FieldAttemptEntry
+  FieldAttemptEntry,
+  AthleticsAttendanceRecord
 } from './athleticsConfig';
 import { User, Student, School } from '../types';
 
@@ -17,7 +18,8 @@ const STORAGE_KEYS = {
   DISCIPLINES_DEF: 'school_athletics_disciplines_def_v2',
   COMMITTEE_ASSIGNMENTS: 'school_athletics_committee_assignments_v2',
   PARTICIPANTS: 'school_athletics_participants_v2',
-  RESULTS: 'school_athletics_results_v2'
+  RESULTS: 'school_athletics_results_v2',
+  ATTENDANCE: 'school_athletics_attendance_v2'
 };
 
 export class AthleticsService {
@@ -520,6 +522,73 @@ export class AthleticsService {
       localStorage.setItem(STORAGE_KEYS.RESULTS, JSON.stringify(all));
       window.dispatchEvent(new CustomEvent('athleticsResultsUpdated', { detail: all }));
       window.dispatchEvent(new CustomEvent('resultsChanged'));
+    }
+  }
+
+  // 6.5. Attendance & Roll Call Management (غرفة المناداة وتأكيد الحضور)
+  static getAllAttendance(): Record<string, Record<string, AthleticsAttendanceRecord>> {
+    try {
+      const data = localStorage.getItem(STORAGE_KEYS.ATTENDANCE);
+      if (data) return JSON.parse(data);
+    } catch (e) {
+      console.error('Failed to parse athletics attendance:', e);
+    }
+    return {};
+  }
+
+  static getAttendanceForEvent(eventKey: string): Record<string, AthleticsAttendanceRecord> {
+    const all = this.getAllAttendance();
+    return all[eventKey] || {};
+  }
+
+  static saveAttendanceForEvent(eventKey: string, records: Record<string, AthleticsAttendanceRecord>): void {
+    const all = this.getAllAttendance();
+    all[eventKey] = records;
+    localStorage.setItem(STORAGE_KEYS.ATTENDANCE, JSON.stringify(all));
+    window.dispatchEvent(new CustomEvent('athleticsAttendanceUpdated', { detail: { eventKey, records } }));
+  }
+
+  static setParticipantAttendance(
+    eventKey: string,
+    participantId: string,
+    status: 'present' | 'absent' | 'pending',
+    lane?: number,
+    notes?: string
+  ): void {
+    const records = this.getAttendanceForEvent(eventKey);
+    records[participantId] = {
+      participantId,
+      status,
+      lane: lane !== undefined ? lane : records[participantId]?.lane,
+      checkInTime: new Date().toISOString(),
+      notes: notes !== undefined ? notes : records[participantId]?.notes
+    };
+    this.saveAttendanceForEvent(eventKey, records);
+  }
+
+  static markAllAttendanceForEvent(
+    eventKey: string,
+    participantIds: string[],
+    status: 'present' | 'absent'
+  ): void {
+    const records = this.getAttendanceForEvent(eventKey);
+    participantIds.forEach((pId, idx) => {
+      records[pId] = {
+        participantId: pId,
+        status,
+        lane: records[pId]?.lane || (idx + 1),
+        checkInTime: new Date().toISOString()
+      };
+    });
+    this.saveAttendanceForEvent(eventKey, records);
+  }
+
+  static clearAttendanceForEvent(eventKey: string): void {
+    const all = this.getAllAttendance();
+    if (all[eventKey]) {
+      delete all[eventKey];
+      localStorage.setItem(STORAGE_KEYS.ATTENDANCE, JSON.stringify(all));
+      window.dispatchEvent(new CustomEvent('athleticsAttendanceUpdated', { detail: { eventKey, records: {} } }));
     }
   }
 

@@ -45,7 +45,11 @@ import {
   Filter,
   CheckCircle,
   Sun,
-  Moon
+  Moon,
+  ClipboardList,
+  UserX,
+  XCircle,
+  Volume2
 } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 import {
@@ -58,7 +62,8 @@ import {
   TrackRankEntry,
   FieldAttemptEntry,
   COMMITTEE_ROLE_OPTIONS,
-  AthleticsCommitteePermissions
+  AthleticsCommitteePermissions,
+  AthleticsAttendanceRecord
 } from '../lib/athleticsConfig';
 import { AthleticsService } from '../lib/athleticsService';
 import { User, School, Student } from '../types';
@@ -124,6 +129,7 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
   const [assignments, setAssignments] = useState<Record<string, AthleticsCommitteeAssignment>>({});
   const [participants, setParticipants] = useState<AthleticsParticipantRecord[]>([]);
   const [results, setResults] = useState<Record<string, AthleticsEventResult>>({});
+  const resultsList = useMemo(() => Object.values(results) as AthleticsEventResult[], [results]);
 
   // Active Selection Filters
   const [selectedDiscipline, setSelectedDiscipline] = useState<AthleticsDisciplineDef | null>(null);
@@ -304,6 +310,13 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
 
   const [isManualTrackEntry, setIsManualTrackEntry] = useState(false);
 
+  // --- ATTENDANCE & ROLL CALL (غرفة المناداة وتأكيد الحضور) STATE ---
+  const [isAttendanceModalOpen, setIsAttendanceModalOpen] = useState(false);
+  const [attendanceMap, setAttendanceMap] = useState<Record<string, AthleticsAttendanceRecord>>({});
+  const [attendanceFilterStatus, setAttendanceFilterStatus] = useState<'ALL' | 'present' | 'absent' | 'pending'>('ALL');
+  const [attendanceSearchQuery, setAttendanceSearchQuery] = useState('');
+  const [isCallingParticipantId, setIsCallingParticipantId] = useState<string | null>(null);
+
   // Filtered disciplines list allowed for the currently selected category & gender
   // AND filtered strictly according to the active committee permission (e.g. Jump Committee only sees Jump competitions!)
   const currentCategoryGendersDisciplines = useMemo(() => {
@@ -398,7 +411,8 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
     return AthleticsService.canUserManageCommittee(currentUser, currentCommitteeDef.id, assignments);
   }, [effectiveRole, currentCommitteeDef, canRecordResults, activeCommitteePermissionDef, currentUser, assignments]);
 
-  // Sync field trials when selecting discipline/category/gender
+  // Sync field trials & track laps when selecting discipline/category/gender
+  // ENSURES 100% INDEPENDENT STORAGE AND STATE PER RACE (كل سباق يتم حفظ نتائجه مستقلا)
   useEffect(() => {
     if (!activeDiscipline) return;
     if (activeDiscipline.type.startsWith('field')) {
@@ -407,7 +421,9 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
         setFieldTrials(eventRes.fieldEntries);
       } else {
         const registered = participants.filter(
-          p => p.disciplineId === activeDiscipline.id && p.category === selectedCategory && p.gender === selectedGender
+          p => (p.disciplineId === activeDiscipline.id || p.secondDisciplineId === activeDiscipline.id) &&
+               p.category === selectedCategory &&
+               p.gender === selectedGender
         );
         const entries: FieldAttemptEntry[] = registered.map(p => ({
           participantId: p.id,
@@ -423,17 +439,59 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
       const eventRes = results[currentEventKey];
       if (eventRes && eventRes.trackLaps && eventRes.trackLaps.length > 0) {
         setRecordedLaps(eventRes.trackLaps);
+      } else {
+        // Fix: Reset recorded laps to empty when switching to unrecorded race
+        setRecordedLaps([]);
       }
+      setIsTimerRunning(false);
+      setElapsedMs(0);
+      setIsManualTrackEntry(false);
     }
-  }, [activeDiscipline, selectedCategory, selectedGender, results, participants]);
 
-  // Filtered Participants for Current Event
+    // Load attendance for currentEventKey
+    const att = AthleticsService.getAttendanceForEvent(currentEventKey);
+    setAttendanceMap(att);
+  }, [activeDiscipline, selectedCategory, selectedGender, currentEventKey, results, participants]);
+
+  // Filtered Participants for Current Event (both primary & secondary disciplines)
   const currentEventParticipants = useMemo(() => {
     if (!activeDiscipline) return [];
     return participants.filter(
-      p => p.disciplineId === activeDiscipline.id && p.category === selectedCategory && p.gender === selectedGender
+      p => (p.disciplineId === activeDiscipline.id || p.secondDisciplineId === activeDiscipline.id) &&
+           p.category === selectedCategory &&
+           p.gender === selectedGender
     );
   }, [participants, activeDiscipline, selectedCategory, selectedGender]);
+
+  // Sorted participants for assignment: present athletes first!
+  const sortedParticipantsForAssignment = useMemo(() => {
+    return [...currentEventParticipants].sort((a, b) => {
+      const aStatus = attendanceMap[a.id]?.status || 'pending';
+      const bStatus = attendanceMap[b.id]?.status || 'pending';
+      if (aStatus === 'present' && bStatus !== 'present') return -1;
+      if (bStatus === 'present' && aStatus !== 'present') return 1;
+      if (aStatus === 'absent' && bStatus !== 'absent') return 1;
+      if (bStatus === 'absent' && aStatus !== 'absent') return -1;
+      return (parseInt(a.bibNumber) || 0) - (parseInt(b.bibNumber) || 0);
+    });
+  }, [currentEventParticipants, attendanceMap]);
+
+  // Attendance stats for quick badges & counts
+  const attendanceStats = useMemo(() => {
+    const total = currentEventParticipants.length;
+    let present = 0;
+    let absent = 0;
+    let pending = 0;
+
+    currentEventParticipants.forEach(p => {
+      const rec = attendanceMap[p.id];
+      if (rec?.status === 'present') present++;
+      else if (rec?.status === 'absent') absent++;
+      else pending++;
+    });
+
+    return { total, present, absent, pending };
+  }, [currentEventParticipants, attendanceMap]);
 
   // Detected teacher school or initial school for admins
   const detectedTeacherSchool = useMemo(() => {
@@ -627,6 +685,118 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
     } else {
       setActiveTab('field');
     }
+  };
+
+  // --- CLEAR CURRENT RACE / EVENT DATA (تفريغ بيانات السباق) ---
+  const handleClearCurrentRaceData = () => {
+    if (!userAccess.canManage) {
+      toast.error('لا تملك صلاحية تفريغ بيانات هذه المسابقة');
+      return;
+    }
+    if (!activeDiscipline) return;
+
+    const raceName = `${activeDiscipline.nameAr} (${selectedCategory} - ${selectedGender === 'Male' ? 'ذكور' : 'إناث'})`;
+
+    if (!window.confirm(`هل أنت متأكد من تفريغ ومسح بيانات ${raceName}؟\nسيتم مسح جميع مراتب وتوقيتات الوصول المسجلة وإعادة ضبط الميقاتي للصفر ليصبح السباق جاهزاً من جديد.`)) {
+      return;
+    }
+
+    if (activeDiscipline.type.startsWith('field')) {
+      const cleanEntries: FieldAttemptEntry[] = currentEventParticipants.map(p => ({
+        participantId: p.id,
+        bibNumber: p.bibNumber,
+        studentName: p.studentName,
+        schoolName: p.schoolName,
+        attempts: [null, null, null],
+        bestAttempt: null
+      }));
+      setFieldTrials(cleanEntries);
+    } else {
+      setRecordedLaps([]);
+      setIsTimerRunning(false);
+      setElapsedMs(0);
+      setIsManualTrackEntry(false);
+    }
+
+    if (results[currentEventKey]) {
+      AthleticsService.deleteEventResult(currentEventKey);
+      setResults(AthleticsService.getAllResults());
+    }
+
+    toast.success(`تم تفريغ بيانات ${raceName} بنجاح ✅ السباق جاهز للانطلاق من جديد.`);
+  };
+
+  // --- ATTENDANCE & ROLL CALL (غرفة المناداة وتأكيد الحضور) HANDLERS ---
+  const handleToggleAttendance = (participantId: string, status: 'present' | 'absent' | 'pending') => {
+    if (!currentEventKey) return;
+    AthleticsService.setParticipantAttendance(currentEventKey, participantId, status);
+    setAttendanceMap(prev => ({
+      ...prev,
+      [participantId]: {
+        participantId,
+        status,
+        lane: prev[participantId]?.lane,
+        checkInTime: new Date().toISOString()
+      }
+    }));
+  };
+
+  const handleUpdateLane = (participantId: string, lane: number) => {
+    if (!currentEventKey) return;
+    const current = attendanceMap[participantId];
+    AthleticsService.setParticipantAttendance(
+      currentEventKey,
+      participantId,
+      current?.status || 'present',
+      lane
+    );
+    setAttendanceMap(prev => ({
+      ...prev,
+      [participantId]: {
+        ...(prev[participantId] || { participantId, status: 'present', checkInTime: new Date().toISOString() }),
+        lane
+      }
+    }));
+  };
+
+  const handleMarkAllAttendance = (status: 'present' | 'absent') => {
+    if (!currentEventKey) return;
+    const ids = currentEventParticipants.map(p => p.id);
+    AthleticsService.markAllAttendanceForEvent(currentEventKey, ids, status);
+    const updated = AthleticsService.getAttendanceForEvent(currentEventKey);
+    setAttendanceMap(updated);
+    toast.success(status === 'present' ? 'تم تأكيد حضور جميع المتسابقين في غرفة المناداة ✅' : 'تم تسجيل غياب الجميع ❌');
+  };
+
+  const handleResetAttendance = () => {
+    if (!currentEventKey) return;
+    if (window.confirm('هل أنت متأكد من إعادة ضبط غرفة المناداة لهذا السباق؟')) {
+      AthleticsService.clearAttendanceForEvent(currentEventKey);
+      setAttendanceMap({});
+      toast.success('تمت إعادة ضبط المناداة بنجاح 🔄');
+    }
+  };
+
+  const handleAudioCall = (studentName: string, bibNumber: string) => {
+    setIsCallingParticipantId(studentName);
+    setTimeout(() => setIsCallingParticipantId(null), 3000);
+
+    try {
+      if ('speechSynthesis' in window) {
+        window.speechSynthesis.cancel();
+        const text = `رقم ${bibNumber}، ${studentName}`;
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.lang = 'ar-SA';
+        utterance.rate = 0.9;
+        window.speechSynthesis.speak(utterance);
+      }
+    } catch (e) {
+      console.log('Audio speech synthesis error:', e);
+    }
+  };
+
+  const handlePrintAttendanceSheet = () => {
+    window.print();
   };
 
   // --- FIELD ATTEMPTS HANDLERS ---
@@ -1442,9 +1612,9 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                   const disc2 = participant.secondDisciplineId ? disciplines.find(d => d.id === participant.secondDisciplineId) : null;
                   
                   // Find results for this participant
-                  const pResults = Object.values(results).filter(r => 
+                  const pResults = (Object.values(results) as AthleticsEventResult[]).filter(r => 
                     (r.trackLaps?.some(l => l.participantId === participant.id)) ||
-                    (r.fieldAttempts?.some(a => a.participantId === participant.id))
+                    (r.fieldEntries?.some(a => a.participantId === participant.id))
                   );
 
                   return (
@@ -1498,14 +1668,14 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                                 </div>
                               );
                             } else {
-                              const entry = res.fieldAttempts?.find(a => a.participantId === participant.id);
+                              const entry = res.fieldEntries?.find(a => a.participantId === participant.id);
                               return (
                                 <div className="flex items-center justify-between bg-emerald-50 dark:bg-emerald-500/5 p-2 rounded-xl border border-emerald-100 dark:border-emerald-500/20">
                                   <div className="flex items-center gap-2">
                                     <div className={`w-6 h-6 rounded-lg flex items-center justify-center text-xs font-black ${entry?.rank === 1 ? 'bg-amber-500 text-white shadow-md' : entry?.rank === 2 ? 'bg-slate-200 dark:bg-slate-300 text-slate-700 dark:text-slate-900' : entry?.rank === 3 ? 'bg-orange-400 text-white shadow-sm' : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400'}`}>
                                       {entry?.rank || '-'}
                                     </div>
-                                    <span className="text-xs font-black text-emerald-600 dark:text-emerald-400">{entry?.bestMark} {entry?.unit || 'م'}</span>
+                                    <span className="text-xs font-black text-emerald-600 dark:text-emerald-400">{entry?.bestAttempt !== null && entry?.bestAttempt !== undefined ? `${entry.bestAttempt} م` : '-'}</span>
                                   </div>
                                   <span className="text-[10px] font-bold text-slate-500 dark:text-slate-500">أفضل علامة</span>
                                 </div>
@@ -1548,14 +1718,14 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                                   </div>
                                 );
                               } else {
-                                const entry = res.fieldAttempts?.find(a => a.participantId === participant.id);
+                                const entry = res.fieldEntries?.find(a => a.participantId === participant.id);
                                 return (
                                   <div className="flex items-center justify-between bg-emerald-500/5 p-2 rounded-xl border border-emerald-500/20">
                                     <div className="flex items-center gap-2">
                                       <div className={`w-6 h-6 rounded-lg flex items-center justify-center text-xs font-black ${entry?.rank === 1 ? 'bg-amber-500 text-white' : entry?.rank === 2 ? 'bg-slate-300 text-slate-900' : entry?.rank === 3 ? 'bg-orange-400 text-white' : 'bg-slate-800 text-slate-400'}`}>
                                         {entry?.rank || '-'}
                                       </div>
-                                      <span className="text-xs font-black text-emerald-400">{entry?.bestMark} {entry?.unit || 'م'}</span>
+                                      <span className="text-xs font-black text-emerald-400">{entry?.bestAttempt !== null && entry?.bestAttempt !== undefined ? `${entry.bestAttempt} م` : '-'}</span>
                                     </div>
                                     <span className="text-[10px] font-bold text-slate-500">أفضل علامة</span>
                                   </div>
@@ -2314,6 +2484,29 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                     <option value="Female">إناث</option>
                   </select>
 
+                  <button
+                    type="button"
+                    onClick={() => setIsAttendanceModalOpen(true)}
+                    className="px-3 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-black transition-all flex items-center gap-1.5 cursor-pointer shadow-md shadow-indigo-600/20 active:scale-95"
+                    title="غرفة المناداة وتأكيد حضور العدائين وتوزيع الممرات"
+                  >
+                    <ClipboardList className="w-3.5 h-3.5" />
+                    <span>غرفة المناداة</span>
+                    <span className="px-1.5 py-0.5 bg-indigo-800 rounded-md text-[10px] font-mono font-bold">
+                      {attendanceStats.present}/{attendanceStats.total}
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleClearCurrentRaceData}
+                    className="px-3 py-2 bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-300 dark:border-rose-800 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-xs active:scale-95"
+                    title="تفريغ بيانات هذا السباق ومسح مراتب الوصول والميقاتي للبدء من جديد"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5 text-rose-500" />
+                    <span>تفريغ بيانات السباق</span>
+                  </button>
+
                   {!isTeacher && activeDiscipline && (
                     <button
                       type="button"
@@ -2559,13 +2752,18 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                                 className="w-full sm:w-48 px-2.5 py-1.5 bg-slate-900 border border-slate-700 rounded-xl text-xs font-bold text-white cursor-pointer"
                               >
                                 <option value="">-- تعيين العداء --</option>
-                                {participants
-                                  .filter(p => p.disciplineId === activeDiscipline.id && p.category === selectedCategory && p.gender === selectedGender)
-                                  .map(p => (
+                                {sortedParticipantsForAssignment.map(p => {
+                                  const att = attendanceMap[p.id];
+                                  const isPresent = att?.status === 'present';
+                                  const isAbsent = att?.status === 'absent';
+                                  const mark = isPresent ? '✅ ' : isAbsent ? '❌ [غائب] ' : '⏳ ';
+                                  const lane = att?.lane ? ` [ممر ${att.lane}]` : '';
+                                  return (
                                     <option key={p.id} value={p.id}>
-                                      #{p.bibNumber} - {p.studentName} ({p.schoolName})
+                                      {mark}#{p.bibNumber} - {p.studentName} ({p.schoolName}){lane}
                                     </option>
-                                  ))}
+                                  );
+                                })}
                               </select>
                             </div>
                           </div>
@@ -2575,14 +2773,34 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                   </div>
 
                   {/* Save Final Race Button */}
-                  <div className="pt-3 border-t border-slate-800 flex items-center justify-between gap-3">
-                    <button
-                      onClick={() => setIsAddParticipantOpen(true)}
-                      className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer"
-                    >
-                      <Plus className="w-4 h-4 text-blue-400" />
-                      <span>إضافة عداء</span>
-                    </button>
+                  <div className="pt-3 border-t border-slate-800 flex items-center justify-between gap-2.5 flex-wrap">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <button
+                        onClick={() => setIsAddParticipantOpen(true)}
+                        className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <Plus className="w-4 h-4 text-blue-400" />
+                        <span>إضافة عداء</span>
+                      </button>
+
+                      <button
+                        onClick={() => setIsAttendanceModalOpen(true)}
+                        className="px-3.5 py-2 bg-indigo-900/60 hover:bg-indigo-900 border border-indigo-700 text-indigo-200 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+                        title="مناداة العدائين وتأكيد الحضور وتوزيع الممرات"
+                      >
+                        <ClipboardList className="w-4 h-4 text-indigo-400" />
+                        <span>غرفة المناداة ({attendanceStats.present}/{attendanceStats.total})</span>
+                      </button>
+
+                      <button
+                        onClick={handleClearCurrentRaceData}
+                        className="px-3.5 py-2 bg-rose-950/40 hover:bg-rose-900/60 border border-rose-800 text-rose-300 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-all active:scale-95"
+                        title="تفريغ ومسح بيانات هذا السباق وإعادة ضبط الميقاتي"
+                      >
+                        <RotateCcw className="w-3.5 h-3.5 text-rose-400" />
+                        <span>تفريغ بيانات السباق</span>
+                      </button>
+                    </div>
 
                     <button
                       onClick={handleSaveTrackResults}
@@ -2638,6 +2856,29 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                       {disc.icon} {disc.nameAr}
                     </button>
                   ))}
+
+                  <button
+                    type="button"
+                    onClick={() => setIsAttendanceModalOpen(true)}
+                    className="px-3 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-black transition-all flex items-center gap-1.5 cursor-pointer shadow-md shadow-indigo-600/20 active:scale-95"
+                    title="غرفة المناداة وتأكيد حضور المتسابقين"
+                  >
+                    <ClipboardList className="w-3.5 h-3.5" />
+                    <span>غرفة المناداة</span>
+                    <span className="px-1.5 py-0.5 bg-indigo-800 rounded-md text-[10px] font-mono font-bold">
+                      {attendanceStats.present}/{attendanceStats.total}
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleClearCurrentRaceData}
+                    className="px-3 py-2 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-800 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-xs active:scale-95"
+                    title="تفريغ ومسح بيانات ومحاولات هذه المسابقة للبدء من جديد"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5 text-rose-500" />
+                    <span>تفريغ بيانات المسابقة</span>
+                  </button>
 
                   {!isTeacher && activeDiscipline && (
                     <button
@@ -2737,7 +2978,35 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                   </div>
                 )}
 
-                <div className="pt-3 border-t border-slate-800 flex items-center justify-end">
+                <div className="pt-3 border-t border-slate-800 flex items-center justify-between gap-2.5 flex-wrap">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <button
+                      onClick={() => setIsAddParticipantOpen(true)}
+                      className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <Plus className="w-3.5 h-3.5 text-indigo-400" />
+                      <span>إضافة متسابق</span>
+                    </button>
+
+                    <button
+                      onClick={() => setIsAttendanceModalOpen(true)}
+                      className="px-3.5 py-2 bg-indigo-900/60 hover:bg-indigo-900 border border-indigo-700 text-indigo-200 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+                      title="مناداة المتسابقين وتأكيد الحضور"
+                    >
+                      <ClipboardList className="w-4 h-4 text-indigo-400" />
+                      <span>غرفة المناداة ({attendanceStats.present}/{attendanceStats.total})</span>
+                    </button>
+
+                    <button
+                      onClick={handleClearCurrentRaceData}
+                      className="px-3.5 py-2 bg-rose-950/40 hover:bg-rose-900/60 border border-rose-800 text-rose-300 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-all active:scale-95"
+                      title="تفريغ ومسح بيانات هذه المسابقة"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5 text-rose-400" />
+                      <span>تفريغ بيانات المسابقة</span>
+                    </button>
+                  </div>
+
                   <button
                     onClick={handleSaveFieldResults}
                     disabled={fieldTrials.length === 0}
@@ -2766,7 +3035,7 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                    </h4>
                    <div className="flex items-center gap-2">
                      <span className="px-2 py-0.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-lg text-[9px] font-black">
-                       {Object.values(results).filter(r => r.status === 'completed').length} نتائج معتمدة
+                       {resultsList.filter(r => r.status === 'completed').length} نتائج معتمدة
                      </span>
                    </div>
                 </div>
@@ -2788,7 +3057,7 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                     >
                       {disciplines.map(d => {
                         // Check if this specific discipline has ANY results in ANY category/gender
-                        const hasAnyResults = Object.values(results).some(r => r.disciplineId === d.id && r.status === 'completed');
+                        const hasAnyResults = resultsList.some(r => r.disciplineId === d.id && r.status === 'completed');
                         return (
                           <option key={d.id} value={d.id}>
                             {d.icon} {d.nameAr} {hasAnyResults ? '✓' : ''}
@@ -3019,14 +3288,14 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                       </p>
                     </div>
 
-                    {Object.values(results).filter(r => r.status === 'completed').length > 0 && (
+                    {resultsList.filter(r => r.status === 'completed').length > 0 && (
                       <div className="space-y-3 pt-4 border-t border-slate-800/50">
                         <h5 className="text-[10px] font-black text-amber-500/80 flex items-center justify-center gap-1.5 uppercase tracking-wider">
                           <CheckCircle2 className="w-3 h-3" />
                           <span>النتائج المتوفرة حالياً:</span>
                         </h5>
                         <div className="flex flex-wrap items-center justify-center gap-2">
-                          {Object.values(results)
+                          {resultsList
                             .filter(r => r.status === 'completed')
                             .map(res => {
                               const d = disciplines.find(item => item.id === res.disciplineId);
@@ -4402,6 +4671,344 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+      {/* ========================================================================= */}
+      {/* 📋 MODAL: CHAMBRE D'APPEL / ROLL CALL & ATTENDANCE (غرفة المناداة وتأكيد الحضور) 📋 */}
+      {/* ========================================================================= */}
+      {isAttendanceModalOpen && activeDiscipline && (
+        <div className="fixed inset-0 z-[60] bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-3 sm:p-5 overflow-y-auto">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-4xl w-full p-5 sm:p-6 shadow-2xl space-y-5 animate-in fade-in zoom-in-95 duration-150 max-h-[92vh] flex flex-col">
+            
+            {/* Modal Header */}
+            <div className="flex items-start justify-between border-b border-slate-200 dark:border-slate-800 pb-4 shrink-0">
+              <div className="flex items-center gap-3">
+                <span className="text-3xl p-2.5 bg-indigo-50 dark:bg-indigo-950/70 border border-indigo-200 dark:border-indigo-800 rounded-2xl text-indigo-600 dark:text-indigo-400">
+                  <ClipboardList className="w-7 h-7" />
+                </span>
+                <div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h3 className="text-base sm:text-lg font-black text-slate-900 dark:text-white flex items-center gap-2">
+                      <span>غرفة المناداة وتأكيد الحضور (Chambre d'Appel)</span>
+                    </h3>
+                    <span className="px-2.5 py-0.5 text-xs font-black bg-indigo-100 dark:bg-indigo-500/20 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-500/30 rounded-lg">
+                      {activeDiscipline.nameAr}
+                    </span>
+                    <span className="px-2 py-0.5 text-xs font-bold bg-blue-100 dark:bg-blue-500/20 text-blue-700 dark:text-blue-300 rounded-lg">
+                      {selectedCategory}
+                    </span>
+                    <span className="px-2 py-0.5 text-xs font-bold bg-pink-100 dark:bg-pink-500/20 text-pink-700 dark:text-pink-300 rounded-lg">
+                      {selectedGender === 'Male' ? 'ذكور' : 'إناث'}
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                    المناداة على المتسابقين، تثبيت رقم الصدرية والممر (Couloir)، واستبعاد الغائبين قبل انطلاق السباق
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setIsAttendanceModalOpen(false)}
+                className="p-1.5 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-slate-900 dark:hover:text-white rounded-xl transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Quick Stats & Action Toolbar */}
+            <div className="space-y-3 shrink-0">
+              <div className="flex flex-wrap items-center justify-between gap-3 bg-slate-50 dark:bg-slate-950/60 p-3.5 rounded-2xl border border-slate-200 dark:border-slate-800">
+                {/* Badges Count */}
+                <div className="flex items-center gap-2 flex-wrap text-xs font-bold">
+                  <span className="px-3 py-1.5 bg-slate-200 dark:bg-slate-800 text-slate-800 dark:text-slate-200 rounded-xl">
+                    إجمالي المسجلين: <strong className="font-mono text-sm">{attendanceStats.total}</strong>
+                  </span>
+                  <span className="px-3 py-1.5 bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800 rounded-xl flex items-center gap-1">
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    <span>حاضرون:</span>
+                    <strong className="font-mono text-sm">{attendanceStats.present}</strong>
+                  </span>
+                  <span className="px-3 py-1.5 bg-rose-100 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 border border-rose-300 dark:border-rose-800 rounded-xl flex items-center gap-1">
+                    <UserX className="w-3.5 h-3.5" />
+                    <span>غائبون:</span>
+                    <strong className="font-mono text-sm">{attendanceStats.absent}</strong>
+                  </span>
+                  <span className="px-3 py-1.5 bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-800 rounded-xl flex items-center gap-1">
+                    <span>قيد الانتظار:</span>
+                    <strong className="font-mono text-sm">{attendanceStats.pending}</strong>
+                  </span>
+                </div>
+
+                {/* Bulk Actions */}
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <button
+                    type="button"
+                    onClick={() => handleMarkAllAttendance('present')}
+                    className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-1 shadow-sm transition-all active:scale-95 cursor-pointer"
+                    title="تأكيد حضور جميع المتسابقين في هذا السباق دفعة واحدة"
+                  >
+                    <Check className="w-3.5 h-3.5" />
+                    <span>تأكيد حضور الجميع</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleMarkAllAttendance('absent')}
+                    className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold flex items-center gap-1 shadow-sm transition-all active:scale-95 cursor-pointer"
+                    title="تسجيل غياب جميع غير المؤكدين"
+                  >
+                    <UserX className="w-3.5 h-3.5" />
+                    <span>تسجيل غياب الجميع</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleResetAttendance}
+                    className="px-2.5 py-1.5 bg-slate-200 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-bold flex items-center gap-1 transition-all cursor-pointer"
+                    title="إعادة ضبط المناداة لحالتها الأولية"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    <span>إعادة ضبط</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handlePrintAttendanceSheet}
+                    className="px-2.5 py-1.5 bg-slate-200 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-bold flex items-center gap-1 transition-all cursor-pointer"
+                    title="طباعة ورقة المناداة ولائحة الانطلاق"
+                  >
+                    <Printer className="w-3.5 h-3.5" />
+                    <span>طباعة</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setIsAddParticipantOpen(true)}
+                    className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold flex items-center gap-1 transition-all cursor-pointer"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>إضافة عداء</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Search & Filter Tabs */}
+              <div className="flex items-center justify-between gap-3 flex-wrap">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs font-bold text-slate-500 dark:text-slate-400">التصفية:</span>
+                  {(['ALL', 'present', 'absent', 'pending'] as const).map(st => (
+                    <button
+                      key={st}
+                      type="button"
+                      onClick={() => setAttendanceFilterStatus(st)}
+                      className={`px-3 py-1 rounded-xl text-xs font-bold transition-all ${
+                        attendanceFilterStatus === st
+                          ? 'bg-indigo-600 text-white'
+                          : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
+                      }`}
+                    >
+                      {st === 'ALL' ? `الكل (${attendanceStats.total})` :
+                       st === 'present' ? `حاضر (${attendanceStats.present})` :
+                       st === 'absent' ? `غائب (${attendanceStats.absent})` :
+                       `انتظار (${attendanceStats.pending})`}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="relative w-full sm:w-64">
+                  <Search className="w-4 h-4 text-slate-400 absolute right-3 top-2.5" />
+                  <input
+                    type="text"
+                    value={attendanceSearchQuery}
+                    onChange={(e) => setAttendanceSearchQuery(e.target.value)}
+                    placeholder="بحث برقم الصدرية، الاسم، أو المؤسسة..."
+                    className="w-full pr-9 pl-3 py-1.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:ring-1 focus:ring-indigo-500 outline-none"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Participants Roll Call Table / Cards */}
+            <div className="flex-1 overflow-y-auto pr-1 space-y-2.5 min-h-[220px]">
+              {sortedParticipantsForAssignment.length === 0 ? (
+                <div className="p-8 text-center bg-slate-50 dark:bg-slate-950/40 rounded-2xl border border-dashed border-slate-200 dark:border-slate-800 space-y-2">
+                  <Users className="w-8 h-8 text-slate-400 mx-auto" />
+                  <p className="text-xs font-bold text-slate-500">لا يوجد متسابقون مسجلون في هذه المسابقة بعد</p>
+                  <button
+                    type="button"
+                    onClick={() => setIsAddParticipantOpen(true)}
+                    className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold inline-flex items-center gap-1.5"
+                  >
+                    <Plus className="w-4 h-4" />
+                    <span>إضافة عداء للسباق الآن</span>
+                  </button>
+                </div>
+              ) : (
+                sortedParticipantsForAssignment
+                  .filter(p => {
+                    const rec = attendanceMap[p.id];
+                    const status = rec?.status || 'pending';
+                    if (attendanceFilterStatus !== 'ALL' && status !== attendanceFilterStatus) return false;
+                    if (attendanceSearchQuery.trim()) {
+                      const q = attendanceSearchQuery.toLowerCase();
+                      return (
+                        p.studentName.toLowerCase().includes(q) ||
+                        p.bibNumber.includes(q) ||
+                        p.schoolName.toLowerCase().includes(q)
+                      );
+                    }
+                    return true;
+                  })
+                  .map((p, idx) => {
+                    const rec = attendanceMap[p.id];
+                    const status = rec?.status || 'pending';
+                    const lane = rec?.lane || (idx + 1);
+                    const isCalling = isCallingParticipantId === p.studentName;
+
+                    return (
+                      <div
+                        key={p.id}
+                        className={`p-3.5 rounded-2xl border transition-all flex flex-col md:flex-row md:items-center justify-between gap-3 ${
+                          isCalling
+                            ? 'bg-amber-100 dark:bg-amber-950/60 border-amber-500 ring-2 ring-amber-400 animate-pulse'
+                            : status === 'present'
+                            ? 'bg-emerald-50/60 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-900/60'
+                            : status === 'absent'
+                            ? 'bg-rose-50/60 dark:bg-rose-950/20 border-rose-200 dark:border-rose-900/60 opacity-75'
+                            : 'bg-white dark:bg-slate-950 border-slate-200 dark:border-slate-800'
+                        }`}
+                      >
+                        {/* Athlete Details */}
+                        <div className="flex items-center gap-3">
+                          {/* Bib Number Badge */}
+                          <div className="w-12 h-12 rounded-2xl bg-slate-900 text-amber-400 font-mono font-black text-base flex flex-col items-center justify-center shrink-0 border border-amber-500/30 shadow-xs">
+                            <span className="text-[9px] text-slate-400 leading-none">صدرية</span>
+                            <span>#{p.bibNumber}</span>
+                          </div>
+
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <h4 className="text-sm font-black text-slate-900 dark:text-white">
+                                {p.studentName}
+                              </h4>
+                              {status === 'present' && (
+                                <span className="px-2 py-0.5 rounded-md text-[10px] font-black bg-emerald-100 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300">
+                                  حاضر ✅
+                                </span>
+                              )}
+                              {status === 'absent' && (
+                                <span className="px-2 py-0.5 rounded-md text-[10px] font-black bg-rose-100 dark:bg-rose-500/20 text-rose-700 dark:text-rose-300">
+                                  غائب ❌
+                                </span>
+                              )}
+                              {status === 'pending' && (
+                                <span className="px-2 py-0.5 rounded-md text-[10px] font-black bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-300">
+                                  قيد الانتظار ⏳
+                                </span>
+                              )}
+                            </div>
+
+                            <p className="text-xs text-slate-500 dark:text-slate-400 font-medium mt-0.5 flex items-center gap-2">
+                              <span>🏢 {p.schoolName}</span>
+                              {p.massarCode && (
+                                <span className="font-mono text-[11px] text-slate-400">({p.massarCode})</span>
+                              )}
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* Controls: Lane, Call Audio, Attendance Toggle */}
+                        <div className="flex items-center gap-2 flex-wrap self-end md:self-auto">
+                          {/* Lane Input (الممر / الحارة) */}
+                          <div className="flex items-center gap-1.5 bg-slate-100 dark:bg-slate-900 px-2.5 py-1 rounded-xl border border-slate-200 dark:border-slate-800">
+                            <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400">الممر:</span>
+                            <input
+                              type="number"
+                              min="1"
+                              max="12"
+                              value={lane}
+                              onChange={(e) => handleUpdateLane(p.id, parseInt(e.target.value) || 1)}
+                              className="w-10 text-center font-mono font-black text-xs bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-700 rounded-lg py-0.5 text-slate-900 dark:text-white"
+                            />
+                          </div>
+
+                          {/* Voice Call Button (النداء الصوتي) */}
+                          <button
+                            type="button"
+                            onClick={() => handleAudioCall(p.studentName, p.bibNumber)}
+                            className={`px-2.5 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1 transition-all cursor-pointer ${
+                              isCalling
+                                ? 'bg-amber-500 text-slate-950 font-black'
+                                : 'bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300'
+                            }`}
+                            title="النداء الصوتي على العداء عبر مكبر الصوت"
+                          >
+                            <Volume2 className="w-3.5 h-3.5 text-amber-500" />
+                            <span>نداء 📢</span>
+                          </button>
+
+                          {/* Attendance Status Buttons */}
+                          <div className="flex items-center p-0.5 bg-slate-100 dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800">
+                            <button
+                              type="button"
+                              onClick={() => handleToggleAttendance(p.id, 'present')}
+                              className={`px-2.5 py-1 rounded-lg text-xs font-black transition-all cursor-pointer ${
+                                status === 'present'
+                                  ? 'bg-emerald-600 text-white shadow-xs'
+                                  : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                              }`}
+                            >
+                              حاضر
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => handleToggleAttendance(p.id, 'absent')}
+                              className={`px-2.5 py-1 rounded-lg text-xs font-black transition-all cursor-pointer ${
+                                status === 'absent'
+                                  ? 'bg-rose-600 text-white shadow-xs'
+                                  : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                              }`}
+                            >
+                              غائب
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => handleToggleAttendance(p.id, 'pending')}
+                              className={`px-2 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                                status === 'pending'
+                                  ? 'bg-amber-500 text-slate-950 font-black shadow-xs'
+                                  : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                              }`}
+                            >
+                              انتظار
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="pt-3 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between gap-3 shrink-0">
+              <span className="text-xs text-slate-500 dark:text-slate-400">
+                ✅ الحاضرون يظهرون تلقائياً في مقدمة قوائم التسجيل في الميقاتي.
+              </span>
+
+              <button
+                type="button"
+                onClick={() => setIsAttendanceModalOpen(false)}
+                className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-black shadow-md shadow-indigo-600/20 cursor-pointer"
+              >
+                إغلاق والعودة إلى السباق
+              </button>
+            </div>
+
           </div>
         </div>
       )}
