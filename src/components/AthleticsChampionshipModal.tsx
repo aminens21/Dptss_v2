@@ -318,10 +318,11 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
 
   // Available heats/series for current race
   const availableSeriesList = useMemo(() => {
-    const set = new Set<number>([1, 2, 3, ...customSeriesList]);
+    const set = new Set<number>([...customSeriesList]);
     recordedLaps.forEach(l => {
       if (l.seriesNumber) set.add(l.seriesNumber);
     });
+    if (set.size === 0) set.add(1);
     return Array.from(set).sort((a, b) => a - b);
   }, [recordedLaps, customSeriesList]);
 
@@ -442,7 +443,14 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
     return AthleticsService.canUserManageCommittee(currentUser, currentCommitteeDef.id, assignments);
   }, [effectiveRole, currentCommitteeDef, canRecordResults, activeCommitteePermissionDef, currentUser, assignments]);
 
-  // Sync field trials & track laps when selecting discipline/category/gender
+  const userAssignedCommittee = useMemo(() => {
+    if (!currentUser) return null;
+    const list = AthleticsService.getRefereeAthleticsAssignments(currentUser);
+    if (list.length > 0) {
+      return list.map(l => `${l.committeeTitle} (${l.roleInCommittee})`).join(' • ');
+    }
+    return null;
+  }, [currentUser, assignments]);
   // ENSURES 100% INDEPENDENT STORAGE AND STATE PER RACE (كل سباق يتم حفظ نتائجه مستقلا)
   // CRITICAL FIX: DO NOT reset recordedLaps or fieldTrials on re-renders or when stopwatch is reset!
   useEffect(() => {
@@ -859,13 +867,14 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
   // --- ATTENDANCE & ROLL CALL (غرفة المناداة وتأكيد الحضور) HANDLERS ---
   const handleToggleAttendance = (participantId: string, status: 'present' | 'absent' | 'pending') => {
     if (!currentEventKey) return;
-    AthleticsService.setParticipantAttendance(currentEventKey, participantId, status);
+    const currentLane = attendanceMap[participantId]?.lane || 1;
+    AthleticsService.setParticipantAttendance(currentEventKey, participantId, status, currentLane);
     setAttendanceMap(prev => ({
       ...prev,
       [participantId]: {
         participantId,
         status,
-        lane: prev[participantId]?.lane,
+        lane: currentLane,
         checkInTime: new Date().toISOString()
       }
     }));
@@ -1552,6 +1561,12 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                   }`}>
                     {userAccess.canManage ? <Unlock className="w-3 h-3 text-emerald-200 dark:text-emerald-400" /> : <Lock className="w-3 h-3 text-amber-200 dark:text-amber-400" />}
                     <span>{userAccess.canManage ? 'تحكيم مفعل' : 'قراءة فقط'}</span>
+                  </span>
+                )}
+
+                {userAssignedCommittee && (
+                  <span className="px-2.5 py-0.5 text-[10px] font-black bg-gradient-to-r from-amber-500 to-orange-500 text-slate-950 rounded-lg shadow-sm flex items-center gap-1">
+                    <span>🏁 صفة التحكيم: {userAssignedCommittee}</span>
                   </span>
                 )}
               </div>
@@ -3051,16 +3066,27 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                               </button>
                               <button
                                 type="button"
-                                onClick={() => {
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  e.preventDefault();
+                                  if (availableSeriesList.length <= 1) {
+                                    toast.error('لا يمكن حذف السلسلة الوحيدة المتبقية!');
+                                    return;
+                                  }
                                   if (window.confirm(`هل أنت متأكد من حذف السلسلة ${sNum} بالكامل مع كافة وصولاتها وتوقيتاتها؟`)) {
                                     setRecordedLaps(prev => prev.filter(l => (l.seriesNumber || 1) !== sNum));
+                                    setCustomSeriesList(prev => prev.filter(s => s !== sNum));
                                     if (seriesViewFilter === sNum) {
                                       setSeriesViewFilter('ALL');
+                                    }
+                                    if (activeSeriesNumber === sNum) {
+                                      const remaining = availableSeriesList.filter(s => s !== sNum);
+                                      setActiveSeriesNumber(remaining[0] || 1);
                                     }
                                     toast.success(`تم حذف السلسلة ${sNum} بنجاح`);
                                   }
                                 }}
-                                className="px-1.5 py-1 text-rose-400 hover:text-white hover:bg-rose-600 transition-colors"
+                                className="px-2 py-1 text-rose-400 hover:text-white hover:bg-rose-600 transition-colors cursor-pointer text-xs font-black z-10"
                                 title={`حذف السلسلة ${sNum}`}
                               >
                                 ✕
@@ -5569,21 +5595,7 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                             />
                           </div>
 
-                          {/* Voice Call Button (النداء الصوتي) */}
-                          <button
-                            type="button"
-                            onClick={() => handleAudioCall(p.studentName, p.bibNumber)}
-                            className={`p-1.5 sm:px-2.5 sm:py-1.5 rounded-xl text-xs font-bold flex items-center gap-1 transition-all cursor-pointer active:scale-95 ${
-                              isCalling
-                                ? 'bg-amber-500 text-slate-950 font-black'
-                                : 'bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300'
-                            }`}
-                            title="النداء الصوتي على العداء عبر مكبر الصوت"
-                          >
-                            <Volume2 className="w-3.5 h-3.5 text-amber-500" />
-                            <span className="hidden sm:inline">نداء 📢</span>
-                            <span className="inline sm:hidden text-[11px]">📢</span>
-                          </button>
+                          {/* Voice Call Button removed per user request */}
 
                           {/* Attendance Status Buttons */}
                           <div className="flex items-center p-0.5 bg-slate-100 dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800">

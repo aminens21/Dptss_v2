@@ -778,7 +778,7 @@ export const Matches: React.FC = () => {
                 )}
               >
                 <Users className="w-3.5 h-3.5" />
-                <span>مبارياتي التحكيمية 🏁</span>
+                <span>أنشطتي التحكيمية 🏁</span>
               </button>
             )}
           </div>

@@ -694,7 +694,7 @@ export const AppLayout: React.FC = () => {
                     {[
                       { name: 'جدول المقابلات والنتائج', tab: 'list', icon: '⚽', show: true },
                       { name: 'الرزنامة والبرنامج (Calendrier)', tab: 'calendar', icon: '📅', show: true },
-                      { name: 'مبارياتي التحكيمية', tab: 'referee', icon: '🏁', show: userProfile?.role === 'TEACHER' || userProfile?.role === 'REFEREE' || userProfile?.role === 'CENTRAL_ADMIN' }
+                      { name: 'أنشطتي التحكيمية', tab: 'referee', icon: '🏁', show: userProfile?.role === 'TEACHER' || userProfile?.role === 'REFEREE' || userProfile?.role === 'CENTRAL_ADMIN' }
                     ]
                       .filter(sub => sub.show)
                       .map((sub) => {

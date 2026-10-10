@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { Match, School, Venue, Tournament, User } from '../types';
 import { SPORTS_MAP } from '../lib/dataService';
+import { AthleticsService } from '../lib/athleticsService';
 import {
   Trophy,
   Calendar,
@@ -130,8 +131,51 @@ export const RefereeMatchesView: React.FC<RefereeMatchesViewProps> = ({
     return SPORTS_MAP[sportId] || { name: sportId || 'رياضة مدرسية', icon: '🏆' };
   };
 
+  const athleticsAssignments = useMemo(() => {
+    if (!userProfile) return [];
+    try {
+      return AthleticsService.getRefereeAthleticsAssignments(userProfile);
+    } catch {
+      return [];
+    }
+  }, [userProfile]);
+
   return (
     <div className="space-y-6 dir-rtl text-right">
+      {/* Athletics Committee Assignments (مهامي التحكيمية في ألعاب القوى) */}
+      {athleticsAssignments.length > 0 && (
+        <div className="bg-gradient-to-r from-amber-500/10 via-orange-500/10 to-amber-600/10 border border-amber-500/30 rounded-3xl p-5 shadow-md">
+          <div className="flex items-center gap-3 mb-3">
+            <div className="w-10 h-10 rounded-2xl bg-amber-500 text-slate-950 flex items-center justify-center font-bold text-lg shadow-sm">
+              🏃‍♂️
+            </div>
+            <div>
+              <h3 className="text-sm font-black text-slate-900 dark:text-white">
+                مهامك وصفاتك التحكيمية الرسمية في بطولات ألعاب القوى المدرسية
+              </h3>
+              <p className="text-xs text-slate-600 dark:text-slate-400 font-medium">
+                تم تعيينك رسمياً في اللجان التقنية والتحكيمية التالية لسباقات ألعاب القوى:
+              </p>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 mt-3">
+            {athleticsAssignments.map((assign, idx) => (
+              <div key={idx} className="bg-white dark:bg-slate-900 border border-amber-500/30 rounded-2xl p-3.5 shadow-xs flex items-center justify-between gap-3">
+                <div>
+                  <span className="text-[10px] font-black px-2 py-0.5 rounded bg-amber-500/20 text-amber-700 dark:text-amber-300 block w-fit mb-1">
+                    {assign.committeeTitle}
+                  </span>
+                  <span className="text-xs font-black text-slate-900 dark:text-white block">
+                    الصفة: {assign.roleInCommittee}
+                  </span>
+                </div>
+                <span className="text-xl">🥇</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Welcome Card & Referee Profile Summary */}
       <div className="p-6 rounded-3xl bg-gradient-to-br from-slate-900 via-blue-950 to-slate-900 text-white border border-slate-800 shadow-xl overflow-hidden relative">
         <div className="absolute top-0 left-0 right-0 h-1.5 bg-linear-to-r from-amber-400 via-yellow-500 to-amber-600" />
