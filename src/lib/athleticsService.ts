@@ -1350,16 +1350,17 @@ export class AthleticsService {
     return { participantsCount: mockStudents.length };
   }
 
-  static getRefereeAthleticsAssignments(user: User | null): { committeeId: string; committeeTitle: string; roleInCommittee: string }[] {
+  static getRefereeAthleticsAssignments(user: User | null): { committeeId: string; committeeTitle: string; roleInCommittee: string; permissions?: any }[] {
     if (!user) return [];
     try {
       const assignments = this.getCommitteeAssignments();
       const committees = this.getCommittees();
-      const results: { committeeId: string; committeeTitle: string; roleInCommittee: string }[] = [];
+      const results: { committeeId: string; committeeTitle: string; roleInCommittee: string; permissions?: any }[] = [];
 
       for (const [cId, assign] of Object.entries(assignments)) {
         const comm = committees.find(c => c.id === cId);
         const title = comm ? comm.titleAr : cId;
+        const permissions = comm?.permissions;
         
         const isMain = assign.teacherId === user.id || (assign.teacherName && user.fullName && assign.teacherName.trim().toLowerCase() === user.fullName.trim().toLowerCase());
         const matchingMember = assign.members?.find(m => m.teacherId === user.id || (m.teacherName && user.fullName && m.teacherName.trim().toLowerCase() === user.fullName.trim().toLowerCase()));
@@ -1368,7 +1369,8 @@ export class AthleticsService {
           results.push({
             committeeId: cId,
             committeeTitle: title,
-            roleInCommittee: matchingMember?.roleInCommittee || (isMain ? 'رئيس اللجنة' : 'عضو لجنة')
+            roleInCommittee: matchingMember?.roleInCommittee || (isMain ? 'رئيس اللجنة' : 'عضو لجنة'),
+            permissions
           });
         }
       }

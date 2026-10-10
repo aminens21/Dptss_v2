@@ -160,16 +160,38 @@ export const RefereeMatchesView: React.FC<RefereeMatchesViewProps> = ({
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 mt-3">
             {athleticsAssignments.map((assign, idx) => (
-              <div key={idx} className="bg-white dark:bg-slate-900 border border-amber-500/30 rounded-2xl p-3.5 shadow-xs flex items-center justify-between gap-3">
-                <div>
-                  <span className="text-[10px] font-black px-2 py-0.5 rounded bg-amber-500/20 text-amber-700 dark:text-amber-300 block w-fit mb-1">
+              <div key={idx} className="bg-white dark:bg-slate-900 border border-amber-500/30 rounded-2xl p-4 shadow-xs space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-black px-2.5 py-0.5 rounded-lg bg-amber-500/20 text-amber-700 dark:text-amber-300">
                     {assign.committeeTitle}
                   </span>
-                  <span className="text-xs font-black text-slate-900 dark:text-white block">
-                    الصفة: {assign.roleInCommittee}
+                  <span className="text-xl">🥇</span>
+                </div>
+                <div>
+                  <span className="text-[10px] font-bold text-slate-400 block">الصفة أو المهمة:</span>
+                  <span className="text-xs font-black text-slate-900 dark:text-white block mt-0.5">
+                    {assign.roleInCommittee}
                   </span>
                 </div>
-                <span className="text-xl">🥇</span>
+                {assign.permissions && (
+                  <div className="pt-2 border-t border-slate-100 dark:border-slate-800 flex flex-wrap gap-1">
+                    {assign.permissions.canRecordResults && (
+                      <span className="text-[9px] font-bold px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300">
+                        ✅ تسجيل النتائج
+                      </span>
+                    )}
+                    {assign.permissions.canValidateResults && (
+                      <span className="text-[9px] font-bold px-2 py-0.5 rounded bg-blue-100 text-blue-800 dark:bg-blue-950/80 dark:text-blue-300">
+                        🛡️ اعتماد النتائج
+                      </span>
+                    )}
+                    {assign.permissions.canPrintReports && (
+                      <span className="text-[9px] font-bold px-2 py-0.5 rounded bg-purple-100 text-purple-800 dark:bg-purple-950/80 dark:text-purple-300">
+                        🖨️ طباعة التقارير
+                      </span>
+                    )}
+                  </div>
+                )}
               </div>
             ))}
           </div>
