@@ -320,14 +320,7 @@ export const Dashboard: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-2 self-start sm:self-auto flex-wrap relative z-10">
-          <button
-            type="button"
-            onClick={() => navigate('/statistics')}
-            className="bg-white/10 hover:bg-white/20 text-white border border-white/20 px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer shrink-0"
-          >
-            <BarChart3 className="w-3.5 h-3.5 text-amber-300" />
-            <span>لوحة الإحصائيات</span>
-          </button>
+          {/* Statistics button hidden as requested */}
 
           {isCentralAdmin ? (
             <button
@@ -357,8 +350,7 @@ export const Dashboard: React.FC = () => {
         </div>
       </div>
 
-      {/* PWA Mobile App Installation Banner */}
-      <PWAInstallButton variant="banner" />
+      {/* PWA Mobile App Installation Banner hidden as requested */}
 
       {/* Teacher Profile Incomplete Banner (Gentle Non-blocking notice) */}
       {isTeacher && (!userProfile?.workLocation || !userProfile?.leaseNumber) && (

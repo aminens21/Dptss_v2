@@ -3417,7 +3417,7 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                         {fieldTrials.length} متسابق(ة)
                       </span>
                     </h4>
-                    <p className="text-xs text-slate-400 font-medium mt-0.5">
+                    <p className="mobile-hide-desc text-xs text-slate-400 font-medium mt-0.5">
                       يتم اختيار التلاميذ يدوياً للاختبار. أدخل المسافة بالمتر (مثال: 4.85) أو حرف X للمحاولة الملغاة.
                     </p>
                   </div>
@@ -3457,7 +3457,7 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                 {fieldTrials.length === 0 ? (
                   <div className="bg-slate-900/60 border border-dashed border-slate-800 rounded-2xl p-8 text-center space-y-3">
                     <p className="text-xs font-bold text-slate-300">لم يتم إدراج تلاميذ في هذا الاختبار بعد</p>
-                    <p className="text-[11px] text-slate-500 max-w-md mx-auto">
+                    <p className="mobile-hide-desc text-[11px] text-slate-500 max-w-md mx-auto">
                       اختر التلاميذ يدوياً واحداً تلو الآخر لبدء تسجيل المحاولات، أو انقر على "إضافة خانة".
                     </p>
                     <div className="flex items-center justify-center gap-2 flex-wrap pt-1">
@@ -4877,7 +4877,7 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
               </div>
 
               {/* Notice */}
-              <div className="p-3 bg-emerald-950/40 border border-emerald-800/60 rounded-xl text-[11px] text-emerald-200 flex items-start gap-2">
+              <div className="mobile-hide-desc p-3 bg-emerald-950/40 border border-emerald-800/60 rounded-xl text-[11px] text-emerald-200 flex items-start gap-2">
                 <CheckCircle className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
                 <span>
                   تتيح لوائح ألعاب القوى المدرسية للتلميذ المشاركة في مسابقتين كحد أقصى (مثلاً: سباق 100م والقفز الطولي، أو 800م وتتابع).
@@ -5172,7 +5172,7 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                     {tempAllowedDiscIds.length} مسابقة محددة
                   </span>
                 </div>
-                <p className="text-[11px] text-slate-400">
+                <p className="mobile-hide-desc text-[11px] text-slate-400">
                   مثال: عند تحديد مسابقات القفز فقط للجنة القفز، فلن تظهر له أي مسابقة أخرى كدفع الجلة أو سباقات الجري.
                 </p>
 
@@ -6131,7 +6131,7 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                   <h3 className="text-base sm:text-lg font-black text-slate-900 dark:text-white flex items-center gap-2">
                     <span>لوائح وبيانات التجريب الافتراضية (10 متسابقين لكل سباق وفئة وجنس)</span>
                   </h3>
-                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
+                  <p className="mobile-hide-desc text-xs text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
                     توليد أو دمج 10 متسابقين حقيقيين في كل سباق ومسابقة، كل فئة عمرية، وكل جنس لاختبار الميقاتي، السلاسل، الترتيب، محاولات الميدان ومنصة التتويج مع إمكانية التوزيع والتطبيق حسب كل لجنة.
                   </p>
                 </div>

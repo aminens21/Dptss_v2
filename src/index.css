@@ -223,3 +223,27 @@ html.dark .shadow-2xl {
   scrollbar-width: none !important;  /* Firefox */
 }
 
+/* Mobile view data & text compaction */
+@media (max-width: 640px) {
+  body {
+    font-size: 13px !important;
+  }
+  table th, table td {
+    padding: 6px 8px !important;
+    font-size: 11px !important;
+  }
+  .mobile-compact-card {
+    padding: 10px !important;
+  }
+  .mobile-text-xs {
+    font-size: 11px !important;
+  }
+  .mobile-icon-sm {
+    width: 14px !important;
+    height: 14px !important;
+  }
+  .mobile-hide-desc {
+    display: none !important;
+  }
+}
+
