@@ -22,6 +22,40 @@ const STORAGE_KEYS = {
   ATTENDANCE: 'school_athletics_attendance_v2'
 };
 
+// --- MOROCCAN DEMO DATA POOLS (بيانات مغربية واقعية للتجريب الشامل) ---
+export const MOROCCAN_DEMO_SCHOOLS = [
+  'ثانوية الفتح التأهيلية',
+  'ثانوية صلاح الدين الأيوبي',
+  'إعدادية علال الفاسي',
+  'إعدادية القدس',
+  'إعدادية ابن خلدون',
+  'مدرسة ابن خلدون الابتدائية',
+  'مدرسة النجاح الابتدائية',
+  'مؤسسة النخبة الخاصة',
+  'ثانوية ابن رشد التأهيلية',
+  'إعدادية المسيرة الخضراء',
+  'ثانوية الزيتون التأهيلية',
+  'مدرسة 11 يناير الابتدائية'
+];
+
+export const MOROCCAN_DEMO_MALE_NAMES = [
+  'ياسين الفيلالي', 'أمين العمراني', 'حمزة التازي', 'سفيان البوشيخي', 'معاد الناصري',
+  'رضا الوردي', 'عثمان التازي', 'طارق العلمي', 'أيوب البوعناني', 'أنس الشرقاوي',
+  'عمر القاسمي', 'آدم الصالحي', 'إلياس بنجلون', 'يوسف بناني', 'بدر الصنهاجي',
+  'بلال اليعقوبي', 'زكرياء المرابط', 'مهدي القاسمي', 'ريان العلوي', 'مروان الشرايبي',
+  'هيثم الودغيري', 'سعد الفاسي', 'أشرف الحداوي', 'وليد البودالي', 'هشام الداودي',
+  'عبد الرحمان بنجلون', 'صلاح الدين المنصوري', 'طه الصالحي', 'إسماعيل بلحسن', 'زياد العمراني'
+];
+
+export const MOROCCAN_DEMO_FEMALE_NAMES = [
+  'أميمة بلحسن', 'فاطمة الزهراء بنعلي', 'خديجة برادة', 'مريم الشاوي', 'هدى الإدريسي',
+  'سارة المنصوري', 'دعاء العلمي', 'ملاك الرحماني', 'سلمى الإدريسي', 'ليلى الشاوي',
+  'سناء المتوكل', 'كوثر العمراني', 'آية الفيلالي', 'نهال الوردي', 'إيمان الناصري',
+  'ياسمين القاسمي', 'شيماء التازي', 'حفصة البوعناني', 'وفاء الشرقاوي', 'رانية الصالحي',
+  'هبة الرحماني', 'وصال بنجلون', 'ريم بناني', 'زينب الصنهاجي', 'ابتسام المرابط',
+  'نسرين العلوي', 'نادية الشرايبي', 'إكرام الودغيري', 'بسمة الفاسي', 'غيثة الحداوي'
+];
+
 export class AthleticsService {
   // 1. Disciplines List (Custom + Built-in)
   static getDisciplines(): AthleticsDisciplineDef[] {
@@ -602,11 +636,51 @@ export class AthleticsService {
     return `${String(seconds).padStart(2, '0')}.${String(hundredths).padStart(2, '0')}`;
   }
 
+  static parseTimeToMs(str: string): number {
+    if (!str || typeof str !== 'string') return 0;
+    const clean = str.trim().replace(',', '.');
+    if (clean.includes(':')) {
+      const parts = clean.split(':');
+      const mins = parseFloat(parts[0]) || 0;
+      const secs = parseFloat(parts[1]) || 0;
+      return Math.round(mins * 60000 + secs * 1000);
+    }
+    const secs = parseFloat(clean);
+    return isNaN(secs) ? 0 : Math.round(secs * 1000);
+  }
+
+  static getDraftTrackLaps(eventKey: string): TrackRankEntry[] {
+    try {
+      const data = localStorage.getItem(`athletics_draft_laps_${eventKey}`);
+      if (data) return JSON.parse(data);
+    } catch (e) {
+      console.error('Failed to parse draft track laps:', e);
+    }
+    return [];
+  }
+
+  static saveDraftTrackLaps(eventKey: string, laps: TrackRankEntry[]): void {
+    try {
+      localStorage.setItem(`athletics_draft_laps_${eventKey}`, JSON.stringify(laps));
+    } catch (e) {
+      console.error('Failed to save draft track laps:', e);
+    }
+  }
+
+  static clearDraftTrackLaps(eventKey: string): void {
+    try {
+      localStorage.removeItem(`athletics_draft_laps_${eventKey}`);
+    } catch (e) {
+      console.error('Failed to clear draft track laps:', e);
+    }
+  }
+
   // 7. Generate & Seed Realistic Default Mock Data (بيانات افتراضية نموذجية)
   static loadDefaultMockData(): {
     participantsCount: number;
     committeesCount: number;
     disciplinesCount: number;
+    breakdown?: Record<string, { committeeTitle: string; count: number; eventsCount: number }>;
   } {
     // 1. Reset Disciplines to full official set
     this.saveDisciplines(INITIAL_ATHLETICS_DISCIPLINES);
@@ -747,357 +821,9 @@ export class AthleticsService {
     localStorage.setItem(STORAGE_KEYS.COMMITTEE_ASSIGNMENTS, JSON.stringify(defaultAssignments));
     window.dispatchEvent(new CustomEvent('athleticsCommitteeUpdated', { detail: defaultAssignments }));
 
-    // 4. Comprehensive Default Participants Roster (20 Moroccan student athletes)
-    const mockParticipants: AthleticsParticipantRecord[] = [
-      // Fath High School (U18 & U20)
-      {
-        id: 'ath-demo-1',
-        disciplineId: 'sprint_100m',
-        secondDisciplineId: 'long_jump',
-        category: 'U18',
-        gender: 'Male',
-        bibNumber: '101',
-        studentName: 'ياسين الفيلالي',
-        schoolName: 'ثانوية الفتح التأهيلية',
-        birthYear: '2008',
-        birthDate: '2008-03-15',
-        massarNumber: 'F132890432',
-        affiliationType: 'non_club',
-        coachName: 'ذ. عبد الرحيم بلقاسم',
-        coachPhone: '0661122334',
-        createdAt: new Date().toISOString()
-      },
-      {
-        id: 'ath-demo-2',
-        disciplineId: 'sprint_100m',
-        secondDisciplineId: 'sprint_200m',
-        category: 'U18',
-        gender: 'Female',
-        bibNumber: '102',
-        studentName: 'أميمة بلحسن',
-        schoolName: 'ثانوية الفتح التأهيلية',
-        birthYear: '2008',
-        birthDate: '2008-06-22',
-        massarNumber: 'F139045612',
-        affiliationType: 'non_club',
-        coachName: 'ذ. عبد الرحيم بلقاسم',
-        coachPhone: '0661122334',
-        createdAt: new Date().toISOString()
-      },
-      {
-        id: 'ath-demo-3',
-        disciplineId: 'middle_1500m',
-        secondDisciplineId: 'middle_800m',
-        category: 'U18',
-        gender: 'Male',
-        bibNumber: '104',
-        studentName: 'سفيان البوشيخي',
-        schoolName: 'ثانوية الفتح التأهيلية',
-        birthYear: '2008',
-        birthDate: '2008-11-05',
-        massarNumber: 'F138901234',
-        affiliationType: 'club_affiliated',
-        coachName: 'ذ. عبد الرحيم بلقاسم',
-        coachPhone: '0661122334',
-        createdAt: new Date().toISOString()
-      },
-      {
-        id: 'ath-demo-4',
-        disciplineId: 'shot_put',
-        secondDisciplineId: 'discus_throw',
-        category: 'U18',
-        gender: 'Male',
-        bibNumber: '301',
-        studentName: 'بلال اليعقوبي',
-        schoolName: 'ثانوية الفتح التأهيلية',
-        birthYear: '2008',
-        birthDate: '2008-02-28',
-        massarNumber: 'F135678901',
-        affiliationType: 'non_club',
-        coachName: 'ذ. عبد الرحيم بلقاسم',
-        coachPhone: '0661122334',
-        createdAt: new Date().toISOString()
-      },
-      {
-        id: 'ath-demo-5',
-        disciplineId: 'sprint_200m',
-        secondDisciplineId: 'middle_400m',
-        category: 'U20',
-        gender: 'Male',
-        bibNumber: '501',
-        studentName: 'رضا الوردي',
-        schoolName: 'ثانوية الفتح التأهيلية',
-        birthYear: '2006',
-        birthDate: '2006-05-12',
-        massarNumber: 'F121234567',
-        affiliationType: 'non_club',
-        coachName: 'ذ. عبد الرحيم بلقاسم',
-        coachPhone: '0661122334',
-        createdAt: new Date().toISOString()
-      },
-      {
-        id: 'ath-demo-6',
-        disciplineId: 'triple_jump',
-        secondDisciplineId: 'long_jump',
-        category: 'U20',
-        gender: 'Male',
-        bibNumber: '503',
-        studentName: 'معاد الناصري',
-        schoolName: 'ثانوية الفتح التأهيلية',
-        birthYear: '2005',
-        birthDate: '2005-12-14',
-        massarNumber: 'F123456789',
-        affiliationType: 'club_affiliated',
-        coachName: 'ذ. عبد الرحيم بلقاسم',
-        coachPhone: '0661122334',
-        createdAt: new Date().toISOString()
-      },
-
-      // Salah Eddine High School
-      {
-        id: 'ath-demo-7',
-        disciplineId: 'sprint_100m',
-        secondDisciplineId: 'sprint_200m',
-        category: 'U18',
-        gender: 'Male',
-        bibNumber: '103',
-        studentName: 'أمين العمراني',
-        schoolName: 'ثانوية صلاح الدين الأيوبي',
-        birthYear: '2008',
-        birthDate: '2008-01-10',
-        massarNumber: 'F134590123',
-        affiliationType: 'club_affiliated',
-        coachName: 'ذ. رشيد الحسيني',
-        coachPhone: '0664455667',
-        createdAt: new Date().toISOString()
-      },
-      {
-        id: 'ath-demo-8',
-        disciplineId: 'middle_800m',
-        secondDisciplineId: 'middle_400m',
-        category: 'U18',
-        gender: 'Female',
-        bibNumber: '106',
-        studentName: 'فاطمة الزهراء بنعلي',
-        schoolName: 'ثانوية صلاح الدين الأيوبي',
-        birthYear: '2008',
-        birthDate: '2008-04-12',
-        massarNumber: 'F136789012',
-        affiliationType: 'non_club',
-        coachName: 'ذ. رشيد الحسيني',
-        coachPhone: '0664455667',
-        createdAt: new Date().toISOString()
-      },
-      {
-        id: 'ath-demo-9',
-        disciplineId: 'middle_1500m',
-        secondDisciplineId: 'middle_800m',
-        category: 'U20',
-        gender: 'Female',
-        bibNumber: '502',
-        studentName: 'خديجة برادة',
-        schoolName: 'ثانوية صلاح الدين الأيوبي',
-        birthYear: '2006',
-        birthDate: '2006-09-08',
-        massarNumber: 'F122345678',
-        affiliationType: 'non_club',
-        coachName: 'ذ. رشيد الحسيني',
-        coachPhone: '0664455667',
-        createdAt: new Date().toISOString()
-      },
-
-      // Allal El Fassi Middle School (U15)
-      {
-        id: 'ath-demo-10',
-        disciplineId: 'sprint_80m',
-        secondDisciplineId: 'long_jump',
-        category: 'U15',
-        gender: 'Male',
-        bibNumber: '201',
-        studentName: 'عمر القاسمي',
-        schoolName: 'إعدادية علال الفاسي',
-        birthYear: '2011',
-        birthDate: '2011-05-14',
-        massarNumber: 'F141234567',
-        affiliationType: 'non_club',
-        coachName: 'ذ. محمد المنصوري',
-        coachPhone: '0662233445',
-        createdAt: new Date().toISOString()
-      },
-      {
-        id: 'ath-demo-11',
-        disciplineId: 'sprint_80m',
-        secondDisciplineId: 'middle_600m',
-        category: 'U15',
-        gender: 'Female',
-        bibNumber: '202',
-        studentName: 'مريم الشاوي',
-        schoolName: 'إعدادية علال الفاسي',
-        birthYear: '2011',
-        birthDate: '2011-09-30',
-        massarNumber: 'F142345678',
-        affiliationType: 'non_club',
-        coachName: 'ذ. محمد المنصوري',
-        coachPhone: '0662233445',
-        createdAt: new Date().toISOString()
-      },
-      {
-        id: 'ath-demo-12',
-        disciplineId: 'long_jump',
-        secondDisciplineId: 'sprint_80m',
-        category: 'U15',
-        gender: 'Male',
-        bibNumber: '203',
-        studentName: 'أيوب البوعناني',
-        schoolName: 'إعدادية علال الفاسي',
-        birthYear: '2010',
-        birthDate: '2010-12-08',
-        massarNumber: 'F143456789',
-        affiliationType: 'non_club',
-        coachName: 'ذ. محمد المنصوري',
-        coachPhone: '0662233445',
-        createdAt: new Date().toISOString()
-      },
-      {
-        id: 'ath-demo-13',
-        disciplineId: 'long_jump',
-        secondDisciplineId: 'sprint_80m',
-        category: 'U15',
-        gender: 'Female',
-        bibNumber: '204',
-        studentName: 'هدى الإدريسي',
-        schoolName: 'إعدادية علال الفاسي',
-        birthYear: '2011',
-        birthDate: '2011-03-21',
-        massarNumber: 'F144567890',
-        affiliationType: 'non_club',
-        coachName: 'ذ. محمد المنصوري',
-        coachPhone: '0662233445',
-        createdAt: new Date().toISOString()
-      },
-      {
-        id: 'ath-demo-14',
-        disciplineId: 'middle_1000m',
-        secondDisciplineId: 'middle_600m',
-        category: 'U15',
-        gender: 'Male',
-        bibNumber: '205',
-        studentName: 'أنس الشرقاوي',
-        schoolName: 'إعدادية علال الفاسي',
-        birthYear: '2010',
-        birthDate: '2010-07-16',
-        massarNumber: 'F145678901',
-        affiliationType: 'club_affiliated',
-        coachName: 'ذ. محمد المنصوري',
-        coachPhone: '0662233445',
-        createdAt: new Date().toISOString()
-      },
-      {
-        id: 'ath-demo-15',
-        disciplineId: 'shot_put',
-        category: 'U15',
-        gender: 'Female',
-        bibNumber: '206',
-        studentName: 'سارة المنصوري',
-        schoolName: 'إعدادية علال الفاسي',
-        birthYear: '2011',
-        birthDate: '2011-08-05',
-        massarNumber: 'F146789012',
-        affiliationType: 'non_club',
-        coachName: 'ذ. محمد المنصوري',
-        coachPhone: '0662233445',
-        createdAt: new Date().toISOString()
-      },
-
-      // Ibn Khaldoun Primary School (U12)
-      {
-        id: 'ath-demo-16',
-        disciplineId: 'sprint_60m',
-        secondDisciplineId: 'long_jump',
-        category: 'U12',
-        gender: 'Male',
-        bibNumber: '401',
-        studentName: 'آدم الصالحي',
-        schoolName: 'مدرسة ابن خلدون',
-        birthYear: '2014',
-        birthDate: '2014-04-18',
-        massarNumber: 'F151234567',
-        affiliationType: 'non_club',
-        coachName: 'ذة. فاطمة الزهراء الإدريسي',
-        coachPhone: '0663344556',
-        createdAt: new Date().toISOString()
-      },
-      {
-        id: 'ath-demo-17',
-        disciplineId: 'sprint_60m',
-        secondDisciplineId: 'middle_600m',
-        category: 'U12',
-        gender: 'Female',
-        bibNumber: '402',
-        studentName: 'ملاك الرحماني',
-        schoolName: 'مدرسة ابن خلدون',
-        birthYear: '2014',
-        birthDate: '2014-07-25',
-        massarNumber: 'F152345678',
-        affiliationType: 'non_club',
-        coachName: 'ذة. فاطمة الزهراء الإدريسي',
-        coachPhone: '0663344556',
-        createdAt: new Date().toISOString()
-      },
-      {
-        id: 'ath-demo-18',
-        disciplineId: 'middle_600m',
-        category: 'U12',
-        gender: 'Male',
-        bibNumber: '403',
-        studentName: 'إلياس بنجلون',
-        schoolName: 'مدرسة ابن خلدون',
-        birthYear: '2013',
-        birthDate: '2013-11-10',
-        massarNumber: 'F153456789',
-        affiliationType: 'non_club',
-        coachName: 'ذة. فاطمة الزهراء الإدريسي',
-        coachPhone: '0663344556',
-        createdAt: new Date().toISOString()
-      },
-      {
-        id: 'ath-demo-19',
-        disciplineId: 'long_jump',
-        secondDisciplineId: 'sprint_60m',
-        category: 'U12',
-        gender: 'Female',
-        bibNumber: '404',
-        studentName: 'دعاء العلمي',
-        schoolName: 'مدرسة ابن خلدون',
-        birthYear: '2014',
-        birthDate: '2014-01-30',
-        massarNumber: 'F154567890',
-        affiliationType: 'non_club',
-        coachName: 'ذة. فاطمة الزهراء الإدريسي',
-        coachPhone: '0663344556',
-        createdAt: new Date().toISOString()
-      },
-
-      // Elite Private School
-      {
-        id: 'ath-demo-20',
-        disciplineId: 'sprint_100m',
-        secondDisciplineId: 'shot_put',
-        category: 'U18',
-        gender: 'Male',
-        bibNumber: '105',
-        studentName: 'حمزة التازي',
-        schoolName: 'مؤسسة النخبة الخاصة',
-        birthYear: '2008',
-        birthDate: '2008-08-19',
-        massarNumber: 'F137890456',
-        affiliationType: 'non_club',
-        coachName: 'ذ. سمير بنجلون',
-        coachPhone: '0661334455',
-        createdAt: new Date().toISOString()
-      }
-    ];
-    this.saveParticipants(mockParticipants);
+    // 4. Generate 10 Participants for Every Race, Category, and Gender Across All Committees
+    // (توليد ودمج 10 متسابقين حقيقيين في كل سباق، كل فئة عمرية، وكل جنس موزعين على اللجان والمؤسسات)
+    const seedResult = this.seedAllCommitteesParticipants(10, 'replace');
 
     // 5. Sample Live/Completed Event Results for Demo
     const sampleResults: Record<string, AthleticsEventResult> = {
@@ -1204,9 +930,388 @@ export class AthleticsService {
     window.dispatchEvent(new CustomEvent('resultsChanged'));
 
     return {
-      participantsCount: mockParticipants.length,
+      participantsCount: seedResult.totalParticipants,
       committeesCount: INITIAL_ATHLETICS_COMMITTEES.length,
-      disciplinesCount: INITIAL_ATHLETICS_DISCIPLINES.length
+      disciplinesCount: INITIAL_ATHLETICS_DISCIPLINES.length,
+      breakdown: seedResult.breakdown
+    };
+  }
+
+  // --- 8. REALISTIC 10 COMPETITORS PER RACE, CATEGORY & GENDER GENERATION & COMMITTEE SEEDING ---
+  static generate10ParticipantsForEvent(
+    discipline: AthleticsDisciplineDef,
+    category: 'U12' | 'U15' | 'U18' | 'U20',
+    gender: 'Male' | 'Female',
+    eventIndex: number,
+    startingBib: number
+  ): AthleticsParticipantRecord[] {
+    const isFemale = gender === 'Female';
+    const namePool = isFemale ? MOROCCAN_DEMO_FEMALE_NAMES : MOROCCAN_DEMO_MALE_NAMES;
+    const records: AthleticsParticipantRecord[] = [];
+
+    const birthYear = category === 'U12' ? '2014' : category === 'U15' ? '2011' : category === 'U18' ? '2008' : '2006';
+    const massarPrefix = category === 'U12' ? 'F15' : category === 'U15' ? 'F14' : category === 'U18' ? 'F13' : 'F12';
+
+    // Preserve the exact 4 IDs and details for sprint_100m U18 Male used in sample results
+    if (discipline.id === 'sprint_100m' && category === 'U18' && gender === 'Male') {
+      const top4 = [
+        { id: 'ath-demo-1', bib: '101', name: 'ياسين الفيلالي', school: 'ثانوية الفتح التأهيلية' },
+        { id: 'ath-demo-7', bib: '103', name: 'أمين العمراني', school: 'ثانوية صلاح الدين الأيوبي' },
+        { id: 'ath-demo-20', bib: '105', name: 'حمزة التازي', school: 'مؤسسة النخبة الخاصة' },
+        { id: 'ath-demo-3', bib: '104', name: 'سفيان البوشيخي', school: 'ثانوية الفتح التأهيلية' }
+      ];
+      top4.forEach((d, idx) => {
+        records.push({
+          id: d.id,
+          disciplineId: discipline.id,
+          secondDisciplineId: idx % 2 === 0 ? 'long_jump' : 'sprint_200m',
+          category,
+          gender,
+          bibNumber: d.bib,
+          studentName: d.name,
+          schoolName: d.school,
+          birthYear,
+          birthDate: `${birthYear}-03-${String(10 + idx)}`,
+          massarNumber: `${massarPrefix}${1328900 + idx}`,
+          affiliationType: idx % 2 === 0 ? 'non_club' : 'club_affiliated',
+          coachName: 'ذ. عبد الرحيم بلقاسم',
+          coachPhone: '0661122334',
+          createdAt: new Date().toISOString()
+        });
+      });
+      // Fill remaining 6 to complete 10
+      for (let i = 4; i < 10; i++) {
+        const name = namePool[(eventIndex * 7 + i) % namePool.length];
+        const school = MOROCCAN_DEMO_SCHOOLS[(eventIndex * 3 + i) % MOROCCAN_DEMO_SCHOOLS.length];
+        records.push({
+          id: `ath-demo-${discipline.id}-${category}-${gender}-${i + 1}`,
+          disciplineId: discipline.id,
+          category,
+          gender,
+          bibNumber: String(106 + i - 4),
+          studentName: name,
+          schoolName: school,
+          birthYear,
+          birthDate: `${birthYear}-04-${String(10 + i)}`,
+          massarNumber: `${massarPrefix}${1328900 + i}`,
+          affiliationType: 'non_club',
+          coachName: 'ذ. عبد الرحيم بلقاسم',
+          coachPhone: '0661122334',
+          createdAt: new Date().toISOString()
+        });
+      }
+      return records;
+    }
+
+    // Preserve the exact 3 IDs and details for long_jump U15 Male used in sample results
+    if (discipline.id === 'long_jump' && category === 'U15' && gender === 'Male') {
+      const top3 = [
+        { id: 'ath-demo-10', bib: '201', name: 'عمر القاسمي', school: 'إعدادية علال الفاسي' },
+        { id: 'ath-demo-12', bib: '203', name: 'أيوب البوعناني', school: 'إعدادية علال الفاسي' },
+        { id: 'ath-demo-14', bib: '205', name: 'أنس الشرقاوي', school: 'إعدادية علال الفاسي' }
+      ];
+      top3.forEach((d, idx) => {
+        records.push({
+          id: d.id,
+          disciplineId: discipline.id,
+          secondDisciplineId: 'sprint_80m',
+          category,
+          gender,
+          bibNumber: d.bib,
+          studentName: d.name,
+          schoolName: d.school,
+          birthYear,
+          birthDate: `${birthYear}-05-${String(10 + idx)}`,
+          massarNumber: `${massarPrefix}${1412300 + idx}`,
+          affiliationType: idx === 2 ? 'club_affiliated' : 'non_club',
+          coachName: 'ذ. محمد المنصوري',
+          coachPhone: '0662233445',
+          createdAt: new Date().toISOString()
+        });
+      });
+      // Fill remaining 7 to complete 10
+      for (let i = 3; i < 10; i++) {
+        const name = namePool[(eventIndex * 7 + i) % namePool.length];
+        const school = MOROCCAN_DEMO_SCHOOLS[(eventIndex * 3 + i) % MOROCCAN_DEMO_SCHOOLS.length];
+        records.push({
+          id: `ath-demo-${discipline.id}-${category}-${gender}-${i + 1}`,
+          disciplineId: discipline.id,
+          category,
+          gender,
+          bibNumber: String(206 + i - 3),
+          studentName: name,
+          schoolName: school,
+          birthYear,
+          birthDate: `${birthYear}-06-${String(10 + i)}`,
+          massarNumber: `${massarPrefix}${1412300 + i}`,
+          affiliationType: 'non_club',
+          coachName: 'ذ. محمد المنصوري',
+          coachPhone: '0662233445',
+          createdAt: new Date().toISOString()
+        });
+      }
+      return records;
+    }
+
+    // General standard generator for all other events (10 competitors each)
+    for (let i = 0; i < 10; i++) {
+      const name = namePool[(eventIndex * 7 + i) % namePool.length];
+      const school = MOROCCAN_DEMO_SCHOOLS[(eventIndex * 3 + i) % MOROCCAN_DEMO_SCHOOLS.length];
+      const bib = String(startingBib + i);
+      const birthMonth = String((i % 12) + 1).padStart(2, '0');
+      const birthDay = String(((i * 3 + 2) % 27) + 1).padStart(2, '0');
+
+      records.push({
+        id: `ath-demo-${discipline.id}-${category}-${gender}-${i + 1}`,
+        disciplineId: discipline.id,
+        category,
+        gender,
+        bibNumber: bib,
+        studentName: name,
+        schoolName: school,
+        birthYear,
+        birthDate: `${birthYear}-${birthMonth}-${birthDay}`,
+        massarNumber: `${massarPrefix}${String(1000000 + (eventIndex * 10) + i).slice(1)}`,
+        affiliationType: i % 4 === 0 ? 'club_affiliated' : 'non_club',
+        coachName: 'ذ. أستاذ التربية البدنية',
+        coachPhone: '0661000000',
+        createdAt: new Date().toISOString()
+      });
+    }
+
+    return records;
+  }
+
+  static generateParticipantsForCommittee(
+    committeeId: string,
+    countPerEvent: number = 10,
+    startBibOffset: number = 100
+  ): AthleticsParticipantRecord[] {
+    const disciplines = this.getDisciplines().filter(d => d.committeeId === committeeId);
+    const records: AthleticsParticipantRecord[] = [];
+    let eventIdx = 0;
+    let currentBib = startBibOffset;
+
+    disciplines.forEach(disc => {
+      disc.allowedCategories.forEach(cat => {
+        disc.allowedGenders.forEach(gen => {
+          const eventParticipants = this.generate10ParticipantsForEvent(disc, cat, gen, eventIdx, currentBib);
+          records.push(...eventParticipants);
+          eventIdx++;
+          currentBib += countPerEvent;
+        });
+      });
+    });
+
+    return records;
+  }
+
+  static generateAllCommitteesParticipants(countPerEvent: number = 10): AthleticsParticipantRecord[] {
+    const committees = this.getCommittees();
+    const records: AthleticsParticipantRecord[] = [];
+    let globalBib = 101;
+    let eventIdx = 0;
+
+    committees.forEach(comm => {
+      if (comm.id === 'podium_committee') return;
+      const commDisciplines = this.getDisciplines().filter(d => d.committeeId === comm.id);
+      commDisciplines.forEach(disc => {
+        disc.allowedCategories.forEach(cat => {
+          disc.allowedGenders.forEach(gen => {
+            const eventParticipants = this.generate10ParticipantsForEvent(disc, cat, gen, eventIdx, globalBib);
+            records.push(...eventParticipants);
+            eventIdx++;
+            globalBib += countPerEvent;
+          });
+        });
+      });
+    });
+
+    return records;
+  }
+
+  static seedAllCommitteesParticipants(
+    countPerEvent: number = 10,
+    mode: 'replace' | 'merge' = 'replace'
+  ): {
+    totalParticipants: number;
+    totalEvents: number;
+    committeesCount: number;
+    breakdown: Record<string, { committeeTitle: string; count: number; eventsCount: number }>;
+  } {
+    const generated = this.generateAllCommitteesParticipants(countPerEvent);
+    const breakdown: Record<string, { committeeTitle: string; count: number; eventsCount: number }> = {};
+    const committees = this.getCommittees();
+
+    committees.forEach(comm => {
+      if (comm.id === 'podium_committee') return;
+      const commDisc = this.getDisciplines().filter(d => d.committeeId === comm.id);
+      let count = 0;
+      let eventsCount = 0;
+      commDisc.forEach(d => {
+        d.allowedCategories.forEach(() => {
+          d.allowedGenders.forEach(() => {
+            eventsCount++;
+            count += countPerEvent;
+          });
+        });
+      });
+      breakdown[comm.id] = {
+        committeeTitle: comm.titleAr,
+        count,
+        eventsCount
+      };
+    });
+
+    let finalParticipants: AthleticsParticipantRecord[];
+    if (mode === 'replace') {
+      finalParticipants = generated;
+    } else {
+      const current = this.getParticipants();
+      const existingKeys = new Set(current.map(p => `${p.disciplineId}_${p.category}_${p.gender}_${p.studentName}`));
+      const newItems = generated.filter(p => !existingKeys.has(`${p.disciplineId}_${p.category}_${p.gender}_${p.studentName}`));
+      finalParticipants = [...current, ...newItems];
+    }
+
+    this.saveParticipants(finalParticipants);
+
+    return {
+      totalParticipants: finalParticipants.length,
+      totalEvents: Object.values(breakdown).reduce((acc, b) => acc + b.eventsCount, 0),
+      committeesCount: committees.filter(c => c.id !== 'podium_committee').length,
+      breakdown
+    };
+  }
+
+  static seedCommitteeParticipants(
+    committeeId: string,
+    countPerEvent: number = 10,
+    mode: 'merge' | 'replace' = 'merge'
+  ): {
+    committeeId: string;
+    addedCount: number;
+    totalCommitteeParticipants: number;
+    eventsCount: number;
+    disciplinesCount: number;
+  } {
+    const disciplines = this.getDisciplines().filter(d => d.committeeId === committeeId);
+    const current = this.getParticipants();
+    const currentDiscIds = new Set(disciplines.map(d => d.id));
+    const generated = this.generateParticipantsForCommittee(committeeId, countPerEvent, 100 + current.length);
+
+    let finalParticipants: AthleticsParticipantRecord[];
+    let addedCount = 0;
+
+    if (mode === 'replace') {
+      const retained = current.filter(p => !currentDiscIds.has(p.disciplineId));
+      finalParticipants = [...retained, ...generated];
+      addedCount = generated.length;
+    } else {
+      const newItems: AthleticsParticipantRecord[] = [];
+      disciplines.forEach(disc => {
+        disc.allowedCategories.forEach(cat => {
+          disc.allowedGenders.forEach(gen => {
+            const existingForEvent = current.filter(
+              p => p.disciplineId === disc.id && p.category === cat && p.gender === gen
+            );
+            if (existingForEvent.length < countPerEvent) {
+              const needed = countPerEvent - existingForEvent.length;
+              const fresh = this.generate10ParticipantsForEvent(
+                disc,
+                cat,
+                gen,
+                Math.floor(Math.random() * 100),
+                200 + current.length + newItems.length
+              ).slice(0, needed);
+              newItems.push(...fresh);
+            }
+          });
+        });
+      });
+      finalParticipants = [...current, ...newItems];
+      addedCount = newItems.length;
+    }
+
+    this.saveParticipants(finalParticipants);
+
+    const totalCommittee = finalParticipants.filter(
+      p => currentDiscIds.has(p.disciplineId) || (p.secondDisciplineId && currentDiscIds.has(p.secondDisciplineId))
+    ).length;
+
+    let totalEvents = 0;
+    disciplines.forEach(d => {
+      totalEvents += d.allowedCategories.length * d.allowedGenders.length;
+    });
+
+    return {
+      committeeId,
+      addedCount,
+      totalCommitteeParticipants: totalCommittee,
+      eventsCount: totalEvents,
+      disciplinesCount: disciplines.length
+    };
+  }
+
+  static seedSingleEventParticipants(
+    disciplineId: string,
+    category: 'U12' | 'U15' | 'U18' | 'U20',
+    gender: 'Male' | 'Female',
+    count: number = 10
+  ): AthleticsParticipantRecord[] {
+    const disc = this.getDisciplines().find(d => d.id === disciplineId);
+    if (!disc) return [];
+
+    const current = this.getParticipants();
+    const generated = this.generate10ParticipantsForEvent(
+      disc,
+      category,
+      gender,
+      Math.floor(Math.random() * 50),
+      300 + current.length
+    ).slice(0, count);
+
+    const retained = current.filter(
+      p => !(p.disciplineId === disciplineId && p.category === category && p.gender === gender)
+    );
+    const updated = [...retained, ...generated];
+    this.saveParticipants(updated);
+    return generated;
+  }
+
+  static getCommitteeParticipantStats(committeeId: string): {
+    totalParticipants: number;
+    maleCount: number;
+    femaleCount: number;
+    u12Count: number;
+    u15Count: number;
+    u18Count: number;
+    u20Count: number;
+    disciplinesCount: number;
+    eventsCount: number;
+  } {
+    const participants = this.getParticipants();
+    const disciplines = this.getDisciplines().filter(d => d.committeeId === committeeId);
+    const discIds = new Set(disciplines.map(d => d.id));
+
+    const committeeParticipants = participants.filter(
+      p => discIds.has(p.disciplineId) || (p.secondDisciplineId && discIds.has(p.secondDisciplineId))
+    );
+
+    let eventsCount = 0;
+    disciplines.forEach(d => {
+      eventsCount += d.allowedCategories.length * d.allowedGenders.length;
+    });
+
+    return {
+      totalParticipants: committeeParticipants.length,
+      maleCount: committeeParticipants.filter(p => p.gender === 'Male').length,
+      femaleCount: committeeParticipants.filter(p => p.gender === 'Female').length,
+      u12Count: committeeParticipants.filter(p => p.category === 'U12').length,
+      u15Count: committeeParticipants.filter(p => p.category === 'U15').length,
+      u18Count: committeeParticipants.filter(p => p.category === 'U18').length,
+      u20Count: committeeParticipants.filter(p => p.category === 'U20').length,
+      disciplinesCount: disciplines.length,
+      eventsCount
     };
   }
 

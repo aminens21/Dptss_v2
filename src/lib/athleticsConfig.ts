@@ -388,6 +388,7 @@ export interface TrackRankEntry {
   studentName?: string;
   schoolName?: string;
   confirmed: boolean;
+  seriesNumber?: number; // 1, 2, 3... for multi-series / heats races (سباقات المجموعات والسلاسل)
 }
 
 export interface FieldAttemptEntry {

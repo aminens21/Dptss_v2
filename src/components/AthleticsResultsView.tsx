@@ -264,6 +264,7 @@ export const AthleticsResultsView: React.FC<AthleticsResultsViewProps> = ({
                       <th className="py-2.5 px-3">الصدرية</th>
                       <th className="py-2.5 px-3">اسم التلميذ(ة)</th>
                       <th className="py-2.5 px-3">المؤسسة التعليمية</th>
+                      <th className="py-2.5 px-3 text-center">المجموعة / السلسلة</th>
                       <th className="py-2.5 px-3 text-center">التوقيت المسجل</th>
                     </tr>
                   </thead>
@@ -281,6 +282,11 @@ export const AthleticsResultsView: React.FC<AthleticsResultsViewProps> = ({
                         </td>
                         <td className="py-2.5 px-3 text-slate-600">
                           {lap.schoolName || '-'}
+                        </td>
+                        <td className="py-2.5 px-3 text-center">
+                          <span className="px-2 py-0.5 bg-amber-50 text-amber-700 border border-amber-200 rounded-md text-[10px] font-bold">
+                            {lap.seriesNumber ? `السلسلة ${lap.seriesNumber}` : 'السلسلة 1'}
+                          </span>
                         </td>
                         <td className="py-2.5 px-3 text-center font-mono font-black text-emerald-700">
                           {lap.formattedTime}
