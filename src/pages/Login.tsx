@@ -280,6 +280,7 @@ export const Login: React.FC = () => {
   // Monthly Calendar state
   const [currentCalendarMonth, setCurrentCalendarMonth] = useState<Date>(new Date());
   const [isCalendarExpanded, setIsCalendarExpanded] = useState<boolean>(true);
+  const [mobileProgramTab, setMobileProgramTab] = useState<'daily' | 'monthly'>('daily');
 
   const ARABIC_MONTHS = [
     'يناير', 'فبراير', 'مارس', 'أبريل', 'ماي', 'يونيو',
@@ -1296,10 +1297,299 @@ export const Login: React.FC = () => {
       }
     });
     const monthDatesWithMatches = Array.from(set).sort();
+    const todayYmd = new Date().toISOString().split('T')[0];
 
+    const handlePrevDay = () => {
+      try {
+        const d = new Date(selectedDate);
+        d.setDate(d.getDate() - 1);
+        setSelectedDate(d.toISOString().split('T')[0]);
+      } catch (e) {
+        // ignore
+      }
+    };
+
+    const handleNextDay = () => {
+      try {
+        const d = new Date(selectedDate);
+        d.setDate(d.getDate() + 1);
+        setSelectedDate(d.toISOString().split('T')[0]);
+      } catch (e) {
+        // ignore
+      }
+    };
+
+    if (isMobile) {
+      return (
+        <div className="bg-white dark:bg-slate-900 border-2 border-emerald-500/40 dark:border-slate-800 rounded-3xl p-4 sm:p-5 shadow-lg space-y-3.5 transition-all">
+          {/* Mobile Top Header: Title, Sport, & Jump to Today */}
+          <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3 gap-2">
+            <div className="flex items-center gap-2 min-w-0">
+              <div className="p-2 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-700 text-white shrink-0 shadow-xs">
+                <Calendar className="w-4 h-4" />
+              </div>
+              <div className="min-w-0">
+                <h4 className="text-sm font-black text-slate-900 dark:text-slate-100 flex items-center gap-1.5 truncate">
+                  <span>البرنامج اليومي والشهرية</span>
+                  <span className="text-[10px] px-1.5 py-0.5 bg-emerald-100 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300 rounded-md font-bold">
+                    مباشر
+                  </span>
+                </h4>
+                <p className="text-[10px] text-slate-500 dark:text-slate-400 font-bold truncate">
+                  {selectedSport !== 'ALL' ? (SPORTS_MAP[selectedSport]?.name || 'المنافسة') : 'كافة الرياضات والبطولات'}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-1.5 shrink-0">
+              <button
+                type="button"
+                onClick={() => setSelectedDate(todayYmd)}
+                className={`px-2.5 py-1 text-[10px] font-black rounded-xl border transition-all cursor-pointer ${
+                  selectedDate === todayYmd
+                    ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
+                    : 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-200 border-emerald-200 dark:border-emerald-800 hover:bg-emerald-100'
+                }`}
+                title="الانتقال لتاريخ اليوم"
+              >
+                ⚡ اليوم
+              </button>
+            </div>
+          </div>
+
+          {/* Mobile View Switcher (البرنامج اليومي vs اليومية الشهرية) */}
+          <div className="grid grid-cols-2 gap-1.5 bg-slate-100 dark:bg-slate-800 p-1 rounded-2xl text-xs font-black">
+            <button
+              type="button"
+              onClick={() => setMobileProgramTab('daily')}
+              className={`py-2 px-3 rounded-xl flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                mobileProgramTab === 'daily'
+                  ? 'bg-white dark:bg-slate-700 text-emerald-700 dark:text-emerald-300 shadow-xs font-black'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+              }`}
+            >
+              <span>⚡ البرنامج اليومي</span>
+              <span className="px-1.5 py-0.2 bg-emerald-100 dark:bg-emerald-900/60 text-emerald-800 dark:text-emerald-200 rounded-full text-[10px] font-bold">
+                {filteredMatches.length}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setMobileProgramTab('monthly')}
+              className={`py-2 px-3 rounded-xl flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                mobileProgramTab === 'monthly'
+                  ? 'bg-white dark:bg-slate-700 text-emerald-700 dark:text-emerald-300 shadow-xs font-black'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+              }`}
+            >
+              <span>🗓️ اليومية والبرنامج الشهري</span>
+              {monthDatesWithMatches.length > 0 && (
+                <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block animate-pulse" />
+              )}
+            </button>
+          </div>
+
+          {/* TAB 1: DAILY PROGRAM VIEW (البرنامج اليومي) */}
+          {mobileProgramTab === 'daily' && (
+            <div className="space-y-3">
+              {/* Day Selector with Previous/Next Day navigation */}
+              <div className="flex items-center justify-between bg-slate-50 dark:bg-slate-800/80 p-2 rounded-2xl border border-slate-200/80 dark:border-slate-700/60">
+                <button
+                  type="button"
+                  onClick={handleNextDay}
+                  className="p-1.5 bg-white dark:bg-slate-700 hover:bg-slate-100 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 rounded-xl shadow-xs transition-colors cursor-pointer border border-slate-200 dark:border-slate-600"
+                  title="اليوم التالي"
+                >
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+
+                <div className="text-center">
+                  <div className="text-xs font-black text-slate-900 dark:text-white flex items-center justify-center gap-1.5">
+                    <span>برنامج ومباريات يوم:</span>
+                    <span className="text-emerald-600 dark:text-emerald-400 font-mono font-bold">{selectedDate}</span>
+                  </div>
+                  <p className="text-[10px] text-slate-500 dark:text-slate-400 font-bold">
+                    {selectedDate === todayYmd ? '⚡ موعد اليوم الحالي' : 'تاريخ محدد'} • {filteredMatches.length} حدث مبرمج
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handlePrevDay}
+                  className="p-1.5 bg-white dark:bg-slate-700 hover:bg-slate-100 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 rounded-xl shadow-xs transition-colors cursor-pointer border border-slate-200 dark:border-slate-600"
+                  title="اليوم السابق"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Matches List for Selected Day */}
+              <div className="space-y-2 max-h-56 overflow-y-auto pr-0.5">
+                {filteredMatches.length === 0 ? (
+                  <div className="p-4 bg-slate-50 dark:bg-slate-800/60 rounded-2xl text-center space-y-2 border border-dashed border-slate-200 dark:border-slate-700">
+                    <p className="text-xs font-bold text-slate-600 dark:text-slate-300">
+                      لا توجد مباريات مبرمجة في تاريخ {selectedDate}
+                    </p>
+                    {monthDatesWithMatches.length > 0 && (
+                      <div className="pt-1 flex flex-wrap items-center justify-center gap-1.5 text-[10px]">
+                        <span className="text-slate-400 font-bold">مواعيد مبرمجة هذا الشهر:</span>
+                        {monthDatesWithMatches.slice(0, 5).map(dt => (
+                          <button
+                            key={dt}
+                            type="button"
+                            onClick={() => setSelectedDate(dt)}
+                            className="px-2 py-0.5 bg-emerald-100 dark:bg-emerald-900/60 text-emerald-800 dark:text-emerald-200 rounded-lg font-black hover:bg-emerald-200 transition-colors cursor-pointer"
+                          >
+                            {dt.slice(8)} {ARABIC_MONTHS[currentCalendarMonth.getMonth()]}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  filteredMatches.map(m => (
+                    <div key={m.id} className="p-3 bg-slate-50 dark:bg-slate-800 rounded-2xl space-y-1.5 border border-slate-200/80 dark:border-slate-700/60 shadow-xs hover:border-emerald-400 transition-all">
+                      <div className="flex items-center justify-between text-xs font-black text-slate-900 dark:text-slate-100">
+                        <span className="flex items-center gap-1.5 text-emerald-700 dark:text-emerald-400 truncate">
+                          <span>{SPORTS_MAP[m.sportId]?.icon || '⚽'}</span>
+                          <span className="truncate">{m.team1Name} VS {m.team2Name}</span>
+                        </span>
+                        <span className="font-mono text-amber-600 dark:text-amber-400 shrink-0 font-black">{m.startTime || '10:00'}</span>
+                      </div>
+
+                      <div className="flex items-center justify-between text-[10px] text-slate-500 dark:text-slate-400 font-bold">
+                        <span className="flex items-center gap-1 truncate"><MapPin className="w-2.5 h-2.5" /> {m.venueName || 'الملعب الرياضي'}</span>
+                        <span className="px-1.5 py-0.5 bg-white dark:bg-slate-700 rounded-md font-black">{m.category || 'عامة'}</span>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+
+              {/* Notice linking to podium underneath */}
+              <div className="p-2.5 bg-amber-50 dark:bg-amber-950/50 rounded-2xl border border-amber-200 dark:border-amber-800 text-center">
+                <p className="text-[11px] font-black text-amber-900 dark:text-amber-200 flex items-center justify-center gap-1">
+                  <span>🏆</span>
+                  <span>منصة التتويج الأولمبية والنتائج الرسمية معروضة أسفله مباشرة 👇</span>
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* TAB 2: MONTHLY CALENDAR VIEW (اليومية الشهرية) */}
+          {mobileProgramTab === 'monthly' && (
+            <div className="space-y-3">
+              {/* Month Navigator */}
+              <div className="flex items-center justify-between bg-slate-50 dark:bg-slate-800/80 p-2 rounded-2xl border border-slate-200/80 dark:border-slate-700/60">
+                <button
+                  type="button"
+                  onClick={handlePrevMonth}
+                  className="p-1.5 bg-white dark:bg-slate-700 hover:bg-slate-100 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 rounded-xl shadow-xs transition-colors cursor-pointer border border-slate-200 dark:border-slate-600"
+                  title="الشهر السابق"
+                >
+                  <ChevronRight className="w-3.5 h-3.5" />
+                </button>
+
+                <span className="text-xs font-black text-emerald-800 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/80 px-3 py-1 rounded-xl border border-emerald-200 dark:border-emerald-800 font-mono">
+                  {ARABIC_MONTHS[currentCalendarMonth.getMonth()]} {currentCalendarMonth.getFullYear()}
+                </span>
+
+                <button
+                  type="button"
+                  onClick={handleNextMonth}
+                  className="p-1.5 bg-white dark:bg-slate-700 hover:bg-slate-100 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 rounded-xl shadow-xs transition-colors cursor-pointer border border-slate-200 dark:border-slate-600"
+                  title="الشهر التالي"
+                >
+                  <ChevronLeft className="w-3.5 h-3.5" />
+                </button>
+              </div>
+
+              {/* Days of week header */}
+              <div className="grid grid-cols-7 text-center text-[10px] font-black text-slate-500 dark:text-slate-400 pb-1 border-b border-slate-100 dark:border-slate-800">
+                <span>أحد</span>
+                <span>اتن</span>
+                <span>ثلا</span>
+                <span>أرب</span>
+                <span>خميس</span>
+                <span>جمعة</span>
+                <span>سبت</span>
+              </div>
+
+              {/* Days cells */}
+              <div className="grid grid-cols-7 gap-1 text-center text-xs">
+                {/* Empty padding slots */}
+                {Array.from({ length: new Date(currentCalendarMonth.getFullYear(), currentCalendarMonth.getMonth(), 1).getDay() }).map((_, i) => (
+                  <div key={`empty-${i}`} className="h-7"></div>
+                ))}
+
+                {/* Days 1..N */}
+                {Array.from({ length: new Date(currentCalendarMonth.getFullYear(), currentCalendarMonth.getMonth() + 1, 0).getDate() }).map((_, idx) => {
+                  const dayNum = idx + 1;
+                  const dayStr = String(dayNum).padStart(2, '0');
+                  const cellYmd = `${year}-${monthStr}-${dayStr}`;
+
+                  const isSelected = selectedDate === cellYmd;
+                  const dayMatchesCount = matches.filter(m => safeDateCompare(m.date, cellYmd)).length;
+                  const hasMatches = dayMatchesCount > 0;
+
+                  return (
+                    <button
+                      key={dayNum}
+                      type="button"
+                      onClick={() => {
+                        setSelectedDate(cellYmd);
+                        setMobileProgramTab('daily');
+                      }}
+                      className={`h-7 rounded-xl flex flex-col items-center justify-center relative font-bold text-[11px] transition-all cursor-pointer ${
+                        isSelected
+                          ? 'bg-emerald-600 text-white font-black shadow-md scale-105 ring-2 ring-emerald-400'
+                          : hasMatches
+                          ? 'bg-amber-100 dark:bg-amber-950/80 text-amber-950 dark:text-amber-200 border border-amber-300 dark:border-amber-700 font-black'
+                          : 'hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300'
+                      }`}
+                    >
+                      <span>{dayNum}</span>
+                      {hasMatches && !isSelected && (
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 dark:bg-emerald-400 absolute bottom-0.5"></span>
+                      )}
+                      {hasMatches && isSelected && (
+                        <span className="w-1.5 h-1.5 rounded-full bg-amber-300 absolute bottom-0.5"></span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Quick Jump Dates With Matches */}
+              {monthDatesWithMatches.length > 0 && (
+                <div className="pt-2 border-t border-slate-100 dark:border-slate-800 flex flex-wrap items-center gap-1.5 text-[10px]">
+                  <span className="text-slate-400 font-bold">أيام المنافسات:</span>
+                  {monthDatesWithMatches.map(dt => (
+                    <button
+                      key={dt}
+                      type="button"
+                      onClick={() => {
+                        setSelectedDate(dt);
+                        setMobileProgramTab('daily');
+                      }}
+                      className="px-2 py-0.5 bg-emerald-100 dark:bg-emerald-900/60 text-emerald-800 dark:text-emerald-200 rounded-lg font-black hover:bg-emerald-200 transition-colors cursor-pointer"
+                    >
+                      {dt.slice(8)} {ARABIC_MONTHS[currentCalendarMonth.getMonth()]}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // Desktop Layout
     return (
-      <div className={`bg-white dark:bg-slate-900 border ${isMobile ? 'border-2 border-emerald-500/30 dark:border-slate-800 rounded-3xl p-4 sm:p-5 shadow-md' : 'border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-sm'} space-y-3.5 transition-all`}>
-        {/* Header with Month Navigator & Mobile Toggle */}
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-sm space-y-3.5 transition-all">
+        {/* Header with Month Navigator */}
         <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3 gap-2">
           <div className="flex items-center gap-2 min-w-0">
             <div className="p-2 rounded-xl bg-emerald-50 dark:bg-emerald-950/80 text-emerald-600 dark:text-emerald-400 shrink-0 border border-emerald-200/60 dark:border-emerald-800">
@@ -1337,82 +1627,64 @@ export const Login: React.FC = () => {
             >
               <ChevronLeft className="w-3.5 h-3.5" />
             </button>
-
-            {isMobile && (
-              <button
-                type="button"
-                onClick={() => setIsCalendarExpanded(!isCalendarExpanded)}
-                className="px-2 py-1 text-[10px] font-black rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors mr-1 flex items-center gap-1 cursor-pointer"
-                title={isCalendarExpanded ? 'طي اليومية' : 'إظهار اليومية'}
-              >
-                <span>{isCalendarExpanded ? 'طي' : 'عرض'}</span>
-                <ChevronDown className={`w-3 h-3 transition-transform ${isCalendarExpanded ? 'rotate-180' : ''}`} />
-              </button>
-            )}
           </div>
         </div>
 
         {/* Monthly Calendar Grid (اليومية الشهرية) */}
-        {(!isMobile || isCalendarExpanded) && (
-          <div className="space-y-2">
-            {/* Days of week header */}
-            <div className="grid grid-cols-7 text-center text-[10px] sm:text-xs font-black text-slate-500 dark:text-slate-400 pb-1.5 border-b border-slate-100 dark:border-slate-800">
-              <span>أحد</span>
-              <span>اتن</span>
-              <span>ثلا</span>
-              <span>أرب</span>
-              <span>خميس</span>
-              <span>جمعة</span>
-              <span>سبت</span>
-            </div>
-
-            {/* Days cells */}
-            <div className="grid grid-cols-7 gap-1 sm:gap-1.5 text-center text-xs">
-              {/* Empty padding slots before 1st of month */}
-              {Array.from({ length: new Date(currentCalendarMonth.getFullYear(), currentCalendarMonth.getMonth(), 1).getDay() }).map((_, i) => (
-                <div key={`empty-${i}`} className="h-7 sm:h-8"></div>
-              ))}
-
-              {/* Days 1..N */}
-              {Array.from({ length: new Date(currentCalendarMonth.getFullYear(), currentCalendarMonth.getMonth() + 1, 0).getDate() }).map((_, idx) => {
-                const dayNum = idx + 1;
-                const year = currentCalendarMonth.getFullYear();
-                const monthStr = String(currentCalendarMonth.getMonth() + 1).padStart(2, '0');
-                const dayStr = String(dayNum).padStart(2, '0');
-                const cellYmd = `${year}-${monthStr}-${dayStr}`;
-
-                const isSelected = selectedDate === cellYmd;
-                
-                // Count matches on this specific day
-                const dayMatchesCount = matches.filter(m => safeDateCompare(m.date, cellYmd)).length;
-                const hasMatches = dayMatchesCount > 0;
-
-                return (
-                  <button
-                    key={dayNum}
-                    type="button"
-                    onClick={() => setSelectedDate(cellYmd)}
-                    className={`h-7 sm:h-8 rounded-xl flex flex-col items-center justify-center relative font-bold text-[11px] sm:text-xs transition-all cursor-pointer ${
-                      isSelected
-                        ? 'bg-emerald-600 text-white font-black shadow-md shadow-emerald-600/30 scale-105 ring-2 ring-emerald-400'
-                        : hasMatches
-                        ? 'bg-amber-100 dark:bg-amber-950/80 text-amber-950 dark:text-amber-200 border border-amber-300 dark:border-amber-700 font-black'
-                        : 'hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300'
-                    }`}
-                  >
-                    <span>{dayNum}</span>
-                    {hasMatches && !isSelected && (
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 dark:bg-emerald-400 absolute bottom-0.5"></span>
-                    )}
-                    {hasMatches && isSelected && (
-                      <span className="w-1.5 h-1.5 rounded-full bg-amber-300 absolute bottom-0.5"></span>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
+        <div className="space-y-2">
+          {/* Days of week header */}
+          <div className="grid grid-cols-7 text-center text-[10px] sm:text-xs font-black text-slate-500 dark:text-slate-400 pb-1.5 border-b border-slate-100 dark:border-slate-800">
+            <span>أحد</span>
+            <span>اتن</span>
+            <span>ثلا</span>
+            <span>أرب</span>
+            <span>خميس</span>
+            <span>جمعة</span>
+            <span>سبت</span>
           </div>
-        )}
+
+          {/* Days cells */}
+          <div className="grid grid-cols-7 gap-1 sm:gap-1.5 text-center text-xs">
+            {/* Empty padding slots before 1st of month */}
+            {Array.from({ length: new Date(currentCalendarMonth.getFullYear(), currentCalendarMonth.getMonth(), 1).getDay() }).map((_, i) => (
+              <div key={`empty-${i}`} className="h-7 sm:h-8"></div>
+            ))}
+
+            {/* Days 1..N */}
+            {Array.from({ length: new Date(currentCalendarMonth.getFullYear(), currentCalendarMonth.getMonth() + 1, 0).getDate() }).map((_, idx) => {
+              const dayNum = idx + 1;
+              const dayStr = String(dayNum).padStart(2, '0');
+              const cellYmd = `${year}-${monthStr}-${dayStr}`;
+
+              const isSelected = selectedDate === cellYmd;
+              const dayMatchesCount = matches.filter(m => safeDateCompare(m.date, cellYmd)).length;
+              const hasMatches = dayMatchesCount > 0;
+
+              return (
+                <button
+                  key={dayNum}
+                  type="button"
+                  onClick={() => setSelectedDate(cellYmd)}
+                  className={`h-7 sm:h-8 rounded-xl flex flex-col items-center justify-center relative font-bold text-[11px] sm:text-xs transition-all cursor-pointer ${
+                    isSelected
+                      ? 'bg-emerald-600 text-white font-black shadow-md shadow-emerald-600/30 scale-105 ring-2 ring-emerald-400'
+                      : hasMatches
+                      ? 'bg-amber-100 dark:bg-amber-950/80 text-amber-950 dark:text-amber-200 border border-amber-300 dark:border-amber-700 font-black'
+                      : 'hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300'
+                  }`}
+                >
+                  <span>{dayNum}</span>
+                  {hasMatches && !isSelected && (
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 dark:bg-emerald-400 absolute bottom-0.5"></span>
+                  )}
+                  {hasMatches && isSelected && (
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-300 absolute bottom-0.5"></span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </div>
 
         {/* Selected Day / Monthly Matches Summary */}
         <div className="pt-2.5 border-t border-slate-100 dark:border-slate-800 space-y-2">
