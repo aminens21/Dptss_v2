@@ -31,6 +31,7 @@ import { FinishLineScannerModal } from '../components/FinishLineScannerModal';
 import { CrossCountryPodiumView } from '../components/CrossCountryPodiumView';
 import { ElectronicDrawModal } from '../components/ElectronicDrawModal';
 import { BibGeneratorModal } from '../components/BibGeneratorModal';
+import { AthleticsBibGeneratorModal } from '../components/AthleticsBibGeneratorModal';
 import { AthleticsChampionshipModal } from '../components/AthleticsChampionshipModal';
 import { AthleticsService } from '../lib/athleticsService';
 import { useAuth } from '../contexts/AuthContext';
@@ -122,7 +123,7 @@ export const HelperApps: React.FC = () => {
   const [isAthleticsModalOpen, setIsAthleticsModalOpen] = useState<boolean>(false);
 
   // Auxiliary Interactive Tools states
-  const [activeSecondaryModal, setActiveSecondaryModal] = useState<'draw' | 'bib_generator' | null>(null);
+  const [activeSecondaryModal, setActiveSecondaryModal] = useState<'draw' | 'bib_generator' | 'athletics_bib' | null>(null);
 
   // Electronic Draw Tool State
   const [drawPool, setDrawPool] = useState<string[]>([]);
@@ -282,6 +283,42 @@ export const HelperApps: React.FC = () => {
           </div>
           <div className="absolute -bottom-1.5 -right-1.5 bg-indigo-500 text-white p-1 rounded-full shadow-md border border-white">
             <Printer className="w-2.5 h-2.5" />
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // App 5: Athletics Bib Numbers Generator Icon
+  const AthleticsBibAppIcon: React.FC<{ size?: number; className?: string }> = ({ size = 64, className = '' }) => {
+    return (
+      <div 
+        className={`relative rounded-3xl overflow-hidden shadow-lg border border-white/20 flex items-center justify-center select-none shrink-0 ${className}`}
+        style={{
+          width: size,
+          height: size,
+          background: 'linear-gradient(135deg, #f97316 0%, #ea580c 50%, #c2410c 100%)',
+        }}
+      >
+        <div className="absolute inset-0 bg-linear-to-b from-white/25 via-transparent to-black/30 pointer-events-none" />
+        <div className="relative z-10 flex flex-col items-center justify-center">
+          <div className="w-10 h-8 sm:w-11 sm:h-9 bg-white rounded-md shadow-md border border-slate-200/90 flex flex-col items-center justify-between p-0.5 relative overflow-hidden">
+            <div className="w-full bg-orange-600 h-1.5 rounded-t-xs flex items-center justify-between px-1">
+              <div className="w-1 h-1 rounded-full bg-white/80" />
+              <span className="text-[5px] font-black text-white leading-none">ATHL</span>
+              <div className="w-1 h-1 rounded-full bg-white/80" />
+            </div>
+            <span className="text-[11px] sm:text-xs font-black text-slate-900 tracking-tighter leading-none mt-0.5 font-mono">
+              #07
+            </span>
+            <div className="flex items-center gap-0.5 h-1.5 mb-0.5 opacity-80">
+              <div className="w-0.5 h-full bg-orange-700" />
+              <div className="w-1 h-full bg-orange-700" />
+              <div className="w-0.5 h-full bg-orange-700" />
+            </div>
+          </div>
+          <div className="absolute -bottom-1.5 -right-1.5 bg-orange-500 text-white p-1 rounded-full shadow-md border border-white">
+            <span className="text-[9px] leading-none">🎽</span>
           </div>
         </div>
       </div>
@@ -474,6 +511,39 @@ export const HelperApps: React.FC = () => {
             </button>
           </div>
 
+          {/* App 5: Athletics Bib Numbers Generator (الجري، القفز، دفع الجلة) */}
+          <div className="bg-white border-2 border-orange-400/50 rounded-3xl p-5 shadow-sm flex flex-col justify-between hover:shadow-md hover:border-orange-500 transition-all">
+            <div>
+              <div className="flex items-center justify-between mb-3">
+                <AthleticsBibAppIcon size={48} />
+                <span className="px-2.5 py-0.5 text-[10px] font-black bg-gradient-to-r from-orange-500 to-amber-600 text-white rounded-full shadow-xs">
+                  ألعاب القوى
+                </span>
+              </div>
+
+              <h4 className="text-sm font-black text-slate-900 mb-1">
+                إعداد صدريات مسابقات ألعاب القوى
+              </h4>
+              <p className="text-xs text-slate-500 leading-relaxed font-medium mb-3">
+                توليد وطباعة صدريات ألعاب القوى متضمنة نوع وتخصص المسابقة (الجري، القفز، دفع الجلة)، الفئة، رمز الاستجابة السريعة، وأسماء المتسابقين.
+              </p>
+
+              <div className="flex flex-wrap gap-1 mb-4">
+                <span className="px-2 py-0.5 bg-orange-100 text-orange-950 rounded text-[10px] font-bold">إظهار نوع المسابقة بالصدرية</span>
+                <span className="px-2 py-0.5 bg-amber-100 text-amber-950 rounded text-[10px] font-bold">الجري • القفز • الجلة</span>
+                <span className="px-2 py-0.5 bg-slate-100 text-slate-700 rounded text-[10px] font-bold">A4 / A5 & PDF</span>
+              </div>
+            </div>
+
+            <button
+              onClick={() => setActiveSecondaryModal('athletics_bib')}
+              className="w-full py-2.5 px-3 bg-gradient-to-r from-orange-500 via-amber-600 to-rose-600 hover:from-orange-600 hover:to-rose-700 text-white rounded-xl text-xs font-black transition-all flex items-center justify-center gap-1.5 shadow-md shadow-orange-500/20 cursor-pointer active:scale-98"
+            >
+              <Printer className="w-3.5 h-3.5" />
+              <span>دخول لإعداد صدريات ألعاب القوى</span>
+            </button>
+          </div>
+
         </div>
       </div>
 
@@ -505,7 +575,7 @@ export const HelperApps: React.FC = () => {
       )}
 
       {/* ========================================================================= */}
-      {/* 🎽 MODAL 3: PDF BIB GENERATOR (2 BIBS PER PAGE MODEL) 🎽 */}
+      {/* 🎽 MODAL 3: PDF BIB GENERATOR (CROSS COUNTRY) 🎽 */}
       {/* ========================================================================= */}
       {activeSecondaryModal === 'bib_generator' && (
         <BibGeneratorModal
@@ -513,6 +583,16 @@ export const HelperApps: React.FC = () => {
           onClose={() => setActiveSecondaryModal(null)}
           students={students}
           schools={schools}
+        />
+      )}
+
+      {/* ========================================================================= */}
+      {/* 🎽 MODAL 3.5: ATHLETICS BIBS GENERATOR (الجري، القفز، دفع الجلة) 🎽 */}
+      {/* ========================================================================= */}
+      {activeSecondaryModal === 'athletics_bib' && (
+        <AthleticsBibGeneratorModal
+          isOpen={true}
+          onClose={() => setActiveSecondaryModal(null)}
         />
       )}
 

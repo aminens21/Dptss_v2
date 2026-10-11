@@ -68,6 +68,7 @@ import {
 import { AthleticsService } from '../lib/athleticsService';
 import { User, School, Student } from '../types';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
+import { AthleticsBibGeneratorModal } from './AthleticsBibGeneratorModal';
 import toast from 'react-hot-toast';
 
 interface AthleticsChampionshipModalProps {
@@ -180,6 +181,7 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
   const [schoolCategoryFilter, setSchoolCategoryFilter] = useState<string>('ALL');
   const [schoolGenderFilter, setSchoolGenderFilter] = useState<string>('ALL');
   const [isPrintRosterModalOpen, setIsPrintRosterModalOpen] = useState(false);
+  const [isAthleticsBibModalOpen, setIsAthleticsBibOpen] = useState(false);
 
   // School Participant Add/Edit Form State
   const [isSchoolRegModalOpen, setIsSchoolRegModalOpen] = useState(false);
@@ -1036,6 +1038,85 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
     });
   };
 
+  const handleSaveFieldResultsSilent = () => {
+    if (!activeDiscipline || fieldTrials.length === 0) return;
+    const eventResult: AthleticsEventResult = {
+      id: currentEventKey,
+      disciplineId: activeDiscipline.id,
+      category: selectedCategory,
+      gender: selectedGender,
+      committeeId: activeDiscipline.committeeId,
+      type: 'field',
+      status: 'completed',
+      fieldEntries: fieldTrials,
+      recordedByTeacherName: currentCommitteeAssignment?.teacherName || currentUser?.fullName || 'أستاذ التحكيم',
+      directorateName,
+      season,
+      lastUpdated: new Date().toISOString()
+    };
+    AthleticsService.saveEventResult(eventResult);
+    setResults(AthleticsService.getAllResults());
+  };
+
+  const handleVoiceDictation = (entryIndex: number, attemptIndex: number) => {
+    const SpeechRecognitionAPI = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognitionAPI) {
+      toast.error('متصفحك لا يدعم الإملاء الصوتي. يمكنك الكتابة عبر لوحة المفاتيح.');
+      return;
+    }
+
+    const recognition = new SpeechRecognitionAPI();
+    recognition.lang = 'ar-MA';
+    recognition.interimResults = false;
+    recognition.maxAlternatives = 1;
+
+    toast.loading('🎙️ جاري الاستماع للإملاء الصوتي (قل الرقم مثل: 5.26)...', { id: 'voice_dictation' });
+
+    recognition.onresult = (event: any) => {
+      const transcript = event.results[0][0].transcript.trim();
+      toast.dismiss('voice_dictation');
+      
+      const match = transcript.match(/\d+([.,]\d+)?/);
+      const parsedVal = match ? parseFloat(match[0].replace(',', '.')) : null;
+
+      if (parsedVal !== null && !isNaN(parsedVal)) {
+        handleUpdateAttempt(entryIndex, attemptIndex, parsedVal.toString());
+        setTimeout(() => {
+          handleSaveFieldResultsSilent();
+        }, 100);
+        toast.success(`تم التعرف على الصوت (${transcript} -> ${parsedVal}) وحفظه تلقائياً!`);
+      } else {
+        const cleaned = transcript.replace(/[^\d.,]/g, '').replace(',', '.');
+        const num = parseFloat(cleaned);
+        if (!isNaN(num)) {
+          handleUpdateAttempt(entryIndex, attemptIndex, num.toString());
+          setTimeout(() => {
+            handleSaveFieldResultsSilent();
+          }, 100);
+          toast.success(`تم تسجيل القيمة: ${num}`);
+        } else {
+          toast.error(`لم يتم التعرف على رقم صالح من الصوت: "${transcript}"`);
+        }
+      }
+    };
+
+    recognition.onerror = () => {
+      toast.dismiss('voice_dictation');
+      toast.error('حدث خطأ في الإملاء الصوتي.');
+    };
+
+    recognition.onend = () => {
+      toast.dismiss('voice_dictation');
+    };
+
+    try {
+      recognition.start();
+    } catch {
+      toast.dismiss('voice_dictation');
+      toast.error('تعذر بدء الإملاء الصوتي.');
+    }
+  };
+
   const handleSaveFieldResults = () => {
     if (!userAccess.canManage) {
       toast.error(userAccess.reason || 'لا تملك صلاحية حفظ نتائج هذه المسابقة');
@@ -1627,6 +1708,17 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                 </button>
               </>
             )}
+
+            {/* Athletics Bib Generator Button */}
+            <button
+              type="button"
+              onClick={() => setIsAthleticsBibOpen(true)}
+              className="p-2 sm:px-3 sm:py-2 bg-gradient-to-r from-orange-500 to-amber-600 hover:from-orange-600 hover:to-amber-700 text-white rounded-xl text-xs font-black flex items-center gap-1.5 shadow-md shadow-orange-500/20 transition-all cursor-pointer active:scale-95"
+              title="تطبيق إعداد وطباعة الصدريات لمسابقات ألعاب القوى (الجري، القفز، دفع الجلة)"
+            >
+              <span className="text-sm">🎽</span>
+              <span className="hidden sm:inline">إعداد الصدريات</span>
+            </button>
 
             {/* Theme Toggle Button */}
             <button
@@ -2251,7 +2343,7 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                           const isFemale = p.gender === 'Female';
 
                           return (
-                            <tr key={p.id} className="hover:bg-slate-900/60 transition-colors">
+                            <tr key={`school-part-${p.id}-${idx}`} className="hover:bg-slate-900/60 transition-colors">
                               <td className="py-3 px-3.5 text-center font-mono font-bold text-slate-400">
                                 {idx + 1}
                               </td>
@@ -2883,109 +2975,149 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
               {/* --- BIG SMART STOPWATCH CONSOLE --- */}
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
                 
-                {/* Left (Stopwatch Screen & Main Trigger Button) */}
-                <div className="lg:col-span-6 bg-gradient-to-b from-slate-950 to-slate-900 border-2 border-emerald-900/60 rounded-3xl p-6 flex flex-col items-center justify-between shadow-2xl space-y-6">
+                {/* Left (Unified Smart Stopwatch & Rank Console Widget) */}
+                <div className="lg:col-span-6 bg-gradient-to-br from-slate-950 via-slate-900 to-emerald-950/40 border-2 border-emerald-500/30 rounded-3xl p-5 shadow-2xl space-y-4">
                   
-                  {/* Digital Clock Display */}
-                  <div className="w-full text-center py-6 bg-slate-950/80 border border-slate-800 rounded-2xl shadow-inner relative overflow-hidden">
-                    <div className="absolute top-2 left-2 flex items-center gap-1.5">
-                       <button
-                         onClick={() => setIsManualTrackEntry(!isManualTrackEntry)}
-                         className={`px-2 py-1 rounded-lg text-[10px] font-black border transition-all ${
-                           isManualTrackEntry
-                             ? 'bg-amber-600 text-white border-amber-500'
-                             : 'bg-slate-800 text-slate-400 border-slate-700 hover:text-white'
-                         }`}
-                         title={isManualTrackEntry ? 'الوضع اليدوي نشط' : 'تفعيل الإدخال اليدوي'}
-                       >
-                         <span>{isManualTrackEntry ? '⌨️' : '⏱️'}</span>
-                         <span className="hidden sm:inline">{isManualTrackEntry ? ' الوضع اليدوي' : ' إدخال يدوي'}</span>
-                       </button>
-                    </div>
-
-                    <div className="flex items-center justify-center gap-2 mb-1">
-                      <span className="text-xs font-mono font-bold text-emerald-500 uppercase tracking-wider">
-                        CHRONO SMART CHIPS • 1/100s
-                      </span>
-                      <span className="px-2 py-0.5 rounded-md text-[10px] font-black bg-amber-500/20 text-amber-300 border border-amber-500/40">
-                        سلسلة {activeSeriesNumber}
-                      </span>
-                    </div>
-
-                    <div className="text-5xl sm:text-6xl font-black font-mono tracking-tight text-white select-none">
-                      {AthleticsService.formatMilliseconds(elapsedMs)}
-                    </div>
-                    {isTimerRunning && (
-                      <div className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-400 mt-2 bg-emerald-950/80 px-3 py-0.5 rounded-full border border-emerald-700 animate-pulse">
-                        <span className="w-2 h-2 rounded-full bg-emerald-400" />
-                        <span>سباق السلسلة {activeSeriesNumber} جاري والتوقيت نشط</span>
+                  {/* Header & Mode Switch */}
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xl p-2 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-emerald-400">⏱️</span>
+                      <div>
+                        <h4 className="text-xs font-black text-white">الميقاتي الذكي الموحد (سلسلة {activeSeriesNumber})</h4>
+                        <p className="text-[10px] text-slate-400">الانطلاق، التوقيت، وترتيب العدائين في زر واحد ومختصر</p>
                       </div>
-                    )}
-                  </div>
-
-                  {/* Stopwatch Base Controls (Start / Stop / Reset) */}
-                  <div className="flex items-center gap-3 w-full">
-                    {!isTimerRunning ? (
-                      <button
-                        onClick={handleStartStopwatch}
-                        className="flex-1 py-3.5 px-4 bg-emerald-600 hover:bg-emerald-700 active:scale-98 text-white rounded-2xl font-black text-sm flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/30 cursor-pointer transition-all"
-                        title={elapsedMs === 0 ? 'إطلاق الميقاتي (Départ)' : 'استئناف التوقيت'}
-                      >
-                        <Play className="w-5 h-5 fill-white" />
-                        <span className="hidden sm:inline">{elapsedMs === 0 ? `إطلاق ميقاتي السلسلة ${activeSeriesNumber} (Départ)` : 'استئناف التوقيت'}</span>
-                      </button>
-                    ) : (
-                      <button
-                        onClick={handleStopStopwatch}
-                        className="flex-1 py-3.5 px-4 bg-rose-600 hover:bg-rose-700 active:scale-98 text-white rounded-2xl font-black text-sm flex items-center justify-center gap-2 shadow-lg shadow-rose-600/30 cursor-pointer transition-all"
-                        title="إيقاف الميقاتي"
-                      >
-                        <Square className="w-5 h-5 fill-white" />
-                        <span className="hidden sm:inline">إيقاف الميقاتي</span>
-                      </button>
-                    )}
-
+                    </div>
+                    
                     <button
-                      onClick={handleResetStopwatch}
-                      disabled={isTimerRunning && elapsedMs > 0}
-                      className="py-3.5 px-4 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-300 rounded-2xl font-black text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer"
-                      title="إعادة ضبط الصفر (تصفير الميقاتي مع الحفاظ التام على النتائج)"
+                      onClick={() => setIsManualTrackEntry(!isManualTrackEntry)}
+                      className={`px-2.5 py-1 rounded-xl text-[10px] font-black border transition-all ${
+                        isManualTrackEntry ? 'bg-amber-600 text-white border-amber-500' : 'bg-slate-800 text-slate-300 border-slate-700'
+                      }`}
                     >
-                      <RotateCcw className="w-4 h-4" />
-                      <span className="hidden sm:inline">تصفير الميقاتي</span>
+                      {isManualTrackEntry ? '⌨️ وضع يدوي' : '⚡ وضع الميقاتي'}
                     </button>
                   </div>
 
-                  {/* ⭐ THE REQUESTED SMART ONE-TAP MULTI-RANK BUTTON FOR ACTIVE SERIES ⭐ */}
-                  <div className="w-full pt-2">
-                    {(() => {
-                      const lapsInThisSeries = recordedLaps.filter(l => (l.seriesNumber || 1) === activeSeriesNumber);
-                      const nextRankInThisSeries = lapsInThisSeries.length + 1;
-                      return (
+                  {/* UNIFIED SINGLE MASTER STOPWATCH & RANK BUTTON WITH RESET DIRECTLY UNDERNEATH */}
+                  {(() => {
+                    const lapsInThisSeries = recordedLaps.filter(l => (l.seriesNumber || 1) === activeSeriesNumber);
+                    const nextRankInThisSeries = lapsInThisSeries.length + 1;
+
+                    const handleMasterButtonClick = () => {
+                      if (!isTimerRunning) {
+                        handleStartStopwatch();
+                      } else {
+                        handleTriggerRankSplit();
+                      }
+                    };
+
+                    return (
+                      <div className="space-y-3">
+                        {/* THE SINGLE MASTER BUTTON (الانطلاق + التوقيت الحي + تسجيل مراتب الوصول) */}
                         <button
-                          onClick={handleTriggerRankSplit}
-                          disabled={!isTimerRunning && elapsedMs === 0}
-                          className="w-full py-6 px-4 bg-gradient-to-r from-amber-500 via-orange-600 to-rose-600 hover:from-amber-400 hover:to-rose-500 active:scale-97 disabled:opacity-50 text-white rounded-3xl font-black text-lg sm:text-xl flex flex-col items-center justify-center gap-1 shadow-2xl shadow-orange-600/30 transition-all cursor-pointer ring-4 ring-orange-500/20"
+                          type="button"
+                          onClick={handleMasterButtonClick}
+                          className={`w-full rounded-3xl p-6 sm:p-7 flex flex-col items-center justify-center text-center transition-all cursor-pointer active:scale-98 relative overflow-hidden select-none shadow-2xl border-2 ${
+                            !isTimerRunning && elapsedMs === 0
+                              ? 'bg-gradient-to-br from-emerald-600 via-emerald-700 to-teal-800 hover:from-emerald-500 hover:to-teal-700 text-white border-emerald-400/40 shadow-emerald-600/30 ring-4 ring-emerald-500/20'
+                              : isTimerRunning
+                              ? 'bg-gradient-to-br from-amber-500 via-orange-600 to-rose-600 hover:from-amber-400 hover:to-rose-500 text-white border-amber-300/50 shadow-orange-600/40 ring-4 ring-orange-500/30'
+                              : 'bg-gradient-to-br from-indigo-700 via-purple-700 to-slate-900 hover:from-indigo-600 hover:to-slate-800 text-white border-indigo-400/40 shadow-indigo-700/30 ring-4 ring-indigo-500/20'
+                          }`}
                         >
-                          <div className="flex items-center gap-2">
-                            <Flag className="w-6 h-6 animate-bounce" />
-                            <span>
-                              {nextRankInThisSeries === 1
-                                ? `🥇 تسجيل المرتبة الأولى (السلسلة ${activeSeriesNumber})`
-                                : nextRankInThisSeries === 2
-                                ? `🥈 تسجيل المرتبة الثانية (السلسلة ${activeSeriesNumber})`
-                                : nextRankInThisSeries === 3
-                                ? `🥉 تسجيل المرتبة الثالثة (السلسلة ${activeSeriesNumber})`
-                                : `تسجيل المرتبة (${nextRankInThisSeries}) - السلسلة ${activeSeriesNumber}`}
-                            </span>
+                          {/* Top Status Pill Inside Button */}
+                          <div className="flex items-center gap-2 mb-2">
+                            {!isTimerRunning && elapsedMs === 0 && (
+                              <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-white/20 backdrop-blur-md rounded-full text-xs font-black text-white">
+                                <Play className="w-3.5 h-3.5 fill-white" />
+                                <span>جاهز للانطلاق • سلسلة {activeSeriesNumber}</span>
+                              </span>
+                            )}
+                            {isTimerRunning && (
+                              <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-black/30 backdrop-blur-md rounded-full text-xs font-black text-amber-200 border border-amber-300/40 animate-pulse">
+                                <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping inline-block" />
+                                <span>⚡ التوقيت حي ونشط • اضغط لتسجيل الوصول</span>
+                              </span>
+                            )}
+                            {!isTimerRunning && elapsedMs > 0 && (
+                              <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-white/20 backdrop-blur-md rounded-full text-xs font-black text-amber-200">
+                                <span>⏸️ الميقاتي متوقف • اضغط للاستئناف</span>
+                              </span>
+                            )}
                           </div>
-                          <span className="text-xs text-orange-100 font-medium">
-                            اضغط عند وصول العداء لخط النهاية لحفظ توقيته آلياً (يتم اختيار التلميذ يدوياً)
-                          </span>
+
+                          {/* Live Running Time in Big Digital Digits Inside the Button */}
+                          <div className="font-mono text-5xl sm:text-6xl md:text-7xl font-black tracking-tight drop-shadow-lg my-1 select-none">
+                            {AthleticsService.formatMilliseconds(elapsedMs)}
+                          </div>
+
+                          {/* Primary Action Callout Inside the Button */}
+                          <div className="mt-2 flex items-center justify-center gap-2">
+                            {!isTimerRunning && elapsedMs === 0 && (
+                              <div className="flex items-center gap-2 text-base sm:text-lg font-black bg-black/20 px-4 py-2 rounded-2xl">
+                                <Flag className="w-5 h-5 text-emerald-200 animate-bounce" />
+                                <span>اضغط هنا للانطلاق (Départ)</span>
+                              </div>
+                            )}
+                            {isTimerRunning && (
+                              <div className="flex items-center gap-2 text-base sm:text-lg font-black bg-black/30 px-5 py-2.5 rounded-2xl ring-2 ring-white/20 shadow-md">
+                                <Flag className="w-5 h-5 text-amber-200 animate-bounce" />
+                                <span>
+                                  {nextRankInThisSeries === 1
+                                    ? `🥇 تسجيل وصول المرتبة الأولى (1)`
+                                    : nextRankInThisSeries === 2
+                                    ? `🥈 تسجيل وصول المرتبة الثانية (2)`
+                                    : nextRankInThisSeries === 3
+                                    ? `🥉 تسجيل وصول المرتبة الثالثة (3)`
+                                    : `🏁 تسجيل وصول المرتبة #${nextRankInThisSeries}`}
+                                </span>
+                              </div>
+                            )}
+                            {!isTimerRunning && elapsedMs > 0 && (
+                              <div className="flex items-center gap-2 text-base sm:text-lg font-black bg-black/20 px-4 py-2 rounded-2xl">
+                                <Play className="w-5 h-5 text-white" />
+                                <span>اضغط لاستئناف التوقيت وتسجيل المراتب</span>
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Subtext info inside button */}
+                          <div className="mt-2 text-xs font-bold text-white/80">
+                            {isTimerRunning
+                              ? `تم تسجيل ${lapsInThisSeries.length} وصول حتى الآن للسلسلة ${activeSeriesNumber}`
+                              : lapsInThisSeries.length > 0
+                              ? `مسجل بالسلسلة ${activeSeriesNumber}: ${lapsInThisSeries.length} وصول`
+                              : `زر واحد يجمع الانطلاق، التوقيت الحي، وتسجيل مراتب المتسابقين`}
+                          </div>
                         </button>
-                      );
-                    })()}
-                  </div>
+
+                        {/* زر التصفير أسفله (RESET BUTTON DIRECTLY UNDERNEATH) */}
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={handleResetStopwatch}
+                            className="flex-1 py-3.5 px-4 bg-slate-900 hover:bg-slate-800 text-slate-200 hover:text-white border border-slate-700/80 hover:border-slate-600 rounded-2xl font-black text-xs sm:text-sm flex items-center justify-center gap-2 cursor-pointer transition-all shadow-md active:scale-98"
+                            title="تصفير العداد للبدء من جديد"
+                          >
+                            <RotateCcw className="w-4 h-4 text-amber-400" />
+                            <span>🔄 زر تصفير العداد (Reset)</span>
+                          </button>
+
+                          {isTimerRunning && (
+                            <button
+                              type="button"
+                              onClick={handleStopStopwatch}
+                              className="py-3.5 px-4 bg-rose-950/80 hover:bg-rose-900 text-rose-200 border border-rose-700/80 rounded-2xl font-black text-xs sm:text-sm flex items-center justify-center gap-1.5 cursor-pointer transition-all shadow-md active:scale-98"
+                              title="إيقاف الميقاتي عند اكتمال وصول المتسابقين"
+                            >
+                              <Square className="w-3.5 h-3.5 fill-rose-300 text-rose-300" />
+                              <span>إيقاف مؤقت / إنهاء</span>
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })()}
 
                   {/* Summary info & series notice */}
                   <div className="w-full space-y-1.5">
@@ -3250,7 +3382,7 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                                   }`}
                                 >
                                   <option value="">-- اضغط لاختيار التلميذ(ة) يدوياً --</option>
-                                  {sortedParticipantsForAssignment.map(p => {
+                                  {sortedParticipantsForAssignment.map((p, idx) => {
                                     const att = attendanceMap[p.id];
                                     const isPresent = att?.status === 'present';
                                     const isAbsent = att?.status === 'absent';
@@ -3262,7 +3394,7 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                                     const assignedNote = otherLap ? ` (تم اختياره بالسلسلة ${otherLap.seriesNumber || 1})` : '';
 
                                     return (
-                                      <option key={p.id} value={p.id}>
+                                      <option key={`assign-lap-${p.id}-${idx}`} value={p.id}>
                                         {mark}#{p.bibNumber} - {p.studentName} ({p.schoolName}){lane}{assignedNote}
                                       </option>
                                     );
@@ -3435,8 +3567,8 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                       className="px-2.5 py-1.5 bg-indigo-950/60 hover:bg-indigo-900 border border-indigo-700 text-indigo-200 rounded-xl text-xs font-bold cursor-pointer outline-none"
                     >
                       <option value="" disabled>+ اختيار تلميذ لبدء المحاولات</option>
-                      {currentEventParticipants.map(p => (
-                        <option key={p.id} value={p.id}>
+                      {currentEventParticipants.map((p, idx) => (
+                        <option key={`field-sel-${p.id}-${idx}`} value={p.id}>
                           #{p.bibNumber} - {p.studentName} ({p.schoolName})
                         </option>
                       ))}
@@ -3519,8 +3651,8 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                                     className="px-2 py-1 bg-slate-900 border border-slate-700 rounded-lg text-[10px] text-slate-300 cursor-pointer"
                                   >
                                     <option value={entry.participantId}>تغيير التلميذ...</option>
-                                    {currentEventParticipants.map(p => (
-                                      <option key={p.id} value={p.id}>
+                                    {currentEventParticipants.map((p, pIdx) => (
+                                      <option key={`field-change-${p.id}-${pIdx}`} value={p.id}>
                                         #{p.bibNumber} - {p.studentName} ({p.schoolName})
                                       </option>
                                     ))}
@@ -3537,8 +3669,8 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                                     className="w-full sm:w-60 px-2.5 py-1.5 bg-slate-900 border border-amber-600 rounded-xl text-xs font-bold text-amber-300 outline-none cursor-pointer ring-1 ring-amber-500/30"
                                   >
                                     <option value="">-- اضغط لاختيار التلميذ(ة) يدوياً --</option>
-                                    {currentEventParticipants.map(p => (
-                                      <option key={p.id} value={p.id}>
+                                    {currentEventParticipants.map((p, pIdx) => (
+                                      <option key={`field-pick-${p.id}-${pIdx}`} value={p.id}>
                                         #{p.bibNumber} - {p.studentName} ({p.schoolName})
                                       </option>
                                     ))}
@@ -3548,13 +3680,26 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                             </td>
                             {[0, 1, 2].map((attIdx) => (
                               <td key={attIdx} className="py-3 px-3 text-center">
-                                <input
-                                  type="text"
-                                  value={entry.attempts[attIdx] === 'X' ? 'X' : entry.attempts[attIdx] ?? ''}
-                                  onChange={(e) => handleUpdateAttempt(eIdx, attIdx, e.target.value)}
-                                  placeholder="0.00"
-                                  className="w-16 text-center py-1.5 bg-slate-900 border border-slate-700 rounded-lg text-xs font-mono font-bold text-white focus:ring-1 focus:ring-indigo-500"
-                                />
+                                <div className="flex items-center gap-1 justify-center">
+                                  <input
+                                    type="text"
+                                    value={entry.attempts[attIdx] === 'X' ? 'X' : entry.attempts[attIdx] ?? ''}
+                                    onChange={(e) => {
+                                      handleUpdateAttempt(eIdx, attIdx, e.target.value);
+                                      handleSaveFieldResultsSilent();
+                                    }}
+                                    placeholder="0.00"
+                                    className="w-14 text-center py-1.5 bg-slate-900 border border-slate-700 rounded-lg text-xs font-mono font-bold text-white focus:ring-1 focus:ring-indigo-500"
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => handleVoiceDictation(eIdx, attIdx)}
+                                    className="p-1 bg-indigo-600/20 hover:bg-indigo-600 text-indigo-300 hover:text-white rounded-lg transition-colors cursor-pointer"
+                                    title="إملاء صوتي (مثال: 5.26)"
+                                  >
+                                    🎙️
+                                  </button>
+                                </div>
                               </td>
                             ))}
                             <td className="py-3 px-3 text-center font-mono font-black text-sm text-amber-400 bg-amber-950/20">
@@ -5030,7 +5175,7 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                       const disc1 = disciplines.find(d => d.id === p.disciplineId);
                       const disc2 = p.secondDisciplineId ? disciplines.find(d => d.id === p.secondDisciplineId) : null;
                       return (
-                        <tr key={p.id} className={idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/70'}>
+                        <tr key={`print-roster-${p.id}-${idx}`} className={idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/70'}>
                           <td className="p-2 text-center font-bold border-l border-slate-200">{idx + 1}</td>
                           <td className="p-2 font-black text-slate-900 border-l border-slate-200">{p.studentName}</td>
                           <td className="p-2 font-mono border-l border-slate-200">{p.massarNumber || '---'}</td>
@@ -5530,7 +5675,7 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
 
                     return (
                       <div
-                        key={p.id}
+                        key={`att-participant-${p.id}-${idx}`}
                         className={`p-3.5 rounded-2xl border transition-all flex flex-col md:flex-row md:items-center justify-between gap-3 ${
                           isCalling
                             ? 'bg-amber-100 dark:bg-amber-950/60 border-amber-500 ring-2 ring-amber-400 animate-pulse'
@@ -5800,7 +5945,7 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                             }`}
                           >
                             <option value="">-- اضغط لاختيار صاحب المرتبة {officialRank} --</option>
-                            {sortedParticipantsForAssignment.map(p => {
+                            {sortedParticipantsForAssignment.map((p, pIdx) => {
                               const att = attendanceMap[p.id];
                               const isPresent = att?.status === 'present';
                               const mark = isPresent ? '✅ ' : '';
@@ -5808,7 +5953,7 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                               const assignedNote = otherLap ? ` (تم اختياره بالسلسلة ${otherLap.seriesNumber || 1})` : '';
 
                               return (
-                                <option key={p.id} value={p.id}>
+                                <option key={`assign-rank-${p.id}-${pIdx}`} value={p.id}>
                                   {mark}#{p.bibNumber} - {p.studentName} ({p.schoolName}){assignedNote}
                                 </option>
                               );
@@ -6297,6 +6442,19 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
 
           </div>
         </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* 🎽 MODAL: ATHLETICS BIBS GENERATOR (تطبيق إعداد صدريات ألعاب القوى) 🎽 */}
+      {/* ========================================================================= */}
+      {isAthleticsBibModalOpen && (
+        <AthleticsBibGeneratorModal
+          isOpen={isAthleticsBibModalOpen}
+          onClose={() => setIsAthleticsBibOpen(false)}
+          initialDisciplineId={activeDiscipline?.id}
+          initialCategory={selectedCategory}
+          initialGender={selectedGender}
+        />
       )}
     </div>
   );

@@ -279,6 +279,7 @@ export const Login: React.FC = () => {
 
   // Monthly Calendar state
   const [currentCalendarMonth, setCurrentCalendarMonth] = useState<Date>(new Date());
+  const [isCalendarExpanded, setIsCalendarExpanded] = useState<boolean>(true);
 
   const ARABIC_MONTHS = [
     'يناير', 'فبراير', 'مارس', 'أبريل', 'ماي', 'يونيو',
@@ -1284,6 +1285,198 @@ export const Login: React.FC = () => {
     { id: 5, icon: '🏁', text: 'تحميل الشواهد التقديرية ومحاضر المباريات والنتائج الرسمية متاح مباشرة عبر المنصة.' }
   ];
 
+  // Interactive Monthly Calendar & Daily Program Widget (نافذة البرنامج اليومي والشهرية)
+  const renderMonthlyProgramWidget = (isMobile = false) => {
+    const year = currentCalendarMonth.getFullYear();
+    const monthStr = String(currentCalendarMonth.getMonth() + 1).padStart(2, '0');
+    const set = new Set<string>();
+    matches.forEach(m => {
+      if (m.date && m.date.startsWith(`${year}-${monthStr}`)) {
+        set.add(m.date);
+      }
+    });
+    const monthDatesWithMatches = Array.from(set).sort();
+
+    return (
+      <div className={`bg-white dark:bg-slate-900 border ${isMobile ? 'border-2 border-emerald-500/30 dark:border-slate-800 rounded-3xl p-4 sm:p-5 shadow-md' : 'border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-sm'} space-y-3.5 transition-all`}>
+        {/* Header with Month Navigator & Mobile Toggle */}
+        <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3 gap-2">
+          <div className="flex items-center gap-2 min-w-0">
+            <div className="p-2 rounded-xl bg-emerald-50 dark:bg-emerald-950/80 text-emerald-600 dark:text-emerald-400 shrink-0 border border-emerald-200/60 dark:border-emerald-800">
+              <Calendar className="w-4 h-4" />
+            </div>
+            <div className="min-w-0">
+              <h4 className="text-xs sm:text-sm font-black text-slate-800 dark:text-slate-100 truncate">
+                البرنامج الشهري واليومية
+              </h4>
+              <p className="text-[10px] text-slate-500 dark:text-slate-400 font-bold truncate">
+                {selectedSport !== 'ALL' ? (SPORTS_MAP[selectedSport]?.name || 'المنافسة') : 'كافة الرياضات والبطولات'}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-1.5 shrink-0">
+            <button
+              type="button"
+              onClick={handlePrevMonth}
+              className="p-1.5 text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer border border-slate-200 dark:border-slate-700"
+              title="الشهر السابق"
+            >
+              <ChevronRight className="w-3.5 h-3.5" />
+            </button>
+
+            <span className="text-[11px] font-black text-emerald-800 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/80 px-2.5 py-1 rounded-lg border border-emerald-200 dark:border-emerald-800 font-mono">
+              {ARABIC_MONTHS[currentCalendarMonth.getMonth()]} {currentCalendarMonth.getFullYear()}
+            </span>
+
+            <button
+              type="button"
+              onClick={handleNextMonth}
+              className="p-1.5 text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer border border-slate-200 dark:border-slate-700"
+              title="الشهر التالي"
+            >
+              <ChevronLeft className="w-3.5 h-3.5" />
+            </button>
+
+            {isMobile && (
+              <button
+                type="button"
+                onClick={() => setIsCalendarExpanded(!isCalendarExpanded)}
+                className="px-2 py-1 text-[10px] font-black rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors mr-1 flex items-center gap-1 cursor-pointer"
+                title={isCalendarExpanded ? 'طي اليومية' : 'إظهار اليومية'}
+              >
+                <span>{isCalendarExpanded ? 'طي' : 'عرض'}</span>
+                <ChevronDown className={`w-3 h-3 transition-transform ${isCalendarExpanded ? 'rotate-180' : ''}`} />
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Monthly Calendar Grid (اليومية الشهرية) */}
+        {(!isMobile || isCalendarExpanded) && (
+          <div className="space-y-2">
+            {/* Days of week header */}
+            <div className="grid grid-cols-7 text-center text-[10px] sm:text-xs font-black text-slate-500 dark:text-slate-400 pb-1.5 border-b border-slate-100 dark:border-slate-800">
+              <span>أحد</span>
+              <span>اتن</span>
+              <span>ثلا</span>
+              <span>أرب</span>
+              <span>خميس</span>
+              <span>جمعة</span>
+              <span>سبت</span>
+            </div>
+
+            {/* Days cells */}
+            <div className="grid grid-cols-7 gap-1 sm:gap-1.5 text-center text-xs">
+              {/* Empty padding slots before 1st of month */}
+              {Array.from({ length: new Date(currentCalendarMonth.getFullYear(), currentCalendarMonth.getMonth(), 1).getDay() }).map((_, i) => (
+                <div key={`empty-${i}`} className="h-7 sm:h-8"></div>
+              ))}
+
+              {/* Days 1..N */}
+              {Array.from({ length: new Date(currentCalendarMonth.getFullYear(), currentCalendarMonth.getMonth() + 1, 0).getDate() }).map((_, idx) => {
+                const dayNum = idx + 1;
+                const year = currentCalendarMonth.getFullYear();
+                const monthStr = String(currentCalendarMonth.getMonth() + 1).padStart(2, '0');
+                const dayStr = String(dayNum).padStart(2, '0');
+                const cellYmd = `${year}-${monthStr}-${dayStr}`;
+
+                const isSelected = selectedDate === cellYmd;
+                
+                // Count matches on this specific day
+                const dayMatchesCount = matches.filter(m => safeDateCompare(m.date, cellYmd)).length;
+                const hasMatches = dayMatchesCount > 0;
+
+                return (
+                  <button
+                    key={dayNum}
+                    type="button"
+                    onClick={() => setSelectedDate(cellYmd)}
+                    className={`h-7 sm:h-8 rounded-xl flex flex-col items-center justify-center relative font-bold text-[11px] sm:text-xs transition-all cursor-pointer ${
+                      isSelected
+                        ? 'bg-emerald-600 text-white font-black shadow-md shadow-emerald-600/30 scale-105 ring-2 ring-emerald-400'
+                        : hasMatches
+                        ? 'bg-amber-100 dark:bg-amber-950/80 text-amber-950 dark:text-amber-200 border border-amber-300 dark:border-amber-700 font-black'
+                        : 'hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300'
+                    }`}
+                  >
+                    <span>{dayNum}</span>
+                    {hasMatches && !isSelected && (
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 dark:bg-emerald-400 absolute bottom-0.5"></span>
+                    )}
+                    {hasMatches && isSelected && (
+                      <span className="w-1.5 h-1.5 rounded-full bg-amber-300 absolute bottom-0.5"></span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Selected Day / Monthly Matches Summary */}
+        <div className="pt-2.5 border-t border-slate-100 dark:border-slate-800 space-y-2">
+          <div className="flex items-center justify-between text-xs font-bold text-slate-700 dark:text-slate-200">
+            <span className="flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+              <span>برمجة ومباريات يوم ({selectedDate}):</span>
+            </span>
+            <span className="px-2.5 py-0.5 bg-emerald-50 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-200 rounded-md font-mono font-black text-[11px] border border-emerald-200/50 dark:border-emerald-800">
+              {filteredMatches.length} حدث/مباراة
+            </span>
+          </div>
+
+          <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+            {filteredMatches.length === 0 ? (
+              <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-2xl text-center space-y-1.5 border border-dashed border-slate-200 dark:border-slate-700/60">
+                <p className="text-[11px] font-bold text-slate-500 dark:text-slate-400">
+                  لا توجد مباريات مبرمجة في تاريخ {selectedDate}
+                </p>
+                {(selectedSport === 'athletics' || selectedSport === 'cross_country') && (
+                  <p className="text-[10px] font-black text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/60 py-1 px-2.5 rounded-lg inline-block">
+                    🏆 منصة التتويج والنتائج الرسمية المعتمدة معروضة أسفله مباشرة 👇
+                  </p>
+                )}
+                {monthDatesWithMatches.length > 0 && (
+                  <div className="pt-1 flex flex-wrap items-center justify-center gap-1 text-[10px]">
+                    <span className="text-slate-400">مواعيد مبرمجة هذا الشهر:</span>
+                    {monthDatesWithMatches.slice(0, 4).map(dt => (
+                      <button
+                        key={dt}
+                        type="button"
+                        onClick={() => setSelectedDate(dt)}
+                        className="px-2 py-0.5 bg-emerald-100 dark:bg-emerald-900/60 text-emerald-800 dark:text-emerald-200 rounded-md font-bold hover:bg-emerald-200 transition-colors"
+                      >
+                        {dt.slice(8)} {ARABIC_MONTHS[currentCalendarMonth.getMonth()]}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ) : (
+              filteredMatches.map(m => (
+                <div key={m.id} className="p-2.5 bg-slate-50 dark:bg-slate-800 rounded-2xl space-y-1.5 border border-slate-200/80 dark:border-slate-700/60 hover:border-emerald-300 transition-all">
+                  <div className="flex items-center justify-between text-[11px] font-black text-slate-900 dark:text-slate-100">
+                    <span className="flex items-center gap-1.5 text-emerald-700 dark:text-emerald-400 truncate">
+                      <span>{SPORTS_MAP[m.sportId]?.icon || '⚽'}</span>
+                      <span className="truncate">{m.team1Name} VS {m.team2Name}</span>
+                    </span>
+                    <span className="font-mono text-amber-600 dark:text-amber-400 shrink-0 font-black">{m.startTime || '10:00'}</span>
+                  </div>
+
+                  <div className="flex items-center justify-between text-[10px] text-slate-500 dark:text-slate-400">
+                    <span className="flex items-center gap-1"><MapPin className="w-2.5 h-2.5" /> {m.venueName || 'الملعب'}</span>
+                    <span className="px-1.5 py-0.5 bg-white dark:bg-slate-700 rounded font-bold">{m.category || 'عامة'}</span>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   const renderRightSidebar = () => (
     <div className="space-y-5">
       {/* Weather Widget (نافذة الطقس الصغيرة) */}
@@ -1362,138 +1555,9 @@ export const Login: React.FC = () => {
         </div>
       </div>
 
-      {/* Monthly Program & Interactive Monthly Calendar (نافذة اليومية الشهرية الصغيرة) */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-sm space-y-3 transition-colors">
-        
-        {/* Header with Month Navigator */}
-        <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-2.5">
-          <div className="flex items-center gap-1.5">
-            <Calendar className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
-            <h4 className="text-xs font-black text-slate-800 dark:text-slate-100">
-              البرنامج الشهري واليومية
-            </h4>
-          </div>
-
-          <div className="flex items-center gap-1">
-            <button
-              type="button"
-              onClick={handlePrevMonth}
-              className="p-1 text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
-              title="الشهر السابق"
-            >
-              <ChevronRight className="w-3.5 h-3.5" />
-            </button>
-
-            <span className="text-[10px] font-black text-emerald-800 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/80 px-2 py-0.5 rounded-md border border-emerald-200 dark:border-emerald-800">
-              {ARABIC_MONTHS[currentCalendarMonth.getMonth()]} {currentCalendarMonth.getFullYear()}
-            </span>
-
-            <button
-              type="button"
-              onClick={handleNextMonth}
-              className="p-1 text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
-              title="الشهر التالي"
-            >
-              <ChevronLeft className="w-3.5 h-3.5" />
-            </button>
-          </div>
-        </div>
-
-        {/* Monthly Calendar Grid (اليومية الشهرية) */}
-        <div className="space-y-1.5">
-          {/* Days of week header */}
-          <div className="grid grid-cols-7 text-center text-[10px] font-black text-slate-500 dark:text-slate-400 pb-1 border-b border-slate-100 dark:border-slate-800">
-            <span>أحد</span>
-            <span>اتن</span>
-            <span>ثلا</span>
-            <span>أرب</span>
-            <span>خميس</span>
-            <span>جمعة</span>
-            <span>سبت</span>
-          </div>
-
-          {/* Days cells */}
-          <div className="grid grid-cols-7 gap-1 text-center text-xs">
-            {/* Empty padding slots before 1st of month */}
-            {Array.from({ length: new Date(currentCalendarMonth.getFullYear(), currentCalendarMonth.getMonth(), 1).getDay() }).map((_, i) => (
-              <div key={`empty-${i}`} className="h-6"></div>
-            ))}
-
-            {/* Days 1..N */}
-            {Array.from({ length: new Date(currentCalendarMonth.getFullYear(), currentCalendarMonth.getMonth() + 1, 0).getDate() }).map((_, idx) => {
-              const dayNum = idx + 1;
-              const year = currentCalendarMonth.getFullYear();
-              const monthStr = String(currentCalendarMonth.getMonth() + 1).padStart(2, '0');
-              const dayStr = String(dayNum).padStart(2, '0');
-              const cellYmd = `${year}-${monthStr}-${dayStr}`;
-
-              const isSelected = selectedDate === cellYmd;
-              
-              // Count matches on this specific day
-              const dayMatchesCount = matches.filter(m => safeDateCompare(m.date, cellYmd)).length;
-              const hasMatches = dayMatchesCount > 0;
-
-              return (
-                <button
-                  key={dayNum}
-                  type="button"
-                  onClick={() => setSelectedDate(cellYmd)}
-                  className={`h-6.5 rounded-lg flex flex-col items-center justify-center relative font-bold text-[10px] transition-all cursor-pointer ${
-                    isSelected
-                      ? 'bg-emerald-600 text-white font-black shadow-md shadow-emerald-600/30 scale-105'
-                      : hasMatches
-                      ? 'bg-amber-100 dark:bg-amber-950/80 text-amber-900 dark:text-amber-200 border border-amber-300 dark:border-amber-700 font-black'
-                      : 'hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300'
-                  }`}
-                >
-                  <span>{dayNum}</span>
-                  {hasMatches && !isSelected && (
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 dark:bg-emerald-400 absolute bottom-0.5"></span>
-                  )}
-                  {hasMatches && isSelected && (
-                    <span className="w-1.5 h-1.5 rounded-full bg-amber-300 absolute bottom-0.5"></span>
-                  )}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* Selected Day / Monthly Matches Summary */}
-        <div className="pt-2 border-t border-slate-100 dark:border-slate-800 space-y-2">
-          <div className="flex items-center justify-between text-[10px] font-bold text-slate-600 dark:text-slate-300">
-            <span>مباريات اليوم ({selectedDate}):</span>
-            <span className="px-2 py-0.5 bg-emerald-50 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-200 rounded font-mono font-bold">
-              {filteredMatches.length} مباراة
-            </span>
-          </div>
-
-          <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
-            {filteredMatches.length === 0 ? (
-              <div className="p-2.5 bg-slate-50 dark:bg-slate-800/60 rounded-xl text-center text-[10px] text-slate-500 dark:text-slate-400">
-                لا توجد مباريات مبرمجة في تاريخ {selectedDate}
-              </div>
-            ) : (
-              filteredMatches.map(m => (
-                <div key={m.id} className="p-2 bg-slate-50 dark:bg-slate-800 rounded-xl space-y-1 border border-slate-100 dark:border-slate-700/60">
-                  <div className="flex items-center justify-between text-[10px] font-black text-slate-800 dark:text-slate-100">
-                    <span className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400">
-                      <span>{SPORTS_MAP[m.sportId]?.icon || '⚽'}</span>
-                      <span className="truncate">{m.team1Name} VS {m.team2Name}</span>
-                    </span>
-                    <span className="font-mono text-amber-600 dark:text-amber-400">{m.startTime || '10:00'}</span>
-                  </div>
-
-                  <div className="flex items-center justify-between text-[9px] text-slate-500 dark:text-slate-400">
-                    <span className="flex items-center gap-1"><MapPin className="w-2.5 h-2.5" /> {m.venueName || 'الملعب'}</span>
-                    <span className="px-1.5 py-0.5 bg-white dark:bg-slate-700 rounded font-bold">{m.category || 'عامة'}</span>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-        </div>
-
+      {/* Monthly Program & Interactive Monthly Calendar (نافذة اليومية الشهرية - معروضة هنا في الحاسوب فقط) */}
+      <div className="hidden lg:block">
+        {renderMonthlyProgramWidget(false)}
       </div>
 
       {/* Tournament Guides Button */}
@@ -1820,15 +1884,10 @@ export const Login: React.FC = () => {
           </div>
         )}
 
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-          
-          {/* RIGHT SIDEBAR WIDGETS (WEATHER, PRAYER, PROGRAM, GALLERY) */}
-          <div className="order-2 lg:order-none lg:col-span-3 lg:col-start-1 space-y-5">
-            {renderRightSidebar()}
-          </div>
+        <div className="flex flex-col lg:grid lg:grid-cols-12 gap-6 items-start">
 
-          {/* MAIN COLUMN: PUBLIC RESULTS & CHAMPIONSHIPS PORTAL */}
-          <div className={`space-y-5 transition-all duration-300 order-1 lg:order-none ${
+          {/* MAIN COLUMN: PUBLIC RESULTS & CHAMPIONSHIPS PORTAL (FIRST IN DOM FOR MOBILE) */}
+          <div className={`w-full space-y-5 transition-all duration-300 ${
             showLoginPanel 
               ? 'lg:col-span-6 lg:col-start-4' 
               : 'lg:col-span-9 lg:col-start-4'
@@ -1924,6 +1983,11 @@ export const Login: React.FC = () => {
                 </div>
               )}
 
+            </div>
+
+            {/* 📅 MONTHLY & DAILY PROGRAM (ON MOBILE: PROMINENTLY POSITIONED DIRECTLY ABOVE THE PODIUM) 📅 */}
+            <div className="block lg:hidden">
+              {renderMonthlyProgramWidget(true)}
             </div>
 
             {/* TAB 1: CROSS COUNTRY PODIUM & RANKING RESULTS */}
@@ -2382,9 +2446,9 @@ export const Login: React.FC = () => {
 
                   return (
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                      {items.map((ath: AthleticsCategoryResult) => (
+                      {items.map((ath: AthleticsCategoryResult, idx: number) => (
                         <div
-                          key={ath.id}
+                          key={`ath-res-${ath.id}-${idx}`}
                           className="bg-white dark:bg-slate-900 border-2 border-emerald-500/20 dark:border-slate-800 rounded-3xl p-4 sm:p-5 shadow-md hover:shadow-lg transition-all space-y-4"
                         >
                           {/* Card Header */}
@@ -2685,6 +2749,11 @@ export const Login: React.FC = () => {
               </div>
             )}
 
+          </div>
+
+          {/* RIGHT SIDEBAR WIDGETS (DESKTOP: SIDEBAR / MOBILE: AUXILIARY WIDGETS BELOW PODIUM) */}
+          <div className="w-full lg:col-span-3 lg:col-start-1 space-y-5">
+            {renderRightSidebar()}
           </div>
 
           {/* SIDE COLUMN (3 COLS ON DESKTOP): TEACHERS & MANAGERS LOGIN PANEL */}

@@ -349,7 +349,32 @@ export class AthleticsService {
   static getParticipants(): AthleticsParticipantRecord[] {
     try {
       const data = localStorage.getItem(STORAGE_KEYS.PARTICIPANTS);
-      if (data) return JSON.parse(data);
+      if (data) {
+        const parsed = JSON.parse(data);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          // Strictly deduplicate by ID and ensure all IDs are unique
+          const seenIds = new Set<string>();
+          let hasDuplicates = false;
+          const sanitized: AthleticsParticipantRecord[] = [];
+          for (let i = 0; i < parsed.length; i++) {
+            const p = parsed[i];
+            if (!p) continue;
+            if (!p.id || seenIds.has(p.id)) {
+              hasDuplicates = true;
+              const uniqueId = p.id ? `${p.id}-d${i}` : `ath-part-${Date.now()}-${i}`;
+              sanitized.push({ ...p, id: uniqueId });
+              seenIds.add(uniqueId);
+            } else {
+              seenIds.add(p.id);
+              sanitized.push(p);
+            }
+          }
+          if (hasDuplicates) {
+            localStorage.setItem(STORAGE_KEYS.PARTICIPANTS, JSON.stringify(sanitized));
+          }
+          return sanitized;
+        }
+      }
     } catch (e) {
       console.error('Failed to parse athletics participants:', e);
     }
@@ -426,8 +451,22 @@ export class AthleticsService {
   }
 
   static saveParticipants(participants: AthleticsParticipantRecord[]): void {
-    localStorage.setItem(STORAGE_KEYS.PARTICIPANTS, JSON.stringify(participants));
-    window.dispatchEvent(new CustomEvent('athleticsParticipantsUpdated', { detail: participants }));
+    const seenIds = new Set<string>();
+    const sanitized: AthleticsParticipantRecord[] = [];
+    for (let i = 0; i < participants.length; i++) {
+      const p = participants[i];
+      if (!p) continue;
+      if (!p.id || seenIds.has(p.id)) {
+        const uniqueId = p.id ? `${p.id}-d${i}` : `ath-part-${Date.now()}-${i}`;
+        sanitized.push({ ...p, id: uniqueId });
+        seenIds.add(uniqueId);
+      } else {
+        seenIds.add(p.id);
+        sanitized.push(p);
+      }
+    }
+    localStorage.setItem(STORAGE_KEYS.PARTICIPANTS, JSON.stringify(sanitized));
+    window.dispatchEvent(new CustomEvent('athleticsParticipantsUpdated', { detail: sanitized }));
   }
 
   static addParticipant(participant: Omit<AthleticsParticipantRecord, 'id' | 'createdAt'>): AthleticsParticipantRecord {

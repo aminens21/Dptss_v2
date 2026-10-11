@@ -509,8 +509,8 @@ export const PublicResults: React.FC = () => {
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {athleticsList.map(ath => (
-                  <div key={ath.id} className="bg-white rounded-3xl p-5 sm:p-6 border border-slate-200 shadow-sm space-y-6">
+                {athleticsList.map((ath, idx) => (
+                  <div key={`ath-${ath.id}-${idx}`} className="bg-white rounded-3xl p-5 sm:p-6 border border-slate-200 shadow-sm space-y-6">
                     <div className="flex items-center justify-between border-b border-slate-100 pb-3">
                       <div className="flex items-center gap-3">
                         <div className="p-2 bg-emerald-500 text-white rounded-xl shadow-xs">
