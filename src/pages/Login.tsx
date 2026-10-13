@@ -109,61 +109,17 @@ export const Login: React.FC = () => {
   const [isSportsBarPaused, setIsSportsBarPaused] = useState(false);
   const sportsBarTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  const activeSportsWithResults = useMemo(() => {
-    const hasCrossCountryResults = Object.values(crossCountryResults).some(r => r && r.podium && r.podium.length > 0);
-    const hasAthleticsResults = Object.values(athleticsResults).some(r => r && r.podium && r.podium.length > 0) ||
-      Object.values(AthleticsService.getAllResults()).some(r => r.status === 'completed' && r.isFinallyValidated);
-
-    const resultSports: [string, { name: string; icon: string }][] = [];
-
-    Object.entries(SPORTS_MAP).forEach(([sportKey, sport]) => {
-      if (sportKey === 'cross_country') {
-        if (hasCrossCountryResults) {
-          resultSports.push([sportKey, sport]);
-        }
-      } else if (sportKey === 'athletics') {
-        if (hasAthleticsResults) {
-          resultSports.push([sportKey, sport]);
-        }
-      } else {
-        const sportMatches = matches.filter(m => {
-          const mSportId = m.sportId || tournaments.find(t => t.id === m.tournamentId)?.sportId;
-          return mSportId === sportKey;
-        });
-        const hasMatchResults = sportMatches.some(m => 
-          m.status?.toLowerCase() === 'completed' || 
-          m.status?.toLowerCase() === 'ongoing' || 
-          (m.score1 !== undefined && m.score1 !== null) || 
-          (m.score2 !== undefined && m.score2 !== null) ||
-          (m.team1Score !== undefined && m.team1Score !== null) ||
-          (m.team2Score !== undefined && m.team2Score !== null)
-        );
-        if (hasMatchResults) {
-          resultSports.push([sportKey, sport]);
-        }
-      }
-    });
-
-    return resultSports.length > 0 ? resultSports : Object.entries(SPORTS_MAP);
-  }, [crossCountryResults, athleticsResults, matches, tournaments]);
-
   useEffect(() => {
     let animationFrameId: number;
     const scrollEl = sportsBarRef.current;
     const set1El = set1Ref.current;
 
-    if (scrollEl && set1El) {
-      if (scrollEl.scrollLeft === 0) {
-        scrollEl.scrollLeft = set1El.offsetWidth;
-      }
-    }
-
     const step = () => {
       if (scrollEl && set1El && !isSportsBarPaused && !isSportsBarDragging) {
         const set1Width = set1El.offsetWidth;
-        scrollEl.scrollLeft -= 0.6; // Reversed direction
-        if (scrollEl.scrollLeft <= 0) {
-          scrollEl.scrollLeft += set1Width; // Seamless loop in reverse
+        scrollEl.scrollLeft += 0.6;
+        if (scrollEl.scrollLeft >= set1Width) {
+          scrollEl.scrollLeft -= set1Width;
         }
       }
       animationFrameId = requestAnimationFrame(step);
@@ -171,7 +127,7 @@ export const Login: React.FC = () => {
 
     animationFrameId = requestAnimationFrame(step);
     return () => cancelAnimationFrame(animationFrameId);
-  }, [isSportsBarPaused, isSportsBarDragging, activeSportsWithResults]);
+  }, [isSportsBarPaused, isSportsBarDragging]);
 
   const triggerSportsBarPause = () => {
     setIsSportsBarPaused(true);
@@ -2238,7 +2194,7 @@ export const Login: React.FC = () => {
                       <span>جميع الرياضات</span>
                     </button>
 
-                    {activeSportsWithResults.map(([sportKey, sport]) => {
+                    {Object.entries(SPORTS_MAP).map(([sportKey, sport]) => {
                       const isSelected = selectedSport === sportKey;
                       return (
                         <button
@@ -2290,7 +2246,7 @@ export const Login: React.FC = () => {
                       <span>جميع الرياضات</span>
                     </button>
 
-                    {activeSportsWithResults.map(([sportKey, sport]) => {
+                    {Object.entries(SPORTS_MAP).map(([sportKey, sport]) => {
                       const isSelected = selectedSport === sportKey;
                       return (
                         <button
