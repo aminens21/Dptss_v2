@@ -210,7 +210,18 @@ html.dark .shadow-2xl {
   animation-play-state: paused;
 }
 
-/* Hide scrollbar for Chrome, Safari and Opera */
+@keyframes tickerSlow {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+
+.animate-ticker-slow {
+  animation: tickerSlow 70s linear infinite;
+}
+
+.animate-ticker-slow:hover {
+  animation-play-state: paused;
+}
 .no-scrollbar::-webkit-scrollbar {
   display: none !important;
   width: 0 !important;

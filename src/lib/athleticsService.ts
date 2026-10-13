@@ -584,8 +584,66 @@ export class AthleticsService {
       lastUpdated: new Date().toISOString()
     };
     localStorage.setItem(STORAGE_KEYS.RESULTS, JSON.stringify(all));
+
+    // Also sync to global/public athletics results storage so PublicResults immediately reflects it
+    try {
+      const disciplines = this.getDisciplines();
+      const disc = disciplines.find(d => d.id === result.disciplineId);
+      const specName = disc?.nameAr || result.disciplineId;
+
+      let podium: any[] = [];
+      if (result.type === 'track' && result.trackLaps) {
+        podium = result.trackLaps
+          .slice(0, 3)
+          .filter(lap => lap.participantId || lap.studentName)
+          .map((lap, idx) => ({
+            rank: idx + 1,
+            fullName: lap.studentName || 'عداء',
+            schoolName: lap.schoolName || '',
+            performance: lap.formattedTime,
+            bibNumber: lap.bibNumber ? String(lap.bibNumber) : undefined
+          }));
+      } else if (result.fieldEntries) {
+        podium = result.fieldEntries
+          .slice(0, 3)
+          .filter(f => f.participantId || f.studentName)
+          .map((f, idx) => ({
+            rank: idx + 1,
+            fullName: f.studentName || 'متسابق',
+            schoolName: f.schoolName || '',
+            performance: f.bestAttempt ? `${f.bestAttempt.toFixed(2)} م` : '-'
+          }));
+      }
+
+      const categoryResult = {
+        id: result.id,
+        category: result.category,
+        gender: result.gender,
+        specialtyName: specName,
+        specialtyType: result.type,
+        status: 'completed',
+        isFinallyValidated: true,
+        directorateId: result.directorateName || 'taourirt',
+        podium,
+        updatedAt: new Date().toISOString()
+      };
+
+      const keys = ['taourirt_athletics_results', 'taourirt_athletics_results_taourirt'];
+      keys.forEach(k => {
+        try {
+          const raw = localStorage.getItem(k);
+          const map = raw ? JSON.parse(raw) : {};
+          map[result.id] = categoryResult;
+          localStorage.setItem(k, JSON.stringify(map));
+        } catch (e) {}
+      });
+    } catch (e) {
+      console.warn('Error syncing athletics result to global storage:', e);
+    }
+
     window.dispatchEvent(new CustomEvent('athleticsResultsUpdated', { detail: all }));
     window.dispatchEvent(new CustomEvent('resultsChanged'));
+    window.dispatchEvent(new Event('storage'));
   }
 
   static deleteEventResult(resultId: string): void {
@@ -593,8 +651,24 @@ export class AthleticsService {
     if (all[resultId]) {
       delete all[resultId];
       localStorage.setItem(STORAGE_KEYS.RESULTS, JSON.stringify(all));
+
+      const keys = ['taourirt_athletics_results', 'taourirt_athletics_results_taourirt'];
+      keys.forEach(k => {
+        try {
+          const raw = localStorage.getItem(k);
+          if (raw) {
+            const map = JSON.parse(raw);
+            if (map[resultId]) {
+              delete map[resultId];
+              localStorage.setItem(k, JSON.stringify(map));
+            }
+          }
+        } catch (e) {}
+      });
+
       window.dispatchEvent(new CustomEvent('athleticsResultsUpdated', { detail: all }));
       window.dispatchEvent(new CustomEvent('resultsChanged'));
+      window.dispatchEvent(new Event('storage'));
     }
   }
 

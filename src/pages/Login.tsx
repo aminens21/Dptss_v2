@@ -2091,54 +2091,108 @@ export const Login: React.FC = () => {
                 <span>شريط الرياضات:</span>
               </div>
 
-              <div className="flex-1 overflow-x-auto no-scrollbar flex items-center gap-1.5 py-0.5">
-                {/* All Sports Option */}
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSelectedSport('ALL');
-                    setActivePublicTab('MATCHES');
-                    setSelectedCategory('ALL');
-                  }}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer flex items-center gap-1.5 shrink-0 ${
-                    selectedSport === 'ALL'
-                      ? 'bg-emerald-500 text-white shadow-md shadow-emerald-500/20'
-                      : 'bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white border border-slate-200 dark:border-slate-700/60'
-                  }`}
-                >
-                  <span>🏆</span>
-                  <span>جميع الرياضات</span>
-                </button>
-
-                {/* Individual Sports from SPORTS_MAP */}
-                {Object.entries(SPORTS_MAP).map(([sportKey, sport]) => {
-                  const isSelected = selectedSport === sportKey;
-                  return (
+              <div className="flex-1 overflow-hidden relative py-0.5 group">
+                <div className="flex items-center gap-1.5 w-max animate-ticker-slow">
+                  {/* Set 1 */}
+                  <div className="flex items-center gap-1.5">
+                    {/* All Sports Option */}
                     <button
-                      key={sportKey}
                       type="button"
                       onClick={() => {
-                        setSelectedSport(sportKey);
-                        if (sportKey === 'cross_country') {
-                          setActivePublicTab('CC_PODIUM');
-                        } else if (sportKey === 'athletics') {
-                          setActivePublicTab('ATHLETICS');
-                        } else {
-                          setActivePublicTab('MATCHES');
-                        }
+                        setSelectedSport('ALL');
+                        setActivePublicTab('MATCHES');
                         setSelectedCategory('ALL');
                       }}
                       className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer flex items-center gap-1.5 shrink-0 ${
-                        isSelected
+                        selectedSport === 'ALL'
                           ? 'bg-emerald-500 text-white shadow-md shadow-emerald-500/20'
                           : 'bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white border border-slate-200 dark:border-slate-700/60'
                       }`}
                     >
-                      <span className="text-sm">{sport.icon}</span>
-                      <span>{sport.name}</span>
+                      <span>🏆</span>
+                      <span>جميع الرياضات</span>
                     </button>
-                  );
-                })}
+
+                    {/* Individual Sports from SPORTS_MAP */}
+                    {Object.entries(SPORTS_MAP).map(([sportKey, sport]) => {
+                      const isSelected = selectedSport === sportKey;
+                      return (
+                        <button
+                          key={sportKey}
+                          type="button"
+                          onClick={() => {
+                            setSelectedSport(sportKey);
+                            if (sportKey === 'cross_country') {
+                              setActivePublicTab('CC_PODIUM');
+                            } else if (sportKey === 'athletics') {
+                              setActivePublicTab('ATHLETICS');
+                            } else {
+                              setActivePublicTab('MATCHES');
+                            }
+                            setSelectedCategory('ALL');
+                          }}
+                          className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer flex items-center gap-1.5 shrink-0 ${
+                            isSelected
+                              ? 'bg-emerald-500 text-white shadow-md shadow-emerald-500/20'
+                              : 'bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white border border-slate-200 dark:border-slate-700/60'
+                          }`}
+                        >
+                          <span className="text-sm">{sport.icon}</span>
+                          <span>{sport.name}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {/* Set 2 (Duplicate for seamless loop) */}
+                  <div className="flex items-center gap-1.5" aria-hidden="true">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedSport('ALL');
+                        setActivePublicTab('MATCHES');
+                        setSelectedCategory('ALL');
+                      }}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer flex items-center gap-1.5 shrink-0 ${
+                        selectedSport === 'ALL'
+                          ? 'bg-emerald-500 text-white shadow-md shadow-emerald-500/20'
+                          : 'bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white border border-slate-200 dark:border-slate-700/60'
+                      }`}
+                    >
+                      <span>🏆</span>
+                      <span>جميع الرياضات</span>
+                    </button>
+
+                    {Object.entries(SPORTS_MAP).map(([sportKey, sport]) => {
+                      const isSelected = selectedSport === sportKey;
+                      return (
+                        <button
+                          key={`dup-${sportKey}`}
+                          type="button"
+                          onClick={() => {
+                            setSelectedSport(sportKey);
+                            if (sportKey === 'cross_country') {
+                              setActivePublicTab('CC_PODIUM');
+                            } else if (sportKey === 'athletics') {
+                              setActivePublicTab('ATHLETICS');
+                            } else {
+                              setActivePublicTab('MATCHES');
+                            }
+                            setSelectedCategory('ALL');
+                          }}
+                          className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer flex items-center gap-1.5 shrink-0 ${
+                            isSelected
+                              ? 'bg-emerald-500 text-white shadow-md shadow-emerald-500/20'
+                              : 'bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white border border-slate-200 dark:border-slate-700/60'
+                          }`}
+                        >
+                          <span className="text-sm">{sport.icon}</span>
+                          <span>{sport.name}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
               </div>
             </div>
           </div>

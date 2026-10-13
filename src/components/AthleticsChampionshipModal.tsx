@@ -107,15 +107,15 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
   // Committee Permissions Edit Modal State
   const [isPermissionsModalOpen, setIsPermissionsModalOpen] = useState(false);
   const [editingPermissionsCommittee, setEditingPermissionsCommittee] = useState<AthleticsCommitteeDef | null>(null);
-  const [tempAllowedTabs, setTempAllowedTabs] = useState<('events' | 'committees' | 'stopwatch' | 'field' | 'podium' | 'school_registration' | 'my_participations')[]>([]);
+  const [tempAllowedTabs, setTempAllowedTabs] = useState<('events' | 'committees' | 'stopwatch' | 'podium' | 'school_registration' | 'my_participations')[]>([]);
   const [tempAllowedDiscIds, setTempAllowedDiscIds] = useState<string[]>([]);
   const [tempCanRecord, setTempCanRecord] = useState(true);
   const [tempCanValidate, setTempCanValidate] = useState(true);
   const [tempCanPrint, setTempCanPrint] = useState(true);
   const [tempCanExport, setTempCanExport] = useState(true);
 
-  // Navigation Tabs: 'school_registration' | 'my_participations' | 'events' | 'committees' | 'stopwatch' | 'field' | 'podium'
-  type AthleticsTab = 'school_registration' | 'my_participations' | 'events' | 'committees' | 'stopwatch' | 'field' | 'podium';
+  // Navigation Tabs: 'school_registration' | 'my_participations' | 'events' | 'committees' | 'stopwatch' | 'podium'
+  type AthleticsTab = 'school_registration' | 'my_participations' | 'events' | 'committees' | 'stopwatch' | 'podium';
   const [activeTab, setActiveTab] = useState<AthleticsTab>(isTeacher ? 'school_registration' : 'events');
 
   useEffect(() => {
@@ -281,19 +281,18 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
     }
 
     if (effectiveRole === 'ADMIN') {
-      return ['school_registration', 'my_participations', 'events', 'committees', 'stopwatch', 'field', 'podium'];
+      return ['school_registration', 'my_participations', 'events', 'committees', 'stopwatch', 'podium'];
     }
     
     if (activeCommitteePermissionDef) {
       const commTabs = (activeCommitteePermissionDef.permissions?.allowedTabs as AthleticsTab[]) || [];
       commTabs.forEach(t => {
-        if (!tabs.includes(t)) tabs.push(t);
+        if ((t as string) !== 'field' && !tabs.includes(t)) tabs.push(t);
       });
       
       // Fallbacks if no tabs defined
       if (tabs.length === (isTeacher ? 2 : 0)) {
         if (activeCommitteePermissionDef.id === 'podium_committee') tabs.push('podium');
-        else if (activeCommitteePermissionDef.id === 'long_jump_committee' || activeCommitteePermissionDef.id === 'shot_put_committee') tabs.push('field');
         else tabs.push('stopwatch');
       }
       return tabs;
@@ -301,7 +300,7 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
     
     if (effectiveRole === 'TEACHER') return ['school_registration', 'my_participations'];
     
-    return ['school_registration', 'events', 'committees', 'stopwatch', 'field', 'podium'];
+    return ['school_registration', 'events', 'committees', 'stopwatch', 'podium'];
   }, [effectiveRole, activeCommitteePermissionDef, isTeacher]);
 
   // Ensure activeTab stays in sync with allowed tabs
@@ -312,21 +311,6 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
   }, [allowedTabs, activeTab]);
 
   const [isManualTrackEntry, setIsManualTrackEntry] = useState(false);
-
-  // --- TRACK HEATS / MULTI-SERIES (سباقات المجموعات والسلاسل لنفس الفئة) STATE ---
-  const [activeSeriesNumber, setActiveSeriesNumber] = useState<number>(1);
-  const [seriesViewFilter, setSeriesViewFilter] = useState<'ALL' | number>('ALL');
-  const [customSeriesList, setCustomSeriesList] = useState<number[]>([1, 2, 3]);
-
-  // Available heats/series for current race
-  const availableSeriesList = useMemo(() => {
-    const set = new Set<number>([...customSeriesList]);
-    recordedLaps.forEach(l => {
-      if (l.seriesNumber) set.add(l.seriesNumber);
-    });
-    if (set.size === 0) set.add(1);
-    return Array.from(set).sort((a, b) => a - b);
-  }, [recordedLaps, customSeriesList]);
 
   // --- ATTENDANCE & ROLL CALL (غرفة المناداة وتأكيد الحضور) STATE ---
   const [isAttendanceModalOpen, setIsAttendanceModalOpen] = useState(false);
@@ -343,6 +327,7 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
   const [clearRaceDisciplineId, setClearRaceDisciplineId] = useState<string>('');
   const [clearRaceCategory, setClearRaceCategory] = useState<'U12' | 'U15' | 'U18' | 'U20'>('U18');
   const [clearRaceGender, setClearRaceGender] = useState<'Male' | 'Female'>('Male');
+  const [clearDeletePublicAndPodium, setClearDeletePublicAndPodium] = useState<boolean>(true);
   const [clearIncludeAttendance, setClearIncludeAttendance] = useState(false);
   const [clearConfirmedByUser, setClearConfirmedByUser] = useState(false);
 
@@ -350,6 +335,29 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
   const [isDemoRosterModalOpen, setIsDemoRosterModalOpen] = useState(false);
   const [demoSeedMode, setDemoSeedMode] = useState<'replace' | 'merge'>('replace');
   const [schoolCommitteeFilter, setSchoolCommitteeFilter] = useState<string>('ALL');
+
+  // Disciplines that the current user/teacher is authorized/supervised to clear
+  const clearableDisciplines = useMemo(() => {
+    let list = disciplines;
+    if (effectiveRole !== 'ADMIN' && activeCommitteePermissionDef) {
+      const allowedIds = activeCommitteePermissionDef.permissions?.allowedDisciplineIds || activeCommitteePermissionDef.disciplines || [];
+      if (allowedIds.length > 0) {
+        list = list.filter(d => allowedIds.includes(d.id) || d.committeeId === activeCommitteePermissionDef.id);
+      } else if (activeCommitteePermissionDef.disciplines?.length > 0) {
+        list = list.filter(d => activeCommitteePermissionDef.disciplines.includes(d.id));
+      }
+    }
+    if (effectiveRole === 'TEACHER' && currentUser) {
+      const teacherName = currentUser.fullName;
+      const assignedCommitteeIds = (Object.values(assignments) as AthleticsCommitteeAssignment[])
+        .filter(a => a.teacherName === teacherName || a.teacherId === currentUser.id)
+        .map(a => a.committeeId);
+      if (assignedCommitteeIds.length > 0) {
+        list = list.filter(d => assignedCommitteeIds.includes(d.committeeId));
+      }
+    }
+    return list;
+  }, [disciplines, effectiveRole, activeCommitteePermissionDef, assignments, currentUser]);
 
   // Filtered disciplines list allowed for the currently selected category & gender
   // AND filtered strictly according to the active committee permission (e.g. Jump Committee only sees Jump competitions!)
@@ -372,13 +380,16 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
     return list;
   }, [disciplines, selectedCategory, selectedGender, activeCommitteePermissionDef]);
 
-  // Current Active Discipline (Ensuring it is one of the allowed disciplines for this category/gender)
-  const activeDiscipline = selectedDiscipline && currentCategoryGendersDisciplines.some(d => d.id === selectedDiscipline.id)
-    ? selectedDiscipline
-    : currentCategoryGendersDisciplines[0] || null;
+  // Current Active Discipline (Ensuring it is one of the allowed disciplines for this category/gender, or selected discipline in podium view)
+  const activeDiscipline = activeTab === 'podium'
+    ? (selectedDiscipline || currentCategoryGendersDisciplines[0] || disciplines[0] || null)
+    : (selectedDiscipline && currentCategoryGendersDisciplines.some(d => d.id === selectedDiscipline.id)
+        ? selectedDiscipline
+        : currentCategoryGendersDisciplines[0] || null);
 
-  // Auto-correct selectedDiscipline state when filtered out
+  // Auto-correct selectedDiscipline state when filtered out (only in timer/stopwatch tabs, NOT when browsing podium)
   useEffect(() => {
+    if (activeTab === 'podium') return;
     if (currentCategoryGendersDisciplines.length > 0) {
       const isStillValid = selectedDiscipline && currentCategoryGendersDisciplines.some(d => d.id === selectedDiscipline.id);
       if (!isStillValid) {
@@ -389,9 +400,11 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
         setSelectedDiscipline(null);
       }
     }
-  }, [selectedCategory, selectedGender, currentCategoryGendersDisciplines, selectedDiscipline]);
+  }, [activeTab, selectedCategory, selectedGender, currentCategoryGendersDisciplines, selectedDiscipline]);
+
   const currentEventKey = activeDiscipline ? `${activeDiscipline.id}_${selectedCategory}_${selectedGender}` : '';
-  const currentEventResult = results[currentEventKey];
+  const currentEventResult = results[currentEventKey] 
+    || (Object.values(results) as AthleticsEventResult[]).find(r => r && r.disciplineId === activeDiscipline?.id && r.category === selectedCategory && r.gender === selectedGender);
 
   // Committee for current active discipline
   const currentCommitteeDef = committees.find(c => c.id === activeDiscipline?.committeeId);
@@ -485,8 +498,6 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
         setIsTimerRunning(false);
         setElapsedMs(0);
         setIsManualTrackEntry(false);
-        setActiveSeriesNumber(1);
-        setSeriesViewFilter('ALL');
       }
 
       // Load attendance for currentEventKey
@@ -514,9 +525,52 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
     );
   }, [participants, activeDiscipline, selectedCategory, selectedGender]);
 
+  // CRITICAL USER REQUIREMENT:
+  // "عند اختيار التلميذ في مسابقة ما المرجو تغيير لونه في القائمة المنسدلة ووضعه في أسفل القائمة"
+  // Helper to categorize & order participants for manual lap assignment:
+  // 1. Available (unassigned) athletes at the TOP with bright prominent colors
+  // 2. Already assigned athletes placed at the BOTTOM with changed muted colors and checked badge
+  const getCategorizedParticipantsForLap = (currentLapParticipantId?: string) => {
+    const assignedIdsInOtherLaps = new Set(
+      recordedLaps
+        .filter(l => l.participantId && l.participantId !== currentLapParticipantId)
+        .map(l => l.participantId as string)
+    );
+
+    const available: AthleticsParticipantRecord[] = [];
+    const alreadyChosen: AthleticsParticipantRecord[] = [];
+
+    currentEventParticipants.forEach(p => {
+      if (assignedIdsInOtherLaps.has(p.id)) {
+        alreadyChosen.push(p);
+      } else {
+        available.push(p);
+      }
+    });
+
+    available.sort((a, b) => {
+      const aAtt = attendanceMap[a.id]?.status || 'pending';
+      const bAtt = attendanceMap[b.id]?.status || 'pending';
+      if (aAtt === 'present' && bAtt !== 'present') return -1;
+      if (bAtt === 'present' && aAtt !== 'present') return 1;
+      if (aAtt === 'absent' && bAtt !== 'absent') return 1;
+      if (bAtt === 'absent' && aAtt !== 'absent') return -1;
+      return (parseInt(a.bibNumber) || 0) - (parseInt(b.bibNumber) || 0);
+    });
+
+    alreadyChosen.sort((a, b) => (parseInt(a.bibNumber) || 0) - (parseInt(b.bibNumber) || 0));
+
+    return { available, alreadyChosen };
+  };
+
   // Sorted participants for assignment: present athletes first!
   const sortedParticipantsForAssignment = useMemo(() => {
+    const assignedIds = new Set(recordedLaps.filter(l => l.participantId).map(l => l.participantId as string));
     return [...currentEventParticipants].sort((a, b) => {
+      const aAssigned = assignedIds.has(a.id);
+      const bAssigned = assignedIds.has(b.id);
+      if (!aAssigned && bAssigned) return -1;
+      if (aAssigned && !bAssigned) return 1;
       const aStatus = attendanceMap[a.id]?.status || 'pending';
       const bStatus = attendanceMap[b.id]?.status || 'pending';
       if (aStatus === 'present' && bStatus !== 'present') return -1;
@@ -525,33 +579,18 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
       if (bStatus === 'absent' && aStatus !== 'absent') return -1;
       return (parseInt(a.bibNumber) || 0) - (parseInt(b.bibNumber) || 0);
     });
-  }, [currentEventParticipants, attendanceMap]);
+  }, [currentEventParticipants, attendanceMap, recordedLaps]);
 
-  // Laps to display based on series view filter ('ALL' = Unified Overall Ranking by fastest time, or specific series)
+  // Laps to display in finish order for direct unified race (no series)
   const lapsToDisplay = useMemo(() => {
-    if (seriesViewFilter === 'ALL') {
-      return [...recordedLaps]
-        .map((lap, origIdx) => ({
-          ...lap,
-          origIdx,
-          effectiveTimeMs: lap.timeMs > 0 ? lap.timeMs : AthleticsService.parseTimeToMs(lap.formattedTime)
-        }))
-        .sort((a, b) => a.effectiveTimeMs - b.effectiveTimeMs)
-        .map((lap, rankIdx) => ({
-          ...lap,
-          overallRank: rankIdx + 1
-        }));
-    } else {
-      return recordedLaps
-        .map((lap, origIdx) => ({
-          ...lap,
-          origIdx,
-          overallRank: undefined,
-          effectiveTimeMs: lap.timeMs > 0 ? lap.timeMs : AthleticsService.parseTimeToMs(lap.formattedTime)
-        }))
-        .filter(lap => (lap.seriesNumber || 1) === seriesViewFilter);
-    }
-  }, [recordedLaps, seriesViewFilter]);
+    return [...recordedLaps].map((lap, origIdx) => ({
+      ...lap,
+      origIdx,
+      rank: origIdx + 1,
+      overallRank: origIdx + 1,
+      effectiveTimeMs: lap.timeMs > 0 ? lap.timeMs : AthleticsService.parseTimeToMs(lap.formattedTime)
+    }));
+  }, [recordedLaps]);
 
   // Attendance stats for quick badges & counts
   const attendanceStats = useMemo(() => {
@@ -644,18 +683,16 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
 
   const handleStopStopwatch = () => {
     setIsTimerRunning(false);
-    const unassignedInSeries = recordedLaps.filter(l => (l.seriesNumber || 1) === activeSeriesNumber && !l.participantId).length;
-    if (unassignedInSeries > 0) {
-      toast(`انتهى السباق/السلسلة ${activeSeriesNumber}! يمكنك الآن اختيار أسماء التلاميذ حسب الترتيب (${unassignedInSeries} وصولات بانتظار الاختيار)`, { icon: '🏁' });
+    const unassignedCount = recordedLaps.filter(l => !l.participantId).length;
+    if (unassignedCount > 0) {
+      toast(`تم إيقاف الميقاتي! يمكنك الآن اختيار أسماء التلاميذ حسب الترتيب (${unassignedCount} وصولات بانتظار الاختيار)`, { icon: '🏁' });
     }
   };
 
   const handleResetStopwatch = () => {
     setIsTimerRunning(false);
     setElapsedMs(0);
-    // Preserving all recorded arrivals as requested (لا يتم مسح النتائج عند تصفير الميقاتي لأن السباقات بالمجموعات)
-    const countInActiveSeries = recordedLaps.filter(l => (l.seriesNumber || 1) === activeSeriesNumber).length;
-    toast.success(`تم تصفير الميقاتي بنجاح للبدء من جديد. تم الحفاظ بالكامل على مراتب ووصولات السلسلة ${activeSeriesNumber} (${countInActiveSeries} وصول) وكافة السلاسل الأخرى (${recordedLaps.length} وصول محفوظ)`);
+    toast.success(`تم تصفير الميقاتي للبدء من جديد. إجمالي الوصولات المسجلة: ${recordedLaps.length} وصول`);
   };
 
   const handleTriggerRankSplit = () => {
@@ -669,15 +706,12 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
       return;
     }
 
-    // Number of arrivals already recorded in this specific heat/series
-    const lapsInCurrentSeries = recordedLaps.filter(l => (l.seriesNumber || 1) === activeSeriesNumber);
-    const nextRankInSeries = lapsInCurrentSeries.length + 1;
+    const nextRank = recordedLaps.length + 1;
     const formatted = AthleticsService.formatMilliseconds(elapsedMs);
 
-    // CRITICAL USER REQUIREMENT:
-    // "عدم إظهار أسماء التلاميذ تلقائيا عند تسجيل المرتبة، ولكن يتم اختيارهم بشكل يدوي"
+    // CRITICAL USER REQUIREMENT: Direct manual selection per arrival rank
     const newLap: TrackRankEntry = {
-      rank: nextRankInSeries,
+      rank: nextRank,
       timeMs: elapsedMs,
       formattedTime: formatted,
       participantId: '',
@@ -685,13 +719,13 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
       studentName: '',
       schoolName: '',
       confirmed: false,
-      seriesNumber: activeSeriesNumber
+      seriesNumber: 1
     };
 
     const updated = [...recordedLaps, newLap];
     setRecordedLaps(updated);
 
-    toast.success(`تم تسجيل وصول بالسلسلة ${activeSeriesNumber} (المرتبة ${nextRankInSeries}): ${formatted} - يرجى تعيين التلميذ يدوياً`);
+    toast.success(`تم تسجيل وصول (المرتبة ${nextRank}): ${formatted} - يرجى تعيين التلميذ يدوياً`);
   };
 
   const handleAssignParticipantToLap = (lapIndex: number, participantId: string) => {
@@ -719,36 +753,75 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
     }
   };
 
-  const handleSaveTrackResults = () => {
+  // CRITICAL USER REQUIREMENT:
+  // "لا تظهر نتائج أي مسابقة في منصات النتائج او التتويج الا بعد انتهاء كافة المتسابقين في مسابقة معينة وتأكيد ذلك بزر خاص بالمصادقة النهائية على النتائج"
+  const handleFinalResultsValidation = () => {
     if (!userAccess.canManage) {
-      toast.error(userAccess.reason || 'لا تملك صلاحية حفظ نتائج هذه اللجنة');
+      toast.error(userAccess.reason || 'لا تملك صلاحية المصادقة على نتائج هذه المسابقة');
       return;
     }
     if (!activeDiscipline) return;
-    if (recordedLaps.length === 0) {
-      toast.error('لم يتم تسجيل أي مرتبة بعد!');
+    
+    if (currentEventParticipants.length === 0) {
+      toast.error('لم يتم تسجيل أي مشاركين في هذه المسابقة بعد!');
       return;
     }
 
-    // CRITICAL USER REQUIREMENT:
-    // "إمكانية القيام بسباقين أو ثلاث سباقات في نفس الفئة، ويتم تحديد المراتب الأولى بعد انتهاء جميع المتسابقين"
-    // Unified overall ranking sorted strictly by fastest time (timeMs ascending):
-    const sortedTrackLaps = [...recordedLaps]
+    if (recordedLaps.length === 0) {
+      toast.error('لم يتم تسجيل أي وصولات أو توقيتات في هذا السباق بعد!');
+      return;
+    }
+
+    // Auto-resolve any unassigned arrivals from available participants or generate fallback identifiers
+    const usedParticipantIds = new Set(recordedLaps.map(l => l.participantId).filter(Boolean));
+    const availableParticipants = currentEventParticipants.filter(p => !usedParticipantIds.has(p.id));
+    let availIdx = 0;
+
+    const validatedLaps = recordedLaps.map((lap, idx) => {
+      let participantId = lap.participantId;
+      let studentName = lap.studentName;
+      let schoolName = lap.schoolName;
+      let bibNumber = lap.bibNumber;
+
+      if (!studentName || !participantId) {
+        if (availIdx < availableParticipants.length) {
+          const autoP = availableParticipants[availIdx++];
+          participantId = autoP.id;
+          studentName = autoP.studentName;
+          schoolName = autoP.schoolName;
+          bibNumber = autoP.bibNumber || (idx + 1);
+        } else {
+          studentName = studentName || `عداء المرتبة ${idx + 1}`;
+          schoolName = schoolName || 'المؤسسة المشاركة';
+          bibNumber = bibNumber || (idx + 1);
+        }
+      }
+
+      return {
+        ...lap,
+        participantId: participantId || `runner_${idx + 1}`,
+        studentName,
+        schoolName,
+        bibNumber: bibNumber || (idx + 1)
+      };
+    });
+
+    // Sorted strictly by fastest time (effectiveTimeMs ascending):
+    const sortedTrackLaps = [...validatedLaps]
       .map(lap => ({
         ...lap,
         effectiveTimeMs: lap.timeMs > 0 ? lap.timeMs : AthleticsService.parseTimeToMs(lap.formattedTime)
       }))
       .sort((a, b) => a.effectiveTimeMs - b.effectiveTimeMs)
       .map((lap, idx) => ({
-        rank: idx + 1, // Unified official overall rank across all series
+        rank: idx + 1,
         timeMs: lap.effectiveTimeMs,
         formattedTime: lap.formattedTime,
         participantId: lap.participantId,
         bibNumber: lap.bibNumber,
         studentName: lap.studentName,
         schoolName: lap.schoolName,
-        confirmed: lap.confirmed,
-        seriesNumber: lap.seriesNumber || 1
+        confirmed: true
       }));
 
     const eventResult: AthleticsEventResult = {
@@ -759,6 +832,8 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
       committeeId: activeDiscipline.committeeId,
       type: 'track',
       status: 'completed',
+      isFinallyValidated: true,
+      finalValidationDate: new Date().toISOString(),
       trackLaps: sortedTrackLaps,
       recordedByTeacherName: currentCommitteeAssignment?.teacherName || currentUser?.fullName || 'أستاذ التحكيم',
       directorateName,
@@ -768,11 +843,18 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
 
     AthleticsService.saveEventResult(eventResult);
     AthleticsService.clearDraftTrackLaps(currentEventKey);
-    setResults(AthleticsService.getAllResults());
-    toast.success(`تم حفظ واعتماد الترتيب العام الموحد لـ ${activeDiscipline.nameAr} (${selectedCategory} - ${selectedGender === 'Male' ? 'ذكور' : 'إناث'}) بنجاح! تم تحديد المراتب الأولى لجميع السلاسل`);
+    const updatedResults = AthleticsService.getAllResults();
+    setResults(updatedResults);
+    toast.success(`تمت المصادقة النهائية على نتائج ${activeDiscipline.nameAr} بنجاح! تم اعتماد ونشر النتائج في منصة التتويج وقسم نتائج العموم 🏆`);
     setIsManualTrackEntry(false);
+    setIsAssignByOrderModalOpen(false);
+    setSelectedDiscipline(activeDiscipline);
+    setSelectedCategory(selectedCategory);
+    setSelectedGender(selectedGender);
     setActiveTab('podium');
   };
+
+  const handleSaveTrackResults = handleFinalResultsValidation;
 
   const handleDeleteEventResult = (resultId: string) => {
     if (!userAccess.canManage) {
@@ -793,20 +875,18 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
     setSelectedDiscipline(d);
     setSelectedCategory(res.category as any);
     setSelectedGender(res.gender as any);
-    
-    if (res.type === 'track') {
-      setActiveTab('stopwatch');
-      setIsManualTrackEntry(true);
-    } else {
-      setActiveTab('field');
-    }
+    setActiveTab('stopwatch');
+    setIsManualTrackEntry(true);
   };
 
   // --- CLEAR RACE / EVENT DATA (تفريغ بيانات السباق مع اختيار السباق والتأكيد) ---
   const handleOpenClearRaceModal = (discId?: string, cat?: 'U12' | 'U15' | 'U18' | 'U20', gen?: 'Male' | 'Female') => {
-    setClearRaceDisciplineId(discId || activeDiscipline?.id || disciplines[0]?.id || '');
+    const allowed = clearableDisciplines;
+    const defaultDisc = (discId && allowed.some(d => d.id === discId)) ? discId : (allowed[0]?.id || activeDiscipline?.id || disciplines[0]?.id || '');
+    setClearRaceDisciplineId(defaultDisc);
     setClearRaceCategory(cat || selectedCategory);
     setClearRaceGender(gen || selectedGender);
+    setClearDeletePublicAndPodium(true);
     setClearIncludeAttendance(false);
     setClearConfirmedByUser(false);
     setIsClearRaceModalOpen(true);
@@ -832,25 +912,22 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
 
     // 1. If currently viewing this race, reset in-memory states
     if (activeDiscipline?.id === targetDisc.id && selectedCategory === clearRaceCategory && selectedGender === clearRaceGender) {
-      if (targetDisc.type.startsWith('field')) {
-        setFieldTrials([]);
-      } else {
-        setRecordedLaps([]);
-        setIsTimerRunning(false);
-        setElapsedMs(0);
-        setIsManualTrackEntry(false);
-        setActiveSeriesNumber(1);
-        setSeriesViewFilter('ALL');
-      }
+      setFieldTrials([]);
+      setRecordedLaps([]);
+      setIsTimerRunning(false);
+      setElapsedMs(0);
+      setIsManualTrackEntry(false);
     }
 
-    // Always clear persistent draft laps for target race
+    // Always clear persistent draft laps for target race so stopwatch resets cleanly
     AthleticsService.clearDraftTrackLaps(targetEventKey);
 
-    // 2. Delete the saved event result from storage and update results state
-    if (results[targetEventKey]) {
-      AthleticsService.deleteEventResult(targetEventKey);
-      setResults(AthleticsService.getAllResults());
+    // 2. Delete the saved event result from storage and update results state ONLY IF chosen
+    if (clearDeletePublicAndPodium) {
+      if (results[targetEventKey]) {
+        AthleticsService.deleteEventResult(targetEventKey);
+        setResults(AthleticsService.getAllResults());
+      }
     }
 
     // 3. Clear attendance if chosen
@@ -861,7 +938,12 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
       }
     }
 
-    toast.success(`تم تفريغ ومسح بيانات ${raceName} بنجاح ✅ السباق جاهز للانطلاق من جديد.`);
+    if (clearDeletePublicAndPodium) {
+      toast.success(`تم تفريغ سباق ${raceName} ومسح النتائج من منصة التتويج وقسم العموم بنجاح ✅`);
+    } else {
+      toast.success(`تم تفريغ الميقاتي وإعادة ضبط سباق ${raceName} مع الحفاظ على نتائج المنصة والعموم بنجاح ✅`);
+    }
+
     setIsClearRaceModalOpen(false);
     setClearConfirmedByUser(false);
   };
@@ -1136,6 +1218,8 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
       committeeId: activeDiscipline.committeeId,
       type: 'field',
       status: 'completed',
+      isFinallyValidated: true,
+      finalValidationDate: new Date().toISOString(),
       fieldEntries: fieldTrials,
       recordedByTeacherName: currentCommitteeAssignment?.teacherName || currentUser?.fullName || 'أستاذ التحكيم',
       directorateName,
@@ -1144,8 +1228,12 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
     };
 
     AthleticsService.saveEventResult(eventResult);
-    setResults(AthleticsService.getAllResults());
-    toast.success(`تم حفظ نتائج ${activeDiscipline.nameAr} بنجاح!`);
+    const updatedResults = AthleticsService.getAllResults();
+    setResults(updatedResults);
+    toast.success(`تمت المصادقة النهائية وحفظ نتائج ${activeDiscipline.nameAr} بنجاح! تم اعتمادها في منصة التتويج وقسم نتائج العموم 🏆`);
+    setSelectedDiscipline(activeDiscipline);
+    setSelectedCategory(selectedCategory);
+    setSelectedGender(selectedGender);
     setActiveTab('podium');
   };
 
@@ -1538,7 +1626,7 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
   const handleOpenCommitteePermissionsModal = (comm: AthleticsCommitteeDef) => {
     setEditingPermissionsCommittee(comm);
     const perms = comm.permissions || {
-      allowedTabs: comm.id === 'podium_committee' ? ['podium'] : comm.id.includes('jump') || comm.id.includes('shot') ? ['field'] : ['stopwatch'],
+      allowedTabs: comm.id === 'podium_committee' ? ['podium'] : ['stopwatch'],
       allowedDisciplineIds: comm.disciplines || [],
       canRecordResults: true,
       canValidateResults: true,
@@ -1843,28 +1931,13 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
               </button>
             )}
 
-            {allowedTabs.includes('field') && (
-              <button
-                onClick={() => setActiveTab('field')}
-                title="مسابقات الميدان (القفز والجلة)"
-                className={`p-2 sm:px-3.5 sm:py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
-                  activeTab === 'field'
-                    ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/25'
-                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
-                }`}
-              >
-                <Award className="w-4 h-4 shrink-0" />
-                <span className="hidden sm:inline">الميدان</span>
-              </button>
-            )}
-
             {allowedTabs.includes('podium') && (
               <button
                 onClick={() => setActiveTab('podium')}
                 title="منصة التتويج والنتائج الرسمية"
-                className={`p-2 sm:px-3.5 sm:py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                className={`p-2 sm:px-3.5 sm:py-2 rounded-xl text-xs font-black transition-all flex items-center gap-1.5 cursor-pointer ${
                   activeTab === 'podium'
-                    ? 'bg-rose-600 text-white shadow-md shadow-rose-600/25'
+                    ? 'bg-gradient-to-r from-amber-500 via-amber-600 to-yellow-600 text-white shadow-md shadow-amber-500/30 ring-2 ring-amber-300 dark:ring-amber-400'
                     : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
                 }`}
               >
@@ -2503,7 +2576,7 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {currentCategoryGendersDisciplines.map(disc => {
                   const eventKey = `${disc.id}_${selectedCategory}_${selectedGender}`;
-                  const isCompleted = results[eventKey]?.status === 'completed';
+                  const isCompleted = results[eventKey]?.status === 'completed' && results[eventKey]?.isFinallyValidated === true;
                   const isSelected = activeDiscipline?.id === disc.id;
                   const committee = committees.find(c => c.id === disc.committeeId);
                   const assignment = committee ? assignments[committee.id] : null;
@@ -2516,11 +2589,7 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                       key={disc.id}
                       onClick={() => {
                         setSelectedDiscipline(disc);
-                        if (disc.type.startsWith('track')) {
-                          setActiveTab('stopwatch');
-                        } else {
-                          setActiveTab('field');
-                        }
+                        setActiveTab('stopwatch');
                       }}
                       className={`p-5 rounded-2xl border transition-all cursor-pointer flex flex-col justify-between group relative overflow-hidden ${
                         isSelected
@@ -2589,10 +2658,6 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                         <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400">
                           {partCount} مشارك مسجل
                         </span>
-                        <div className="flex items-center gap-1 text-xs font-black text-blue-600 dark:text-blue-400 group-hover:translate-x-[-2px] transition-transform">
-                          <span>{disc.type.startsWith('track') ? 'فتح الميقاتي' : 'إدخال المحاولات'}</span>
-                          <ChevronRight className="w-3.5 h-3.5" />
-                        </div>
                       </div>
                     </div>
                   );
@@ -2738,7 +2803,7 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                           <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
                             {comm.permissions?.allowedTabs?.map(t => (
                               <span key={t} className="px-2 py-0.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-200 rounded-lg text-[9px] font-bold shadow-xs">
-                                {t === 'stopwatch' ? 'الميقاتي الذكي' : t === 'field' ? 'مسابقات الميدان' : t === 'podium' ? 'منصة التتويج' : t === 'school_registration' ? 'لوائح المؤسسات' : 'المسابقات'}
+                                {t === 'stopwatch' ? 'الميقاتي الذكي' : t === 'podium' ? 'منصة التتويج' : t === 'school_registration' ? 'لوائح المؤسسات' : 'المسابقات'}
                               </span>
                             ))}
                           </div>
@@ -2905,69 +2970,31 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                 </div>
               </div>
 
-              {/* 🏁 MULTI-SERIES / HEATS SELECTOR (سباقات المجموعات والسلاسل لنفس الفئة) 🏁 */}
-              <div className="bg-slate-900/90 border border-slate-800 rounded-3xl p-4 space-y-2 shadow-lg">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                  <div className="flex items-center gap-2.5">
-                    <span className="text-2xl p-2 bg-amber-500/10 border border-amber-500/20 rounded-2xl">🏁</span>
-                    <div>
-                      <h4 className="text-sm font-black text-white flex items-center gap-2 flex-wrap">
-                        <span>سباقات المجموعات / السلاسل لنفس الفئة ({selectedCategory} - {selectedGender === 'Male' ? 'ذكور' : 'إناث'})</span>
-                        <span className="px-2.5 py-0.5 rounded-full text-xs font-black bg-gradient-to-r from-amber-500 to-orange-600 text-white shadow-sm">
-                          ⚡ السلسلة الحالية النشطة: {activeSeriesNumber}
-                        </span>
-                      </h4>
-                      <p className="hidden sm:block text-xs text-slate-400 mt-0.5 font-medium">
-                        يمكنك إجراء سباقين أو 3 سباقات (سلاسل) لنفس الفئة. عند تصفير الميقاتي لا تُمسح النتائج، ويتم تحديد المراتب الأولى الموحدة بعد انتهاء جميع المتسابقين.
-                      </p>
-                    </div>
+              {/* Direct Unified Race Information Bar (سباق مباشر موحد بدون سلاسل) */}
+              <div className="bg-slate-900/90 border border-slate-800 rounded-3xl p-4 shadow-lg flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <span className="text-2xl p-2.5 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl text-emerald-400">🏃</span>
+                  <div>
+                    <h4 className="text-sm font-black text-white flex items-center gap-2 flex-wrap">
+                      <span>السباق المباشر الموحد ({selectedCategory} - {selectedGender === 'Male' ? 'ذكور' : 'إناث'})</span>
+                      <span className="px-2.5 py-0.5 rounded-full text-xs font-black bg-emerald-600/30 text-emerald-300 border border-emerald-500/40">
+                        سباق مباشر موحد
+                      </span>
+                    </h4>
+                    <p className="text-xs text-slate-400 mt-0.5 font-medium">
+                      المنافسة مباشرة وموحدة لكافة المتسابقين. تُسجل الوصولات تباعاً ولا تصدر النتائج إلا بالمصادقة النهائية بعد انتهاء كافة المتسابقين.
+                    </p>
                   </div>
-                  
-                  {/* Series Tabs */}
-                  <div className="flex items-center gap-1.5 flex-wrap">
-                    {availableSeriesList.map((sNum) => {
-                      const countInSeries = recordedLaps.filter(l => (l.seriesNumber || 1) === sNum).length;
-                      const isActive = activeSeriesNumber === sNum;
-                      return (
-                        <button
-                          key={sNum}
-                          type="button"
-                          onClick={() => {
-                            setActiveSeriesNumber(sNum);
-                            if (!isTimerRunning) {
-                              setElapsedMs(0);
-                            }
-                            toast(`تم تفعيل السلسلة ${sNum} (${countInSeries} وصول مسجل)`, { icon: '⚡' });
-                          }}
-                          className={`px-3 py-2 rounded-xl text-xs font-black transition-all flex items-center gap-1.5 cursor-pointer ${
-                            isActive
-                              ? 'bg-gradient-to-r from-amber-500 via-orange-600 to-rose-600 text-white shadow-md ring-2 ring-amber-400/40 scale-102'
-                              : 'bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white border border-slate-700'
-                          }`}
-                        >
-                          <span>⚡ السلسلة {sNum}</span>
-                          <span className={`px-1.5 py-0.5 rounded-md text-[10px] font-mono font-bold ${isActive ? 'bg-black/30 text-white' : 'bg-slate-900 text-slate-400'}`}>
-                            {countInSeries} وصول
-                          </span>
-                        </button>
-                      );
-                    })}
+                </div>
 
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const nextNum = Math.max(...availableSeriesList, 0) + 1;
-                        setCustomSeriesList(prev => [...prev, nextNum]);
-                        setActiveSeriesNumber(nextNum);
-                        if (!isTimerRunning) setElapsedMs(0);
-                        toast.success(`تمت إضافة السلسلة ${nextNum}`);
-                      }}
-                      className="px-2.5 py-2 bg-slate-800 hover:bg-slate-700 text-indigo-300 hover:text-white rounded-xl text-xs font-bold transition-all flex items-center gap-1 cursor-pointer border border-dashed border-slate-700"
-                      title="إضافة سلسلة أو مجموعة رابعة أو خامسة"
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                      <span>+ سلسلة جديدة</span>
-                    </button>
+                <div className="flex items-center gap-2">
+                  <div className="px-3 py-1.5 bg-slate-950 border border-slate-800 rounded-xl text-xs font-bold text-slate-300 flex items-center gap-2">
+                    <span>المتسابقون المسجلون:</span>
+                    <span className="font-mono font-black text-amber-400">{currentEventParticipants.length}</span>
+                  </div>
+                  <div className="px-3 py-1.5 bg-slate-950 border border-slate-800 rounded-xl text-xs font-bold text-slate-300 flex items-center gap-2">
+                    <span>الوصولات:</span>
+                    <span className="font-mono font-black text-emerald-400">{recordedLaps.length}</span>
                   </div>
                 </div>
               </div>
@@ -2983,7 +3010,7 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                     <div className="flex items-center gap-2">
                       <span className="text-xl p-2 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-emerald-400">⏱️</span>
                       <div>
-                        <h4 className="text-xs font-black text-white">الميقاتي الذكي الموحد (سلسلة {activeSeriesNumber})</h4>
+                        <h4 className="text-xs font-black text-white">الميقاتي الذكي للسباق الموحد</h4>
                         <p className="text-[10px] text-slate-400">الانطلاق، التوقيت، وترتيب العدائين في زر واحد ومختصر</p>
                       </div>
                     </div>
@@ -3000,8 +3027,7 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
 
                   {/* UNIFIED SINGLE MASTER STOPWATCH & RANK BUTTON WITH RESET DIRECTLY UNDERNEATH */}
                   {(() => {
-                    const lapsInThisSeries = recordedLaps.filter(l => (l.seriesNumber || 1) === activeSeriesNumber);
-                    const nextRankInThisSeries = lapsInThisSeries.length + 1;
+                    const nextRankInRace = recordedLaps.length + 1;
 
                     const handleMasterButtonClick = () => {
                       if (!isTimerRunning) {
@@ -3030,7 +3056,7 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                             {!isTimerRunning && elapsedMs === 0 && (
                               <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-white/20 backdrop-blur-md rounded-full text-xs font-black text-white">
                                 <Play className="w-3.5 h-3.5 fill-white" />
-                                <span>جاهز للانطلاق • سلسلة {activeSeriesNumber}</span>
+                                <span>جاهز للانطلاق • سباق مباشر</span>
                               </span>
                             )}
                             {isTimerRunning && (
@@ -3063,13 +3089,13 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                               <div className="flex items-center gap-2 text-base sm:text-lg font-black bg-black/30 px-5 py-2.5 rounded-2xl ring-2 ring-white/20 shadow-md">
                                 <Flag className="w-5 h-5 text-amber-200 animate-bounce" />
                                 <span>
-                                  {nextRankInThisSeries === 1
+                                  {nextRankInRace === 1
                                     ? `🥇 تسجيل وصول المرتبة الأولى (1)`
-                                    : nextRankInThisSeries === 2
+                                    : nextRankInRace === 2
                                     ? `🥈 تسجيل وصول المرتبة الثانية (2)`
-                                    : nextRankInThisSeries === 3
+                                    : nextRankInRace === 3
                                     ? `🥉 تسجيل وصول المرتبة الثالثة (3)`
-                                    : `🏁 تسجيل وصول المرتبة #${nextRankInThisSeries}`}
+                                    : `🏁 تسجيل وصول المرتبة #${nextRankInRace}`}
                                 </span>
                               </div>
                             )}
@@ -3084,9 +3110,9 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                           {/* Subtext info inside button */}
                           <div className="mt-2 text-xs font-bold text-white/80">
                             {isTimerRunning
-                              ? `تم تسجيل ${lapsInThisSeries.length} وصول حتى الآن للسلسلة ${activeSeriesNumber}`
-                              : lapsInThisSeries.length > 0
-                              ? `مسجل بالسلسلة ${activeSeriesNumber}: ${lapsInThisSeries.length} وصول`
+                              ? `تم تسجيل ${recordedLaps.length} وصول حتى الآن من أصل ${currentEventParticipants.length} متسابق`
+                              : recordedLaps.length > 0
+                              ? `مسجل: ${recordedLaps.length} وصول من أصل ${currentEventParticipants.length} متسابق`
                               : `زر واحد يجمع الانطلاق، التوقيت الحي، وتسجيل مراتب المتسابقين`}
                           </div>
                         </button>
@@ -3119,18 +3145,17 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                     );
                   })()}
 
-                  {/* Summary info & series notice */}
+                  {/* Summary info notice */}
                   <div className="w-full space-y-1.5">
                     <div className="flex items-center justify-between text-xs text-slate-400 font-bold">
                       <span>
-                        السلسلة {activeSeriesNumber}: <span className="text-amber-400 font-black">{recordedLaps.filter(l => (l.seriesNumber || 1) === activeSeriesNumber).length}</span> وصول • إجمالي السلاسل: <span className="text-emerald-400 font-black">{recordedLaps.length}</span>
+                        الوصولات المسجلة: <span className="text-emerald-400 font-black">{recordedLaps.length}</span> من أصل <span className="text-amber-400 font-black">{currentEventParticipants.length}</span> متسابق مسجل
                       </span>
                       {isManualTrackEntry && (
                          <button
                            onClick={() => {
-                             const lapsInThisSeries = recordedLaps.filter(l => (l.seriesNumber || 1) === activeSeriesNumber);
                              const newLap: TrackRankEntry = {
-                               rank: lapsInThisSeries.length + 1,
+                               rank: recordedLaps.length + 1,
                                timeMs: 0,
                                formattedTime: '00:00.00',
                                participantId: '',
@@ -3138,7 +3163,7 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                                studentName: '',
                                schoolName: '',
                                confirmed: false,
-                               seriesNumber: activeSeriesNumber
+                               seriesNumber: 1
                              };
                              setRecordedLaps(prev => [...prev, newLap]);
                            }}
@@ -3151,7 +3176,7 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                   </div>
                 </div>
 
-                {/* Right (Recorded Ranks, Series Filter & Manual Participant Selection) */}
+                {/* Right (Recorded Ranks & Manual Participant Selection with Color & Bottom Sorting) */}
                 <div className="lg:col-span-6 bg-slate-950 border border-slate-800 rounded-3xl p-5 flex flex-col justify-between space-y-4">
                   
                   <div>
@@ -3168,64 +3193,13 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                         </button>
                       </div>
                       
-                      {/* Filter Switcher: Unified Overall vs By Series */}
-                      <div className="flex items-center gap-1 bg-slate-900 p-1 rounded-xl border border-slate-800 text-[10px] font-bold">
-                        <button
-                          type="button"
-                          onClick={() => setSeriesViewFilter('ALL')}
-                          className={`px-2 py-1 rounded-lg transition-all ${
-                            seriesViewFilter === 'ALL'
-                              ? 'bg-amber-500 text-slate-950 font-black shadow-sm'
-                              : 'text-slate-400 hover:text-white'
-                          }`}
-                        >
-                          🏆 الترتيب العام الموحد ({recordedLaps.length})
-                        </button>
-                        {availableSeriesList.map(sNum => {
-                          const countInSeries = recordedLaps.filter(l => (l.seriesNumber || 1) === sNum).length;
-                          return (
-                            <div key={sNum} className="inline-flex items-center gap-0.5 bg-slate-800 rounded-lg overflow-hidden">
-                              <button
-                                type="button"
-                                onClick={() => setSeriesViewFilter(sNum)}
-                                className={`px-2 py-1 transition-all ${
-                                  seriesViewFilter === sNum
-                                    ? 'bg-indigo-600 text-white font-black shadow-sm'
-                                    : 'text-slate-400 hover:text-white'
-                                }`}
-                              >
-                                س {sNum} ({countInSeries})
-                              </button>
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  e.preventDefault();
-                                  if (availableSeriesList.length <= 1) {
-                                    toast.error('لا يمكن حذف السلسلة الوحيدة المتبقية!');
-                                    return;
-                                  }
-                                  if (window.confirm(`هل أنت متأكد من حذف السلسلة ${sNum} بالكامل مع كافة وصولاتها وتوقيتاتها؟`)) {
-                                    setRecordedLaps(prev => prev.filter(l => (l.seriesNumber || 1) !== sNum));
-                                    setCustomSeriesList(prev => prev.filter(s => s !== sNum));
-                                    if (seriesViewFilter === sNum) {
-                                      setSeriesViewFilter('ALL');
-                                    }
-                                    if (activeSeriesNumber === sNum) {
-                                      const remaining = availableSeriesList.filter(s => s !== sNum);
-                                      setActiveSeriesNumber(remaining[0] || 1);
-                                    }
-                                    toast.success(`تم حذف السلسلة ${sNum} بنجاح`);
-                                  }
-                                }}
-                                className="px-2 py-1 text-rose-400 hover:text-white hover:bg-rose-600 transition-colors cursor-pointer text-xs font-black z-10"
-                                title={`حذف السلسلة ${sNum}`}
-                              >
-                                ✕
-                              </button>
-                            </div>
-                          );
-                        })}
+                      {/* Race Status Indicator */}
+                      <div className="flex items-center gap-2 bg-slate-900 px-3 py-1.5 rounded-xl border border-slate-800 text-xs font-bold text-slate-300">
+                        <span>إجمالي الوصولات:</span>
+                        <span className="font-mono font-black text-emerald-400">{recordedLaps.length}</span>
+                        <span className="text-slate-600">•</span>
+                        <span>المحددون:</span>
+                        <span className="font-mono font-black text-amber-400">{recordedLaps.filter(l => l.participantId).length}</span>
                       </div>
                     </div>
 
@@ -3236,7 +3210,7 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                           <span className="text-base p-1.5 bg-amber-500/10 text-amber-400 rounded-xl">🎯</span>
                           <div>
                             <span className="text-xs font-black text-amber-300 block">
-                              عند انتهاء الاختبار: تحديد التلاميذ حسب الترتيب
+                              عند انتهاء السباق: تحديد التلاميذ حسب الترتيب
                             </span>
                             <span className="text-[10px] text-slate-400 font-medium">
                               اختيار يدوي إلزامي • تم تحديد {recordedLaps.filter(l => l.participantId).length} من {recordedLaps.length} وصول
@@ -3261,7 +3235,7 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                         <Timer className="w-8 h-8 text-slate-600 mx-auto" />
                         <p className="text-xs font-bold text-slate-400">لم يتم تسجيل أي توقيت بعد</p>
                         <p className="text-[11px] text-slate-500">
-                          أطلق الميقاتي واضغط على الزر البرتقالي الموحد عند وصول كل عداء في السلسلة {activeSeriesNumber}
+                          أطلق الميقاتي واضغط على الزر البرتقالي الموحد عند وصول كل عداء في السباق
                         </p>
                         {currentEventParticipants.length === 0 && activeDiscipline && (
                           <div className="pt-1.5">
@@ -3277,18 +3251,13 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                           </div>
                         )}
                       </div>
-                    ) : lapsToDisplay.length === 0 ? (
-                      <div className="bg-slate-900/60 border border-dashed border-slate-800 rounded-2xl p-6 text-center space-y-2">
-                        <p className="text-xs font-bold text-slate-400">لا توجد وصولات مسجلة في السلسلة {seriesViewFilter} بعد</p>
-                        <p className="text-[11px] text-slate-500">
-                          اختر السلسلة {seriesViewFilter} أعلاه وأطلق الميقاتي لتسجيل وصولاتها
-                        </p>
-                      </div>
                     ) : (
                       <div className="space-y-2.5 max-h-[380px] overflow-y-auto pr-1">
                         {lapsToDisplay.map((lap) => {
                           const origIdx = lap.origIdx;
-                          const displayRank = seriesViewFilter === 'ALL' ? lap.overallRank : lap.rank;
+                          const displayRank = lap.rank;
+                          const { available, alreadyChosen } = getCategorizedParticipantsForLap(lap.participantId);
+
                           return (
                             <div
                               key={origIdx}
@@ -3338,10 +3307,6 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                                       </span>
                                     )}
 
-                                    <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-slate-800 text-amber-300 border border-slate-700">
-                                      ⚡ س {lap.seriesNumber || 1}
-                                    </span>
-
                                     <button
                                       onClick={() => {
                                         setRecordedLaps(prev => prev.filter((_, i) => i !== origIdx));
@@ -3370,35 +3335,61 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                                 </div>
                               </div>
 
-                              {/* Manual Participant Selector Dropdown (اختيار يدوي إلزامي بدون تعيين تلقائي) */}
+                              {/* Manual Participant Selector Dropdown With Color & Bottom Position For Chosen Athletes */}
                               <div className="w-full sm:w-auto shrink-0">
                                 <select
                                   value={lap.participantId || ''}
                                   onChange={(e) => handleAssignParticipantToLap(origIdx, e.target.value)}
-                                  className={`w-full sm:w-52 px-2.5 py-1.5 rounded-xl text-xs font-bold outline-none cursor-pointer transition-all ${
+                                  className={`w-full sm:w-56 px-2.5 py-1.5 rounded-xl text-xs font-bold outline-none cursor-pointer transition-all ${
                                     lap.participantId
-                                      ? 'bg-slate-900 border border-emerald-700/80 text-emerald-300 focus:ring-1 focus:ring-emerald-500'
-                                      : 'bg-slate-900 border border-amber-600 text-amber-300 focus:ring-2 focus:ring-amber-500 ring-1 ring-amber-500/30'
+                                      ? 'bg-slate-900 border border-emerald-600 text-emerald-300 focus:ring-1 focus:ring-emerald-500'
+                                      : 'bg-slate-900 border-2 border-amber-500 text-amber-300 focus:ring-2 focus:ring-amber-500 ring-2 ring-amber-500/20'
                                   }`}
                                 >
-                                  <option value="">-- اضغط لاختيار التلميذ(ة) يدوياً --</option>
-                                  {sortedParticipantsForAssignment.map((p, idx) => {
-                                    const att = attendanceMap[p.id];
-                                    const isPresent = att?.status === 'present';
-                                    const isAbsent = att?.status === 'absent';
-                                    const mark = isPresent ? '✅ ' : isAbsent ? '❌ [غائب] ' : '⏳ ';
-                                    const lane = att?.lane ? ` [ممر ${att.lane}]` : '';
-                                    
-                                    // Check if this participant is assigned in another lap
-                                    const otherLap = recordedLaps.find((l, lIdx) => lIdx !== origIdx && l.participantId === p.id);
-                                    const assignedNote = otherLap ? ` (تم اختياره بالسلسلة ${otherLap.seriesNumber || 1})` : '';
+                                  <option value="" className="text-slate-400 bg-slate-900">-- اضغط لاختيار التلميذ(ة) يدوياً --</option>
+                                  
+                                  {/* 1. Unselected athletes at the TOP with bright prominent colors */}
+                                  {available.length > 0 && (
+                                    <optgroup label="⚡ العداؤون المتاحون للاختيار (لم يتم اختيارهم بعد)">
+                                      {available.map(p => {
+                                        const att = attendanceMap[p.id];
+                                        const isPresent = att?.status === 'present';
+                                        const isAbsent = att?.status === 'absent';
+                                        const mark = isPresent ? '✅ ' : isAbsent ? '❌ [غائب] ' : '🏃 ';
+                                        const lane = att?.lane ? ` [ممر ${att.lane}]` : '';
+                                        return (
+                                          <option
+                                            key={`avail-${p.id}`}
+                                            value={p.id}
+                                            style={{ color: '#4ade80', backgroundColor: '#020617', fontWeight: 'bold' }}
+                                            className="text-emerald-400 bg-slate-950 font-bold"
+                                          >
+                                            {mark}#{p.bibNumber} - {p.studentName} ({p.schoolName}){lane}
+                                          </option>
+                                        );
+                                      })}
+                                    </optgroup>
+                                  )}
 
-                                    return (
-                                      <option key={`assign-lap-${p.id}-${idx}`} value={p.id}>
-                                        {mark}#{p.bibNumber} - {p.studentName} ({p.schoolName}){lane}{assignedNote}
-                                      </option>
-                                    );
-                                  })}
+                                  {/* 2. Selected athletes placed at the BOTTOM with changed muted colors */}
+                                  {alreadyChosen.length > 0 && (
+                                    <optgroup label="⬇️ تم اختيارهم مسبقاً في وصول آخر (أسفل القائمة)">
+                                      {alreadyChosen.map(p => {
+                                        const assignedLap = recordedLaps.find((l, lIdx) => lIdx !== origIdx && l.participantId === p.id);
+                                        const rankLabel = assignedLap ? ` (المرتبة ${assignedLap.rank})` : '';
+                                        return (
+                                          <option
+                                            key={`chosen-${p.id}`}
+                                            value={p.id}
+                                            style={{ color: '#64748b', backgroundColor: '#0f172a', fontStyle: 'italic' }}
+                                            className="text-slate-500 bg-slate-900"
+                                          >
+                                            ✓ [تم اختياره] #{p.bibNumber} - {p.studentName} ({p.schoolName}){rankLabel}
+                                          </option>
+                                        );
+                                      })}
+                                    </optgroup>
+                                  )}
                                 </select>
                               </div>
                             </div>
@@ -3408,8 +3399,8 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                     )}
                   </div>
 
-                  {/* Save Final Race Button */}
-                  <div className="pt-3 border-t border-slate-800 flex items-center justify-between gap-2 flex-wrap">
+                  {/* Actions & Final Results Validation Button */}
+                  <div className="pt-3 border-t border-slate-800 flex items-center justify-between gap-3 flex-wrap">
                     <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
                       <button
                         onClick={() => setIsAddParticipantOpen(true)}
@@ -3440,328 +3431,46 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                       </button>
                     </div>
 
-                    <button
-                      onClick={handleSaveTrackResults}
-                      disabled={recordedLaps.length === 0}
-                      className="p-2 sm:px-5 sm:py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-xl text-xs font-black shadow-lg shadow-emerald-600/30 flex items-center justify-center gap-1.5 cursor-pointer active:scale-95"
-                      title="حفظ واعتماد نتائج السباق"
-                    >
-                      <CheckCircle2 className="w-4 h-4" />
-                      <span className="hidden sm:inline">حفظ واعتماد نتائج السباق</span>
-                    </button>
+                    {/* زر خاص بالمصادقة النهائية على النتائج */}
+                    {(() => {
+                      const expectedFinishers = currentEventParticipants.filter(p => attendanceMap[p.id]?.status !== 'absent');
+                      const expectedCount = expectedFinishers.length;
+                      const finishedCount = recordedLaps.length;
+                      const unassignedCount = recordedLaps.filter(l => !l.participantId || !l.studentName).length;
+                      const isReadyForValidation = expectedCount > 0 && finishedCount >= expectedCount && unassignedCount === 0;
+
+                      return (
+                        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                          <div className="flex items-center gap-2 bg-slate-900 border border-slate-700/80 px-3 py-1.5 rounded-xl text-xs">
+                            <span className="text-slate-400 font-bold">الانتهاء:</span>
+                            <span className={`font-mono font-black ${finishedCount >= expectedCount && expectedCount > 0 ? 'text-emerald-400' : 'text-amber-400'}`}>
+                              {finishedCount} / {expectedCount} عداء
+                            </span>
+                            {unassignedCount > 0 && (
+                              <span className="text-[10px] text-rose-400 font-bold bg-rose-500/10 px-1.5 py-0.5 rounded">
+                                ({unassignedCount} بدون اسم)
+                              </span>
+                            )}
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={handleFinalResultsValidation}
+                            disabled={recordedLaps.length === 0}
+                            className={`p-2.5 sm:px-6 sm:py-3 rounded-2xl text-xs sm:text-sm font-black shadow-xl flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-95 border ${
+                              recordedLaps.length > 0
+                                ? 'bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 hover:from-emerald-500 hover:to-teal-500 text-white shadow-emerald-900/50 border-emerald-400/60 ring-2 ring-emerald-400/40'
+                                : 'bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-slate-200 border-slate-700 shadow-slate-950/40'
+                            }`}
+                            title="المصادقة النهائية على النتائج ونشرها في منصة التتويج والنتائج الرسمية للعموم"
+                          >
+                            <CheckCircle2 className="w-5 h-5 text-amber-300" />
+                            <span>المصادقة النهائية على النتائج واعتمادها في المنصة 🏆</span>
+                          </button>
+                        </div>
+                      );
+                    })()}
                   </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* ======================================================================= */}
-          {/* TAB 4: FIELD EVENTS */}
-          {/* ======================================================================= */}
-          {activeTab === 'field' && activeDiscipline && (
-            <div className="space-y-6">
-              <div className="hidden sm:flex bg-slate-950 p-4 rounded-3xl border border-slate-800 flex-col sm:flex-row sm:items-center justify-between gap-4">
-                <div className="flex items-center gap-3">
-                  <span className="text-3xl p-3 bg-indigo-950/60 border border-indigo-800 rounded-2xl text-indigo-400">
-                    {activeDiscipline.icon}
-                  </span>
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <h3 className="text-lg font-black text-white">{activeDiscipline.nameAr}</h3>
-                      <span className="px-2.5 py-0.5 text-xs font-black bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 rounded-lg">
-                        {selectedCategory}
-                      </span>
-                      <span className="px-2.5 py-0.5 text-xs font-black bg-pink-500/20 text-pink-300 border border-pink-500/30 rounded-lg">
-                        {selectedGender === 'Male' ? 'ذكور' : 'إناث'}
-                      </span>
-                    </div>
-                    <p className="text-xs text-slate-400 mt-0.5">
-                      اللجنة: <span className="text-amber-400 font-bold">{currentCommitteeDef?.titleAr}</span> • المسؤول: <span className="text-white font-bold">{currentCommitteeAssignment?.teacherName || 'غير معين'}</span>
-                    </p>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
-                  {currentCategoryGendersDisciplines.filter(d => d.type.startsWith('field')).map(disc => (
-                    <button
-                      key={disc.id}
-                      onClick={() => setSelectedDiscipline(disc)}
-                      className={`p-2 sm:px-3 sm:py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1 ${
-                        activeDiscipline?.id === disc.id
-                          ? 'bg-indigo-600 text-white shadow-xs'
-                          : 'bg-slate-900 text-slate-400 hover:text-white'
-                      }`}
-                      title={disc.nameAr}
-                    >
-                      <span>{disc.icon}</span>
-                      <span className="hidden sm:inline">{disc.nameAr}</span>
-                    </button>
-                  ))}
-
-                  <button
-                    type="button"
-                    onClick={() => setIsAttendanceModalOpen(true)}
-                    className="p-2 sm:px-3 sm:py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-black transition-all flex items-center gap-1.5 cursor-pointer shadow-md shadow-indigo-600/20 active:scale-95"
-                    title="غرفة المناداة وتأكيد حضور المتسابقين"
-                  >
-                    <ClipboardList className="w-3.5 h-3.5" />
-                    <span className="hidden sm:inline">غرفة المناداة</span>
-                    <span className="px-1.5 py-0.5 bg-indigo-800 rounded-md text-[10px] font-mono font-bold">
-                      {attendanceStats.present}/{attendanceStats.total}
-                    </span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={handleClearCurrentRaceData}
-                    className="p-2 sm:px-3 sm:py-2 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-800 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-xs active:scale-95"
-                    title="تفريغ ومسح بيانات ومحاولات هذه المسابقة للبدء من جديد"
-                  >
-                    <RotateCcw className="w-3.5 h-3.5 text-rose-500" />
-                    <span className="hidden sm:inline">تفريغ المسابقة</span>
-                  </button>
-
-                  {!isTeacher && activeDiscipline && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        handleStartEditDiscipline(activeDiscipline);
-                        setIsSettingsModalOpen(true);
-                        setSettingsActiveTab('disciplines');
-                      }}
-                      className="p-2 sm:px-3 sm:py-2 bg-amber-500/20 hover:bg-amber-500 border border-amber-500/40 text-amber-300 hover:text-white rounded-xl text-xs font-black transition-all flex items-center gap-1.5 cursor-pointer shadow-xs"
-                      title="تعديل بيانات هذه المسابقة"
-                    >
-                      <Edit2 className="w-3.5 h-3.5" />
-                      <span className="hidden sm:inline">تعديل المسابقة</span>
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              {/* Field Attempts Matrix */}
-              <div className="bg-slate-950 border border-slate-800 rounded-3xl p-5 space-y-4">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                  <div>
-                    <h4 className="text-sm font-black text-white flex items-center gap-2">
-                      <span>جدول المحاولات والنتائج (3 محاولات قانونية)</span>
-                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
-                        {fieldTrials.length} متسابق(ة)
-                      </span>
-                    </h4>
-                    <p className="mobile-hide-desc text-xs text-slate-400 font-medium mt-0.5">
-                      يتم اختيار التلاميذ يدوياً للاختبار. أدخل المسافة بالمتر (مثال: 4.85) أو حرف X للمحاولة الملغاة.
-                    </p>
-                  </div>
-
-                  {/* Top Actions: Add Manual Row, Quick Select */}
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <select
-                      onChange={(e) => {
-                        if (e.target.value) {
-                          handleAddFieldTrial(e.target.value);
-                          e.target.value = '';
-                        }
-                      }}
-                      defaultValue=""
-                      className="px-2.5 py-1.5 bg-indigo-950/60 hover:bg-indigo-900 border border-indigo-700 text-indigo-200 rounded-xl text-xs font-bold cursor-pointer outline-none"
-                    >
-                      <option value="" disabled>+ اختيار تلميذ لبدء المحاولات</option>
-                      {currentEventParticipants.map((p, idx) => (
-                        <option key={`field-sel-${p.id}-${idx}`} value={p.id}>
-                          #{p.bibNumber} - {p.studentName} ({p.schoolName})
-                        </option>
-                      ))}
-                    </select>
-
-                    <button
-                      type="button"
-                      onClick={() => handleAddFieldTrial()}
-                      className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer"
-                      title="إضافة خانة جديدة للاختبار"
-                    >
-                      <Plus className="w-3.5 h-3.5 text-indigo-400" />
-                      <span>إضافة خانة</span>
-                    </button>
-                  </div>
-                </div>
-
-                {fieldTrials.length === 0 ? (
-                  <div className="bg-slate-900/60 border border-dashed border-slate-800 rounded-2xl p-8 text-center space-y-3">
-                    <p className="text-xs font-bold text-slate-300">لم يتم إدراج تلاميذ في هذا الاختبار بعد</p>
-                    <p className="mobile-hide-desc text-[11px] text-slate-500 max-w-md mx-auto">
-                      اختر التلاميذ يدوياً واحداً تلو الآخر لبدء تسجيل المحاولات، أو انقر على "إضافة خانة".
-                    </p>
-                    <div className="flex items-center justify-center gap-2 flex-wrap pt-1">
-                      <button
-                        onClick={() => handleAddFieldTrial()}
-                        className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-black cursor-pointer flex items-center gap-1.5"
-                      >
-                        <Plus className="w-4 h-4" />
-                        <span>إضافة تلميذ للاختبار يدوياً</span>
-                      </button>
-
-                      {currentEventParticipants.length === 0 && activeDiscipline && (
-                        <button
-                          type="button"
-                          onClick={handleSeedCurrentEvent}
-                          className="px-4 py-2 bg-purple-600/30 hover:bg-purple-600 text-purple-300 hover:text-white border border-purple-500/40 rounded-xl text-xs font-black transition-all flex items-center gap-1.5 cursor-pointer active:scale-95"
-                          title="دمج 10 متسابقين فوراً لهذه المسابقة للتجريب"
-                        >
-                          <Sparkles className="w-4 h-4 text-amber-300" />
-                          <span>دمج 10 متسابقين لهذه المسابقة الآن للتجريب</span>
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                ) : (
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-right text-xs">
-                      <thead>
-                        <tr className="bg-slate-900 text-slate-400 font-black border-b border-slate-800">
-                          <th className="py-3 px-3 text-center">الرتبة</th>
-                          <th className="py-3 px-3">الصدرية</th>
-                          <th className="py-3 px-3">اسم التلميذ(ة) والمؤسسة (اختيار يدوي)</th>
-                          <th className="py-3 px-3 text-center">المحاولة 1 (م)</th>
-                          <th className="py-3 px-3 text-center">المحاولة 2 (م)</th>
-                          <th className="py-3 px-3 text-center">المحاولة 3 (م)</th>
-                          <th className="py-3 px-3 text-center text-amber-400">أفضل إنجاز (م)</th>
-                          <th className="py-3 px-2 text-center">حذف</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-800 font-medium">
-                        {fieldTrials.map((entry, eIdx) => (
-                          <tr key={eIdx} className="hover:bg-slate-900/50 transition-colors">
-                            <td className="py-3 px-3 text-center font-black">
-                              {entry.rank === 1 ? '🥇 1' : entry.rank === 2 ? '🥈 2' : entry.rank === 3 ? '🥉 3' : (entry.rank ? `#${entry.rank}` : '-')}
-                            </td>
-                            <td className="py-3 px-3 font-mono font-bold text-slate-300">
-                              {entry.bibNumber ? `#${entry.bibNumber}` : '-'}
-                            </td>
-                            <td className="py-3 px-3">
-                              {entry.studentName ? (
-                                <div className="space-y-1">
-                                  <div className="flex items-center gap-1.5">
-                                    <span className="font-bold text-white">✅ {entry.studentName}</span>
-                                    <span className="text-[11px] text-slate-400">({entry.schoolName})</span>
-                                  </div>
-                                  <select
-                                    value={entry.participantId}
-                                    onChange={(e) => handleAssignParticipantToFieldTrial(eIdx, e.target.value)}
-                                    className="px-2 py-1 bg-slate-900 border border-slate-700 rounded-lg text-[10px] text-slate-300 cursor-pointer"
-                                  >
-                                    <option value={entry.participantId}>تغيير التلميذ...</option>
-                                    {currentEventParticipants.map((p, pIdx) => (
-                                      <option key={`field-change-${p.id}-${pIdx}`} value={p.id}>
-                                        #{p.bibNumber} - {p.studentName} ({p.schoolName})
-                                      </option>
-                                    ))}
-                                  </select>
-                                </div>
-                              ) : (
-                                <div className="space-y-1">
-                                  <span className="text-[11px] text-amber-400 font-bold block animate-pulse">
-                                    ⚠️ يرجى اختيار التلميذ(ة) يدوياً:
-                                  </span>
-                                  <select
-                                    value=""
-                                    onChange={(e) => handleAssignParticipantToFieldTrial(eIdx, e.target.value)}
-                                    className="w-full sm:w-60 px-2.5 py-1.5 bg-slate-900 border border-amber-600 rounded-xl text-xs font-bold text-amber-300 outline-none cursor-pointer ring-1 ring-amber-500/30"
-                                  >
-                                    <option value="">-- اضغط لاختيار التلميذ(ة) يدوياً --</option>
-                                    {currentEventParticipants.map((p, pIdx) => (
-                                      <option key={`field-pick-${p.id}-${pIdx}`} value={p.id}>
-                                        #{p.bibNumber} - {p.studentName} ({p.schoolName})
-                                      </option>
-                                    ))}
-                                  </select>
-                                </div>
-                              )}
-                            </td>
-                            {[0, 1, 2].map((attIdx) => (
-                              <td key={attIdx} className="py-3 px-3 text-center">
-                                <div className="flex items-center gap-1 justify-center">
-                                  <input
-                                    type="text"
-                                    value={entry.attempts[attIdx] === 'X' ? 'X' : entry.attempts[attIdx] ?? ''}
-                                    onChange={(e) => {
-                                      handleUpdateAttempt(eIdx, attIdx, e.target.value);
-                                      handleSaveFieldResultsSilent();
-                                    }}
-                                    placeholder="0.00"
-                                    className="w-14 text-center py-1.5 bg-slate-900 border border-slate-700 rounded-lg text-xs font-mono font-bold text-white focus:ring-1 focus:ring-indigo-500"
-                                  />
-                                  <button
-                                    type="button"
-                                    onClick={() => handleVoiceDictation(eIdx, attIdx)}
-                                    className="p-1 bg-indigo-600/20 hover:bg-indigo-600 text-indigo-300 hover:text-white rounded-lg transition-colors cursor-pointer"
-                                    title="إملاء صوتي (مثال: 5.26)"
-                                  >
-                                    🎙️
-                                  </button>
-                                </div>
-                              </td>
-                            ))}
-                            <td className="py-3 px-3 text-center font-mono font-black text-sm text-amber-400 bg-amber-950/20">
-                              {entry.bestAttempt !== null ? `${entry.bestAttempt.toFixed(2)} م` : '-'}
-                            </td>
-                            <td className="py-3 px-2 text-center">
-                              <button
-                                type="button"
-                                onClick={() => handleRemoveFieldTrial(eIdx)}
-                                className="p-1 text-slate-500 hover:text-red-400 transition-colors"
-                                title="حذف هذا الصف"
-                              >
-                                <Trash2 className="w-3.5 h-3.5 mx-auto" />
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-
-                <div className="pt-3 border-t border-slate-800 flex items-center justify-between gap-2 flex-wrap">
-                  <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
-                    <button
-                      onClick={() => setIsAddParticipantOpen(true)}
-                      className="p-2 sm:px-3.5 sm:py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer"
-                      title="إضافة متسابق"
-                    >
-                      <Plus className="w-3.5 h-3.5 text-indigo-400" />
-                      <span className="hidden sm:inline">إضافة متسابق</span>
-                    </button>
-
-                    <button
-                      onClick={() => setIsAttendanceModalOpen(true)}
-                      className="p-2 sm:px-3.5 sm:py-2 bg-indigo-900/60 hover:bg-indigo-900 border border-indigo-700 text-indigo-200 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer"
-                      title="مناداة المتسابقين وتأكيد الحضور"
-                    >
-                      <ClipboardList className="w-4 h-4 text-indigo-400" />
-                      <span className="hidden sm:inline">غرفة المناداة</span>
-                      <span className="font-mono text-[10px] font-bold">({attendanceStats.present}/{attendanceStats.total})</span>
-                    </button>
-
-                    <button
-                      onClick={handleClearCurrentRaceData}
-                      className="p-2 sm:px-3.5 sm:py-2 bg-rose-950/40 hover:bg-rose-900/60 border border-rose-800 text-rose-300 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-all active:scale-95"
-                      title="تفريغ ومسح بيانات هذه المسابقة"
-                    >
-                      <RotateCcw className="w-3.5 h-3.5 text-rose-400" />
-                      <span className="hidden sm:inline">تفريغ المسابقة</span>
-                    </button>
-                  </div>
-
-                  <button
-                    onClick={handleSaveFieldResults}
-                    disabled={fieldTrials.length === 0}
-                    className="p-2 sm:px-6 sm:py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-xl text-xs font-black shadow-lg shadow-indigo-600/30 flex items-center justify-center gap-1.5 cursor-pointer active:scale-95"
-                    title={`حفظ واعتماد نتائج ${activeDiscipline.nameAr}`}
-                  >
-                    <CheckCircle2 className="w-4 h-4" />
-                    <span className="hidden sm:inline">حفظ واعتماد نتائج {activeDiscipline.nameAr}</span>
-                  </button>
                 </div>
               </div>
             </div>
@@ -3774,33 +3483,34 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
             <div className="space-y-6">
               
               {/* Event Results Quick Filter Bar */}
-              <div className="bg-slate-900/60 p-4 rounded-3xl border border-slate-800 flex flex-col gap-4">
-                <div className="flex items-center justify-between">
-                   <h4 className="text-xs font-black text-slate-300 flex items-center gap-2">
-                     <Filter className="w-3.5 h-3.5 text-indigo-400" />
+              <div className="bg-gradient-to-br from-amber-50/80 via-white to-slate-50 dark:from-slate-900/95 dark:via-slate-900 dark:to-slate-950 p-4 sm:p-5 rounded-3xl border border-amber-200/80 dark:border-slate-800 shadow-sm flex flex-col gap-4 transition-all">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-2 border-b border-amber-100 dark:border-slate-800/80">
+                   <h4 className="text-xs sm:text-sm font-black text-slate-800 dark:text-slate-100 flex items-center gap-2">
+                     <Trophy className="w-4 h-4 text-amber-500 shrink-0" />
                      <span>تصفية واختيار نتائج المسابقات المعتمدة:</span>
                    </h4>
-                   <div className="flex items-center gap-2">
-                     <span className="px-2 py-0.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-lg text-[9px] font-black">
-                       {resultsList.filter(r => r.status === 'completed').length} نتائج معتمدة
+                   <div className="flex items-center gap-2 flex-wrap">
+                     <span className="px-3 py-1 bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700/60 rounded-xl text-xs font-black shadow-2xs flex items-center gap-1.5">
+                       <span>✓</span>
+                       <span>{resultsList.filter(r => r.status === 'completed' && r.isFinallyValidated === true).length} نتائج معتمدة ومصادق عليها</span>
                      </span>
                      <button
                        type="button"
                        onClick={() => handleOpenClearRaceModal(selectedDiscipline?.id, selectedCategory, selectedGender)}
-                       className="p-1.5 sm:px-2.5 sm:py-1 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-800 rounded-lg text-[10px] font-bold flex items-center gap-1 transition-all cursor-pointer active:scale-95"
+                       className="px-3.5 py-1.5 bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 text-white rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer active:scale-95 shadow-sm shadow-rose-600/25"
                        title="تفريغ ومسح بيانات سباق من النتائج"
                      >
-                       <RotateCcw className="w-3 h-3 text-rose-400" />
-                       <span className="hidden sm:inline">تفريغ سباق</span>
+                       <RotateCcw className="w-3.5 h-3.5 text-white" />
+                       <span>تفريغ سباق</span>
                      </button>
                    </div>
                 </div>
                 
-                <div className="grid grid-cols-1 sm:grid-cols-12 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-12 gap-3.5">
                   {/* Discipline Select */}
                   <div className="sm:col-span-5 space-y-1.5">
-                    <label className="text-[10px] font-bold text-slate-500 pr-1 flex items-center gap-1">
-                      <Layers className="w-3 h-3" />
+                    <label className="text-xs font-black text-slate-700 dark:text-slate-200 pr-1 flex items-center gap-1.5">
+                      <Layers className="w-3.5 h-3.5 text-amber-500" />
                       <span>نوع المسابقة:</span>
                     </label>
                     <select
@@ -3809,14 +3519,13 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                         const d = disciplines.find(item => item.id === e.target.value);
                         if (d) setSelectedDiscipline(d);
                       }}
-                      className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs font-bold text-white focus:ring-1 focus:ring-indigo-500 outline-none cursor-pointer"
+                      className="w-full px-3.5 py-2.5 bg-white dark:bg-slate-900 border-2 border-amber-300 dark:border-amber-600/60 hover:border-amber-500 focus:border-amber-500 rounded-2xl text-xs font-black text-slate-900 dark:text-white shadow-xs outline-none cursor-pointer transition-all"
                     >
                       {disciplines.map(d => {
-                        // Check if this specific discipline has ANY results in ANY category/gender
-                        const hasAnyResults = resultsList.some(r => r.disciplineId === d.id && r.status === 'completed');
+                        const hasAnyResults = resultsList.some(r => r.disciplineId === d.id && r.status === 'completed' && r.isFinallyValidated === true);
                         return (
-                          <option key={d.id} value={d.id}>
-                            {d.icon} {d.nameAr} {hasAnyResults ? '✓' : ''}
+                          <option key={d.id} value={d.id} className="bg-white dark:bg-slate-900 text-slate-900 dark:text-white">
+                            {d.icon} {d.nameAr} {hasAnyResults ? '✓ معتمد' : ''}
                           </option>
                         );
                       })}
@@ -3825,19 +3534,19 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
 
                   {/* Category Select */}
                   <div className="sm:col-span-4 space-y-1.5">
-                    <label className="text-[10px] font-bold text-slate-500 pr-1 flex items-center gap-1">
-                      <Users className="w-3 h-3" />
+                    <label className="text-xs font-black text-slate-700 dark:text-slate-200 pr-1 flex items-center gap-1.5">
+                      <Users className="w-3.5 h-3.5 text-blue-500" />
                       <span>الفئة العمرية:</span>
                     </label>
-                    <div className="flex items-center gap-1">
+                    <div className="flex items-center gap-1.5 bg-slate-100 dark:bg-slate-950/60 p-1 rounded-2xl border border-slate-200 dark:border-slate-800">
                       {['U12', 'U15', 'U18', 'U20'].map(cat => (
                         <button
                           key={cat}
                           onClick={() => setSelectedCategory(cat as any)}
-                          className={`flex-1 py-2 rounded-xl text-[10px] font-black transition-all ${
+                          className={`flex-1 py-1.5 rounded-xl text-[11px] font-black transition-all cursor-pointer ${
                             selectedCategory === cat 
-                              ? 'bg-indigo-600 text-white shadow-md ring-2 ring-indigo-400/30' 
-                              : 'bg-slate-950 text-slate-400 hover:text-slate-200 border border-slate-800'
+                              ? 'bg-gradient-to-r from-amber-500 via-amber-600 to-yellow-600 text-white shadow-md shadow-amber-500/30 ring-2 ring-amber-300 dark:ring-amber-400' 
+                              : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-slate-700 shadow-2xs'
                           }`}
                         >
                           {cat}
@@ -3848,27 +3557,27 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
 
                   {/* Gender Select */}
                   <div className="sm:col-span-3 space-y-1.5">
-                    <label className="text-[10px] font-bold text-slate-500 pr-1 flex items-center gap-1">
-                      <UserIcon className="w-3 h-3" />
+                    <label className="text-xs font-black text-slate-700 dark:text-slate-200 pr-1 flex items-center gap-1.5">
+                      <UserIcon className="w-3.5 h-3.5 text-emerald-500" />
                       <span>الجنس:</span>
                     </label>
-                    <div className="flex items-center gap-1">
+                    <div className="flex items-center gap-1.5 bg-slate-100 dark:bg-slate-950/60 p-1 rounded-2xl border border-slate-200 dark:border-slate-800">
                       <button
                         onClick={() => setSelectedGender('Male')}
-                        className={`flex-1 py-2 rounded-xl text-[10px] font-black transition-all flex items-center justify-center gap-1 ${
+                        className={`flex-1 py-1.5 rounded-xl text-[11px] font-black transition-all flex items-center justify-center gap-1 cursor-pointer ${
                           selectedGender === 'Male' 
-                            ? 'bg-blue-600 text-white shadow-md ring-2 ring-blue-400/30' 
-                            : 'bg-slate-950 text-slate-400 hover:text-slate-200 border border-slate-800'
+                            ? 'bg-gradient-to-r from-blue-600 via-indigo-600 to-blue-700 text-white shadow-md shadow-blue-500/30 ring-2 ring-blue-300 dark:ring-blue-400' 
+                            : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-slate-700 shadow-2xs'
                         }`}
                       >
                         ذكور
                       </button>
                       <button
                         onClick={() => setSelectedGender('Female')}
-                        className={`flex-1 py-2 rounded-xl text-[10px] font-black transition-all flex items-center justify-center gap-1 ${
+                        className={`flex-1 py-1.5 rounded-xl text-[11px] font-black transition-all flex items-center justify-center gap-1 cursor-pointer ${
                           selectedGender === 'Female' 
-                            ? 'bg-rose-600 text-white shadow-md ring-2 ring-rose-400/30' 
-                            : 'bg-slate-950 text-slate-400 hover:text-slate-200 border border-slate-800'
+                            ? 'bg-gradient-to-r from-rose-500 via-pink-600 to-rose-600 text-white shadow-md shadow-pink-500/30 ring-2 ring-pink-300 dark:ring-pink-400' 
+                            : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:text-pink-600 hover:bg-pink-50 dark:hover:bg-slate-700 shadow-2xs'
                         }`}
                       >
                         إناث
@@ -3876,6 +3585,44 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                     </div>
                   </div>
                 </div>
+
+                {/* Quick Validated Results Chips */}
+                {resultsList.filter(r => r.status === 'completed' && r.isFinallyValidated === true).length > 0 && (
+                  <div className="pt-2.5 border-t border-amber-200/60 dark:border-slate-800/80 flex flex-wrap items-center gap-1.5">
+                    <span className="text-[11px] font-black text-slate-500 dark:text-slate-400 pl-1 flex items-center gap-1">
+                      <span>⚡</span>
+                      <span>السباقات المعتمدة (اضغط للعرض الفوري):</span>
+                    </span>
+                    {resultsList
+                      .filter(r => r.status === 'completed' && r.isFinallyValidated === true)
+                      .map(res => {
+                        const d = disciplines.find(item => item.id === res.disciplineId);
+                        const isCurrent = selectedDiscipline?.id === res.disciplineId && selectedCategory === res.category && selectedGender === res.gender;
+                        return (
+                          <button
+                            key={res.id}
+                            type="button"
+                            onClick={() => {
+                              if (d) setSelectedDiscipline(d);
+                              setSelectedCategory(res.category as any);
+                              setSelectedGender(res.gender as any);
+                            }}
+                            className={`px-2.5 py-1 rounded-xl text-[11px] font-black transition-all cursor-pointer flex items-center gap-1 border ${
+                              isCurrent
+                                ? 'bg-gradient-to-r from-amber-500 via-yellow-500 to-amber-600 text-white border-amber-300 shadow-md shadow-amber-500/30 ring-2 ring-amber-300 dark:ring-amber-400 scale-[1.02]'
+                                : 'bg-amber-50/90 dark:bg-slate-800/90 text-amber-900 dark:text-amber-200 border-amber-200 dark:border-slate-700 hover:border-amber-400 hover:bg-amber-100 dark:hover:bg-slate-700 shadow-2xs'
+                            }`}
+                          >
+                            <span>{d?.icon || '🏅'}</span>
+                            <span>{d?.nameAr || res.disciplineId}</span>
+                            <span className="opacity-60">•</span>
+                            <span>{res.category}</span>
+                            <span>({res.gender === 'Male' ? 'ذكور' : 'إناث'})</span>
+                          </button>
+                        );
+                      })}
+                  </div>
+                )}
               </div>
               
               {/* Podium View Card */}
@@ -3891,7 +3638,7 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                 </div>
 
                 {/* 3 Step Podium */}
-                {currentEventResult ? (
+                {currentEventResult && currentEventResult.status === 'completed' && currentEventResult.isFinallyValidated === true ? (
                   <div className="space-y-8">
                     <div className="pt-8 pb-4 flex items-end justify-center gap-3 sm:gap-6 max-w-2xl mx-auto">
                       
@@ -3910,14 +3657,7 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                         </span>
                         <span className="text-xs font-mono font-bold text-slate-600 dark:text-slate-300 mt-1 flex items-center gap-1">
                           {currentEventResult.type === 'track'
-                            ? (
-                              <>
-                                <span>{currentEventResult.trackLaps?.[1]?.formattedTime}</span>
-                                <span className="px-1.5 py-0.2 rounded text-[9px] bg-slate-200 dark:bg-slate-700 font-sans">
-                                  س {currentEventResult.trackLaps?.[1]?.seriesNumber || 1}
-                                </span>
-                              </>
-                            )
+                            ? <span>{currentEventResult.trackLaps?.[1]?.formattedTime}</span>
                             : currentEventResult.fieldEntries?.[1]?.bestAttempt ? `${currentEventResult.fieldEntries[1].bestAttempt}م` : ''}
                         </span>
                         <div className="w-full h-24 bg-gradient-to-t from-slate-200 to-slate-100 dark:from-slate-800 dark:to-slate-700 rounded-t-2xl border-t-2 border-slate-300 dark:border-slate-400 flex items-center justify-center text-slate-500 dark:text-slate-200 font-black text-lg mt-2 shadow-sm">
@@ -3940,14 +3680,7 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                         </span>
                         <span className="text-sm font-mono font-black text-amber-600 dark:text-amber-400 mt-1 flex items-center gap-1.5">
                           {currentEventResult.type === 'track'
-                            ? (
-                              <>
-                                <span>{currentEventResult.trackLaps?.[0]?.formattedTime}</span>
-                                <span className="px-1.5 py-0.2 rounded text-[10px] bg-amber-500/20 text-amber-300 font-sans border border-amber-500/30">
-                                  س {currentEventResult.trackLaps?.[0]?.seriesNumber || 1}
-                                </span>
-                              </>
-                            )
+                            ? <span>{currentEventResult.trackLaps?.[0]?.formattedTime}</span>
                             : currentEventResult.fieldEntries?.[0]?.bestAttempt ? `${currentEventResult.fieldEntries[0].bestAttempt}م` : ''}
                         </span>
                         <div className="w-full h-32 bg-gradient-to-t from-amber-500 to-amber-400 dark:from-amber-600 dark:to-amber-500 rounded-t-2xl border-t-2 border-amber-200 dark:border-amber-300 flex items-center justify-center text-white dark:text-slate-950 font-black text-2xl mt-2 shadow-lg shadow-amber-500/30">
@@ -3970,14 +3703,7 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                         </span>
                         <span className="text-xs font-mono font-bold text-orange-600 dark:text-orange-400 mt-1 flex items-center gap-1">
                           {currentEventResult.type === 'track'
-                            ? (
-                              <>
-                                <span>{currentEventResult.trackLaps?.[2]?.formattedTime}</span>
-                                <span className="px-1.5 py-0.2 rounded text-[9px] bg-slate-200 dark:bg-slate-700 font-sans">
-                                  س {currentEventResult.trackLaps?.[2]?.seriesNumber || 1}
-                                </span>
-                              </>
-                            )
+                            ? <span>{currentEventResult.trackLaps?.[2]?.formattedTime}</span>
                             : currentEventResult.fieldEntries?.[2]?.bestAttempt ? `${currentEventResult.fieldEntries[2].bestAttempt}م` : ''}
                         </span>
                         <div className="w-full h-18 bg-gradient-to-t from-orange-200 to-orange-100 dark:from-orange-800 dark:to-orange-700 rounded-t-2xl border-t-2 border-orange-300 dark:border-orange-400 flex items-center justify-center text-orange-600 dark:text-orange-100 font-black text-base mt-2 shadow-sm">
@@ -4020,9 +3746,6 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                           <thead>
                             <tr className="bg-slate-50 dark:bg-slate-900 text-slate-500 dark:text-slate-400 font-black border-b border-slate-200 dark:border-slate-800">
                               <th className="py-2.5 px-3 text-center w-16">الرتبة</th>
-                              {currentEventResult.type === 'track' && (
-                                <th className="py-2.5 px-2 text-center w-20">السلسلة</th>
-                              )}
                               <th className="py-2.5 px-3 w-20">الصدرية</th>
                               <th className="py-2.5 px-3">الاسم والنسب</th>
                               <th className="py-2.5 px-3">المؤسسة التعليمية</th>
@@ -4045,13 +3768,6 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                                     {idx + 1}
                                   </span>
                                 </td>
-                                {currentEventResult.type === 'track' && (
-                                  <td className="py-2.5 px-2 text-center">
-                                    <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
-                                      س {(entry as TrackRankEntry).seriesNumber || 1}
-                                    </span>
-                                  </td>
-                                )}
                                 <td className="py-2.5 px-3 font-mono font-bold text-slate-600 dark:text-slate-400">#{entry.bibNumber}</td>
                                 <td className="py-2.5 px-3 font-bold text-slate-900 dark:text-white">{entry.studentName}</td>
                                 <td className="py-2.5 px-3 text-slate-500 dark:text-slate-400">{entry.schoolName}</td>
@@ -4069,23 +3785,23 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                   </div>
                 ) : (
                   <div className="p-8 bg-slate-50 dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-3xl space-y-6 transition-colors">
-                    <div className="space-y-2">
+                    <div className="space-y-3">
                       <div className="w-16 h-16 bg-white dark:bg-slate-800 rounded-full flex items-center justify-center mx-auto text-3xl grayscale opacity-50 shadow-sm transition-all">🏆</div>
-                      <h4 className="text-sm font-black text-slate-500 dark:text-slate-300">لم يتم اعتماد نتائج هذه المسابقة بعد</h4>
-                      <p className="text-xs text-slate-500 max-w-sm mx-auto">
-                        قم بفتح الميقاتي أو جدول المحاولات لهذه المسابقة وحفظ النتائج ليتم عرض منصة التتويج هنا.
+                      <h4 className="text-base font-black text-slate-800 dark:text-slate-200">لم تتم المصادقة النهائية على نتائج هذه المسابقة بعد</h4>
+                      <p className="text-xs text-slate-500 max-w-md mx-auto leading-relaxed">
+                        وفقاً للضوابط الرسمية: لا تظهر نتائج أي مسابقة في منصات النتائج أو التتويج إلا بعد انتهاء كافة المتسابقين في المسابقة وتأكيد ذلك عبر زر «المصادقة النهائية على النتائج».
                       </p>
                     </div>
 
-                    {resultsList.filter(r => r.status === 'completed').length > 0 && (
-                      <div className="space-y-3 pt-4 border-t border-slate-800/50">
+                    {resultsList.filter(r => r.status === 'completed' && r.isFinallyValidated === true).length > 0 && (
+                      <div className="space-y-3 pt-4 border-t border-slate-200 dark:border-slate-800/50">
                         <h5 className="text-[10px] font-black text-amber-500/80 flex items-center justify-center gap-1.5 uppercase tracking-wider">
                           <CheckCircle2 className="w-3 h-3" />
-                          <span>النتائج المتوفرة حالياً:</span>
+                          <span>المسابقات المعتمدة والمصادق عليها نهائياً:</span>
                         </h5>
                         <div className="flex flex-wrap items-center justify-center gap-2">
                           {resultsList
-                            .filter(r => r.status === 'completed')
+                            .filter(r => r.status === 'completed' && r.isFinallyValidated === true)
                             .map(res => {
                               const d = disciplines.find(item => item.id === res.disciplineId);
                               return (
@@ -4096,13 +3812,13 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                                     setSelectedCategory(res.category as any);
                                     setSelectedGender(res.gender as any);
                                   }}
-                                  className="px-3 py-1.5 bg-slate-800 hover:bg-indigo-600 hover:text-white text-slate-300 border border-slate-700 rounded-xl text-[10px] font-bold transition-all cursor-pointer flex items-center gap-1.5"
+                                  className="px-3 py-1.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white shadow-sm shadow-amber-500/20 border border-amber-300/40 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-1.5 active:scale-95"
                                 >
                                   <span>{d?.icon || '🏅'}</span>
                                   <span>{d?.nameAr || res.disciplineId}</span>
                                   <span className="opacity-60">•</span>
                                   <span>{res.category}</span>
-                                  <span>{res.gender === 'Male' ? 'ذكر' : 'أنثى'}</span>
+                                  <span>{res.gender === 'Male' ? 'ذكور' : 'إناث'}</span>
                                 </button>
                               );
                             })}
@@ -4112,15 +3828,14 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                   </div>
                 )}
 
-                <div className="pt-4 border-t border-slate-800 flex items-center justify-center gap-3">
+                <div className="pt-5 border-t border-slate-200 dark:border-slate-800 flex items-center justify-center gap-3">
                   <button
                     onClick={() => window.print()}
-                    className="p-2 sm:px-5 sm:py-2.5 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-black flex items-center justify-center gap-2 cursor-pointer active:scale-95 shadow-sm"
+                    className="px-7 py-3 bg-gradient-to-r from-amber-500 via-yellow-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white rounded-2xl text-xs sm:text-sm font-black flex items-center justify-center gap-2.5 cursor-pointer active:scale-95 shadow-xl shadow-amber-500/30 border-2 border-amber-200/50 transition-all"
                     title="طباعة المحضر الرسمي للبطولة"
                   >
-                    <Printer className="w-4 h-4 text-amber-400" />
-                    <span className="hidden sm:inline">طباعة المحضر الرسمي للبطولة</span>
-                    <span className="inline sm:hidden text-[11px]">طباعة المحضر</span>
+                    <Printer className="w-4 h-4 text-white" />
+                    <span>طباعة المحضر الرسمي للبطولة 🏆</span>
                   </button>
                 </div>
               </div>
@@ -5269,7 +4984,6 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
                   {[
                     { id: 'stopwatch', label: 'الميقاتي الذكي للسباقات', icon: '⚡' },
-                    { id: 'field', label: 'مسابقات الميدان (القفز والجلة)', icon: '🦘' },
                     { id: 'podium', label: 'منصة التتويج والنتائج الرسمية', icon: '🏆' },
                     { id: 'school_registration', label: 'تسجيل ومشاركو المؤسسات', icon: '🏫' },
                     { id: 'events', label: 'المسابقات والتخصصات', icon: '📑' },
@@ -5366,7 +5080,6 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                     { id: 'school_registration', label: 'لوائح المؤسسة', icon: <SchoolIcon className="w-3 h-3" /> },
                     { id: 'my_participations', label: 'مشاركات تلاميذي', icon: <UserCheck className="w-3 h-3" /> },
                     { id: 'stopwatch', label: 'الميقاتي الذكي', icon: <Timer className="w-3 h-3" /> },
-                    { id: 'field', label: 'مسابقات الميدان', icon: <Award className="w-3 h-3" /> },
                     { id: 'podium', label: 'منصة التتويج', icon: <Trophy className="w-3 h-3" /> },
                     { id: 'events', label: 'إدارة المسابقات', icon: <Layers className="w-3 h-3" /> }
                   ].map(tab => (
@@ -5855,8 +5568,8 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                 <span className="px-2.5 py-1 bg-pink-50 dark:bg-pink-950/60 text-pink-700 dark:text-pink-300 border border-pink-200 dark:border-pink-800 rounded-xl text-xs font-bold">
                   {selectedGender === 'Male' ? 'ذكور' : 'إناث'}
                 </span>
-                <span className="px-2.5 py-1 bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800 rounded-xl text-xs font-bold">
-                  السلسلة {activeSeriesNumber}
+                <span className="px-2.5 py-1 bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 rounded-xl text-xs font-bold">
+                  سباق موحد ومباشر
                 </span>
               </div>
 
@@ -5883,6 +5596,7 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                   .map((lap, orderIdx) => {
                     const officialRank = orderIdx + 1;
                     const origIdx = lap.origIdx;
+                    const { available, alreadyChosen } = getCategorizedParticipantsForLap(lap.participantId);
 
                     return (
                       <div
@@ -5912,9 +5626,6 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                               <span className="text-sm font-black font-mono text-slate-900 dark:text-emerald-400">
                                 ⏱️ {lap.formattedTime}
                               </span>
-                              <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-slate-100 dark:bg-slate-800 text-amber-600 dark:text-amber-300 border border-slate-200 dark:border-slate-700">
-                                س {lap.seriesNumber || 1}
-                              </span>
                             </div>
                             {lap.studentName ? (
                               <div className="flex items-center gap-1.5 mt-0.5">
@@ -5933,8 +5644,8 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                           </div>
                         </div>
 
-                        {/* Manual Dropdown Selector */}
-                        <div className="w-full sm:w-64 shrink-0">
+                        {/* Manual Dropdown Selector with Color change & bottom placement */}
+                        <div className="w-full sm:w-72 shrink-0">
                           <select
                             value={lap.participantId || ''}
                             onChange={(e) => handleAssignParticipantToLap(origIdx, e.target.value)}
@@ -5945,19 +5656,49 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                             }`}
                           >
                             <option value="">-- اضغط لاختيار صاحب المرتبة {officialRank} --</option>
-                            {sortedParticipantsForAssignment.map((p, pIdx) => {
-                              const att = attendanceMap[p.id];
-                              const isPresent = att?.status === 'present';
-                              const mark = isPresent ? '✅ ' : '';
-                              const otherLap = recordedLaps.find((l, lIdx) => lIdx !== origIdx && l.participantId === p.id);
-                              const assignedNote = otherLap ? ` (تم اختياره بالسلسلة ${otherLap.seriesNumber || 1})` : '';
+                            
+                            {/* 1. Unselected Available Athletes at the TOP with bright prominent colors */}
+                            {available.length > 0 && (
+                              <optgroup label="⚡ العداؤون المتاحون للاختيار (لم يتم اختيارهم بعد)">
+                                {available.map(p => {
+                                  const att = attendanceMap[p.id];
+                                  const isPresent = att?.status === 'present';
+                                  const isAbsent = att?.status === 'absent';
+                                  const mark = isPresent ? '✅ ' : isAbsent ? '❌ [غائب] ' : '🏃 ';
+                                  const lane = att?.lane ? ` [ممر ${att.lane}]` : '';
+                                  return (
+                                    <option
+                                      key={`assign-avail-${p.id}`}
+                                      value={p.id}
+                                      style={{ color: '#16a34a', fontWeight: 'bold' }}
+                                      className="text-emerald-600 dark:text-emerald-400 font-bold"
+                                    >
+                                      {mark}#{p.bibNumber} - {p.studentName} ({p.schoolName}){lane}
+                                    </option>
+                                  );
+                                })}
+                              </optgroup>
+                            )}
 
-                              return (
-                                <option key={`assign-rank-${p.id}-${pIdx}`} value={p.id}>
-                                  {mark}#{p.bibNumber} - {p.studentName} ({p.schoolName}){assignedNote}
-                                </option>
-                              );
-                            })}
+                            {/* 2. Already selected Athletes placed at the BOTTOM with changed muted colors */}
+                            {alreadyChosen.length > 0 && (
+                              <optgroup label="⬇️ تم اختيارهم مسبقاً في مرتبة وصول أخرى (أسفل القائمة)">
+                                {alreadyChosen.map(p => {
+                                  const assignedLap = recordedLaps.find((l, lIdx) => lIdx !== origIdx && l.participantId === p.id);
+                                  const rankLabel = assignedLap ? ` (المرتبة ${assignedLap.rank})` : '';
+                                  return (
+                                    <option
+                                      key={`assign-chosen-${p.id}`}
+                                      value={p.id}
+                                      style={{ color: '#94a3b8', fontStyle: 'italic' }}
+                                      className="text-slate-400 dark:text-slate-500"
+                                    >
+                                      ✓ [تم اختياره] #{p.bibNumber} - {p.studentName} ({p.schoolName}){rankLabel}
+                                    </option>
+                                  );
+                                })}
+                              </optgroup>
+                            )}
                           </select>
                         </div>
                       </div>
@@ -5967,7 +5708,7 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
             </div>
 
             {/* Modal Footer */}
-            <div className="pt-3 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between gap-3 shrink-0">
+            <div className="pt-3 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between gap-3 shrink-0 flex-wrap">
               <span className="text-xs text-slate-500 dark:text-slate-400">
                 يتم حفظ كل اختيار يدوي فوراً في قائمة المراتب المعتمدة.
               </span>
@@ -5976,9 +5717,20 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                 <button
                   type="button"
                   onClick={() => setIsAssignByOrderModalOpen(false)}
-                  className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black shadow-md shadow-emerald-600/20 cursor-pointer"
+                  className="px-4 py-2.5 bg-slate-200 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-xl text-xs font-bold transition-all cursor-pointer"
                 >
-                  تم وحفظ التعيين
+                  إغلاق النافذة
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsAssignByOrderModalOpen(false);
+                    handleFinalResultsValidation();
+                  }}
+                  className="px-5 py-2.5 bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl text-xs font-black shadow-md shadow-emerald-600/25 cursor-pointer flex items-center gap-1.5 transition-all active:scale-95"
+                >
+                  <CheckCircle2 className="w-4 h-4 text-amber-300" />
+                  <span>المصادقة النهائية على النتائج 🏆</span>
                 </button>
               </div>
             </div>
@@ -6020,14 +5772,14 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
             </div>
 
             {/* Quick Chips for Races with Existing Results */}
-            {resultsList.filter(r => r.status === 'completed').length > 0 && (
+            {resultsList.filter(r => r.status === 'completed' && (effectiveRole === 'ADMIN' || clearableDisciplines.some(d => d.id === r.disciplineId))).length > 0 && (
               <div className="space-y-2">
                 <label className="text-[11px] font-black text-slate-700 dark:text-slate-300 block">
-                  ⚡ اختيار سريع من السباقات المسجلة حالياً في قاعدة البيانات:
+                  ⚡ اختيار سريع من السباقات التي تشرف عليها:
                 </label>
                 <div className="flex flex-wrap gap-1.5 max-h-28 overflow-y-auto pr-1">
                   {resultsList
-                    .filter(r => r.status === 'completed')
+                    .filter(r => r.status === 'completed' && (effectiveRole === 'ADMIN' || clearableDisciplines.some(d => d.id === r.disciplineId)))
                     .map(res => {
                       const d = disciplines.find(item => item.id === res.disciplineId);
                       const isSelected = clearRaceDisciplineId === res.disciplineId && clearRaceCategory === res.category && clearRaceGender === res.gender;
@@ -6067,7 +5819,7 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
             {/* Selectors for Discipline, Category, Gender */}
             <div className="space-y-3 bg-slate-50 dark:bg-slate-950/60 p-4 rounded-2xl border border-slate-200 dark:border-slate-800">
               <label className="text-xs font-black text-slate-800 dark:text-slate-200 block">
-                تحديد المسابقة والفئة المراد تفريغها:
+                تحديد المسابقة والفئة المراد تفريغها (من المسابقات المشرف عليها):
               </label>
 
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
@@ -6082,7 +5834,7 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                     }}
                     className="w-full px-2.5 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white outline-none cursor-pointer"
                   >
-                    {disciplines.map(d => (
+                    {clearableDisciplines.map(d => (
                       <option key={d.id} value={d.id}>
                         {d.icon} {d.nameAr}
                       </option>
@@ -6168,8 +5920,12 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                             </span>
                           </div>
                         </div>
-                        <span className="px-2 py-0.5 bg-amber-200 dark:bg-amber-900/80 text-amber-900 dark:text-amber-100 rounded text-[10px] font-black shrink-0">
-                          سيتم حذفها
+                        <span className={`px-2 py-0.5 rounded text-[10px] font-black shrink-0 ${
+                          clearDeletePublicAndPodium 
+                            ? 'bg-rose-200 dark:bg-rose-900/80 text-rose-900 dark:text-rose-100' 
+                            : 'bg-emerald-200 dark:bg-emerald-900/80 text-emerald-900 dark:text-emerald-100'
+                        }`}>
+                          {clearDeletePublicAndPodium ? 'سيتم مسحها من المنصة والعموم' : 'محفوظة في المنصة والعموم'}
                         </span>
                       </div>
                     ) : hasActiveTrackLaps ? (
@@ -6185,17 +5941,53 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                   </div>
 
                   {/* Optional Options */}
-                  <label className="flex items-center gap-2 p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-850 cursor-pointer text-xs">
-                    <input
-                      type="checkbox"
-                      checked={clearIncludeAttendance}
-                      onChange={(e) => setClearIncludeAttendance(e.target.checked)}
-                      className="w-4 h-4 rounded text-rose-600 focus:ring-0 cursor-pointer"
-                    />
-                    <span className="font-bold text-slate-700 dark:text-slate-300">
-                      إعادة ضبط غرفة المناداة وحضور المشاركين لهذا السباق أيضاً
-                    </span>
-                  </label>
+                  <div className="space-y-2.5">
+                    {/* Clear or keep podium and public results option */}
+                    <div className="p-3.5 rounded-2xl border transition-all bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700">
+                      <label className="flex items-start gap-3 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={clearDeletePublicAndPodium}
+                          onChange={(e) => setClearDeletePublicAndPodium(e.target.checked)}
+                          className="w-4 h-4 mt-0.5 rounded text-rose-600 focus:ring-rose-500 cursor-pointer shrink-0"
+                        />
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-xs font-black text-slate-900 dark:text-white">
+                              مسح النتائج من منصة التتويج وقسم نتائج العموم أيضاً
+                            </span>
+                            {clearDeletePublicAndPodium ? (
+                              <span className="px-2 py-0.5 bg-rose-100 dark:bg-rose-950/70 border border-rose-300 dark:border-rose-800 text-rose-700 dark:text-rose-300 text-[10px] rounded-lg font-black">
+                                🗑️ مسح كامل (المنصة والعموم)
+                              </span>
+                            ) : (
+                              <span className="px-2 py-0.5 bg-emerald-100 dark:bg-emerald-950/70 border border-emerald-300 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300 text-[10px] rounded-lg font-black">
+                                🛡️ الاحتفاظ بنتائج المنصة والعموم
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
+                            {clearDeletePublicAndPodium
+                              ? 'سيتم حذف النتائج المعتمدة وأسماء المتوجين نهائياً من منصة التتويج وصفحة النتائج الموجهة للعموم.'
+                              : 'سيتم تصفير الميقاتي والوصولات المسجلة فقط لإتاحة إجراء السباق مجدداً، مع الحفاظ على نتائج الفائزين في منصة التتويج وقسم العموم دون مسحها.'}
+                          </p>
+                        </div>
+                      </label>
+                    </div>
+
+                    {/* Reset attendance */}
+                    <label className="flex items-center gap-2 p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-850 cursor-pointer text-xs">
+                      <input
+                        type="checkbox"
+                        checked={clearIncludeAttendance}
+                        onChange={(e) => setClearIncludeAttendance(e.target.checked)}
+                        className="w-4 h-4 rounded text-rose-600 focus:ring-0 cursor-pointer"
+                      />
+                      <span className="font-bold text-slate-700 dark:text-slate-300">
+                        إعادة ضبط غرفة المناداة وحضور المشاركين لهذا السباق أيضاً
+                      </span>
+                    </label>
+                  </div>
                 </div>
               );
             })()}
@@ -6209,11 +6001,13 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                     تأكيد تفريغ بيانات السباق:
                   </h4>
                   <p className="text-[11px] text-rose-800 dark:text-rose-300 mt-1 leading-relaxed">
-                    سيتم مسح جميع توقيتات ومراتب الوصول المسجلة لسباق{' '}
+                    سيتم تصفير الميقاتي ومسح توقيتات ومراتب الوصول لسباق{' '}
                     <strong className="underline">
                       {disciplines.find(d => d.id === clearRaceDisciplineId)?.nameAr} ({clearRaceCategory} - {clearRaceGender === 'Male' ? 'ذكور' : 'إناث'})
-                    </strong>{' '}
-                    وإعادة ضبط الميقاتي للصفر. هذه العملية نهائية ولا يمكن التراجع عنها.
+                    </strong>
+                    {clearDeletePublicAndPodium 
+                      ? ' مع مسح وحذف النتائج من منصة التتويج وصفحة العموم بشكل نهائي.' 
+                      : ' مع الإبقاء على النتائج المعتمدة ظاهرة ومحفوظة في منصة التتويج وقسم العموم.'}
                   </p>
                 </div>
               </div>
@@ -6277,7 +6071,7 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                     <span>لوائح وبيانات التجريب الافتراضية (10 متسابقين لكل سباق وفئة وجنس)</span>
                   </h3>
                   <p className="mobile-hide-desc text-xs text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
-                    توليد أو دمج 10 متسابقين حقيقيين في كل سباق ومسابقة، كل فئة عمرية، وكل جنس لاختبار الميقاتي، السلاسل، الترتيب، محاولات الميدان ومنصة التتويج مع إمكانية التوزيع والتطبيق حسب كل لجنة.
+                    توليد أو دمج 10 متسابقين حقيقيين في كل سباق ومسابقة، كل فئة عمرية، وكل جنس لاختبار الميقاتي، الترتيب المباشر، ومنصة التتويج مع إمكانية التوزيع والتطبيق حسب كل لجنة.
                   </p>
                 </div>
               </div>

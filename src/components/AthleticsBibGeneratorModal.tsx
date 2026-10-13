@@ -22,15 +22,115 @@ import {
   Award,
   Trophy,
   Flame,
-  FileSpreadsheet
+  FileSpreadsheet,
+  Type,
+  Upload
 } from 'lucide-react';
 import QRCode from 'qrcode';
 import jsPDF from 'jspdf';
 import { AthleticsService } from '../lib/athleticsService';
 import { AthleticsDisciplineDef, AthleticsParticipantRecord } from '../lib/athleticsConfig';
 import { School, Student } from '../types';
-import { DataService } from '../lib/dataService';
+import { DataService, OfficialLogos } from '../lib/dataService';
+import { AppLogo } from './AppLogo';
 import toast from 'react-hot-toast';
+
+export interface BibFontOption {
+  id: string;
+  nameAr: string;
+  family: string;
+  badge: string;
+}
+
+export const BIB_FONTS: BibFontOption[] = [
+  { id: 'Changa', nameAr: 'تشانغا الرياضي (Changa)', family: "'Changa', sans-serif", badge: 'رياضي' },
+  { id: 'Impact', nameAr: 'إمباكت العريض (Impact)', family: "Impact, 'Arial Black', sans-serif", badge: 'عريض' },
+  { id: 'Cairo', nameAr: 'كايرو البارز (Cairo)', family: "'Cairo', sans-serif", badge: 'حديث' },
+  { id: 'Arial Black', nameAr: 'أريال بلاك (Arial Black)', family: "'Arial Black', Gadget, sans-serif", badge: 'كلاسيكي' },
+  { id: 'Courier New', nameAr: 'رقمي تقني (Monospace)', family: "'Courier New', Courier, monospace", badge: 'رقمي' },
+  { id: 'Alexandria', nameAr: 'الإسكندرية (Alexandria)', family: "'Alexandria', sans-serif", badge: 'هندسي' },
+  { id: 'Lalezar', nameAr: 'لاليزار عريض (Lalezar)', family: "'Lalezar', cursive, sans-serif", badge: 'بارز' },
+  { id: 'Tajawal', nameAr: 'تجوال الحديث (Tajawal)', family: "'Tajawal', sans-serif", badge: 'عصري' },
+];
+
+// Helper to generate a crisp fallback federation circular emblem in PNG for PDF export
+const createFederationEmblemPng = (): string => {
+  try {
+    const canvas = document.createElement('canvas');
+    canvas.width = 160;
+    canvas.height = 160;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return '';
+
+    // Background circle - crisp white with royal border
+    ctx.beginPath();
+    ctx.arc(80, 80, 76, 0, Math.PI * 2);
+    ctx.fillStyle = '#ffffff';
+    ctx.fill();
+    ctx.lineWidth = 6;
+    ctx.strokeStyle = '#c2410c'; // royal orange/amber
+    ctx.stroke();
+
+    // Secondary inner circle
+    ctx.beginPath();
+    ctx.arc(80, 80, 68, 0, Math.PI * 2);
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = '#047857'; // emerald
+    ctx.stroke();
+
+    // Green 5-pointed Moroccan Star
+    ctx.save();
+    ctx.translate(80, 82);
+    ctx.beginPath();
+    const spikes = 5;
+    const outerRadius = 32;
+    const innerRadius = 13;
+    let rot = (Math.PI / 2) * 3;
+    let x = 0;
+    let y = 0;
+    const step = Math.PI / spikes;
+
+    ctx.moveTo(0, -outerRadius);
+    for (let i = 0; i < spikes; i++) {
+      x = Math.cos(rot) * outerRadius;
+      y = Math.sin(rot) * outerRadius;
+      ctx.lineTo(x, y);
+      rot += step;
+
+      x = Math.cos(rot) * innerRadius;
+      y = Math.sin(rot) * innerRadius;
+      ctx.lineTo(x, y);
+      rot += step;
+    }
+    ctx.lineTo(0, -outerRadius);
+    ctx.closePath();
+    ctx.fillStyle = '#047857';
+    ctx.fill();
+    ctx.lineWidth = 2.5;
+    ctx.strokeStyle = '#dc2626'; // red outline
+    ctx.stroke();
+    ctx.restore();
+
+    // Royal Crown on top
+    ctx.fillStyle = '#eab308';
+    ctx.font = 'bold 20px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('👑', 80, 34);
+
+    // Text: FRMSS
+    ctx.fillStyle = '#991b1b';
+    ctx.font = 'bold 15px Arial, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('FRMSS', 80, 134);
+
+    return canvas.toDataURL('image/png');
+  } catch (e) {
+    console.error('Failed to create federation emblem canvas:', e);
+    return '';
+  }
+};
 
 export interface AthleticsBibRunnerData {
   id: string;
@@ -276,6 +376,19 @@ export const AthleticsBibGeneratorModal: React.FC<AthleticsBibGeneratorModalProp
   const [championshipHeaderTitle, setChampionshipHeaderTitle] = useState<string>('البطولة المدرسية لألعاب القوى');
   const [subHeaderTitle, setSubHeaderTitle] = useState<string>('الجامعة الملكية المغربية للرياضة المدرسية');
 
+  // NEW USER REQUIREMENTS:
+  // 1. University / Federation Logo on Top Right & Left (لوغو الجامعة فوق على اليمين واليسار)
+  const [showUniversityLogo, setShowUniversityLogo] = useState<boolean>(true);
+  const [universityLogo, setUniversityLogo] = useState<string>('');
+  const [universityLogoDataUrl, setUniversityLogoDataUrl] = useState<string>('');
+  const [officialLogos, setOfficialLogos] = useState<OfficialLogos | null>(null);
+
+  // 2. Maximize bib number proportionally to fill empty space + Custom font family & Slider
+  // (تكبير حجم رقم الصدرية بشريط تمرير ديناميكي حسب رغبة الأستاذ مع إمكانية التعديل في نوعية الخط)
+  const [isMaximizedNumber, setIsMaximizedNumber] = useState<boolean>(true);
+  const [bibNumberScale, setBibNumberScale] = useState<number>(1.0); // Slider: 0.7x to 2.5x
+  const [bibNumberFont, setBibNumberFont] = useState<string>('Changa');
+
   // Page layout & appearance
   const [bibsPerPage, setBibsPerPage] = useState<1 | 2 | 4>(2);
   const [bibThemeColor, setBibThemeColor] = useState<string>('amber'); // 'amber', 'emerald', 'indigo', 'rose', 'mono'
@@ -284,6 +397,66 @@ export const AthleticsBibGeneratorModal: React.FC<AthleticsBibGeneratorModalProp
   const [qrCache, setQrCache] = useState<Record<string, string>>({});
 
   const printContainerRef = useRef<HTMLDivElement>(null);
+
+  // Load official logos from database / settings
+  useEffect(() => {
+    if (!isOpen) return;
+    DataService.getOfficialLogos().then(logos => {
+      if (logos) {
+        setOfficialLogos(logos);
+        if (logos.frmssLogo) {
+          setUniversityLogo(logos.frmssLogo);
+        }
+      }
+    }).catch(err => {
+      console.warn('Failed to load official logos for bib generator:', err);
+    });
+  }, [isOpen]);
+
+  // Sync university logo to data URL for smooth jsPDF insertion
+  useEffect(() => {
+    let isCancelled = false;
+    const fallbackPng = createFederationEmblemPng();
+
+    if (!universityLogo) {
+      setUniversityLogoDataUrl(fallbackPng);
+      return;
+    }
+
+    if (universityLogo.startsWith('data:image/png') || universityLogo.startsWith('data:image/jpeg')) {
+      setUniversityLogoDataUrl(universityLogo);
+      return;
+    }
+
+    // Try converting image URL to canvas PNG DataURL
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      if (isCancelled) return;
+      try {
+        const canvas = document.createElement('canvas');
+        canvas.width = img.width || 120;
+        canvas.height = img.height || 120;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(img, 0, 0);
+          setUniversityLogoDataUrl(canvas.toDataURL('image/png'));
+          return;
+        }
+      } catch {
+        // Fallback on CORS taint
+      }
+      setUniversityLogoDataUrl(fallbackPng);
+    };
+    img.onerror = () => {
+      if (!isCancelled) setUniversityLogoDataUrl(fallbackPng);
+    };
+    img.src = universityLogo;
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [universityLogo]);
 
   // Load disciplines & participants
   useEffect(() => {
@@ -402,15 +575,40 @@ export const AthleticsBibGeneratorModal: React.FC<AthleticsBibGeneratorModalProp
     if (generationSource === 'registered') {
       let filtered = participants;
 
+      // FIXED: Properly match against participant's disciplineId or secondDisciplineId
       if (selectedDisciplineId !== 'ALL') {
-        filtered = filtered.filter(p => p.disciplines && p.disciplines.includes(selectedDisciplineId));
+        filtered = filtered.filter(p => {
+          if (p.disciplineId === selectedDisciplineId) return true;
+          if (p.secondDisciplineId === selectedDisciplineId) return true;
+          if (Array.isArray((p as any).disciplines) && (p as any).disciplines.includes(selectedDisciplineId)) return true;
+          if ((p as any).discipline === selectedDisciplineId) return true;
+          return false;
+        });
       } else if (disciplineGroupFilter !== 'ALL') {
         const allowedIds = new Set(filteredDisciplines.map(d => d.id));
-        filtered = filtered.filter(p => p.disciplines && p.disciplines.some(id => allowedIds.has(id)));
+        filtered = filtered.filter(p => {
+          if (p.disciplineId && allowedIds.has(p.disciplineId)) return true;
+          if (p.secondDisciplineId && allowedIds.has(p.secondDisciplineId)) return true;
+          if (Array.isArray((p as any).disciplines) && (p as any).disciplines.some((id: string) => allowedIds.has(id))) return true;
+          return false;
+        });
       }
 
+      // FIXED: Properly normalize category (U12 / براعم, U15 / صغار, U18 / فتيان وفتيات, U20 / شبان)
       if (selectedCategory !== 'ALL') {
-        filtered = filtered.filter(p => p.category === selectedCategory);
+        filtered = filtered.filter(p => {
+          if (!p.category) return false;
+          if (p.category === selectedCategory) return true;
+          const normalizeCat = (c?: string) => {
+            if (!c) return '';
+            if (c === 'U12' || c.includes('براعم') || c.includes('برعومات')) return 'U12';
+            if (c === 'U15' || c.includes('صغار') || c.includes('صغيرات')) return 'U15';
+            if (c === 'U18' || c.includes('فتيان') || c.includes('فتيات')) return 'U18';
+            if (c === 'U20' || c.includes('شبان') || c.includes('شابات')) return 'U20';
+            return c;
+          };
+          return normalizeCat(p.category) === normalizeCat(selectedCategory);
+        });
       }
 
       if (selectedGender !== 'ALL') {
@@ -422,12 +620,32 @@ export const AthleticsBibGeneratorModal: React.FC<AthleticsBibGeneratorModalProp
         filtered = filtered.filter(p =>
           (p.studentName && p.studentName.toLowerCase().includes(q)) ||
           (p.schoolName && p.schoolName.toLowerCase().includes(q)) ||
-          (p.bibNumber && p.bibNumber.toString().includes(q))
+          (p.bibNumber && p.bibNumber.toString().includes(q)) ||
+          (p.massarNumber && p.massarNumber.toLowerCase().includes(q))
         );
       }
 
       return filtered.map((p, idx) => {
-        const pDiscipline = disciplines.find(d => p.disciplines && p.disciplines.includes(d.id)) || activeDisciplineObj;
+        let pDiscipline: AthleticsDisciplineDef | undefined;
+        if (selectedDisciplineId !== 'ALL') {
+          pDiscipline = disciplines.find(d => d.id === selectedDisciplineId);
+        }
+        if (!pDiscipline && p.disciplineId) {
+          pDiscipline = disciplines.find(d => d.id === p.disciplineId);
+        }
+        if (!pDiscipline && p.secondDisciplineId) {
+          pDiscipline = disciplines.find(d => d.id === p.secondDisciplineId);
+        }
+        if (!pDiscipline) {
+          pDiscipline = activeDisciplineObj || undefined;
+        }
+
+        const catLabel = p.category === 'U12' ? 'براعم (U12)' :
+          p.category === 'U15' ? 'صغار (U15)' :
+          p.category === 'U18' ? (p.gender === 'Female' ? 'فتيات (U18)' : 'فتيان (U18)') :
+          p.category === 'U20' ? (p.gender === 'Female' ? 'شابات (U20)' : 'شبان (U20)') :
+          (p.category || 'عام');
+
         return {
           id: p.id || `reg-${idx}`,
           bibNumber: p.bibNumber || (idx + 1),
@@ -438,7 +656,7 @@ export const AthleticsBibGeneratorModal: React.FC<AthleticsBibGeneratorModalProp
           disciplineNameAr: pDiscipline ? pDiscipline.nameAr : defaultDiscName,
           disciplineType: pDiscipline ? pDiscipline.type : defaultDiscType,
           category: p.category || selectedCategory,
-          categoryLabel: p.category || selectedCategory,
+          categoryLabel: catLabel,
           gender: p.gender || 'Male',
           genderLabel: p.gender === 'Female' ? 'إناث (F)' : 'ذكور (M)'
         };
@@ -676,13 +894,29 @@ export const AthleticsBibGeneratorModal: React.FC<AthleticsBibGeneratorModalProp
     doc.setFillColor(themeRgb.r, themeRgb.g, themeRgb.b);
     doc.roundedRect(x + 1, y + 1, w - 2, headerHeight, 3, 3, 'F');
 
-    // Arabic Header Title (No Symbols!)
+    // Right & Left University / Federation Logo (لوغو الجامعة فوق على اليمين واليسار)
+    const logoSize = isCompact ? 9 : 12;
+    const logoY = y + 1 + (headerHeight - logoSize) / 2;
+
+    if (showUniversityLogo && universityLogoDataUrl) {
+      try {
+        // Logo Top Right (على اليمين)
+        doc.addImage(universityLogoDataUrl, 'PNG', x + 3, logoY, logoSize, logoSize, undefined, 'FAST');
+        // Logo Top Left (على اليسار)
+        doc.addImage(universityLogoDataUrl, 'PNG', x + w - logoSize - 3, logoY, logoSize, logoSize, undefined, 'FAST');
+      } catch (e) {
+        console.warn('PDF logo render issue:', e);
+      }
+    }
+
+    // Arabic Header Title (No Symbols!) centered between logos
+    const titlePadding = (showUniversityLogo && universityLogoDataUrl) ? logoSize + 4 : 5;
     drawArabicTextToPdf(
       doc,
       headerTitle || 'البطولة المدرسية لألعاب القوى',
-      x + 5,
+      x + titlePadding,
       y + 1,
-      w - 10,
+      w - (titlePadding * 2),
       headerHeight,
       isCompact ? 9 : 12,
       'bold',
@@ -736,25 +970,45 @@ export const AthleticsBibGeneratorModal: React.FC<AthleticsBibGeneratorModalProp
       currentY += catH + 2;
     }
 
-    // Huge Bib Number in Center
-    const numH = isCompact ? 26 : (w > 120 ? 44 : 32);
+    // Bottom info area definition first to calculate exact empty space in center
+    const bottomH = isCompact ? 25 : 33;
+    const bottomY = y + h - bottomH - 3;
+
+    // Huge Bib Number in Center - PROPORTIONALLY MAXIMIZED TO EMPTY SPACE
+    const bannerBottom = currentY;
+    const emptySpaceH = Math.max(20, bottomY - bannerBottom - 4);
+
+    const baseNumH = isMaximizedNumber
+      ? (isCompact ? Math.min(emptySpaceH - 2, 36) : Math.min(emptySpaceH - 2, w > 120 ? 62 : 48))
+      : (isCompact ? 24 : (w > 120 ? 40 : 30));
+
+    const baseFontSizePt = isMaximizedNumber
+      ? (isCompact ? 46 : (w > 120 ? 82 : 62))
+      : (isCompact ? 30 : (w > 120 ? 52 : 38));
+
+    // Apply teacher's custom scale slider (من 70% إلى 250%)
+    const numH = Math.min(emptySpaceH, Math.max(16, baseNumH * bibNumberScale));
+    const fontSizePt = Math.round(baseFontSizePt * bibNumberScale);
+
+    const numY = bannerBottom + (emptySpaceH - numH) / 2;
+
+    const activeFontDef = BIB_FONTS.find(f => f.id === bibNumberFont) || BIB_FONTS[0];
+
     drawArabicTextToPdf(
       doc,
       String(runner.bibNumber),
-      x + 8,
-      currentY,
-      w - 16,
+      x + 6,
+      numY,
+      w - 12,
       numH,
-      isCompact ? 34 : (w > 120 ? 56 : 42),
+      fontSizePt,
       'bold',
       themeRgb.hex,
       'center',
-      "'Courier New', monospace, sans-serif"
+      activeFontDef.family
     );
 
     // Bottom info area with QR and details
-    const bottomH = isCompact ? 25 : 33;
-    const bottomY = y + h - bottomH - 3;
     doc.setFillColor(248, 250, 252);
     doc.setDrawColor(226, 232, 240);
     doc.roundedRect(x + 4, bottomY, w - 8, bottomH, 2, 2, 'FD');
@@ -1494,6 +1748,207 @@ export const AthleticsBibGeneratorModal: React.FC<AthleticsBibGeneratorModalProp
               </div>
             </div>
 
+            {/* 4. NEW: BIB NUMBER MAXIMIZE & FONT SELECTION (تكبير الرقم وتعديل نوع الخط) */}
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 space-y-3 shadow-xs">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-black text-slate-900 dark:text-white flex items-center gap-1.5">
+                  <Maximize2 className="w-4 h-4 text-amber-500" />
+                  <span>4. حجم رقم الصدرية ونوع الخط</span>
+                </span>
+                <span className="text-[10px] font-bold text-amber-600 bg-amber-50 dark:bg-amber-950/60 px-2 py-0.5 rounded-full border border-amber-200 dark:border-amber-800">
+                  {isMaximizedNumber ? 'أقصى ملائم للمساحة 📐' : 'حجم قياسي'}
+                </span>
+              </div>
+
+              {/* Interactive Slider for Bib Number Size (شريط تحريك تكبير حجم رقم الصدرية حسب رغبة الأستاذ) */}
+              <div className="space-y-2.5 bg-amber-50/60 dark:bg-amber-950/30 p-3 rounded-xl border border-amber-200/80 dark:border-amber-800/60 shadow-3xs">
+                <div className="flex items-center justify-between">
+                  <label className="text-[11px] font-black text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                    <Maximize2 className="w-3.5 h-3.5 text-amber-600" />
+                    <span>شريط تكبير رقم الصدرية:</span>
+                  </label>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[11px] font-black text-amber-700 dark:text-amber-300 bg-amber-100/80 dark:bg-amber-900/50 px-2 py-0.5 rounded-md border border-amber-300 dark:border-amber-700 font-mono">
+                      {Math.round(bibNumberScale * 100)}%
+                    </span>
+                    {bibNumberScale !== 1.0 && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setBibNumberScale(1.0);
+                          toast.success('تمت استعادة حجم الرقم الافتراضي (100%)');
+                        }}
+                        className="text-slate-400 hover:text-amber-600 p-0.5 rounded cursor-pointer transition-colors"
+                        title="إعادة للحجم الافتراضي 100%"
+                      >
+                        <RotateCcw className="w-3 h-3" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Range Slider for Bib Number (من 70% إلى 250%) */}
+                <div className="space-y-1">
+                  <input
+                    type="range"
+                    min="0.7"
+                    max="2.5"
+                    step="0.05"
+                    value={bibNumberScale}
+                    onChange={(e) => setBibNumberScale(parseFloat(e.target.value))}
+                    className="w-full h-2.5 bg-amber-200 dark:bg-amber-900/60 rounded-lg appearance-none cursor-pointer accent-amber-600 focus:outline-hidden"
+                    title={`حجم رقم الصدرية الحالي: ${Math.round(bibNumberScale * 100)}%`}
+                  />
+                  <div className="flex justify-between text-[9px] font-bold text-slate-500 dark:text-slate-400 font-mono px-0.5">
+                    <span>70% (أصغر)</span>
+                    <button 
+                      type="button" 
+                      onClick={() => setBibNumberScale(1.0)} 
+                      className="hover:text-amber-600 font-black cursor-pointer underline decoration-dotted"
+                    >
+                      100% (افتراضي)
+                    </button>
+                    <span>250% (عملاق بارز)</span>
+                  </div>
+                </div>
+
+                {/* Quick Presets Buttons */}
+                <div className="grid grid-cols-4 gap-1 pt-0.5">
+                  {[
+                    { label: '100% عادي', scale: 1.0 },
+                    { label: '130% كبير', scale: 1.3 },
+                    { label: '170% بارز', scale: 1.7 },
+                    { label: '220% أقصى', scale: 2.2 }
+                  ].map(p => (
+                    <button
+                      key={p.scale}
+                      type="button"
+                      onClick={() => {
+                        setBibNumberScale(p.scale);
+                        toast.success(`تم ضبط الحجم على ${p.label}`);
+                      }}
+                      className={`py-1 px-1 text-[9px] font-black rounded-lg transition-all cursor-pointer text-center ${
+                        bibNumberScale === p.scale
+                          ? 'bg-amber-600 text-white shadow-xs'
+                          : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-amber-100/50 border border-slate-200 dark:border-slate-700'
+                      }`}
+                    >
+                      {p.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Font Family Selection */}
+              <div>
+                <label className="block text-[11px] font-bold text-slate-500 mb-1.5 flex items-center gap-1">
+                  <Type className="w-3.5 h-3.5 text-blue-500" />
+                  <span>نوعية خط رقم الصدرية:</span>
+                </label>
+                <div className="grid grid-cols-2 gap-1.5">
+                  {BIB_FONTS.map(font => (
+                    <button
+                      key={font.id}
+                      type="button"
+                      onClick={() => {
+                        setBibNumberFont(font.id);
+                        toast.success(`تم اختيار خط ${font.nameAr} للصدريات! ✍️`);
+                      }}
+                      className={`p-2 rounded-xl border text-right transition-all cursor-pointer flex items-center justify-between ${
+                        bibNumberFont === font.id
+                          ? 'bg-orange-50 dark:bg-orange-950/50 border-orange-500 text-orange-900 dark:text-orange-200 font-black shadow-xs ring-1 ring-orange-400'
+                          : 'bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100'
+                      }`}
+                    >
+                      <div className="truncate">
+                        <span className="block text-[10px] truncate text-slate-600 dark:text-slate-400 font-bold">{font.nameAr}</span>
+                        <span 
+                          style={{ fontFamily: font.family }} 
+                          className="text-base font-black text-slate-900 dark:text-white"
+                        >
+                          123
+                        </span>
+                      </div>
+                      {bibNumberFont === font.id && (
+                        <Check className="w-3.5 h-3.5 text-orange-600 shrink-0" />
+                      )}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* 5. NEW: UNIVERSITY / FEDERATION LOGO (لوغو الجامعة فوق على اليمين واليسار) */}
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 space-y-3 shadow-xs">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-black text-slate-900 dark:text-white flex items-center gap-1.5">
+                  <Award className="w-4 h-4 text-orange-500" />
+                  <span>5. شعار الجامعة (فوق على اليمين واليسار)</span>
+                </span>
+                <span className="text-[10px] font-bold text-slate-500">
+                  {showUniversityLogo ? 'مفعل 🏅' : 'مخفي'}
+                </span>
+              </div>
+
+              <label className="flex items-center justify-between p-2 bg-slate-50 dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 cursor-pointer text-xs font-bold text-slate-700 dark:text-slate-300">
+                <span>إظهار لوغو الجامعة في أعلى اليمين واليسار</span>
+                <input
+                  type="checkbox"
+                  checked={showUniversityLogo}
+                  onChange={(e) => setShowUniversityLogo(e.target.checked)}
+                  className="w-4 h-4 text-orange-600 rounded focus:ring-orange-500 cursor-pointer"
+                />
+              </label>
+
+              {showUniversityLogo && (
+                <div className="flex items-center gap-3 p-2.5 bg-orange-50/50 dark:bg-orange-950/30 rounded-xl border border-orange-200 dark:border-orange-900/50">
+                  <div className="w-12 h-12 rounded-xl bg-white p-1 border border-slate-300 shadow-xs flex items-center justify-center shrink-0 overflow-hidden">
+                    {universityLogo ? (
+                      <img src={universityLogo} alt="لوغو الجامعة" className="w-full h-full object-contain" />
+                    ) : (
+                      <AppLogo size={32} />
+                    )}
+                  </div>
+                  <div className="flex-1 text-[11px] font-bold text-slate-600 dark:text-slate-400">
+                    <span className="block text-slate-900 dark:text-white font-black">
+                      {universityLogo ? 'شعار الجامعة الملكية المغربية للرياضة المدرسية' : 'الشعار الرسمي المعتمد'}
+                    </span>
+                    <label className="inline-block mt-1 text-[10px] text-orange-600 hover:text-orange-700 font-black cursor-pointer">
+                      <span>📁 رفع شعار مخصص</span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) {
+                            const reader = new FileReader();
+                            reader.onload = (event) => {
+                              const res = event.target?.result as string;
+                              if (res) {
+                                setUniversityLogo(res);
+                                toast.success('تم تحميل وتعيين شعار الجامعة الجديد للصدريات! 🏅');
+                              }
+                            };
+                            reader.readAsDataURL(file);
+                          }
+                        }}
+                      />
+                    </label>
+                    {universityLogo && officialLogos?.frmssLogo && universityLogo !== officialLogos.frmssLogo && (
+                      <button
+                        type="button"
+                        onClick={() => setUniversityLogo(officialLogos.frmssLogo || '')}
+                        className="block text-[9px] text-slate-400 hover:text-slate-600 mt-0.5 cursor-pointer"
+                      >
+                        استعادة الشعار الأصلي
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
           </div>
 
           {/* ======================================================================= */}
@@ -1517,40 +1972,115 @@ export const AthleticsBibGeneratorModal: React.FC<AthleticsBibGeneratorModalProp
                 </div>
               </div>
 
-              {/* Pagination controls */}
-              <div className="flex items-center gap-2 text-xs font-bold">
-                <button
-                  type="button"
-                  disabled={currentPage <= 1}
-                  onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                  className="p-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 rounded-lg disabled:opacity-40 cursor-pointer"
-                  title="الصفحة السابقة"
-                >
-                  <ChevronRight className="w-4 h-4" />
-                </button>
-                <span className="text-slate-600 dark:text-slate-300">
-                  صفحة {currentPage} من {totalPreviewPages}
-                </span>
-                <button
-                  type="button"
-                  disabled={currentPage >= totalPreviewPages}
-                  onClick={() => setCurrentPage(p => Math.min(totalPreviewPages, p + 1))}
-                  className="p-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 rounded-lg disabled:opacity-40 cursor-pointer"
-                  title="الصفحة التالية"
-                >
-                  <ChevronLeft className="w-4 h-4" />
-                </button>
+              {/* Quick Toolbar Action Buttons */}
+              <div className="flex items-center gap-2 flex-wrap">
+                {/* Quick bib size slider on toolbar */}
+                <div className="flex items-center gap-1.5 bg-slate-100 dark:bg-slate-800 px-2.5 py-1 rounded-xl border border-slate-200 dark:border-slate-700">
+                  <Maximize2 className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                  <span className="text-[11px] font-bold text-slate-600 dark:text-slate-300 hidden sm:inline">حجم الرقم:</span>
+                  <input
+                    type="range"
+                    min="0.7"
+                    max="2.5"
+                    step="0.05"
+                    value={bibNumberScale}
+                    onChange={(e) => setBibNumberScale(parseFloat(e.target.value))}
+                    className="w-20 sm:w-28 h-2 bg-slate-200 dark:bg-slate-700 rounded-lg appearance-none cursor-pointer accent-amber-500"
+                    title={`تكبير الخط: ${Math.round(bibNumberScale * 100)}%`}
+                  />
+                  <span className="text-[10px] font-black font-mono text-amber-600 dark:text-amber-400 min-w-8 text-center">
+                    {Math.round(bibNumberScale * 100)}%
+                  </span>
+                  {bibNumberScale !== 1.0 && (
+                    <button
+                      type="button"
+                      onClick={() => setBibNumberScale(1.0)}
+                      className="text-slate-400 hover:text-amber-600 p-0.5 rounded cursor-pointer"
+                      title="استعادة 100%"
+                    >
+                      <RotateCcw className="w-2.5 h-2.5" />
+                    </button>
+                  )}
+                </div>
+
+                {/* Pagination controls */}
+                <div className="flex items-center gap-1.5 text-xs font-bold">
+                  <button
+                    type="button"
+                    disabled={currentPage <= 1}
+                    onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                    className="p-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 rounded-lg disabled:opacity-40 cursor-pointer"
+                    title="الصفحة السابقة"
+                  >
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
+                  <span className="text-slate-600 dark:text-slate-300 text-[11px]">
+                    صفحة {currentPage} من {totalPreviewPages}
+                  </span>
+                  <button
+                    type="button"
+                    disabled={currentPage >= totalPreviewPages}
+                    onClick={() => setCurrentPage(p => Math.min(totalPreviewPages, p + 1))}
+                    className="p-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 rounded-lg disabled:opacity-40 cursor-pointer"
+                    title="الصفحة التالية"
+                  >
+                    <ChevronLeft className="w-4 h-4" />
+                  </button>
+                </div>
               </div>
             </div>
 
-            {/* Empty state */}
+            {/* Empty state with helpful recovery actions */}
             {bibRunners.length === 0 && (
-              <div className="flex-1 flex flex-col items-center justify-center p-12 text-center text-slate-400">
+              <div className="flex-1 flex flex-col items-center justify-center p-8 text-center bg-white dark:bg-slate-950 rounded-2xl border border-slate-200 dark:border-slate-800">
                 <span className="text-5xl mb-3">🎽</span>
-                <h4 className="text-base font-black text-slate-700 dark:text-slate-300">لا توجد صدريات مطابقة للفلترة المحددة</h4>
-                <p className="text-xs mt-1 max-w-md text-slate-500">
-                  يمكنك تغيير المسابقة أو اختيار "توليد أرقام متسلسلة" لإعداد الصدريات فوراً دون الحاجة لبيانات مسجلة مسبقاً.
+                <h4 className="text-base font-black text-slate-800 dark:text-slate-200">
+                  {generationSource === 'registered' && selectedDisciplineId !== 'ALL'
+                    ? `لا يوجد مسجلون في مسابقة «${activeDisciplineObj?.nameAr || selectedDisciplineId}»`
+                    : 'لا توجد صدريات مطابقة للفلترة المحددة'}
+                </h4>
+                <p className="text-xs mt-1.5 max-w-md text-slate-500">
+                  {generationSource === 'registered'
+                    ? `يوجد ${participants.length} مشارك مسجل في قاعدة بيانات ألعاب القوى. يمكنك اختيار مسابقة أخرى أو عرض كافة المسابقات.`
+                    : 'يمكنك تغيير المسابقة أو توليد أرقام متسلسلة فوراً.'}
                 </p>
+
+                <div className="flex items-center gap-2 mt-4 flex-wrap justify-center">
+                  {generationSource === 'registered' && selectedDisciplineId !== 'ALL' && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedDisciplineId('ALL');
+                        setDisciplineGroupFilter('ALL');
+                      }}
+                      className="px-3.5 py-1.5 bg-orange-600 hover:bg-orange-700 text-white rounded-xl text-xs font-black shadow-xs cursor-pointer transition-all"
+                    >
+                      ⭐ عرض كافة المسجلين في ألعاب القوى ({participants.length})
+                    </button>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setGenerationSource('demo');
+                      toast.success('تم تفعيل المشاركين التجريبيين للمعاينة والتجربة! 🧪');
+                    }}
+                    className="px-3.5 py-1.5 bg-purple-100 hover:bg-purple-200 text-purple-900 rounded-xl text-xs font-black cursor-pointer transition-all"
+                  >
+                    🧪 تجربة مشاركين تجريبيين (Demo)
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setGenerationSource('sequential');
+                      toast.success('تم التحويل إلى الترقيم المتسلسل المباشر للمسابقة!');
+                    }}
+                    className="px-3.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-black cursor-pointer transition-all"
+                  >
+                    🔢 توليد أرقام متسلسلة للمسابقة
+                  </button>
+                </div>
               </div>
             )}
 
@@ -1564,7 +2094,7 @@ export const AthleticsBibGeneratorModal: React.FC<AthleticsBibGeneratorModalProp
                   <div
                     key={`bib-runner-${runner.id}-${idx}`}
                     className="bg-white rounded-3xl border-2 border-slate-900 shadow-xl overflow-hidden relative flex flex-col justify-between transition-all hover:shadow-2xl select-none"
-                    style={{ minHeight: '280px' }}
+                    style={{ minHeight: '300px' }}
                   >
                     {/* Punch hole indicators (4 corners for safety pins) */}
                     <div className="absolute top-2.5 right-2.5 w-3 h-3 rounded-full border border-slate-400 bg-slate-100 z-10 flex items-center justify-center">
@@ -1580,17 +2110,49 @@ export const AthleticsBibGeneratorModal: React.FC<AthleticsBibGeneratorModalProp
                       <div className="w-1 h-1 rounded-full bg-slate-400" />
                     </div>
 
-                    {/* Top Header Bar */}
-                    <div className={`${themeClasses.headerBg} text-white px-4 py-2.5 flex items-center justify-between text-center`}>
-                      <span className="text-[10px] font-black tracking-wider uppercase opacity-90">
-                        ATHLETICS
-                      </span>
-                      <span className="text-xs sm:text-sm font-black truncate max-w-[200px]">
-                        {championshipHeaderTitle}
-                      </span>
-                      <span className="text-[10px] font-black tracking-wider uppercase opacity-90">
-                        BIB
-                      </span>
+                    {/* Top Header Bar with Right and Left University Logos */}
+                    <div className={`${themeClasses.headerBg} text-white px-3 py-2 flex items-center justify-between text-center relative overflow-hidden`}>
+                      {/* Right Logo (لوغو الجامعة على اليمين) */}
+                      {showUniversityLogo ? (
+                        <div className="w-8 h-8 rounded-lg bg-white/20 backdrop-blur-xs p-1 shrink-0 border border-white/30 flex items-center justify-center shadow-xs">
+                          {universityLogo ? (
+                            <img src={universityLogo} alt="شعار الجامعة" className="w-full h-full object-contain" />
+                          ) : (
+                            <AppLogo size={20} />
+                          )}
+                        </div>
+                      ) : (
+                        <span className="text-[10px] font-black tracking-wider uppercase opacity-90">
+                          ATHLETICS
+                        </span>
+                      )}
+
+                      {/* Center Title */}
+                      <div className="flex flex-col items-center justify-center flex-1 px-2 min-w-0">
+                        <span className="text-xs sm:text-sm font-black truncate max-w-[220px] drop-shadow-xs">
+                          {championshipHeaderTitle}
+                        </span>
+                        {subHeaderTitle && (
+                          <span className="text-[9px] text-white/80 font-bold truncate max-w-[200px]">
+                            {subHeaderTitle}
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Left Logo (لوغو الجامعة على اليسار) */}
+                      {showUniversityLogo ? (
+                        <div className="w-8 h-8 rounded-lg bg-white/20 backdrop-blur-xs p-1 shrink-0 border border-white/30 flex items-center justify-center shadow-xs">
+                          {universityLogo ? (
+                            <img src={universityLogo} alt="شعار الجامعة" className="w-full h-full object-contain" />
+                          ) : (
+                            <AppLogo size={20} />
+                          )}
+                        </div>
+                      ) : (
+                        <span className="text-[10px] font-black tracking-wider uppercase opacity-90">
+                          BIB
+                        </span>
+                      )}
                     </div>
 
                     {/* THE CRITICAL REQUIREMENT: Competition Name Banner on Bib */}
@@ -1621,9 +2183,20 @@ export const AthleticsBibGeneratorModal: React.FC<AthleticsBibGeneratorModalProp
                       </div>
                     )}
 
-                    {/* Huge Bib Number in Center */}
-                    <div className="my-2 py-1 flex items-center justify-center text-center">
-                      <span className={`font-mono text-6xl sm:text-7xl md:text-8xl font-black tracking-tighter ${themeClasses.numberColor}`}>
+                    {/* Huge Bib Number in Center - Proportionally Maximized to Empty Space with dynamic scale slider */}
+                    <div className="flex-1 my-auto py-2 px-2 flex items-center justify-center text-center overflow-hidden">
+                      <span 
+                        style={{ 
+                          fontFamily: BIB_FONTS.find(f => f.id === bibNumberFont)?.family || "'Changa', sans-serif",
+                          fontSize: `calc(${
+                            isMaximizedNumber 
+                              ? (String(runner.bibNumber).length <= 2 ? 'clamp(5rem, 15vw, 7.5rem)' : String(runner.bibNumber).length === 3 ? 'clamp(4.2rem, 12vw, 6.2rem)' : 'clamp(3.2rem, 9vw, 4.8rem)')
+                              : (String(runner.bibNumber).length <= 2 ? 'clamp(3.8rem, 10vw, 5.2rem)' : String(runner.bibNumber).length === 3 ? 'clamp(3rem, 8vw, 4.2rem)' : 'clamp(2.4rem, 6vw, 3.4rem)')
+                          } * ${bibNumberScale})`,
+                          lineHeight: 0.95
+                        }}
+                        className={`font-black tracking-tight select-none transition-all duration-150 ${themeClasses.numberColor}`}
+                      >
                         {runner.bibNumber}
                       </span>
                     </div>

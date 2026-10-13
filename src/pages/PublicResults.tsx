@@ -25,6 +25,7 @@ export const PublicResults: React.FC = () => {
 
   // Filters for Cross Country
   const [ccAffiliation, setCcAffiliation] = useState<'CLUB' | 'NON_CLUB'>('NON_CLUB');
+  const [resultsVersion, setResultsVersion] = useState(0);
 
   const loadData = async (dirId?: string) => {
     setLoading(true);
@@ -59,6 +60,21 @@ export const PublicResults: React.FC = () => {
 
   useEffect(() => {
     loadData();
+
+    const handleResultsUpdate = () => {
+      setResultsVersion(v => v + 1);
+      loadData();
+    };
+
+    window.addEventListener('athleticsResultsUpdated', handleResultsUpdate);
+    window.addEventListener('resultsChanged', handleResultsUpdate);
+    window.addEventListener('storage', handleResultsUpdate);
+
+    return () => {
+      window.removeEventListener('athleticsResultsUpdated', handleResultsUpdate);
+      window.removeEventListener('resultsChanged', handleResultsUpdate);
+      window.removeEventListener('storage', handleResultsUpdate);
+    };
   }, []);
 
   const handleDirectorateChange = async (newDirId: string) => {
@@ -170,35 +186,64 @@ export const PublicResults: React.FC = () => {
 
   // Athletics List Processing
   const athleticsList = useMemo(() => {
-    const list = (Object.values(athResults) as AthleticsCategoryResult[]).filter(res => res && res.podium && res.podium.length > 0);
+    const list: any[] = [];
+    const seenIds = new Set<string>();
+
+    // 1. Process results from athResults (DataService / Firestore / taourirt_athletics_results)
+    (Object.values(athResults) as AthleticsCategoryResult[]).forEach(res => {
+      if (res && res.podium && res.podium.length > 0) {
+        // If validated or completed
+        if ((res as any).isFinallyValidated === true || res.status === 'completed') {
+          seenIds.add(res.id);
+          list.push({
+            id: res.id,
+            category: res.category,
+            gender: res.gender,
+            specialtyName: res.specialtyName,
+            specialtyType: res.specialtyType || 'track',
+            status: 'completed',
+            directorateId: res.directorateId || selectedDirId,
+            podium: res.podium
+          });
+        }
+      }
+    });
     
-    // Also include completed results from AthleticsService
+    // 2. Also include validated results directly from AthleticsService
     const customAthResults = AthleticsService.getAllResults();
     const disciplines = AthleticsService.getDisciplines();
 
     Object.values(customAthResults).forEach(res => {
-      if (res.status === 'completed') {
+      if (res.status === 'completed' && res.isFinallyValidated === true && !seenIds.has(res.id)) {
         const disc = disciplines.find(d => d.id === res.disciplineId);
         const specName = disc?.nameAr || res.disciplineId;
         
         let podiumItems: any[] = [];
         if (res.type === 'track' && res.trackLaps) {
-          podiumItems = res.trackLaps.slice(0, 3).map((lap, idx) => ({
-            rank: (idx + 1) as 1 | 2 | 3,
-            fullName: lap.studentName || 'عداء',
-            schoolName: lap.schoolName || '',
-            performance: lap.formattedTime
-          }));
+          podiumItems = res.trackLaps
+            .slice(0, 3)
+            .filter(lap => lap.participantId || lap.studentName)
+            .map((lap, idx) => ({
+              rank: (idx + 1) as 1 | 2 | 3,
+              fullName: lap.studentName || 'عداء',
+              schoolName: lap.schoolName || '',
+              performance: lap.formattedTime
+            }));
         } else if (res.fieldEntries) {
-          podiumItems = res.fieldEntries.slice(0, 3).map((f, idx) => ({
-            rank: (idx + 1) as 1 | 2 | 3,
-            fullName: f.studentName || 'متسابق',
-            schoolName: f.schoolName || '',
-            performance: f.bestAttempt ? `${f.bestAttempt.toFixed(2)} م` : '-'
-          }));
+          const sortedField = [...res.fieldEntries].sort((a, b) => (b.bestAttempt || 0) - (a.bestAttempt || 0));
+          podiumItems = sortedField
+            .slice(0, 3)
+            .filter(f => f.participantId || f.studentName)
+            .map((f, idx) => ({
+              rank: (idx + 1) as 1 | 2 | 3,
+              fullName: f.studentName || 'متسابق',
+              schoolName: f.schoolName || '',
+              performance: f.bestAttempt ? `${f.bestAttempt.toFixed(2)} م` : '-'
+            }));
         }
 
         if (podiumItems.length > 0) {
+          seenIds.add(res.id);
           list.push({
             id: res.id,
             category: res.category,
@@ -214,7 +259,7 @@ export const PublicResults: React.FC = () => {
     });
 
     return list;
-  }, [athResults, selectedDirId]);
+  }, [athResults, selectedDirId, resultsVersion]);
 
   if (loading) {
     return (

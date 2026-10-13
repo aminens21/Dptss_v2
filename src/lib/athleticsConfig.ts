@@ -409,6 +409,8 @@ export interface AthleticsEventResult {
   committeeId: string;
   type: 'track' | 'field';
   status: 'draft' | 'running' | 'completed';
+  isFinallyValidated?: boolean;
+  finalValidationDate?: string;
   trackLaps?: TrackRankEntry[];
   fieldEntries?: FieldAttemptEntry[];
   recordedByTeacherName?: string;
