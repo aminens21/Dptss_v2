@@ -222,6 +222,19 @@ html.dark .shadow-2xl {
 .animate-ticker-slow:hover {
   animation-play-state: paused;
 }
+
+@keyframes tickerSlowReverse {
+  0% { transform: translateX(-50%); }
+  100% { transform: translateX(0); }
+}
+
+.animate-ticker-slow-reverse {
+  animation: tickerSlowReverse 70s linear infinite;
+}
+
+.animate-ticker-slow-reverse:hover {
+  animation-play-state: paused;
+}
 .no-scrollbar::-webkit-scrollbar {
   display: none !important;
   width: 0 !important;

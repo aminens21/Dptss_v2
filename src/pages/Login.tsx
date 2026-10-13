@@ -101,6 +101,10 @@ export const Login: React.FC = () => {
   const ccCategoryScrollRef = useRef<HTMLDivElement>(null);
   const athCategoryScrollRef = useRef<HTMLDivElement>(null);
   const genericCategoryScrollRef = useRef<HTMLDivElement>(null);
+  const sportsBarRef = useRef<HTMLDivElement>(null);
+  const [isSportsBarDragging, setIsSportsBarDragging] = useState(false);
+  const [sportsBarStartX, setSportsBarStartX] = useState(0);
+  const [sportsBarScrollLeft, setSportsBarScrollLeft] = useState(0);
 
   const scrollContainer = (ref: React.RefObject<HTMLDivElement>, direction: 'left' | 'right') => {
     if (ref.current) {
@@ -2081,7 +2085,7 @@ export const Login: React.FC = () => {
           </div>
         </header>
 
-        {/* SPORTS BAR (شريط الرياضات) */}
+        {/* SPORTS BAR (شريط الرياضات مع عكس الاتجاه وإمكانية التحريك اليدوي والسحب) */}
         <section className="bg-white/50 dark:bg-slate-900/50 py-1.5 px-3 sm:px-6 shadow-xs select-none transition-all">
           <div className="max-w-4xl mx-auto flex items-center justify-between gap-2">
             
@@ -2091,8 +2095,45 @@ export const Login: React.FC = () => {
                 <span>شريط الرياضات:</span>
               </div>
 
-              <div className="flex-1 overflow-hidden relative py-0.5 group">
-                <div className="flex items-center gap-1.5 w-max animate-ticker-slow">
+              {/* Manual navigation buttons */}
+              <div className="flex items-center gap-1 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => scrollContainer(sportsBarRef, 'right')}
+                  className="p-1 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-600 dark:text-slate-300 transition-colors cursor-pointer"
+                  title="تحريك لليمين"
+                >
+                  <ChevronRight className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => scrollContainer(sportsBarRef, 'left')}
+                  className="p-1 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-600 dark:text-slate-300 transition-colors cursor-pointer"
+                  title="تحريك لليسار"
+                >
+                  <ChevronLeft className="w-3.5 h-3.5" />
+                </button>
+              </div>
+
+              <div 
+                ref={sportsBarRef}
+                onMouseDown={(e) => {
+                  setIsSportsBarDragging(true);
+                  setSportsBarStartX(e.pageX - sportsBarRef.current!.offsetLeft);
+                  setSportsBarScrollLeft(sportsBarRef.current!.scrollLeft);
+                }}
+                onMouseLeave={() => setIsSportsBarDragging(false)}
+                onMouseUp={() => setIsSportsBarDragging(false)}
+                onMouseMove={(e) => {
+                  if (!isSportsBarDragging || !sportsBarRef.current) return;
+                  e.preventDefault();
+                  const x = e.pageX - sportsBarRef.current.offsetLeft;
+                  const walk = (x - sportsBarStartX) * 1.5;
+                  sportsBarRef.current.scrollLeft = sportsBarScrollLeft - walk;
+                }}
+                className="flex-1 overflow-x-auto overflow-y-hidden relative py-0.5 group cursor-grab active:cursor-grabbing no-scrollbar"
+              >
+                <div className="flex items-center gap-1.5 w-max animate-ticker-slow-reverse">
                   {/* Set 1 */}
                   <div className="flex items-center gap-1.5">
                     {/* All Sports Option */}
