@@ -105,9 +105,24 @@ export const Login: React.FC = () => {
   const [isSportsBarDragging, setIsSportsBarDragging] = useState(false);
   const [sportsBarStartX, setSportsBarStartX] = useState(0);
   const [sportsBarScrollLeft, setSportsBarScrollLeft] = useState(0);
+  const [isSportsBarPaused, setIsSportsBarPaused] = useState(false);
+  const sportsBarTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  const triggerSportsBarPause = () => {
+    setIsSportsBarPaused(true);
+    if (sportsBarTimeoutRef.current) {
+      clearTimeout(sportsBarTimeoutRef.current);
+    }
+    sportsBarTimeoutRef.current = setTimeout(() => {
+      setIsSportsBarPaused(false);
+    }, 2000);
+  };
 
   const scrollContainer = (ref: React.RefObject<HTMLDivElement>, direction: 'left' | 'right') => {
     if (ref.current) {
+      if (ref === sportsBarRef) {
+        triggerSportsBarPause();
+      }
       const scrollAmount = 200;
       ref.current.scrollBy({
         left: direction === 'left' ? -scrollAmount : scrollAmount,
@@ -2118,121 +2133,125 @@ export const Login: React.FC = () => {
               <div 
                 ref={sportsBarRef}
                 onMouseDown={(e) => {
+                  triggerSportsBarPause();
                   setIsSportsBarDragging(true);
                   setSportsBarStartX(e.pageX - sportsBarRef.current!.offsetLeft);
                   setSportsBarScrollLeft(sportsBarRef.current!.scrollLeft);
                 }}
                 onMouseLeave={() => setIsSportsBarDragging(false)}
                 onMouseUp={() => setIsSportsBarDragging(false)}
+                onWheel={() => triggerSportsBarPause()}
+                onTouchStart={() => triggerSportsBarPause()}
                 onMouseMove={(e) => {
                   if (!isSportsBarDragging || !sportsBarRef.current) return;
                   e.preventDefault();
+                  triggerSportsBarPause();
                   const x = e.pageX - sportsBarRef.current.offsetLeft;
                   const walk = (x - sportsBarStartX) * 1.5;
                   sportsBarRef.current.scrollLeft = sportsBarScrollLeft - walk;
                 }}
                 className="flex-1 overflow-x-auto overflow-y-hidden relative py-0.5 group cursor-grab active:cursor-grabbing no-scrollbar"
               >
-                <div className="flex items-center gap-1.5 w-max animate-ticker-slow-reverse">
+                <div className={`flex items-center gap-1.5 w-max ${isSportsBarPaused ? '' : 'animate-ticker-slow-reverse'}`}>
                   {/* Set 1 */}
-                  <div className="flex items-center gap-1.5">
-                    {/* All Sports Option */}
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setSelectedSport('ALL');
-                        setActivePublicTab('MATCHES');
-                        setSelectedCategory('ALL');
-                      }}
-                      className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer flex items-center gap-1.5 shrink-0 ${
-                        selectedSport === 'ALL'
-                          ? 'bg-emerald-500 text-white shadow-md shadow-emerald-500/20'
-                          : 'bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white border border-slate-200 dark:border-slate-700/60'
-                      }`}
-                    >
-                      <span>🏆</span>
-                      <span>جميع الرياضات</span>
-                    </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      triggerSportsBarPause();
+                      setSelectedSport('ALL');
+                      setActivePublicTab('MATCHES');
+                      setSelectedCategory('ALL');
+                    }}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer flex items-center gap-1.5 shrink-0 ${
+                      selectedSport === 'ALL'
+                        ? 'bg-emerald-500 text-white shadow-md shadow-emerald-500/20'
+                        : 'bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white border border-slate-200 dark:border-slate-700/60'
+                    }`}
+                  >
+                    <span>🏆</span>
+                    <span>جميع الرياضات</span>
+                  </button>
 
-                    {/* Individual Sports from SPORTS_MAP */}
-                    {Object.entries(SPORTS_MAP).map(([sportKey, sport]) => {
-                      const isSelected = selectedSport === sportKey;
-                      return (
-                        <button
-                          key={sportKey}
-                          type="button"
-                          onClick={() => {
-                            setSelectedSport(sportKey);
-                            if (sportKey === 'cross_country') {
-                              setActivePublicTab('CC_PODIUM');
-                            } else if (sportKey === 'athletics') {
-                              setActivePublicTab('ATHLETICS');
-                            } else {
-                              setActivePublicTab('MATCHES');
-                            }
-                            setSelectedCategory('ALL');
-                          }}
-                          className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer flex items-center gap-1.5 shrink-0 ${
-                            isSelected
-                              ? 'bg-emerald-500 text-white shadow-md shadow-emerald-500/20'
-                              : 'bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white border border-slate-200 dark:border-slate-700/60'
-                          }`}
-                        >
-                          <span className="text-sm">{sport.icon}</span>
-                          <span>{sport.name}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
+                  {Object.entries(SPORTS_MAP).map(([sportKey, sport]) => {
+                    const isSelected = selectedSport === sportKey;
+                    return (
+                      <button
+                        key={sportKey}
+                        type="button"
+                        onClick={() => {
+                          triggerSportsBarPause();
+                          setSelectedSport(sportKey);
+                          if (sportKey === 'cross_country') {
+                            setActivePublicTab('CC_PODIUM');
+                          } else if (sportKey === 'athletics') {
+                            setActivePublicTab('ATHLETICS');
+                          } else {
+                            setActivePublicTab('MATCHES');
+                          }
+                          setSelectedCategory('ALL');
+                        }}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer flex items-center gap-1.5 shrink-0 ${
+                          isSelected
+                            ? 'bg-emerald-500 text-white shadow-md shadow-emerald-500/20'
+                            : 'bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white border border-slate-200 dark:border-slate-700/60'
+                        }`}
+                      >
+                        <span className="text-sm">{sport.icon}</span>
+                        <span>{sport.name}</span>
+                      </button>
+                    );
+                  })}
 
                   {/* Set 2 (Duplicate for seamless loop) */}
-                  <div className="flex items-center gap-1.5" aria-hidden="true">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setSelectedSport('ALL');
-                        setActivePublicTab('MATCHES');
-                        setSelectedCategory('ALL');
-                      }}
-                      className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer flex items-center gap-1.5 shrink-0 ${
-                        selectedSport === 'ALL'
-                          ? 'bg-emerald-500 text-white shadow-md shadow-emerald-500/20'
-                          : 'bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white border border-slate-200 dark:border-slate-700/60'
-                      }`}
-                    >
-                      <span>🏆</span>
-                      <span>جميع الرياضات</span>
-                    </button>
+                  <button
+                    type="button"
+                    aria-hidden="true"
+                    onClick={() => {
+                      triggerSportsBarPause();
+                      setSelectedSport('ALL');
+                      setActivePublicTab('MATCHES');
+                      setSelectedCategory('ALL');
+                    }}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer flex items-center gap-1.5 shrink-0 ${
+                      selectedSport === 'ALL'
+                        ? 'bg-emerald-500 text-white shadow-md shadow-emerald-500/20'
+                        : 'bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white border border-slate-200 dark:border-slate-700/60'
+                    }`}
+                  >
+                    <span>🏆</span>
+                    <span>جميع الرياضات</span>
+                  </button>
 
-                    {Object.entries(SPORTS_MAP).map(([sportKey, sport]) => {
-                      const isSelected = selectedSport === sportKey;
-                      return (
-                        <button
-                          key={`dup-${sportKey}`}
-                          type="button"
-                          onClick={() => {
-                            setSelectedSport(sportKey);
-                            if (sportKey === 'cross_country') {
-                              setActivePublicTab('CC_PODIUM');
-                            } else if (sportKey === 'athletics') {
-                              setActivePublicTab('ATHLETICS');
-                            } else {
-                              setActivePublicTab('MATCHES');
-                            }
-                            setSelectedCategory('ALL');
-                          }}
-                          className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer flex items-center gap-1.5 shrink-0 ${
-                            isSelected
-                              ? 'bg-emerald-500 text-white shadow-md shadow-emerald-500/20'
-                              : 'bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white border border-slate-200 dark:border-slate-700/60'
-                          }`}
-                        >
-                          <span className="text-sm">{sport.icon}</span>
-                          <span>{sport.name}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
+                  {Object.entries(SPORTS_MAP).map(([sportKey, sport]) => {
+                    const isSelected = selectedSport === sportKey;
+                    return (
+                      <button
+                        key={`dup-${sportKey}`}
+                        type="button"
+                        aria-hidden="true"
+                        onClick={() => {
+                          triggerSportsBarPause();
+                          setSelectedSport(sportKey);
+                          if (sportKey === 'cross_country') {
+                            setActivePublicTab('CC_PODIUM');
+                          } else if (sportKey === 'athletics') {
+                            setActivePublicTab('ATHLETICS');
+                          } else {
+                            setActivePublicTab('MATCHES');
+                          }
+                          setSelectedCategory('ALL');
+                        }}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer flex items-center gap-1.5 shrink-0 ${
+                          isSelected
+                            ? 'bg-emerald-500 text-white shadow-md shadow-emerald-500/20'
+                            : 'bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white border border-slate-200 dark:border-slate-700/60'
+                        }`}
+                      >
+                        <span className="text-sm">{sport.icon}</span>
+                        <span>{sport.name}</span>
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
             </div>
