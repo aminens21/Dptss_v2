@@ -207,6 +207,7 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
 
   // --- FIELD ATTEMPTS STATE ---
   const [fieldTrials, setFieldTrials] = useState<FieldAttemptEntry[]>([]);
+  const [maxFieldAttempts, setMaxFieldAttempts] = useState<number>(3); // 1, 2, or 3 attempts
 
   // Load all initial data
   const loadAllAthleticsData = () => {
@@ -1034,7 +1035,7 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
       bibNumber: p ? p.bibNumber : '',
       studentName: p ? p.studentName : '',
       schoolName: p ? p.schoolName : '',
-      attempts: [null, null, null],
+      attempts: Array(maxFieldAttempts).fill(null),
       bestAttempt: null
     };
     setFieldTrials(prev => [...prev, newEntry]);
@@ -1082,11 +1083,30 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
       bibNumber: p.bibNumber,
       studentName: p.studentName,
       schoolName: p.schoolName,
-      attempts: [null, null, null],
+      attempts: Array(maxFieldAttempts).fill(null),
       bestAttempt: null
     }));
     setFieldTrials(entries);
     toast.success(`تم إدراج ${entries.length} تلميذ(ة) مسجل في الاختبار`);
+  };
+
+  const handleSortFieldTrialsRank = () => {
+    setFieldTrials(prev => {
+      const copy = [...prev];
+      const sorted = copy.sort((a, b) => (b.bestAttempt || 0) - (a.bestAttempt || 0));
+      return sorted.map((item, idx) => ({
+        ...item,
+        rank: item.bestAttempt !== null && item.bestAttempt !== undefined ? idx + 1 : undefined
+      }));
+    });
+    toast.success('تم ترتيب المتسابقين تنازلياً حسب أفضل محاولة بنجاح! 🏆');
+  };
+
+  const getCategorizedParticipantsForField = (currentParticipantId?: string) => {
+    const chosenIds = new Set(fieldTrials.map(f => f.participantId).filter(Boolean));
+    const available = currentEventParticipants.filter(p => !chosenIds.has(p.id) || p.id === currentParticipantId);
+    const alreadyChosen = currentEventParticipants.filter(p => chosenIds.has(p.id) && p.id !== currentParticipantId);
+    return { available, alreadyChosen };
   };
 
   const handleUpdateAttempt = (entryIndex: number, attemptIndex: number, valStr: string) => {
@@ -1102,7 +1122,8 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
       if (valStr.toUpperCase() === 'X') {
         attempts[attemptIndex] = 'X';
       } else {
-        const num = parseFloat(valStr);
+        const normalized = valStr.trim().replace(',', '.');
+        const num = parseFloat(normalized);
         attempts[attemptIndex] = isNaN(num) ? null : num;
       }
       entry.attempts = attempts;
@@ -2865,615 +2886,901 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
           )}
 
           {/* ======================================================================= */}
-          {/* TAB 3: SMART STOPWATCH & MULTI-RANK RECORDER */}
+          {/* TAB 3: SMART STOPWATCH (FOR TRACK) OR FIELD MANUAL MEASUREMENT (FOR JUMP/THROW) */}
           {/* ======================================================================= */}
           {activeTab === 'stopwatch' && activeDiscipline && (
-            <div className="space-y-6">
-              
-              {/* Event Selector & Info Header (مخفي في وضعية الهاتف لتوفير المساحة وإبراز الميقاتي) */}
-              <div className="hidden sm:flex bg-white dark:bg-slate-950 p-4 rounded-3xl border border-slate-200 dark:border-slate-800 flex-col lg:flex-row lg:items-center justify-between gap-4 transition-colors">
-                <div className="flex items-center gap-3">
-                  <span className="text-3xl p-3 bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-100 dark:border-emerald-800 rounded-2xl text-emerald-600 dark:text-emerald-400">
-                    ⚡
-                  </span>
-                  <div>
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <h3 className="text-lg font-black text-slate-900 dark:text-white">
-                        {activeDiscipline.nameAr}
-                      </h3>
-                      <span className="px-2.5 py-0.5 text-xs font-black bg-blue-100 dark:bg-blue-500/20 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-500/30 rounded-lg">
-                        {selectedCategory}
-                      </span>
-                      <span className="px-2.5 py-0.5 text-xs font-black bg-pink-100 dark:bg-pink-500/20 text-pink-700 dark:text-pink-300 border border-pink-200 dark:border-pink-500/30 rounded-lg">
-                        {selectedGender === 'Male' ? 'ذكور' : 'إناث'}
-                      </span>
-                    </div>
-                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                      الأستاذ المسؤول: <span className="text-amber-600 dark:text-amber-400 font-bold">{currentCommitteeAssignment?.teacherName || 'غير معين'}</span>
-                    </p>
-                  </div>
-                </div>
-
-                {/* Quick Switch Dropdown */}
-                <div className="flex items-center gap-2 flex-wrap">
-                  <select
-                    value={activeDiscipline?.id || ''}
-                    onChange={(e) => {
-                      const disc = currentCategoryGendersDisciplines.find(d => d.id === e.target.value);
-                      if (disc) setSelectedDiscipline(disc);
-                    }}
-                    className="px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white cursor-pointer"
-                  >
-                    {currentCategoryGendersDisciplines.filter(d => d.type.startsWith('track')).map(d => (
-                      <option key={d.id} value={d.id}>{d.nameAr}</option>
-                    ))}
-                  </select>
-
-                  <select
-                    value={selectedCategory}
-                    onChange={(e) => setSelectedCategory(e.target.value as any)}
-                    className="px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white cursor-pointer"
-                  >
-                    <option value="U12">براعم (U12)</option>
-                    <option value="U15">صغار (U15)</option>
-                    <option value="U18">فتيان (U18)</option>
-                    <option value="U20">شبان (U20)</option>
-                  </select>
-
-                  <select
-                    value={selectedGender}
-                    onChange={(e) => setSelectedGender(e.target.value as any)}
-                    className="px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white cursor-pointer"
-                  >
-                    <option value="Male">ذكور</option>
-                    <option value="Female">إناث</option>
-                  </select>
-
-                  <button
-                    type="button"
-                    onClick={() => setIsAttendanceModalOpen(true)}
-                    className="p-2 sm:px-3 sm:py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-black transition-all flex items-center gap-1.5 cursor-pointer shadow-md shadow-indigo-600/20 active:scale-95"
-                    title="غرفة المناداة وتأكيد حضور العدائين وتوزيع الممرات"
-                  >
-                    <ClipboardList className="w-3.5 h-3.5" />
-                    <span className="hidden sm:inline">غرفة المناداة</span>
-                    <span className="px-1.5 py-0.5 bg-indigo-800 rounded-md text-[10px] font-mono font-bold">
-                      {attendanceStats.present}/{attendanceStats.total}
+            activeDiscipline.type.startsWith('field') ? (
+              <div className="space-y-6">
+                {/* Field Header & Info */}
+                <div className="bg-white dark:bg-slate-950 p-4 rounded-3xl border border-slate-200 dark:border-slate-800 flex flex-col lg:flex-row lg:items-center justify-between gap-4 transition-colors">
+                  <div className="flex items-center gap-3">
+                    <span className="text-3xl p-3 bg-blue-50 dark:bg-blue-950/60 border border-blue-100 dark:border-blue-800 rounded-2xl text-blue-600 dark:text-blue-400">
+                      {activeDiscipline.id.includes('shot') ? '☄️' : '🦘'}
                     </span>
-                  </button>
+                    <div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <h3 className="text-lg font-black text-slate-900 dark:text-white">
+                          {activeDiscipline.nameAr}
+                        </h3>
+                        <span className="px-2.5 py-0.5 text-xs font-black bg-blue-100 dark:bg-blue-500/20 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-500/30 rounded-lg">
+                          {selectedCategory}
+                        </span>
+                        <span className="px-2.5 py-0.5 text-xs font-black bg-pink-100 dark:bg-pink-500/20 text-pink-700 dark:text-pink-300 border border-pink-200 dark:border-pink-500/30 rounded-lg">
+                          {selectedGender === 'Male' ? 'ذكور' : 'إناث'}
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                        الأستاذ المسؤول: <span className="text-amber-600 dark:text-amber-400 font-bold">{currentCommitteeAssignment?.teacherName || 'غير معين'}</span> • القياس اليدوي بالمتر
+                      </p>
+                    </div>
+                  </div>
 
-                  <button
-                    type="button"
-                    onClick={handleClearCurrentRaceData}
-                    className="p-2 sm:px-3 sm:py-2 bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-300 dark:border-rose-800 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-xs active:scale-95"
-                    title="تفريغ بيانات هذا السباق ومسح مراتب الوصول والميقاتي للبدء من جديد"
-                  >
-                    <RotateCcw className="w-3.5 h-3.5 text-rose-500" />
-                    <span className="hidden sm:inline">تفريغ السباق</span>
-                  </button>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <select
+                      value={activeDiscipline?.id || ''}
+                      onChange={(e) => {
+                        const disc = currentCategoryGendersDisciplines.find(d => d.id === e.target.value);
+                        if (disc) setSelectedDiscipline(disc);
+                      }}
+                      className="px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white cursor-pointer"
+                    >
+                      {currentCategoryGendersDisciplines.filter(d => d.type.startsWith('field')).map(d => (
+                        <option key={d.id} value={d.id}>{d.nameAr}</option>
+                      ))}
+                    </select>
 
-                  {!isTeacher && activeDiscipline && (
+                    <select
+                      value={selectedCategory}
+                      onChange={(e) => setSelectedCategory(e.target.value as any)}
+                      className="px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white cursor-pointer"
+                    >
+                      <option value="U12">براعم (U12)</option>
+                      <option value="U15">صغار (U15)</option>
+                      <option value="U18">فتيان (U18)</option>
+                      <option value="U20">شبان (U20)</option>
+                    </select>
+
+                    <select
+                      value={selectedGender}
+                      onChange={(e) => setSelectedGender(e.target.value as any)}
+                      className="px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white cursor-pointer"
+                    >
+                      <option value="Male">ذكور</option>
+                      <option value="Female">إناث</option>
+                    </select>
+
                     <button
                       type="button"
-                      onClick={() => {
-                        handleStartEditDiscipline(activeDiscipline);
-                        setIsSettingsModalOpen(true);
-                        setSettingsActiveTab('disciplines');
-                      }}
-                      className="p-2 sm:px-3 sm:py-2 bg-amber-500/20 hover:bg-amber-500 border border-amber-500/40 text-amber-700 dark:text-amber-300 hover:text-white rounded-xl text-xs font-black transition-all flex items-center gap-1.5 cursor-pointer shadow-xs"
-                      title="تعديل بيانات هذا السباق"
+                      onClick={handleClearCurrentRaceData}
+                      className="p-2 sm:px-3 sm:py-2 bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 border border-rose-300 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer"
                     >
-                      <Edit2 className="w-3.5 h-3.5" />
-                      <span className="hidden sm:inline">تعديل السباق</span>
+                      <RotateCcw className="w-3.5 h-3.5 text-rose-500" />
+                      <span>تفريغ المسابقة</span>
                     </button>
-                  )}
-                </div>
-              </div>
-
-              {/* Direct Unified Race Information Bar (سباق مباشر موحد بدون سلاسل) */}
-              <div className="bg-slate-900/90 border border-slate-800 rounded-3xl p-4 shadow-lg flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                <div className="flex items-center gap-3">
-                  <span className="text-2xl p-2.5 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl text-emerald-400">🏃</span>
-                  <div>
-                    <h4 className="text-sm font-black text-white flex items-center gap-2 flex-wrap">
-                      <span>السباق المباشر الموحد ({selectedCategory} - {selectedGender === 'Male' ? 'ذكور' : 'إناث'})</span>
-                      <span className="px-2.5 py-0.5 rounded-full text-xs font-black bg-emerald-600/30 text-emerald-300 border border-emerald-500/40">
-                        سباق مباشر موحد
-                      </span>
-                    </h4>
-                    <p className="text-xs text-slate-400 mt-0.5 font-medium">
-                      المنافسة مباشرة وموحدة لكافة المتسابقين. تُسجل الوصولات تباعاً ولا تصدر النتائج إلا بالمصادقة النهائية بعد انتهاء كافة المتسابقين.
-                    </p>
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2">
-                  <div className="px-3 py-1.5 bg-slate-950 border border-slate-800 rounded-xl text-xs font-bold text-slate-300 flex items-center gap-2">
-                    <span>المتسابقون المسجلون:</span>
-                    <span className="font-mono font-black text-amber-400">{currentEventParticipants.length}</span>
+                {/* Information & Attempts Count Selector Bar */}
+                <div className="bg-slate-900 border border-slate-800 rounded-3xl p-4 shadow-lg flex flex-col md:flex-row md:items-center justify-between gap-4">
+                  <div className="flex items-center gap-3">
+                    <span className="text-2xl p-2.5 bg-blue-500/10 border border-blue-500/20 rounded-2xl text-blue-400">📏</span>
+                    <div>
+                      <h4 className="text-sm font-black text-white flex items-center gap-2 flex-wrap">
+                        <span>لوحة القياس اليدوي بالمتر ({selectedCategory} - {selectedGender === 'Male' ? 'ذكور' : 'إناث'})</span>
+                        <span className="px-2.5 py-0.5 rounded-full text-xs font-black bg-blue-600/30 text-blue-300 border border-blue-500/40">
+                          إدخال يدوي للمحاولات بالمتر
+                        </span>
+                      </h4>
+                      <p className="text-xs text-slate-400 mt-0.5 font-medium">
+                        يتم اختيار اسم المتسابق يدوياً ثم إدخال الأداءات بالمتر (أو X للمحاولة الخاطئة). بعد الانتهاء، اضغط على ترتيب المتسابقين ثم المصادقة النهائية لتظهر النتائج في منصة التتويج والعموم.
+                      </p>
+                    </div>
                   </div>
-                  <div className="px-3 py-1.5 bg-slate-950 border border-slate-800 rounded-xl text-xs font-bold text-slate-300 flex items-center gap-2">
-                    <span>الوصولات:</span>
-                    <span className="font-mono font-black text-emerald-400">{recordedLaps.length}</span>
+
+                  {/* Attempts Count Selector */}
+                  <div className="flex items-center gap-2 bg-slate-950 p-2 rounded-2xl border border-slate-800 shrink-0">
+                    <span className="text-xs font-bold text-slate-300">عدد المحاولات:</span>
+                    {[1, 2, 3].map(n => (
+                      <button
+                        key={n}
+                        type="button"
+                        onClick={() => {
+                          setMaxFieldAttempts(n);
+                          setFieldTrials(prev => prev.map(entry => {
+                            const newAttempts = [...entry.attempts];
+                            while (newAttempts.length < n) newAttempts.push(null);
+                            while (newAttempts.length > n) newAttempts.pop();
+                            return { ...entry, attempts: newAttempts };
+                          }));
+                          toast.success(`تم ضبط عدد المحاولات على ${n}`);
+                        }}
+                        className={`px-3 py-1 rounded-xl text-xs font-black transition-all cursor-pointer ${
+                          maxFieldAttempts === n
+                            ? 'bg-blue-600 text-white shadow-md'
+                            : 'bg-slate-900 text-slate-400 hover:text-white'
+                        }`}
+                      >
+                        {n === 1 ? 'محاولة واحدة' : n === 2 ? 'محاولتان' : '3 محاولات'}
+                      </button>
+                    ))}
                   </div>
                 </div>
-              </div>
 
-              {/* --- BIG SMART STOPWATCH CONSOLE --- */}
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-                
-                {/* Left (Unified Smart Stopwatch & Rank Console Widget) */}
-                <div className="lg:col-span-6 bg-gradient-to-br from-slate-950 via-slate-900 to-emerald-950/40 border-2 border-emerald-500/30 rounded-3xl p-5 shadow-2xl space-y-4">
-                  
-                  {/* Header & Mode Switch */}
-                  <div className="flex items-center justify-between">
+                {/* Main Table / List of Participants and Attempts */}
+                <div className="bg-slate-950 border border-slate-800 rounded-3xl p-5 space-y-4">
+                  <div className="flex items-center justify-between flex-wrap gap-2">
                     <div className="flex items-center gap-2">
-                      <span className="text-xl p-2 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-emerald-400">⏱️</span>
-                      <div>
-                        <h4 className="text-xs font-black text-white">الميقاتي الذكي للسباق الموحد</h4>
-                        <p className="text-[10px] text-slate-400">الانطلاق، التوقيت، وترتيب العدائين في زر واحد ومختصر</p>
-                      </div>
+                      <Trophy className="w-5 h-5 text-amber-500" />
+                      <h4 className="text-sm font-black text-white">لائحة المحاولات والقياسات اليدوية</h4>
                     </div>
-                    
-                    <button
-                      onClick={() => setIsManualTrackEntry(!isManualTrackEntry)}
-                      className={`px-2.5 py-1 rounded-xl text-[10px] font-black border transition-all ${
-                        isManualTrackEntry ? 'bg-amber-600 text-white border-amber-500' : 'bg-slate-800 text-slate-300 border-slate-700'
-                      }`}
-                    >
-                      {isManualTrackEntry ? '⌨️ وضع يدوي' : '⚡ وضع الميقاتي'}
-                    </button>
+
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <button
+                        type="button"
+                        onClick={handleBulkImportFieldRegistered}
+                        className="px-3 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-black flex items-center gap-1.5 cursor-pointer transition-all active:scale-95"
+                      >
+                        <Users className="w-3.5 h-3.5" />
+                        <span>إدراج كافة المسجلين ({currentEventParticipants.length})</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleAddFieldTrial()}
+                        className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-black flex items-center gap-1.5 cursor-pointer transition-all active:scale-95"
+                      >
+                        <Plus className="w-3.5 h-3.5 text-blue-400" />
+                        <span>إضافة متسابق يدوياً</span>
+                      </button>
+                    </div>
                   </div>
 
-                  {/* UNIFIED SINGLE MASTER STOPWATCH & RANK BUTTON WITH RESET DIRECTLY UNDERNEATH */}
-                  {(() => {
-                    const nextRankInRace = recordedLaps.length + 1;
-
-                    const handleMasterButtonClick = () => {
-                      if (!isTimerRunning) {
-                        handleStartStopwatch();
-                      } else {
-                        handleTriggerRankSplit();
-                      }
-                    };
-
-                    return (
-                      <div className="space-y-3">
-                        {/* THE SINGLE MASTER BUTTON (الانطلاق + التوقيت الحي + تسجيل مراتب الوصول) */}
-                        <button
-                          type="button"
-                          onClick={handleMasterButtonClick}
-                          className={`w-full rounded-3xl p-6 sm:p-7 flex flex-col items-center justify-center text-center transition-all cursor-pointer active:scale-98 relative overflow-hidden select-none shadow-2xl border-2 ${
-                            !isTimerRunning && elapsedMs === 0
-                              ? 'bg-gradient-to-br from-emerald-600 via-emerald-700 to-teal-800 hover:from-emerald-500 hover:to-teal-700 text-white border-emerald-400/40 shadow-emerald-600/30 ring-4 ring-emerald-500/20'
-                              : isTimerRunning
-                              ? 'bg-gradient-to-br from-amber-500 via-orange-600 to-rose-600 hover:from-amber-400 hover:to-rose-500 text-white border-amber-300/50 shadow-orange-600/40 ring-4 ring-orange-500/30'
-                              : 'bg-gradient-to-br from-indigo-700 via-purple-700 to-slate-900 hover:from-indigo-600 hover:to-slate-800 text-white border-indigo-400/40 shadow-indigo-700/30 ring-4 ring-indigo-500/20'
-                          }`}
-                        >
-                          {/* Top Status Pill Inside Button */}
-                          <div className="flex items-center gap-2 mb-2">
-                            {!isTimerRunning && elapsedMs === 0 && (
-                              <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-white/20 backdrop-blur-md rounded-full text-xs font-black text-white">
-                                <Play className="w-3.5 h-3.5 fill-white" />
-                                <span>جاهز للانطلاق • سباق مباشر</span>
-                              </span>
-                            )}
-                            {isTimerRunning && (
-                              <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-black/30 backdrop-blur-md rounded-full text-xs font-black text-amber-200 border border-amber-300/40 animate-pulse">
-                                <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping inline-block" />
-                                <span>⚡ التوقيت حي ونشط • اضغط لتسجيل الوصول</span>
-                              </span>
-                            )}
-                            {!isTimerRunning && elapsedMs > 0 && (
-                              <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-white/20 backdrop-blur-md rounded-full text-xs font-black text-amber-200">
-                                <span>⏸️ الميقاتي متوقف • اضغط للاستئناف</span>
-                              </span>
-                            )}
-                          </div>
-
-                          {/* Live Running Time in Big Digital Digits Inside the Button */}
-                          <div className="font-mono text-5xl sm:text-6xl md:text-7xl font-black tracking-tight drop-shadow-lg my-1 select-none">
-                            {AthleticsService.formatMilliseconds(elapsedMs)}
-                          </div>
-
-                          {/* Primary Action Callout Inside the Button */}
-                          <div className="mt-2 flex items-center justify-center gap-2">
-                            {!isTimerRunning && elapsedMs === 0 && (
-                              <div className="flex items-center gap-2 text-base sm:text-lg font-black bg-black/20 px-4 py-2 rounded-2xl">
-                                <Flag className="w-5 h-5 text-emerald-200 animate-bounce" />
-                                <span>اضغط هنا للانطلاق (Départ)</span>
-                              </div>
-                            )}
-                            {isTimerRunning && (
-                              <div className="flex items-center gap-2 text-base sm:text-lg font-black bg-black/30 px-5 py-2.5 rounded-2xl ring-2 ring-white/20 shadow-md">
-                                <Flag className="w-5 h-5 text-amber-200 animate-bounce" />
-                                <span>
-                                  {nextRankInRace === 1
-                                    ? `🥇 تسجيل وصول المرتبة الأولى (1)`
-                                    : nextRankInRace === 2
-                                    ? `🥈 تسجيل وصول المرتبة الثانية (2)`
-                                    : nextRankInRace === 3
-                                    ? `🥉 تسجيل وصول المرتبة الثالثة (3)`
-                                    : `🏁 تسجيل وصول المرتبة #${nextRankInRace}`}
-                                </span>
-                              </div>
-                            )}
-                            {!isTimerRunning && elapsedMs > 0 && (
-                              <div className="flex items-center gap-2 text-base sm:text-lg font-black bg-black/20 px-4 py-2 rounded-2xl">
-                                <Play className="w-5 h-5 text-white" />
-                                <span>اضغط لاستئناف التوقيت وتسجيل المراتب</span>
-                              </div>
-                            )}
-                          </div>
-
-                          {/* Subtext info inside button */}
-                          <div className="mt-2 text-xs font-bold text-white/80">
-                            {isTimerRunning
-                              ? `تم تسجيل ${recordedLaps.length} وصول حتى الآن من أصل ${currentEventParticipants.length} متسابق`
-                              : recordedLaps.length > 0
-                              ? `مسجل: ${recordedLaps.length} وصول من أصل ${currentEventParticipants.length} متسابق`
-                              : `زر واحد يجمع الانطلاق، التوقيت الحي، وتسجيل مراتب المتسابقين`}
-                          </div>
-                        </button>
-
-                        {/* زر التصفير أسفله (RESET BUTTON DIRECTLY UNDERNEATH) */}
-                        <div className="flex items-center gap-2">
-                          <button
-                            type="button"
-                            onClick={handleResetStopwatch}
-                            className="flex-1 py-3.5 px-4 bg-slate-900 hover:bg-slate-800 text-slate-200 hover:text-white border border-slate-700/80 hover:border-slate-600 rounded-2xl font-black text-xs sm:text-sm flex items-center justify-center gap-2 cursor-pointer transition-all shadow-md active:scale-98"
-                            title="تصفير العداد للبدء من جديد"
+                  {fieldTrials.length === 0 ? (
+                    <div className="bg-slate-900/60 border border-dashed border-slate-800 rounded-2xl p-8 text-center space-y-3">
+                      <Award className="w-10 h-10 text-slate-600 mx-auto" />
+                      <p className="text-xs font-bold text-slate-400">لم يتم إضافة أي متسابق للاختبار بعد</p>
+                      <p className="text-[11px] text-slate-500">
+                        اضغط على «إدراج كافة المسجلين» أو «إضافة متسابق يدوياً» لبدء تسجيل قياسات المحاولات بالمتر.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={handleBulkImportFieldRegistered}
+                        className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black transition-all inline-flex items-center gap-2 cursor-pointer"
+                      >
+                        <Users className="w-4 h-4" />
+                        <span>إدراج المسجلين الآن</span>
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="space-y-3 max-h-[420px] overflow-y-auto pr-1">
+                      {fieldTrials.map((entry, entryIdx) => {
+                        const { available, alreadyChosen } = getCategorizedParticipantsForField(entry.participantId);
+                        return (
+                          <div
+                            key={entryIdx}
+                            className="p-3.5 rounded-2xl bg-slate-900 border border-slate-800 flex flex-col md:flex-row md:items-center justify-between gap-3"
                           >
-                            <RotateCcw className="w-4 h-4 text-amber-400" />
-                            <span>🔄 زر تصفير العداد (Reset)</span>
-                          </button>
+                            <div className="flex items-center gap-3 flex-wrap">
+                              <span className="w-8 h-8 rounded-xl bg-slate-800 text-slate-300 font-black text-xs flex items-center justify-center shrink-0">
+                                {entry.rank ? `#${entry.rank}` : `${entryIdx + 1}`}
+                              </span>
 
-                          {isTimerRunning && (
-                            <button
-                              type="button"
-                              onClick={handleStopStopwatch}
-                              className="py-3.5 px-4 bg-rose-950/80 hover:bg-rose-900 text-rose-200 border border-rose-700/80 rounded-2xl font-black text-xs sm:text-sm flex items-center justify-center gap-1.5 cursor-pointer transition-all shadow-md active:scale-98"
-                              title="إيقاف الميقاتي عند اكتمال وصول المتسابقين"
-                            >
-                              <Square className="w-3.5 h-3.5 fill-rose-300 text-rose-300" />
-                              <span>إيقاف مؤقت / إنهاء</span>
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })()}
-
-                  {/* Summary info notice */}
-                  <div className="w-full space-y-1.5">
-                    <div className="flex items-center justify-between text-xs text-slate-400 font-bold">
-                      <span>
-                        الوصولات المسجلة: <span className="text-emerald-400 font-black">{recordedLaps.length}</span> من أصل <span className="text-amber-400 font-black">{currentEventParticipants.length}</span> متسابق مسجل
-                      </span>
-                      {isManualTrackEntry && (
-                         <button
-                           onClick={() => {
-                             const newLap: TrackRankEntry = {
-                               rank: recordedLaps.length + 1,
-                               timeMs: 0,
-                               formattedTime: '00:00.00',
-                               participantId: '',
-                               bibNumber: '',
-                               studentName: '',
-                               schoolName: '',
-                               confirmed: false,
-                               seriesNumber: 1
-                             };
-                             setRecordedLaps(prev => [...prev, newLap]);
-                           }}
-                           className="px-3 py-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-[10px] font-black shadow-sm"
-                         >
-                           + إضافة مرتبة يدوياً
-                         </button>
-                      )}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Right (Recorded Ranks & Manual Participant Selection with Color & Bottom Sorting) */}
-                <div className="lg:col-span-6 bg-slate-950 border border-slate-800 rounded-3xl p-5 flex flex-col justify-between space-y-4">
-                  
-                  <div>
-                    <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-                      <div className="flex items-center gap-2">
-                        <Trophy className="w-5 h-5 text-amber-500" />
-                        <h4 className="text-sm font-black text-white">المراتب المسجلة وتعيين التلاميذ</h4>
-                        <button
-                          onClick={() => setIsAddParticipantOpen(true)}
-                          className="p-1.5 bg-slate-800 hover:bg-slate-700 text-indigo-400 rounded-lg transition-colors mr-1"
-                          title="إضافة مشارك جديد لهذا السباق"
-                        >
-                          <Plus className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                      
-                      {/* Race Status Indicator */}
-                      <div className="flex items-center gap-2 bg-slate-900 px-3 py-1.5 rounded-xl border border-slate-800 text-xs font-bold text-slate-300">
-                        <span>إجمالي الوصولات:</span>
-                        <span className="font-mono font-black text-emerald-400">{recordedLaps.length}</span>
-                        <span className="text-slate-600">•</span>
-                        <span>المحددون:</span>
-                        <span className="font-mono font-black text-amber-400">{recordedLaps.filter(l => l.participantId).length}</span>
-                      </div>
-                    </div>
-
-                    {/* Action Bar: Assign pupils by finish order at end of test */}
-                    {recordedLaps.length > 0 && (
-                      <div className="mb-2.5 flex items-center justify-between gap-2 p-2.5 bg-slate-900 border border-amber-500/30 rounded-2xl">
-                        <div className="flex items-center gap-2">
-                          <span className="text-base p-1.5 bg-amber-500/10 text-amber-400 rounded-xl">🎯</span>
-                          <div>
-                            <span className="text-xs font-black text-amber-300 block">
-                              عند انتهاء السباق: تحديد التلاميذ حسب الترتيب
-                            </span>
-                            <span className="text-[10px] text-slate-400 font-medium">
-                              اختيار يدوي إلزامي • تم تحديد {recordedLaps.filter(l => l.participantId).length} من {recordedLaps.length} وصول
-                            </span>
-                          </div>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => setIsAssignByOrderModalOpen(true)}
-                          className="px-3 py-1.5 bg-gradient-to-r from-amber-500 via-orange-600 to-rose-600 hover:from-amber-400 hover:to-rose-500 text-white rounded-xl text-xs font-black shadow-md flex items-center gap-1.5 cursor-pointer active:scale-95 shrink-0"
-                          title="فتح نافذة اختيار وتعيين التلاميذ حسب ترتيب الوصول"
-                        >
-                          <Trophy className="w-3.5 h-3.5" />
-                          <span>تعيين بالترتيب</span>
-                        </button>
-                      </div>
-                    )}
-
-                    {/* Laps List */}
-                    {recordedLaps.length === 0 ? (
-                      <div className="bg-slate-900/60 border border-dashed border-slate-800 rounded-2xl p-6 sm:p-8 text-center space-y-2.5">
-                        <Timer className="w-8 h-8 text-slate-600 mx-auto" />
-                        <p className="text-xs font-bold text-slate-400">لم يتم تسجيل أي توقيت بعد</p>
-                        <p className="text-[11px] text-slate-500">
-                          أطلق الميقاتي واضغط على الزر البرتقالي الموحد عند وصول كل عداء في السباق
-                        </p>
-                        {currentEventParticipants.length === 0 && activeDiscipline && (
-                          <div className="pt-1.5">
-                            <button
-                              type="button"
-                              onClick={handleSeedCurrentEvent}
-                              className="px-3 py-1.5 bg-purple-600/30 hover:bg-purple-600 text-purple-300 hover:text-white border border-purple-500/40 rounded-xl text-xs font-black transition-all inline-flex items-center gap-1.5 cursor-pointer active:scale-95"
-                              title="دمج 10 متسابقين فوراً لهذا السباق للتجريب"
-                            >
-                              <Sparkles className="w-3.5 h-3.5 text-amber-300" />
-                              <span>دمج 10 متسابقين لهذا السباق الآن للتجريب</span>
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    ) : (
-                      <div className="space-y-2.5 max-h-[380px] overflow-y-auto pr-1">
-                        {lapsToDisplay.map((lap) => {
-                          const origIdx = lap.origIdx;
-                          const displayRank = lap.rank;
-                          const { available, alreadyChosen } = getCategorizedParticipantsForLap(lap.participantId);
-
-                          return (
-                            <div
-                              key={origIdx}
-                              className={`p-3 rounded-2xl border transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
-                                displayRank === 1
-                                  ? 'bg-amber-950/40 border-amber-800/80 ring-1 ring-amber-500/30'
-                                  : displayRank === 2
-                                  ? 'bg-slate-850 border-slate-700'
-                                  : displayRank === 3
-                                  ? 'bg-orange-950/30 border-orange-900/60'
-                                  : 'bg-slate-900 border-slate-800'
-                              }`}
-                            >
-                              <div className="flex items-center gap-3">
-                                <span className={`w-9 h-9 rounded-xl font-black text-xs flex items-center justify-center shrink-0 ${
-                                  displayRank === 1
-                                    ? 'bg-amber-500 text-slate-950 shadow-md'
-                                    : displayRank === 2
-                                    ? 'bg-slate-300 text-slate-900 shadow-md'
-                                    : displayRank === 3
-                                    ? 'bg-orange-600 text-white shadow-md'
-                                    : 'bg-slate-800 text-slate-300'
-                                }`}>
-                                  {displayRank === 1 ? '🥇 1' : displayRank === 2 ? '🥈 2' : displayRank === 3 ? '🥉 3' : `#${displayRank}`}
-                                </span>
-
-                                <div>
-                                  <div className="flex items-center gap-2 flex-wrap">
-                                    {isManualTrackEntry ? (
-                                      <input
-                                        type="text"
-                                        value={lap.formattedTime}
-                                        onChange={(e) => {
-                                          const val = e.target.value;
-                                          setRecordedLaps(prev => {
-                                            const copy = [...prev];
-                                            copy[origIdx] = { ...copy[origIdx], formattedTime: val };
-                                            return copy;
-                                          });
-                                        }}
-                                        placeholder="00:00.00"
-                                        className="text-sm font-black font-mono bg-slate-900 border border-slate-700 text-emerald-400 rounded-lg px-2 py-1 w-24 outline-none focus:ring-1 focus:ring-indigo-500"
-                                      />
-                                    ) : (
-                                      <span className="text-sm font-black font-mono text-emerald-400 block">
-                                        {lap.formattedTime}
-                                      </span>
-                                    )}
-
-                                    <button
-                                      onClick={() => {
-                                        setRecordedLaps(prev => prev.filter((_, i) => i !== origIdx));
-                                      }}
-                                      className="p-1 text-slate-500 hover:text-red-500 transition-colors"
-                                      title="حذف هذه المرتبة"
-                                    >
-                                      <Trash2 className="w-3.5 h-3.5" />
-                                    </button>
-                                  </div>
-
-                                  {lap.studentName ? (
-                                    <div className="flex items-center gap-1.5 mt-0.5">
-                                      <span className="text-xs font-bold text-white block">
-                                        ✅ {lap.studentName} ({lap.schoolName})
-                                      </span>
-                                      <span className="text-[10px] text-slate-400 font-mono font-bold">
-                                        #{lap.bibNumber}
-                                      </span>
-                                    </div>
-                                  ) : (
-                                    <span className="text-[11px] text-amber-400 font-bold block mt-0.5 animate-pulse">
-                                      ⚠️ يرجى اختيار التلميذ(ة) يدوياً من القائمة ⬅️
-                                    </span>
-                                  )}
-                                </div>
-                              </div>
-
-                              {/* Manual Participant Selector Dropdown With Color & Bottom Position For Chosen Athletes */}
-                              <div className="w-full sm:w-auto shrink-0">
+                              {/* Participant Selector */}
+                              <div className="w-64">
                                 <select
-                                  value={lap.participantId || ''}
-                                  onChange={(e) => handleAssignParticipantToLap(origIdx, e.target.value)}
-                                  className={`w-full sm:w-56 px-2.5 py-1.5 rounded-xl text-xs font-bold outline-none cursor-pointer transition-all ${
-                                    lap.participantId
-                                      ? 'bg-slate-900 border border-emerald-600 text-emerald-300 focus:ring-1 focus:ring-emerald-500'
-                                      : 'bg-slate-900 border-2 border-amber-500 text-amber-300 focus:ring-2 focus:ring-amber-500 ring-2 ring-amber-500/20'
-                                  }`}
+                                  value={entry.participantId || ''}
+                                  onChange={(e) => handleAssignParticipantToFieldTrial(entryIdx, e.target.value)}
+                                  className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs font-bold text-emerald-300 cursor-pointer outline-none focus:ring-1 focus:ring-blue-500"
                                 >
-                                  <option value="" className="text-slate-400 bg-slate-900">-- اضغط لاختيار التلميذ(ة) يدوياً --</option>
-                                  
-                                  {/* 1. Unselected athletes at the TOP with bright prominent colors */}
-                                  {available.length > 0 && (
-                                    <optgroup label="⚡ العداؤون المتاحون للاختيار (لم يتم اختيارهم بعد)">
-                                      {available.map(p => {
-                                        const att = attendanceMap[p.id];
-                                        const isPresent = att?.status === 'present';
-                                        const isAbsent = att?.status === 'absent';
-                                        const mark = isPresent ? '✅ ' : isAbsent ? '❌ [غائب] ' : '🏃 ';
-                                        const lane = att?.lane ? ` [ممر ${att.lane}]` : '';
-                                        return (
-                                          <option
-                                            key={`avail-${p.id}`}
-                                            value={p.id}
-                                            style={{ color: '#4ade80', backgroundColor: '#020617', fontWeight: 'bold' }}
-                                            className="text-emerald-400 bg-slate-950 font-bold"
-                                          >
-                                            {mark}#{p.bibNumber} - {p.studentName} ({p.schoolName}){lane}
-                                          </option>
-                                        );
-                                      })}
-                                    </optgroup>
-                                  )}
-
-                                  {/* 2. Selected athletes placed at the BOTTOM with changed muted colors */}
-                                  {alreadyChosen.length > 0 && (
-                                    <optgroup label="⬇️ تم اختيارهم مسبقاً في وصول آخر (أسفل القائمة)">
-                                      {alreadyChosen.map(p => {
-                                        const assignedLap = recordedLaps.find((l, lIdx) => lIdx !== origIdx && l.participantId === p.id);
-                                        const rankLabel = assignedLap ? ` (المرتبة ${assignedLap.rank})` : '';
-                                        return (
-                                          <option
-                                            key={`chosen-${p.id}`}
-                                            value={p.id}
-                                            style={{ color: '#64748b', backgroundColor: '#0f172a', fontStyle: 'italic' }}
-                                            className="text-slate-500 bg-slate-900"
-                                          >
-                                            ✓ [تم اختياره] #{p.bibNumber} - {p.studentName} ({p.schoolName}){rankLabel}
-                                          </option>
-                                        );
-                                      })}
-                                    </optgroup>
-                                  )}
+                                  <option value="">-- اختر المتسابق(ة) يدوياً --</option>
+                                  {available.map(p => (
+                                    <option key={p.id} value={p.id}>
+                                      #{p.bibNumber} - {p.studentName} ({p.schoolName})
+                                    </option>
+                                  ))}
+                                  {alreadyChosen.map(p => (
+                                    <option key={p.id} value={p.id} className="text-slate-500">
+                                      ✓ [مختار] #{p.bibNumber} - {p.studentName}
+                                    </option>
+                                  ))}
                                 </select>
                               </div>
+
+                              {entry.studentName && (
+                                <span className="text-xs font-bold text-slate-300 hidden sm:inline">
+                                  🏫 {entry.schoolName} <span className="font-mono text-amber-400">(#{entry.bibNumber})</span>
+                                </span>
+                              )}
                             </div>
-                          );
-                        })}
+
+                            {/* Attempt Inputs & Best Attempt */}
+                            <div className="flex items-center gap-3 flex-wrap justify-end">
+                              <div className="flex items-center gap-2">
+                                {Array.from({ length: maxFieldAttempts }).map((_, attIdx) => {
+                                  const val = entry.attempts[attIdx];
+                                  const valStr = val === 'X' ? 'X' : val !== null && val !== undefined ? String(val) : '';
+                                  return (
+                                    <div key={attIdx} className="flex flex-col items-center">
+                                      <span className="text-[10px] font-bold text-slate-400 mb-0.5">محاولة {attIdx + 1}</span>
+                                      <div className="flex items-center gap-1">
+                                        <input
+                                          type="text"
+                                          value={valStr}
+                                          onChange={(e) => handleUpdateAttempt(entryIdx, attIdx, e.target.value)}
+                                          placeholder="متر (مثل: 5.25)"
+                                          className="w-24 px-2 py-1.5 bg-slate-950 border border-slate-700 text-white text-xs font-mono font-black text-center rounded-xl outline-none focus:ring-1 focus:ring-amber-500"
+                                        />
+                                        <button
+                                          type="button"
+                                          onClick={() => handleUpdateAttempt(entryIdx, attIdx, 'X')}
+                                          className={`px-1.5 py-1 rounded-lg text-[10px] font-black transition-colors ${
+                                            val === 'X' ? 'bg-rose-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-white'
+                                          }`}
+                                          title="محاولة خاطئة (X)"
+                                        >
+                                          X
+                                        </button>
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+
+                              {/* Best Attempt Display */}
+                              <div className="px-3 py-1.5 bg-slate-950 border border-amber-500/40 rounded-xl text-center min-w-[100px]">
+                                <span className="text-[10px] text-slate-400 block font-bold">أفضل محاولة</span>
+                                <span className="text-xs font-mono font-black text-amber-400">
+                                  {entry.bestAttempt !== null && entry.bestAttempt !== undefined ? `${entry.bestAttempt.toFixed(2)} م` : '-'}
+                                </span>
+                              </div>
+
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveFieldTrial(entryIdx)}
+                                className="p-2 text-slate-500 hover:text-red-400 transition-colors"
+                                title="حذف المتسابق"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {/* Footer Actions: Sort & Final Validation */}
+                  <div className="pt-4 border-t border-slate-800 flex items-center justify-between gap-3 flex-wrap">
+                    <button
+                      type="button"
+                      onClick={handleSortFieldTrialsRank}
+                      className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-black shadow-md flex items-center gap-2 cursor-pointer active:scale-95"
+                    >
+                      <Trophy className="w-4 h-4 text-amber-300" />
+                      <span>ترتيب المتسابقين (حسب أفضل محاولة) 📊</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleSaveFieldResults}
+                      disabled={fieldTrials.length === 0}
+                      className="px-6 py-3 bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 hover:from-emerald-500 hover:to-teal-500 text-white rounded-2xl text-xs font-black shadow-xl flex items-center gap-2 cursor-pointer active:scale-95 border border-emerald-400/60 disabled:opacity-40"
+                    >
+                      <CheckCircle2 className="w-5 h-5 text-amber-300" />
+                      <span>المصادقة النهائية على النتائج واعتمادها في المنصة 🏆</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              /* SMART STOPWATCH CONSOLE FOR TRACK */
+              <div className="space-y-6">
+                
+                {/* Event Selector & Info Header (مخفي في وضعية الهاتف لتوفير المساحة وإبراز الميقاتي) */}
+                <div className="hidden sm:flex bg-white dark:bg-slate-950 p-4 rounded-3xl border border-slate-200 dark:border-slate-800 flex-col lg:flex-row lg:items-center justify-between gap-4 transition-colors">
+                  <div className="flex items-center gap-3">
+                    <span className="text-3xl p-3 bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-100 dark:border-emerald-800 rounded-2xl text-emerald-600 dark:text-emerald-400">
+                      ⚡
+                    </span>
+                    <div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <h3 className="text-lg font-black text-slate-900 dark:text-white">
+                          {activeDiscipline.nameAr}
+                        </h3>
+                        <span className="px-2.5 py-0.5 text-xs font-black bg-blue-100 dark:bg-blue-500/20 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-500/30 rounded-lg">
+                          {selectedCategory}
+                        </span>
+                        <span className="px-2.5 py-0.5 text-xs font-black bg-pink-100 dark:bg-pink-500/20 text-pink-700 dark:text-pink-300 border border-pink-200 dark:border-pink-500/30 rounded-lg">
+                          {selectedGender === 'Male' ? 'ذكور' : 'إناث'}
+                        </span>
                       </div>
-                    )}
+                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                        الأستاذ المسؤول: <span className="text-amber-600 dark:text-amber-400 font-bold">{currentCommitteeAssignment?.teacherName || 'غير معين'}</span>
+                      </p>
+                    </div>
                   </div>
 
-                  {/* Actions & Final Results Validation Button */}
-                  <div className="pt-3 border-t border-slate-800 flex items-center justify-between gap-3 flex-wrap">
-                    <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
-                      <button
-                        onClick={() => setIsAddParticipantOpen(true)}
-                        className="p-2 sm:px-3.5 sm:py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer"
-                        title="إضافة عداء"
-                      >
-                        <Plus className="w-4 h-4 text-blue-400" />
-                        <span className="hidden sm:inline">إضافة عداء</span>
-                      </button>
+                  {/* Quick Switch Dropdown */}
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <select
+                      value={activeDiscipline?.id || ''}
+                      onChange={(e) => {
+                        const disc = currentCategoryGendersDisciplines.find(d => d.id === e.target.value);
+                        if (disc) setSelectedDiscipline(disc);
+                      }}
+                      className="px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white cursor-pointer"
+                    >
+                      {currentCategoryGendersDisciplines.filter(d => d.type.startsWith('track')).map(d => (
+                        <option key={d.id} value={d.id}>{d.nameAr}</option>
+                      ))}
+                    </select>
 
-                      <button
-                        onClick={() => setIsAttendanceModalOpen(true)}
-                        className="p-2 sm:px-3.5 sm:py-2 bg-indigo-900/60 hover:bg-indigo-900 border border-indigo-700 text-indigo-200 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer"
-                        title="مناداة العدائين وتأكيد الحضور وتوزيع الممرات"
-                      >
-                        <ClipboardList className="w-4 h-4 text-indigo-400" />
-                        <span className="hidden sm:inline">غرفة المناداة</span>
-                        <span className="font-mono text-[10px] font-bold">({attendanceStats.present}/{attendanceStats.total})</span>
-                      </button>
+                    <select
+                      value={selectedCategory}
+                      onChange={(e) => setSelectedCategory(e.target.value as any)}
+                      className="px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white cursor-pointer"
+                    >
+                      <option value="U12">براعم (U12)</option>
+                      <option value="U15">صغار (U15)</option>
+                      <option value="U18">فتيان (U18)</option>
+                      <option value="U20">شبان (U20)</option>
+                    </select>
 
+                    <select
+                      value={selectedGender}
+                      onChange={(e) => setSelectedGender(e.target.value as any)}
+                      className="px-3 py-2 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-900 dark:text-white cursor-pointer"
+                    >
+                      <option value="Male">ذكور</option>
+                      <option value="Female">إناث</option>
+                    </select>
+
+                    <button
+                      type="button"
+                      onClick={() => setIsAttendanceModalOpen(true)}
+                      className="p-2 sm:px-3 sm:py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-black transition-all flex items-center gap-1.5 cursor-pointer shadow-md shadow-indigo-600/20 active:scale-95"
+                      title="غرفة المناداة وتأكيد حضور العدائين وتوزيع الممرات"
+                    >
+                      <ClipboardList className="w-3.5 h-3.5" />
+                      <span className="hidden sm:inline">غرفة المناداة</span>
+                      <span className="px-1.5 py-0.5 bg-indigo-800 rounded-md text-[10px] font-mono font-bold">
+                        {attendanceStats.present}/{attendanceStats.total}
+                      </span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleClearCurrentRaceData}
+                      className="p-2 sm:px-3 sm:py-2 bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-300 dark:border-rose-800 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-xs active:scale-95"
+                      title="تفريغ بيانات هذا السباق ومسح مراتب الوصول والميقاتي للبدء من جديد"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5 text-rose-500" />
+                      <span className="hidden sm:inline">تفريغ السباق</span>
+                    </button>
+
+                    {!isTeacher && activeDiscipline && (
                       <button
-                        onClick={handleClearCurrentRaceData}
-                        className="p-2 sm:px-3.5 sm:py-2 bg-rose-950/40 hover:bg-rose-900/60 border border-rose-800 text-rose-300 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-all active:scale-95"
-                        title="تفريغ ومسح بيانات هذا السباق وإعادة ضبط الميقاتي"
+                        type="button"
+                        onClick={() => {
+                          handleStartEditDiscipline(activeDiscipline);
+                          setIsSettingsModalOpen(true);
+                          setSettingsActiveTab('disciplines');
+                        }}
+                        className="p-2 sm:px-3 sm:py-2 bg-amber-500/20 hover:bg-amber-500 border border-amber-500/40 text-amber-700 dark:text-amber-300 hover:text-white rounded-xl text-xs font-black transition-all flex items-center gap-1.5 cursor-pointer shadow-xs"
+                        title="تعديل بيانات هذا السباق"
                       >
-                        <RotateCcw className="w-3.5 h-3.5 text-rose-400" />
-                        <span className="hidden sm:inline">تفريغ السباق</span>
+                        <Edit2 className="w-3.5 h-3.5" />
+                        <span className="hidden sm:inline">تعديل السباق</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Direct Unified Race Information Bar (سباق مباشر موحد بدون سلاسل) */}
+                <div className="bg-slate-900/90 border border-slate-800 rounded-3xl p-4 shadow-lg flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <span className="text-2xl p-2.5 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl text-emerald-400">🏃</span>
+                    <div>
+                      <h4 className="text-sm font-black text-white flex items-center gap-2 flex-wrap">
+                        <span>السباق المباشر الموحد ({selectedCategory} - {selectedGender === 'Male' ? 'ذكور' : 'إناث'})</span>
+                        <span className="px-2.5 py-0.5 rounded-full text-xs font-black bg-emerald-600/30 text-emerald-300 border border-emerald-500/40">
+                          سباق مباشر موحد
+                        </span>
+                      </h4>
+                      <p className="text-xs text-slate-400 mt-0.5 font-medium">
+                        المنافسة مباشرة وموحدة لكافة المتسابقين. تُسجل الوصولات تباعاً ولا تصدر النتائج إلا بالمصادقة النهائية بعد انتهاء كافة المتسابقين.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <div className="px-3 py-1.5 bg-slate-950 border border-slate-800 rounded-xl text-xs font-bold text-slate-300 flex items-center gap-2">
+                      <span>المتسابقون المسجلون:</span>
+                      <span className="font-mono font-black text-amber-400">{currentEventParticipants.length}</span>
+                    </div>
+                    <div className="px-3 py-1.5 bg-slate-950 border border-slate-800 rounded-xl text-xs font-bold text-slate-300 flex items-center gap-2">
+                      <span>الوصولات:</span>
+                      <span className="font-mono font-black text-emerald-400">{recordedLaps.length}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* --- BIG SMART STOPWATCH CONSOLE --- */}
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                  
+                  {/* Left (Unified Smart Stopwatch & Rank Console Widget) */}
+                  <div className="lg:col-span-6 bg-gradient-to-br from-slate-950 via-slate-900 to-emerald-950/40 border-2 border-emerald-500/30 rounded-3xl p-5 shadow-2xl space-y-4">
+                    
+                    {/* Header & Mode Switch */}
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xl p-2 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-emerald-400">⏱️</span>
+                        <div>
+                          <h4 className="text-xs font-black text-white">الميقاتي الذكي للسباق الموحد</h4>
+                          <p className="text-[10px] text-slate-400">الانطلاق، التوقيت، وترتيب العدائين في زر واحد ومختصر</p>
+                        </div>
+                      </div>
+                      
+                      <button
+                        onClick={() => setIsManualTrackEntry(!isManualTrackEntry)}
+                        className={`px-2.5 py-1 rounded-xl text-[10px] font-black border transition-all ${
+                          isManualTrackEntry ? 'bg-amber-600 text-white border-amber-500' : 'bg-slate-800 text-slate-300 border-slate-700'
+                        }`}
+                      >
+                        {isManualTrackEntry ? '⌨️ وضع يدوي' : '⚡ وضع الميقاتي'}
                       </button>
                     </div>
 
-                    {/* زر خاص بالمصادقة النهائية على النتائج */}
+                    {/* UNIFIED SINGLE MASTER STOPWATCH & RANK BUTTON WITH RESET DIRECTLY UNDERNEATH */}
                     {(() => {
-                      const expectedFinishers = currentEventParticipants.filter(p => attendanceMap[p.id]?.status !== 'absent');
-                      const expectedCount = expectedFinishers.length;
-                      const finishedCount = recordedLaps.length;
-                      const unassignedCount = recordedLaps.filter(l => !l.participantId || !l.studentName).length;
-                      const isReadyForValidation = expectedCount > 0 && finishedCount >= expectedCount && unassignedCount === 0;
+                      const nextRankInRace = recordedLaps.length + 1;
+
+                      const handleMasterButtonClick = () => {
+                        if (!isTimerRunning) {
+                          handleStartStopwatch();
+                        } else {
+                          handleTriggerRankSplit();
+                        }
+                      };
 
                       return (
-                        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-                          <div className="flex items-center gap-2 bg-slate-900 border border-slate-700/80 px-3 py-1.5 rounded-xl text-xs">
-                            <span className="text-slate-400 font-bold">الانتهاء:</span>
-                            <span className={`font-mono font-black ${finishedCount >= expectedCount && expectedCount > 0 ? 'text-emerald-400' : 'text-amber-400'}`}>
-                              {finishedCount} / {expectedCount} عداء
-                            </span>
-                            {unassignedCount > 0 && (
-                              <span className="text-[10px] text-rose-400 font-bold bg-rose-500/10 px-1.5 py-0.5 rounded">
-                                ({unassignedCount} بدون اسم)
-                              </span>
-                            )}
-                          </div>
-
+                        <div className="space-y-3">
+                          {/* THE SINGLE MASTER BUTTON (الانطلاق + التوقيت الحي + تسجيل مراتب الوصول) */}
                           <button
                             type="button"
-                            onClick={handleFinalResultsValidation}
-                            disabled={recordedLaps.length === 0}
-                            className={`p-2.5 sm:px-6 sm:py-3 rounded-2xl text-xs sm:text-sm font-black shadow-xl flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-95 border ${
-                              recordedLaps.length > 0
-                                ? 'bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 hover:from-emerald-500 hover:to-teal-500 text-white shadow-emerald-900/50 border-emerald-400/60 ring-2 ring-emerald-400/40'
-                                : 'bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-slate-200 border-slate-700 shadow-slate-950/40'
+                            onClick={handleMasterButtonClick}
+                            className={`w-full rounded-3xl p-6 sm:p-7 flex flex-col items-center justify-center text-center transition-all cursor-pointer active:scale-98 relative overflow-hidden select-none shadow-2xl border-2 ${
+                              !isTimerRunning && elapsedMs === 0
+                                ? 'bg-gradient-to-br from-emerald-600 via-emerald-700 to-teal-800 hover:from-emerald-500 hover:to-teal-700 text-white border-emerald-400/40 shadow-emerald-600/30 ring-4 ring-emerald-500/20'
+                                : isTimerRunning
+                                ? 'bg-gradient-to-br from-amber-500 via-orange-600 to-rose-600 hover:from-amber-400 hover:to-rose-500 text-white border-amber-300/50 shadow-orange-600/40 ring-4 ring-orange-500/30'
+                                : 'bg-gradient-to-br from-indigo-700 via-purple-700 to-slate-900 hover:from-indigo-600 hover:to-slate-800 text-white border-indigo-400/40 shadow-indigo-700/30 ring-4 ring-indigo-500/20'
                             }`}
-                            title="المصادقة النهائية على النتائج ونشرها في منصة التتويج والنتائج الرسمية للعموم"
                           >
-                            <CheckCircle2 className="w-5 h-5 text-amber-300" />
-                            <span>المصادقة النهائية على النتائج واعتمادها في المنصة 🏆</span>
+                            {/* Top Status Pill Inside Button */}
+                            <div className="flex items-center gap-2 mb-2">
+                              {!isTimerRunning && elapsedMs === 0 && (
+                                <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-white/20 backdrop-blur-md rounded-full text-xs font-black text-white">
+                                  <Play className="w-3.5 h-3.5 fill-white" />
+                                  <span>جاهز للانطلاق • سباق مباشر</span>
+                                </span>
+                              )}
+                              {isTimerRunning && (
+                                <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-black/30 backdrop-blur-md rounded-full text-xs font-black text-amber-200 border border-amber-300/40 animate-pulse">
+                                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping inline-block" />
+                                  <span>⚡ التوقيت حي ونشط • اضغط لتسجيل الوصول</span>
+                                </span>
+                              )}
+                              {!isTimerRunning && elapsedMs > 0 && (
+                                <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-white/20 backdrop-blur-md rounded-full text-xs font-black text-amber-200">
+                                  <span>⏸️ الميقاتي متوقف • اضغط للاستئناف</span>
+                                </span>
+                              )}
+                            </div>
+
+                            {/* Live Running Time in Big Digital Digits Inside the Button */}
+                            <div className="font-mono text-5xl sm:text-6xl md:text-7xl font-black tracking-tight drop-shadow-lg my-1 select-none">
+                              {AthleticsService.formatMilliseconds(elapsedMs)}
+                            </div>
+
+                            {/* Primary Action Callout Inside the Button */}
+                            <div className="mt-2 flex items-center justify-center gap-2">
+                              {!isTimerRunning && elapsedMs === 0 && (
+                                <div className="flex items-center gap-2 text-base sm:text-lg font-black bg-black/20 px-4 py-2 rounded-2xl">
+                                  <Flag className="w-5 h-5 text-emerald-200 animate-bounce" />
+                                  <span>اضغط هنا للانطلاق (Départ)</span>
+                                </div>
+                              )}
+                              {isTimerRunning && (
+                                <div className="flex items-center gap-2 text-base sm:text-lg font-black bg-black/30 px-5 py-2.5 rounded-2xl ring-2 ring-white/20 shadow-md">
+                                  <Flag className="w-5 h-5 text-amber-200 animate-bounce" />
+                                  <span>
+                                    {nextRankInRace === 1
+                                      ? `🥇 تسجيل وصول المرتبة الأولى (1)`
+                                      : nextRankInRace === 2
+                                      ? `🥈 تسجيل وصول المرتبة الثانية (2)`
+                                      : nextRankInRace === 3
+                                      ? `🥉 تسجيل وصول المرتبة الثالثة (3)`
+                                      : `🏁 تسجيل وصول المرتبة #${nextRankInRace}`}
+                                  </span>
+                                </div>
+                              )}
+                              {!isTimerRunning && elapsedMs > 0 && (
+                                <div className="flex items-center gap-2 text-base sm:text-lg font-black bg-black/20 px-4 py-2 rounded-2xl">
+                                  <Play className="w-5 h-5 text-white" />
+                                  <span>اضغط لاستئناف التوقيت وتسجيل المراتب</span>
+                                </div>
+                              )}
+                            </div>
+
+                            {/* Subtext info inside button */}
+                            <div className="mt-2 text-xs font-bold text-white/80">
+                              {isTimerRunning
+                                ? `تم تسجيل ${recordedLaps.length} وصول حتى الآن من أصل ${currentEventParticipants.length} متسابق`
+                                : recordedLaps.length > 0
+                                ? `مسجل: ${recordedLaps.length} وصول من أصل ${currentEventParticipants.length} متسابق`
+                                : `زر واحد يجمع الانطلاق، التوقيت الحي، وتسجيل مراتب المتسابقين`}
+                            </div>
                           </button>
+
+                          {/* زر التصفير أسفله (RESET BUTTON DIRECTLY UNDERNEATH) */}
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={handleResetStopwatch}
+                              className="flex-1 py-3.5 px-4 bg-slate-900 hover:bg-slate-800 text-slate-200 hover:text-white border border-slate-700/80 hover:border-slate-600 rounded-2xl font-black text-xs sm:text-sm flex items-center justify-center gap-2 cursor-pointer transition-all shadow-md active:scale-98"
+                              title="تصفير العداد للبدء من جديد"
+                            >
+                              <RotateCcw className="w-4 h-4 text-amber-400" />
+                              <span>🔄 زر تصفير العداد (Reset)</span>
+                            </button>
+
+                            {isTimerRunning && (
+                              <button
+                                type="button"
+                                onClick={handleStopStopwatch}
+                                className="py-3.5 px-4 bg-rose-950/80 hover:bg-rose-900 text-rose-200 border border-rose-700/80 rounded-2xl font-black text-xs sm:text-sm flex items-center justify-center gap-1.5 cursor-pointer transition-all shadow-md active:scale-98"
+                                title="إيقاف الميقاتي عند اكتمال وصول المتسابقين"
+                              >
+                                <Square className="w-3.5 h-3.5 fill-rose-300 text-rose-300" />
+                                <span>إيقاف مؤقت / إنهاء</span>
+                              </button>
+                            )}
+                          </div>
                         </div>
                       );
                     })()}
+
+                    {/* Summary info notice */}
+                    <div className="w-full space-y-1.5">
+                      <div className="flex items-center justify-between text-xs text-slate-400 font-bold">
+                        <span>
+                          الوصولات المسجلة: <span className="text-emerald-400 font-black">{recordedLaps.length}</span> من أصل <span className="text-amber-400 font-black">{currentEventParticipants.length}</span> متسابق مسجل
+                        </span>
+                        {isManualTrackEntry && (
+                           <button
+                             onClick={() => {
+                               const newLap: TrackRankEntry = {
+                                 rank: recordedLaps.length + 1,
+                                 timeMs: 0,
+                                 formattedTime: '00:00.00',
+                                 participantId: '',
+                                 bibNumber: '',
+                                 studentName: '',
+                                 schoolName: '',
+                                 confirmed: false,
+                                 seriesNumber: 1
+                               };
+                               setRecordedLaps(prev => [...prev, newLap]);
+                             }}
+                             className="px-3 py-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-[10px] font-black shadow-sm"
+                           >
+                             + إضافة مرتبة يدوياً
+                           </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Right (Recorded Ranks & Manual Participant Selection with Color & Bottom Sorting) */}
+                  <div className="lg:col-span-6 bg-slate-950 border border-slate-800 rounded-3xl p-5 flex flex-col justify-between space-y-4">
+                    
+                    <div>
+                      <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+                        <div className="flex items-center gap-2">
+                          <Trophy className="w-5 h-5 text-amber-500" />
+                          <h4 className="text-sm font-black text-white">المراتب المسجلة وتعيين التلاميذ</h4>
+                          <button
+                            onClick={() => setIsAddParticipantOpen(true)}
+                            className="p-1.5 bg-slate-800 hover:bg-slate-700 text-indigo-400 rounded-lg transition-colors mr-1"
+                            title="إضافة مشارك جديد لهذا السباق"
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                        
+                        {/* Race Status Indicator */}
+                        <div className="flex items-center gap-2 bg-slate-900 px-3 py-1.5 rounded-xl border border-slate-800 text-xs font-bold text-slate-300">
+                          <span>إجمالي الوصولات:</span>
+                          <span className="font-mono font-black text-emerald-400">{recordedLaps.length}</span>
+                          <span className="text-slate-600">•</span>
+                          <span>المحددون:</span>
+                          <span className="font-mono font-black text-amber-400">{recordedLaps.filter(l => l.participantId).length}</span>
+                        </div>
+                      </div>
+
+                      {/* Action Bar: Assign pupils by finish order at end of test */}
+                      {recordedLaps.length > 0 && (
+                        <div className="mb-2.5 flex items-center justify-between gap-2 p-2.5 bg-slate-900 border border-amber-500/30 rounded-2xl">
+                          <div className="flex items-center gap-2">
+                            <span className="text-base p-1.5 bg-amber-500/10 text-amber-400 rounded-xl">🎯</span>
+                            <div>
+                              <span className="text-xs font-black text-amber-300 block">
+                                عند انتهاء السباق: تحديد التلاميذ حسب الترتيب
+                              </span>
+                              <span className="text-[10px] text-slate-400 font-medium">
+                                اختيار يدوي إلزامي • تم تحديد {recordedLaps.filter(l => l.participantId).length} من {recordedLaps.length} وصول
+                              </span>
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setIsAssignByOrderModalOpen(true)}
+                            className="px-3 py-1.5 bg-gradient-to-r from-amber-500 via-orange-600 to-rose-600 hover:from-amber-400 hover:to-rose-500 text-white rounded-xl text-xs font-black shadow-md flex items-center gap-1.5 cursor-pointer active:scale-95 shrink-0"
+                            title="فتح نافذة اختيار وتعيين التلاميذ حسب ترتيب الوصول"
+                          >
+                            <Trophy className="w-3.5 h-3.5" />
+                            <span>تعيين بالترتيب</span>
+                          </button>
+                        </div>
+                      )}
+
+                      {/* Laps List */}
+                      {recordedLaps.length === 0 ? (
+                        <div className="bg-slate-900/60 border border-dashed border-slate-800 rounded-2xl p-6 sm:p-8 text-center space-y-2.5">
+                          <Timer className="w-8 h-8 text-slate-600 mx-auto" />
+                          <p className="text-xs font-bold text-slate-400">لم يتم تسجيل أي توقيت بعد</p>
+                          <p className="text-[11px] text-slate-500">
+                            أطلق الميقاتي واضغط على الزر البرتقالي الموحد عند وصول كل عداء في السباق
+                          </p>
+                          {currentEventParticipants.length === 0 && activeDiscipline && (
+                            <div className="pt-1.5">
+                              <button
+                                type="button"
+                                onClick={handleSeedCurrentEvent}
+                                className="px-3 py-1.5 bg-purple-600/30 hover:bg-purple-600 text-purple-300 hover:text-white border border-purple-500/40 rounded-xl text-xs font-black transition-all inline-flex items-center gap-1.5 cursor-pointer active:scale-95"
+                                title="دمج 10 متسابقين فوراً لهذا السباق للتجريب"
+                              >
+                                <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+                                <span>دمج 10 متسابقين لهذا السباق الآن للتجريب</span>
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="space-y-2.5 max-h-[380px] overflow-y-auto pr-1">
+                          {lapsToDisplay.map((lap) => {
+                            const origIdx = lap.origIdx;
+                            const displayRank = lap.rank;
+                            const { available, alreadyChosen } = getCategorizedParticipantsForLap(lap.participantId);
+
+                            return (
+                              <div
+                                key={origIdx}
+                                className={`p-3 rounded-2xl border transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+                                  displayRank === 1
+                                    ? 'bg-amber-950/40 border-amber-800/80 ring-1 ring-amber-500/30'
+                                    : displayRank === 2
+                                    ? 'bg-slate-850 border-slate-700'
+                                    : displayRank === 3
+                                    ? 'bg-orange-950/30 border-orange-900/60'
+                                    : 'bg-slate-900 border-slate-800'
+                                }`}
+                              >
+                                <div className="flex items-center gap-3">
+                                  <span className={`w-9 h-9 rounded-xl font-black text-xs flex items-center justify-center shrink-0 ${
+                                    displayRank === 1
+                                      ? 'bg-amber-500 text-slate-950 shadow-md'
+                                      : displayRank === 2
+                                      ? 'bg-slate-300 text-slate-900 shadow-md'
+                                      : displayRank === 3
+                                      ? 'bg-orange-600 text-white shadow-md'
+                                      : 'bg-slate-800 text-slate-300'
+                                  }`}>
+                                    {displayRank === 1 ? '🥇 1' : displayRank === 2 ? '🥈 2' : displayRank === 3 ? '🥉 3' : `#${displayRank}`}
+                                  </span>
+
+                                  <div>
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                      {isManualTrackEntry ? (
+                                        <input
+                                          type="text"
+                                          value={lap.formattedTime}
+                                          onChange={(e) => {
+                                            const val = e.target.value;
+                                            setRecordedLaps(prev => {
+                                              const copy = [...prev];
+                                              copy[origIdx] = { ...copy[origIdx], formattedTime: val };
+                                              return copy;
+                                            });
+                                          }}
+                                          placeholder="00:00.00"
+                                          className="text-sm font-black font-mono bg-slate-900 border border-slate-700 text-emerald-400 rounded-lg px-2 py-1 w-24 outline-none focus:ring-1 focus:ring-indigo-500"
+                                        />
+                                      ) : (
+                                        <span className="text-sm font-black font-mono text-emerald-400 block">
+                                          {lap.formattedTime}
+                                        </span>
+                                      )}
+
+                                      <button
+                                        onClick={() => {
+                                          setRecordedLaps(prev => prev.filter((_, i) => i !== origIdx));
+                                        }}
+                                        className="p-1 text-slate-500 hover:text-red-500 transition-colors"
+                                        title="حذف هذه المرتبة"
+                                      >
+                                        <Trash2 className="w-3.5 h-3.5" />
+                                      </button>
+                                    </div>
+
+                                    {lap.studentName ? (
+                                      <div className="flex items-center gap-1.5 mt-0.5">
+                                        <span className="text-xs font-bold text-white block">
+                                          ✅ {lap.studentName} ({lap.schoolName})
+                                        </span>
+                                        <span className="text-[10px] text-slate-400 font-mono font-bold">
+                                          #{lap.bibNumber}
+                                        </span>
+                                      </div>
+                                    ) : (
+                                      <span className="text-[11px] text-amber-400 font-bold block mt-0.5 animate-pulse">
+                                        ⚠️ يرجى اختيار التلميذ(ة) يدوياً من القائمة ⬅️
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+
+                                {/* Manual Participant Selector Dropdown With Color & Bottom Position For Chosen Athletes */}
+                                <div className="w-full sm:w-auto shrink-0">
+                                  <select
+                                    value={lap.participantId || ''}
+                                    onChange={(e) => handleAssignParticipantToLap(origIdx, e.target.value)}
+                                    className={`w-full sm:w-56 px-2.5 py-1.5 rounded-xl text-xs font-bold outline-none cursor-pointer transition-all ${
+                                      lap.participantId
+                                        ? 'bg-slate-900 border border-emerald-600 text-emerald-300 focus:ring-1 focus:ring-emerald-500'
+                                        : 'bg-slate-900 border-2 border-amber-500 text-amber-300 focus:ring-2 focus:ring-amber-500 ring-2 ring-amber-500/20'
+                                    }`}
+                                  >
+                                    <option value="" className="text-slate-400 bg-slate-900">-- اضغط لاختيار التلميذ(ة) يدوياً --</option>
+                                    
+                                    {/* 1. Unselected athletes at the TOP with bright prominent colors */}
+                                    {available.length > 0 && (
+                                      <optgroup label="⚡ العداؤون المتاحون للاختيار (لم يتم اختيارهم بعد)">
+                                        {available.map(p => {
+                                          const att = attendanceMap[p.id];
+                                          const isPresent = att?.status === 'present';
+                                          const isAbsent = att?.status === 'absent';
+                                          const mark = isPresent ? '✅ ' : isAbsent ? '❌ [غائب] ' : '🏃 ';
+                                          const lane = att?.lane ? ` [ممر ${att.lane}]` : '';
+                                          return (
+                                            <option
+                                              key={`avail-${p.id}`}
+                                              value={p.id}
+                                              style={{ color: '#4ade80', backgroundColor: '#020617', fontWeight: 'bold' }}
+                                              className="text-emerald-400 bg-slate-950 font-bold"
+                                            >
+                                              {mark}#{p.bibNumber} - {p.studentName} ({p.schoolName}){lane}
+                                            </option>
+                                          );
+                                        })}
+                                      </optgroup>
+                                    )}
+
+                                    {/* 2. Selected athletes placed at the BOTTOM with changed muted colors */}
+                                    {alreadyChosen.length > 0 && (
+                                      <optgroup label="⬇️ تم اختيارهم مسبقاً في وصول آخر (أسفل القائمة)">
+                                        {alreadyChosen.map(p => {
+                                          const assignedLap = recordedLaps.find((l, lIdx) => lIdx !== origIdx && l.participantId === p.id);
+                                          const rankLabel = assignedLap ? ` (المرتبة ${assignedLap.rank})` : '';
+                                          return (
+                                            <option
+                                              key={`chosen-${p.id}`}
+                                              value={p.id}
+                                              style={{ color: '#64748b', backgroundColor: '#0f172a', fontStyle: 'italic' }}
+                                              className="text-slate-500 bg-slate-900"
+                                            >
+                                              ✓ [تم اختياره] #{p.bibNumber} - {p.studentName} ({p.schoolName}){rankLabel}
+                                            </option>
+                                          );
+                                        })}
+                                      </optgroup>
+                                    )}
+                                  </select>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Actions & Final Results Validation Button */}
+                    <div className="pt-3 border-t border-slate-800 flex items-center justify-between gap-3 flex-wrap">
+                      <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
+                        <button
+                          onClick={() => setIsAddParticipantOpen(true)}
+                          className="p-2 sm:px-3.5 sm:py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+                          title="إضافة عداء"
+                        >
+                          <Plus className="w-4 h-4 text-blue-400" />
+                          <span className="hidden sm:inline">إضافة عداء</span>
+                        </button>
+
+                        <button
+                          onClick={() => setIsAttendanceModalOpen(true)}
+                          className="p-2 sm:px-3.5 sm:py-2 bg-indigo-900/60 hover:bg-indigo-900 border border-indigo-700 text-indigo-200 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+                          title="مناداة العدائين وتأكيد الحضور وتوزيع الممرات"
+                        >
+                          <ClipboardList className="w-4 h-4 text-indigo-400" />
+                          <span className="hidden sm:inline">غرفة المناداة</span>
+                          <span className="font-mono text-[10px] font-bold">({attendanceStats.present}/{attendanceStats.total})</span>
+                        </button>
+
+                        <button
+                          onClick={handleClearCurrentRaceData}
+                          className="p-2 sm:px-3.5 sm:py-2 bg-rose-950/40 hover:bg-rose-900/60 border border-rose-800 text-rose-300 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-all active:scale-95"
+                          title="تفريغ ومسح بيانات هذا السباق وإعادة ضبط الميقاتي"
+                        >
+                          <RotateCcw className="w-3.5 h-3.5 text-rose-400" />
+                          <span className="hidden sm:inline">تفريغ السباق</span>
+                        </button>
+                      </div>
+
+                      {/* زر خاص بالمصادقة النهائية على النتائج */}
+                      {(() => {
+                        const expectedFinishers = currentEventParticipants.filter(p => attendanceMap[p.id]?.status !== 'absent');
+                        const expectedCount = expectedFinishers.length;
+                        const finishedCount = recordedLaps.length;
+                        const unassignedCount = recordedLaps.filter(l => !l.participantId || !l.studentName).length;
+                        const isReadyForValidation = expectedCount > 0 && finishedCount >= expectedCount && unassignedCount === 0;
+
+                        return (
+                          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                            <div className="flex items-center gap-2 bg-slate-900 border border-slate-700/80 px-3 py-1.5 rounded-xl text-xs">
+                              <span className="text-slate-400 font-bold">الانتهاء:</span>
+                              <span className={`font-mono font-black ${finishedCount >= expectedCount && expectedCount > 0 ? 'text-emerald-400' : 'text-amber-400'}`}>
+                                {finishedCount} / {expectedCount} عداء
+                              </span>
+                              {unassignedCount > 0 && (
+                                <span className="text-[10px] text-rose-400 font-bold bg-rose-500/10 px-1.5 py-0.5 rounded">
+                                  ({unassignedCount} بدون اسم)
+                                </span>
+                              )}
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={handleFinalResultsValidation}
+                              disabled={recordedLaps.length === 0}
+                              className={`p-2.5 sm:px-6 sm:py-3 rounded-2xl text-xs sm:text-sm font-black shadow-xl flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-95 border ${
+                                recordedLaps.length > 0
+                                  ? 'bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 hover:from-emerald-500 hover:to-teal-500 text-white shadow-emerald-900/50 border-emerald-400/60 ring-2 ring-emerald-400/40'
+                                  : 'bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-slate-200 border-slate-700 shadow-slate-950/40'
+                              }`}
+                              title="المصادقة النهائية على النتائج ونشرها في منصة التتويج والنتائج الرسمية للعموم"
+                            >
+                              <CheckCircle2 className="w-5 h-5 text-amber-300" />
+                              <span>المصادقة النهائية على النتائج واعتمادها في المنصة 🏆</span>
+                            </button>
+                          </div>
+                        );
+                      })()}
+                    </div>
                   </div>
                 </div>
               </div>
-            </div>
+            )
           )}
 
           {/* ======================================================================= */}
