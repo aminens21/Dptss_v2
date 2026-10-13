@@ -277,8 +277,8 @@ export const PublicResults: React.FC = () => {
   const showMatches = selectedSportId === 'ALL' || (selectedSportId !== 'cross_country' && selectedSportId !== 'athletics');
 
   return (
-    <div className="min-h-screen bg-slate-50 p-4 sm:p-8 dir-rtl">
-      <div className="max-w-6xl mx-auto space-y-8">
+    <div className="min-h-screen bg-slate-50 p-4 sm:p-8 lg:p-12 dir-rtl">
+      <div className="max-w-7xl lg:max-w-[1550px] mx-auto space-y-8 lg:space-y-12">
         
         {/* Header */}
         <div className="text-center space-y-2">
@@ -462,9 +462,9 @@ export const PublicResults: React.FC = () => {
                 <p className="text-slate-500 font-bold text-xs">لا توجد نتائج مسجلة للعدو الريفي في هذا الفرع حالياً</p>
               </div>
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3 gap-6 lg:gap-8">
                 {crossCountryList.map(cat => (
-                  <div key={cat.key} className="bg-white rounded-3xl p-5 sm:p-6 border border-slate-200 shadow-sm space-y-6">
+                  <div key={cat.key} className="bg-white rounded-3xl p-6 sm:p-7 lg:p-8 border border-slate-200 shadow-sm hover:shadow-md transition-all space-y-6">
                     <div className="flex items-center gap-3 border-b border-slate-100 pb-3">
                       <div className="p-2 bg-amber-500 text-white rounded-xl shadow-xs">
                         <Trophy className="w-5 h-5" />
@@ -553,9 +553,9 @@ export const PublicResults: React.FC = () => {
                 <p className="text-slate-500 font-bold text-xs">لا توجد نتائج مسجلة لألعاب القوى حالياً</p>
               </div>
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3 gap-6 lg:gap-8">
                 {athleticsList.map((ath, idx) => (
-                  <div key={`ath-${ath.id}-${idx}`} className="bg-white rounded-3xl p-5 sm:p-6 border border-slate-200 shadow-sm space-y-6">
+                  <div key={`ath-${ath.id}-${idx}`} className="bg-white rounded-3xl p-6 sm:p-7 lg:p-8 border border-slate-200 shadow-sm hover:shadow-md transition-all space-y-6">
                     <div className="flex items-center justify-between border-b border-slate-100 pb-3">
                       <div className="flex items-center gap-3">
                         <div className="p-2 bg-emerald-500 text-white rounded-xl shadow-xs">
@@ -652,11 +652,11 @@ export const PublicResults: React.FC = () => {
                 <p className="text-slate-400 font-medium text-xs">يمكنك تغيير الرياضة المختارة أو التبديل لعرض جميع الرياضات</p>
               </div>
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 lg:gap-6">
                 {filteredMatches.map(m => {
                   const matchSport = getMatchSport(m);
                   return (
-                    <div key={m.id} className="bg-white p-5 rounded-3xl border border-slate-200 shadow-xs hover:shadow-md transition-all space-y-3">
+                    <div key={m.id} className="bg-white p-6 rounded-3xl border border-slate-200 shadow-xs hover:shadow-md transition-all space-y-4">
                       <div className="flex justify-between items-center text-[10px] font-bold text-slate-500 border-b border-slate-100 pb-2">
                         <div className="flex items-center gap-1.5">
                           <span className="text-xs">{matchSport.icon}</span>
