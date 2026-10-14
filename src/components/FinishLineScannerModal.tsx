@@ -33,7 +33,11 @@ import {
   CheckSquare,
   Square,
   Loader2,
-  Activity
+  Activity,
+  Eye,
+  Printer,
+  Clock,
+  Flag
 } from 'lucide-react';
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
 import toast from 'react-hot-toast';
@@ -201,6 +205,12 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
   const [clearScope, setClearScope] = useState<'current' | 'all_races' | 'participants' | 'everything'>('current');
   const [isClearing, setIsClearing] = useState<boolean>(false);
 
+  // Participant Details Modal State (إجمالي المسجلين، الواصلين، المتبقي في السباق)
+  type ParticipantDetailsTab = 'registered' | 'arrivals' | 'remaining';
+  const [detailsModalTab, setDetailsModalTab] = useState<ParticipantDetailsTab | null>(null);
+  const [detailsScope, setDetailsScope] = useState<'current_race' | 'all_races'>('current_race');
+  const [detailsSearchQuery, setDetailsSearchQuery] = useState<string>('');
+
   // Drag and drop / file upload state
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -315,6 +325,21 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
       return effectiveMale ? 'u18_male' : 'u18_female';
     }
     if (rawCat.includes('شبان') || rawCat.includes('شابات') || rawCat.includes('u20') || rawCat.includes('20')) {
+      return effectiveMale ? 'u20_male' : 'u20_female';
+    }
+
+    // Check birth year / date fallback (Moroccan School Sports official categories)
+    let bYear: number | null = null;
+    if ((student as any).birthYear && !isNaN(Number((student as any).birthYear))) {
+      bYear = Number((student as any).birthYear);
+    } else if (student.birthDate) {
+      const match = String(student.birthDate).match(/\b(19\d\d|20\d\d)\b/);
+      if (match) bYear = Number(match[1]);
+    }
+    if (bYear !== null) {
+      if (bYear >= 2014) return effectiveMale ? 'u12_male' : 'u12_female';
+      if (bYear >= 2012) return effectiveMale ? 'u15_male' : 'u15_female';
+      if (bYear >= 2009) return effectiveMale ? 'u18_male' : 'u18_female';
       return effectiveMale ? 'u20_male' : 'u20_female';
     }
 
@@ -1338,6 +1363,162 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
   // Filter students for the selected active category
   const filteredStudentsCount = getCategoryRunnersCount(activeCategory);
 
+  // Active Race Registered Students list (respecting category & affiliation)
+  const activeRaceRegisteredStudents = useMemo(() => {
+    return allStudents.filter(s => {
+      const sAff = s.affiliationType || 'non_club';
+      if (raceAffiliation && sAff !== raceAffiliation) return false;
+      const resolved = resolveStudentCategoryId(s);
+      if (selectedRaceIds.length > 1) {
+        return selectedRaceIds.includes(resolved);
+      }
+      return resolved === activeCategory.id;
+    });
+  }, [allStudents, raceAffiliation, selectedRaceIds, activeCategory.id]);
+
+  // Check if current race/category has school team participants
+  const hasSchoolTeamParticipants = useMemo(() => {
+    return activeRaceRegisteredStudents.some(s => s.participationType === 'school_team') ||
+           arrivals.some(a => resolveRunnerParticipationType(a, allStudents) === 'school_team');
+  }, [activeRaceRegisteredStudents, arrivals, allStudents]);
+
+  // Check if a student has arrived at the finish line
+  const checkIsStudentArrived = (student: Student) => {
+    const sBib = String(student.bibNumber ?? (student as any).crossCountryBibNumber ?? '').trim();
+    const sMassar = student.massarNumber ? student.massarNumber.trim().toUpperCase() : '';
+    const sId = student.id;
+
+    return arrivals.some(a => {
+      const aBib = String(a.bibNumber || '').trim();
+      if (sBib && aBib && sBib === aBib) return true;
+      if (a.studentId && sId && a.studentId === sId) return true;
+      if (sMassar && a.massarNumber && a.massarNumber.trim().toUpperCase() === sMassar) return true;
+      return false;
+    });
+  };
+
+  const getStudentArrival = (student: Student) => {
+    const sBib = String(student.bibNumber ?? (student as any).crossCountryBibNumber ?? '').trim();
+    const sMassar = student.massarNumber ? student.massarNumber.trim().toUpperCase() : '';
+    const sId = student.id;
+
+    return arrivals.find(a => {
+      const aBib = String(a.bibNumber || '').trim();
+      if (sBib && aBib && sBib === aBib) return true;
+      if (a.studentId && sId && a.studentId === sId) return true;
+      if (sMassar && a.massarNumber && a.massarNumber.trim().toUpperCase() === sMassar) return true;
+      return false;
+    });
+  };
+
+  // Active Race Remaining Students list (who haven't arrived yet)
+  const activeRaceRemainingStudents = useMemo(() => {
+    return activeRaceRegisteredStudents.filter(s => !checkIsStudentArrived(s));
+  }, [activeRaceRegisteredStudents, arrivals]);
+
+  // Filtered items in the Details Modal based on search query
+  const detailsRegisteredFiltered = useMemo(() => {
+    const baseList = detailsScope === 'current_race' ? activeRaceRegisteredStudents : allStudents;
+    if (!detailsSearchQuery.trim()) return baseList;
+    const q = detailsSearchQuery.toLowerCase().trim();
+    return baseList.filter(s => {
+      const nameMatch = (s.fullName || '').toLowerCase().includes(q);
+      const bibMatch = String(s.bibNumber ?? (s as any).crossCountryBibNumber ?? '').includes(q);
+      const schoolMatch = (s.schoolName || '').toLowerCase().includes(q);
+      const massarMatch = (s.massarNumber || '').toLowerCase().includes(q);
+      return nameMatch || bibMatch || schoolMatch || massarMatch;
+    });
+  }, [detailsScope, activeRaceRegisteredStudents, allStudents, detailsSearchQuery]);
+
+  const detailsArrivalsFiltered = useMemo(() => {
+    if (!detailsSearchQuery.trim()) return arrivals;
+    const q = detailsSearchQuery.toLowerCase().trim();
+    return arrivals.filter(a => {
+      const nameMatch = (a.fullName || '').toLowerCase().includes(q);
+      const bibMatch = String(a.bibNumber || '').includes(q);
+      const schoolMatch = (a.schoolName || '').toLowerCase().includes(q);
+      return nameMatch || bibMatch || schoolMatch;
+    });
+  }, [arrivals, detailsSearchQuery]);
+
+  const detailsRemainingFiltered = useMemo(() => {
+    if (!detailsSearchQuery.trim()) return activeRaceRemainingStudents;
+    const q = detailsSearchQuery.toLowerCase().trim();
+    return activeRaceRemainingStudents.filter(s => {
+      const nameMatch = (s.fullName || '').toLowerCase().includes(q);
+      const bibMatch = String(s.bibNumber ?? (s as any).crossCountryBibNumber ?? '').includes(q);
+      const schoolMatch = (s.schoolName || '').toLowerCase().includes(q);
+      const massarMatch = (s.massarNumber || '').toLowerCase().includes(q);
+      return nameMatch || bibMatch || schoolMatch || massarMatch;
+    });
+  }, [activeRaceRemainingStudents, detailsSearchQuery]);
+
+  // Export Details to Excel
+  const handleExportDetailsToExcel = () => {
+    const isRegistered = detailsModalTab === 'registered';
+    const isArrivals = detailsModalTab === 'arrivals';
+    const isRemaining = detailsModalTab === 'remaining';
+
+    let sheetData: any[] = [];
+    let fileName = '';
+
+    if (isRegistered) {
+      sheetData = detailsRegisteredFiltered.map((s, idx) => {
+        const arr = getStudentArrival(s);
+        const bib = s.bibNumber ?? (s as any).crossCountryBibNumber ?? '-';
+        return {
+          'الرقم الترتيبي': idx + 1,
+          'رقم الصدرية': bib,
+          'الاسم الكامل': s.fullName,
+          'رقم مسار': s.massarNumber || '-',
+          'المؤسسة': s.schoolName,
+          'الفئة': CROSS_COUNTRY_CATEGORIES.find(c => c.id === resolveStudentCategoryId(s))?.titleAr || s.category || '-',
+          'الجنس': s.gender === 'Female' ? 'أنثى' : 'ذكر',
+          'نوع المشاركة': s.participationType === 'school_team' ? 'فريق مؤسسة' : 'فردي',
+          'حالة الوصول': arr ? `وصل (المرتبة ${arr.rank} - توقيت ${arr.time || '-'})` : 'في الحلبة (لم يصل بعد)'
+        };
+      });
+      fileName = `لائحة_المسجلين_${activeCategory.shortLabel}_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    } else if (isArrivals) {
+      sheetData = detailsArrivalsFiltered.map((a, idx) => ({
+        'الترتيب': a.rank || idx + 1,
+        'التوقيت الرسمي': a.time || '-',
+        'رقم الصدرية': a.bibNumber || '-',
+        'الاسم الكامل': a.fullName,
+        'المؤسسة': a.schoolName,
+        'الفئة': a.categoryTitle || activeCategory.titleAr,
+        'نوع المشاركة': a.participationType === 'school_team' ? 'فريق مؤسسة' : 'فردي',
+        'صنف المشاركة': a.affiliationType === 'club_affiliated' ? 'منتمي لنادي' : 'مدرسي'
+      }));
+      fileName = `لائحة_الواصلين_${activeCategory.shortLabel}_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    } else if (isRemaining) {
+      sheetData = detailsRemainingFiltered.map((s, idx) => {
+        const bib = s.bibNumber ?? (s as any).crossCountryBibNumber ?? '-';
+        return {
+          'الرقم': idx + 1,
+          'رقم الصدرية': bib,
+          'الاسم الكامل': s.fullName,
+          'المؤسسة': s.schoolName,
+          'الفئة': activeCategory.titleAr,
+          'الجنس': s.gender === 'Female' ? 'أنثى' : 'ذكر',
+          'حالة السباق': 'قيد السباق (في انتظار الوصول)'
+        };
+      });
+      fileName = `لائحة_المتبقي_في_السباق_${activeCategory.shortLabel}_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    }
+
+    if (sheetData.length === 0) {
+      toast.error('لا توجد بيانات لتصديرها');
+      return;
+    }
+
+    const ws = XLSX.utils.json_to_sheet(sheetData);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'البيانات');
+    XLSX.writeFile(wb, fileName);
+    toast.success('تم تصدير ملف Excel بنجاح! 📊');
+  };
+
   if (!isOpen) return null;
 
   return (
@@ -1467,12 +1648,36 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
                 </div>
 
                 {/* Loaded Statistics */}
-                <div className="bg-white dark:bg-slate-800 p-3 rounded-xl border border-slate-200 dark:border-slate-700 flex items-center justify-between gap-2">
-                  <div className="min-w-0">
-                    <span className="text-[9px] sm:text-[10px] font-bold text-slate-500 dark:text-slate-400 block truncate">إجمالي المسجلين:</span>
-                    <span className="text-base sm:text-xl font-black text-blue-900 dark:text-blue-400 font-mono">{allStudents.length}</span>
-                  </div>
+                <div className="bg-white dark:bg-slate-800 p-3 rounded-xl border border-slate-200 dark:border-slate-700 flex items-center justify-between gap-2 shadow-xs">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDetailsScope('all_races');
+                      setDetailsModalTab('registered');
+                    }}
+                    className="min-w-0 text-right hover:opacity-85 transition-opacity cursor-pointer group"
+                    title="انقر لعرض لائحة المشاركين المسجلين في نافذة منبثقة"
+                  >
+                    <span className="text-[9px] sm:text-[10px] font-bold text-slate-500 dark:text-slate-400 block truncate group-hover:text-blue-600 dark:group-hover:text-blue-400">
+                      إجمالي المسجلين (انقر للعرض 📋):
+                    </span>
+                    <span className="text-base sm:text-xl font-black text-blue-900 dark:text-blue-400 font-mono group-hover:underline">
+                      {allStudents.length}
+                    </span>
+                  </button>
                   <div className="flex items-center gap-1.5 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDetailsScope('all_races');
+                        setDetailsModalTab('registered');
+                      }}
+                      className="px-2.5 py-1.5 bg-blue-50 dark:bg-blue-950/50 hover:bg-blue-100 dark:hover:bg-blue-900/50 text-blue-700 dark:text-blue-300 rounded-lg text-xs font-bold transition-all cursor-pointer border border-blue-200 dark:border-blue-800 flex items-center gap-1 shadow-2xs"
+                      title="عرض لائحة المشاركين المسجلين"
+                    >
+                      <Eye className="w-3.5 h-3.5" />
+                      <span className="hidden sm:inline">عرض اللائحة</span>
+                    </button>
                     {allStudents.length > 0 && (
                       <button
                         type="button"
@@ -1551,7 +1756,7 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
                           return (
                             <button
                               key={cat.id}
-                              onClick={() => setSelectedRaceId(cat.id)}
+                              onClick={() => selectSingleRace(cat.id)}
                               className={`p-2.5 rounded-xl text-right text-xs transition-all flex items-center justify-between border cursor-pointer group ${
                                 isSelected
                                   ? 'bg-blue-600 border-blue-700 dark:border-blue-500 text-white font-black shadow-sm ring-2 ring-blue-400/40'
@@ -1630,9 +1835,20 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
                   )}
 
                   {/* Registered Count Banner */}
-                  <div className="bg-white dark:bg-slate-900 p-3 rounded-xl border border-blue-200 dark:border-slate-700 flex items-center justify-between text-xs">
+                  <div className="bg-white dark:bg-slate-900 p-3 rounded-xl border border-blue-200 dark:border-slate-700 flex items-center justify-between text-xs shadow-xs">
                     <span className="font-bold text-slate-600 dark:text-slate-400">المسجلين المؤهلين لهذه الفئة:</span>
-                    <span className="px-2.5 py-1 bg-blue-100 dark:bg-blue-950/80 text-blue-900 dark:text-blue-300 rounded-lg font-black">{filteredStudentsCount} عداء(ة)</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDetailsScope('current_race');
+                        setDetailsModalTab('registered');
+                      }}
+                      className="px-2.5 py-1 bg-blue-100 dark:bg-blue-950/80 hover:bg-blue-200 dark:hover:bg-blue-900 text-blue-900 dark:text-blue-300 rounded-lg font-black transition-all cursor-pointer flex items-center gap-1.5 shadow-2xs active:scale-95"
+                      title="انقر لعرض لائحة المسجلين المؤهلين"
+                    >
+                      <span>{filteredStudentsCount} عداء(ة)</span>
+                      <span className="text-[10px] font-bold bg-blue-200 dark:bg-blue-900 px-1.5 py-0.5 rounded">📋 استعراض</span>
+                    </button>
                   </div>
                 </div>
 
@@ -1936,7 +2152,7 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
                       <p className="text-[11px] text-slate-500 dark:text-slate-400">في انتظار وصول 4 عداءين على الأقل لتحديد ترتيب الفرق المكتملة.</p>
                     ) : (
                       <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
-                        {liveTeamRankings.map((team, idx) => (
+                        {liveTeamRankings.filter(t => t.isValidTeam).map((team, idx) => (
                           <div
                             key={team.schoolName}
                             className={`p-2 rounded-xl text-xs flex items-center justify-between border ${
@@ -2036,25 +2252,52 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
                   {/* Live Participant Stats Dashboard */}
                   {showParticipantStats && (
                     <div className="bg-blue-50/40 dark:bg-slate-900/50 border border-blue-100/50 dark:border-slate-700 p-2.5 rounded-xl mb-3 grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-right shadow-3xs">
-                      <div className="bg-white dark:bg-slate-800 p-2 rounded-lg border border-slate-100 dark:border-slate-700 shadow-3xs">
-                        <span className="text-[9px] font-black text-slate-400 dark:text-slate-400 block">إجمالي المسجلين</span>
-                        <span className="text-xs font-black text-blue-950 dark:text-blue-300 font-mono">{filteredStudentsCount}</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setDetailsScope('current_race');
+                          setDetailsModalTab('registered');
+                        }}
+                        className="bg-white dark:bg-slate-800 hover:bg-blue-50 dark:hover:bg-slate-750 p-2 rounded-lg border border-slate-100 dark:border-slate-700 shadow-3xs text-right transition-all cursor-pointer group"
+                        title="انقر لعرض لائحة المسجلين في السباق الحالي"
+                      >
+                        <span className="text-[9px] font-black text-slate-400 dark:text-slate-400 block group-hover:text-blue-600">إجمالي المسجلين 📋</span>
+                        <span className="text-xs font-black text-blue-950 dark:text-blue-300 font-mono group-hover:underline">{filteredStudentsCount}</span>
                         <span className="text-[9px] text-slate-400 dark:text-slate-400 font-medium mr-1">عداء</span>
-                      </div>
-                      <div className="bg-white dark:bg-slate-800 p-2 rounded-lg border border-slate-100 dark:border-slate-700 shadow-3xs">
-                        <span className="text-[9px] font-black text-slate-400 dark:text-slate-400 block">الواصلين حالياً</span>
-                        <span className="text-xs font-black text-emerald-700 dark:text-emerald-400 font-mono">{arrivals.length}</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setDetailsScope('current_race');
+                          setDetailsModalTab('arrivals');
+                        }}
+                        className="bg-white dark:bg-slate-800 hover:bg-emerald-50 dark:hover:bg-slate-750 p-2 rounded-lg border border-slate-100 dark:border-slate-700 shadow-3xs text-right transition-all cursor-pointer group"
+                        title="انقر لعرض لائحة الواصلين في السباق الحالي"
+                      >
+                        <span className="text-[9px] font-black text-slate-400 dark:text-slate-400 block group-hover:text-emerald-600">الواصلين حالياً 🏁</span>
+                        <span className="text-xs font-black text-emerald-700 dark:text-emerald-400 font-mono group-hover:underline">{arrivals.length}</span>
                         <span className="text-[9px] text-emerald-600/80 dark:text-emerald-400/80 font-bold mr-1 font-mono">
                           ({filteredStudentsCount > 0 ? Math.min(100, Math.round((arrivals.length / filteredStudentsCount) * 100)) : 0}%)
                         </span>
-                      </div>
-                      <div className="bg-white dark:bg-slate-800 p-2 rounded-lg border border-slate-100 dark:border-slate-700 shadow-3xs">
-                        <span className="text-[9px] font-black text-slate-400 dark:text-slate-400 block">المتبقي في السباق</span>
-                        <span className="text-xs font-black text-amber-700 dark:text-amber-400 font-mono">
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setDetailsScope('current_race');
+                          setDetailsModalTab('remaining');
+                        }}
+                        className="bg-white dark:bg-slate-800 hover:bg-amber-50 dark:hover:bg-slate-750 p-2 rounded-lg border border-slate-100 dark:border-slate-700 shadow-3xs text-right transition-all cursor-pointer group"
+                        title="انقر لعرض لائحة المتبقي في السباق"
+                      >
+                        <span className="text-[9px] font-black text-slate-400 dark:text-slate-400 block group-hover:text-amber-600">المتبقي في السباق ⏳</span>
+                        <span className="text-xs font-black text-amber-700 dark:text-amber-400 font-mono group-hover:underline">
                           {Math.max(0, filteredStudentsCount - arrivals.length)}
                         </span>
                         <span className="text-[9px] text-slate-400 dark:text-slate-400 font-medium mr-1">عداء</span>
-                      </div>
+                      </button>
+
                       <div className="bg-white dark:bg-slate-800 p-2 rounded-lg border border-slate-100 dark:border-slate-700 shadow-3xs">
                         <span className="text-[9px] font-black text-slate-400 dark:text-slate-400 block">المؤسسات المشاركة</span>
                         <span className="text-xs font-black text-indigo-950 dark:text-indigo-300 font-mono font-bold">
@@ -2065,8 +2308,8 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
                     </div>
                   )}
 
-                  {/* Live Winning Teams Dashboard */}
-                  {showWinningTeams && (
+                  {/* Live Winning Teams Dashboard - Show only if participation condition is school team */}
+                  {showWinningTeams && hasSchoolTeamParticipants && (
                     <div className="bg-amber-50/50 dark:bg-amber-950/30 border border-amber-200/50 dark:border-amber-800/50 p-2.5 rounded-xl mb-3 space-y-1.5 shadow-3xs">
                       <div className="flex items-center gap-1 text-[10px] font-black text-amber-950 dark:text-amber-200">
                         <span>🏆</span>
@@ -2111,7 +2354,7 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
                             <th className="p-2 sm:p-2.5">الصدرية</th>
                             <th className="p-2 sm:p-2.5">العداء(ة)</th>
                             <th className="p-2 sm:p-2.5 hidden xs:table-cell">المؤسسة</th>
-                            <th className="p-2 sm:p-2.5">التوقيت</th>
+                            <th className="p-2 sm:p-2.5 text-center">نوع المشاركة</th>
                             <th className="p-2 sm:p-2.5 text-center">تعديل</th>
                           </tr>
                         </thead>
@@ -2145,8 +2388,14 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
                                 {runner.schoolName}
                               </td>
 
-                              <td className="p-2 sm:p-2.5 font-mono text-[10px] sm:text-[11px] font-bold text-slate-800 dark:text-slate-200">
-                                {runner.time || '-'}
+                              <td className="p-2 sm:p-2.5 text-center">
+                                <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold ${
+                                  resolveRunnerParticipationType(runner, allStudents) === 'school_team'
+                                    ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300'
+                                    : 'bg-amber-50 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300'
+                                }`}>
+                                  {resolveRunnerParticipationType(runner, allStudents) === 'school_team' ? 'فريق المؤسسة' : 'فردي'}
+                                </span>
                               </td>
 
                               <td className="p-2 sm:p-2.5 text-center">
@@ -2531,6 +2780,267 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
           </div>
         </div>
       )}
+
+      {/* Participant Details Modal (إجمالي المسجلين، الواصلين، المتبقي في السباق) */}
+      {detailsModalTab !== null && (
+        <div className="fixed inset-0 z-[70] bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-3 sm:p-5">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col animate-in fade-in zoom-in-95 duration-200">
+            
+            {/* Header */}
+            <div className="bg-gradient-to-r from-blue-900 via-indigo-900 to-slate-900 text-white p-4 sm:p-5 flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-white/15 border border-white/20 flex items-center justify-center text-xl shrink-0 shadow-inner">
+                  {detailsModalTab === 'registered' ? '📋' : detailsModalTab === 'arrivals' ? '🏁' : '⏳'}
+                </div>
+                <div>
+                  <h3 className="text-base font-black flex items-center gap-2">
+                    <span>
+                      {detailsModalTab === 'registered' ? 'لائحة المسجلين' : detailsModalTab === 'arrivals' ? 'لائحة الواصلين حالياً' : 'لائحة المتبقي في السباق'}
+                    </span>
+                    <span className="text-[10px] font-mono bg-white/20 px-2.5 py-0.5 rounded-full">
+                      {detailsModalTab === 'registered' ? detailsRegisteredFiltered.length : detailsModalTab === 'arrivals' ? detailsArrivalsFiltered.length : detailsRemainingFiltered.length} عداء(ة)
+                    </span>
+                  </h3>
+                  <p className="text-xs text-indigo-200">
+                    {activeCategory.icon} {activeCategory.titleAr} ({raceAffiliation === 'club_affiliated' ? 'منتمين للأندية' : 'مدرسي'})
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleExportDetailsToExcel}
+                  className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
+                  title="تصدير اللائحة إلى Excel"
+                >
+                  <FileSpreadsheet className="w-4 h-4" />
+                  <span className="hidden sm:inline">تصدير Excel 📊</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setDetailsModalTab(null)}
+                  className="w-9 h-9 rounded-xl bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition-colors cursor-pointer"
+                  title="إغلاق"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+
+            {/* Sub-header / Tabs & Search */}
+            <div className="p-4 bg-slate-50 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-700 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 shrink-0">
+              
+              {/* Tab Selector */}
+              <div className="flex items-center gap-1.5 bg-slate-200 dark:bg-slate-700 p-1 rounded-xl">
+                <button
+                  type="button"
+                  onClick={() => setDetailsModalTab('registered')}
+                  className={`flex-1 sm:flex-none px-3 py-1.5 rounded-lg text-xs font-black transition-all cursor-pointer ${
+                    detailsModalTab === 'registered'
+                      ? 'bg-white dark:bg-slate-900 text-blue-900 dark:text-blue-300 shadow-2xs'
+                      : 'text-slate-600 dark:text-slate-300 hover:text-slate-900'
+                  }`}
+                >
+                  إجمالي المسجلين ({detailsScope === 'current_race' ? activeRaceRegisteredStudents.length : allStudents.length})
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setDetailsModalTab('arrivals')}
+                  className={`flex-1 sm:flex-none px-3 py-1.5 rounded-lg text-xs font-black transition-all cursor-pointer ${
+                    detailsModalTab === 'arrivals'
+                      ? 'bg-white dark:bg-slate-900 text-emerald-700 dark:text-emerald-300 shadow-2xs'
+                      : 'text-slate-600 dark:text-slate-300 hover:text-slate-900'
+                  }`}
+                >
+                  الواصلين ({arrivals.length})
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setDetailsModalTab('remaining')}
+                  className={`flex-1 sm:flex-none px-3 py-1.5 rounded-lg text-xs font-black transition-all cursor-pointer ${
+                    detailsModalTab === 'remaining'
+                      ? 'bg-white dark:bg-slate-900 text-amber-700 dark:text-amber-300 shadow-2xs'
+                      : 'text-slate-600 dark:text-slate-300 hover:text-slate-900'
+                  }`}
+                >
+                  المتبقي ({activeRaceRemainingStudents.length})
+                </button>
+              </div>
+
+              {/* Search & Scope toggles */}
+              <div className="flex items-center gap-2">
+                {detailsModalTab === 'registered' && (
+                  <select
+                    value={detailsScope}
+                    onChange={(e) => setDetailsScope(e.target.value as any)}
+                    className="bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 text-xs font-bold rounded-xl px-3 py-2 border border-slate-300 dark:border-slate-700 cursor-pointer"
+                  >
+                    <option value="current_race">مسجلي السباق الحالي ({activeCategory.titleAr})</option>
+                    <option value="all_races">كافة مسجلي البطولة ({allStudents.length})</option>
+                  </select>
+                )}
+
+                <div className="relative flex-1 sm:w-64">
+                  <Search className="w-4 h-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={detailsSearchQuery}
+                    onChange={(e) => setDetailsSearchQuery(e.target.value)}
+                    placeholder="بحث بالاسم، الصدرية، المؤسسة..."
+                    className="w-full bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 text-xs rounded-xl pr-9 pl-3 py-2 border border-slate-300 dark:border-slate-700 focus:outline-hidden focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Modal Body: List View */}
+            <div className="p-4 sm:p-6 overflow-y-auto flex-1 space-y-2 bg-slate-50 dark:bg-slate-950/50">
+              
+              {/* Tab 1: Registered Students */}
+              {detailsModalTab === 'registered' && (
+                detailsRegisteredFiltered.length === 0 ? (
+                  <div className="py-12 text-center space-y-2">
+                    <p className="text-3xl">📭</p>
+                    <p className="text-sm font-bold text-slate-600 dark:text-slate-400">لا توجد نتائج مطابقة للبحث أو اللائحة فارغة.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {detailsRegisteredFiltered.map((student, idx) => {
+                      const arr = getStudentArrival(student);
+                      const bib = student.bibNumber ?? (student as any).crossCountryBibNumber ?? (idx + 1 + 100);
+                      const partType = resolveRunnerParticipationType(student, allStudents);
+                      return (
+                        <div key={student.id || idx} className="bg-white dark:bg-slate-900 p-3 rounded-2xl border border-slate-200 dark:border-slate-800 flex items-center justify-between gap-3 text-xs shadow-3xs">
+                          <div className="flex items-center gap-3 min-w-0">
+                            <span className="w-10 h-10 rounded-xl bg-blue-50 dark:bg-blue-950/80 text-blue-900 dark:text-blue-300 font-mono font-black flex items-center justify-center shrink-0 border border-blue-200 dark:border-blue-800 text-xs shadow-3xs" title="رقم الصدرية">
+                              #{bib}
+                            </span>
+                            <div className="min-w-0">
+                              <p className="font-black text-slate-900 dark:text-slate-100 truncate flex items-center gap-2">
+                                <span>{student.fullName}</span>
+                                <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold ${
+                                  partType === 'school_team'
+                                    ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300'
+                                    : 'bg-amber-50 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300'
+                                }`}>
+                                  {partType === 'school_team' ? 'فريق المؤسسة' : 'فردي'}
+                                </span>
+                              </p>
+                              <p className="text-[10px] text-slate-500 dark:text-slate-400 truncate">
+                                🏫 {student.schoolName || 'مؤسسة غير محددة'} • مسار: {student.massarNumber || '-'} • <strong className="font-mono text-blue-700 dark:text-blue-400">الصدرية: #{bib}</strong>
+                              </p>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-2 shrink-0">
+                            {arr ? (
+                              <span className="px-2.5 py-1 bg-emerald-100 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300 font-black rounded-lg text-[10px] border border-emerald-300 dark:border-emerald-800">
+                                وصل 🏁 (المرتبة {arr.rank} - {arr.time || '-'})
+                              </span>
+                            ) : (
+                              <span className="px-2.5 py-1 bg-amber-50 dark:bg-amber-950/50 text-amber-800 dark:text-amber-300 font-bold rounded-lg text-[10px] border border-amber-200 dark:border-amber-800">
+                                في الحلبة ⏳
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )
+              )}
+
+              {/* Tab 2: Arrivals */}
+              {detailsModalTab === 'arrivals' && (
+                detailsArrivalsFiltered.length === 0 ? (
+                  <div className="py-12 text-center space-y-2">
+                    <p className="text-3xl">🏁</p>
+                    <p className="text-sm font-bold text-slate-600 dark:text-slate-400">لم يتم تسجيل أي وصول في هذا السباق بعد.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {detailsArrivalsFiltered.map((arrival, idx) => (
+                      <div key={idx} className="bg-white dark:bg-slate-900 p-3 rounded-2xl border border-slate-200 dark:border-slate-800 flex items-center justify-between gap-3 text-xs shadow-3xs">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <span className="w-8 h-8 rounded-xl bg-emerald-50 dark:bg-emerald-950/80 text-emerald-900 dark:text-emerald-300 font-mono font-black flex items-center justify-center shrink-0 border border-emerald-200 dark:border-emerald-800">
+                            #{arrival.rank || idx + 1}
+                          </span>
+                          <div className="min-w-0">
+                            <p className="font-black text-slate-900 dark:text-slate-100 truncate">{arrival.fullName}</p>
+                            <p className="text-[10px] text-slate-500 dark:text-slate-400 truncate">
+                              🏫 {arrival.schoolName} • صدرية #{arrival.bibNumber || '-'}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2 shrink-0 font-mono font-black text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/60 px-3 py-1 rounded-xl border border-emerald-200 dark:border-emerald-800">
+                          ⏱️ {arrival.time || '00:00.0'}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )
+              )}
+
+              {/* Tab 3: Remaining in Race */}
+              {detailsModalTab === 'remaining' && (
+                detailsRemainingFiltered.length === 0 ? (
+                  <div className="py-12 text-center space-y-2">
+                    <p className="text-3xl">🎉</p>
+                    <p className="text-sm font-bold text-slate-600 dark:text-slate-400">رائع! لقد وصل جميع مسجلي هذا السباق إلى خط النهاية.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {detailsRemainingFiltered.map((student, idx) => {
+                      const bib = student.bibNumber ?? (student as any).crossCountryBibNumber ?? '-';
+                      return (
+                        <div key={student.id || idx} className="bg-white dark:bg-slate-900 p-3 rounded-2xl border border-slate-200 dark:border-slate-800 flex items-center justify-between gap-3 text-xs shadow-3xs">
+                          <div className="flex items-center gap-3 min-w-0">
+                            <span className="w-8 h-8 rounded-xl bg-amber-50 dark:bg-amber-950/80 text-amber-900 dark:text-amber-300 font-mono font-black flex items-center justify-center shrink-0 border border-amber-200 dark:border-amber-800">
+                              #{bib}
+                            </span>
+                            <div className="min-w-0">
+                              <p className="font-black text-slate-900 dark:text-slate-100 truncate">{student.fullName}</p>
+                              <p className="text-[10px] text-slate-500 dark:text-slate-400 truncate">
+                                🏫 {student.schoolName || 'مؤسسة غير محددة'} • مسار: {student.massarNumber || '-'}
+                              </p>
+                            </div>
+                          </div>
+
+                          <span className="px-2.5 py-1 bg-amber-100 dark:bg-amber-950/80 text-amber-900 dark:text-amber-300 font-bold rounded-lg text-[10px] border border-amber-300 dark:border-amber-800 shrink-0">
+                            قيد السباق (في انتظار الوصول) ⏳
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )
+              )}
+
+            </div>
+
+            {/* Footer */}
+            <div className="p-4 bg-slate-100 dark:bg-slate-800 border-t border-slate-200 dark:border-slate-700 flex items-center justify-between shrink-0">
+              <span className="text-xs text-slate-500 dark:text-slate-400">
+                يمكنك النقر على أي عداء أو تصدير اللائحة مباشرة لإكسل.
+              </span>
+              <button
+                type="button"
+                onClick={() => setDetailsModalTab(null)}
+                className="px-5 py-2 bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 text-slate-800 dark:text-slate-200 font-bold text-xs rounded-xl transition-colors cursor-pointer"
+              >
+                إغلاق
+              </button>
+            </div>
+
+          </div>
+        </div>
+      )}
+
     </div>
   );
 };

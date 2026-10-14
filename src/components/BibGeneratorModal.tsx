@@ -23,7 +23,9 @@ import {
   CheckSquare,
   Square,
   RotateCcw,
-  Palette as PaletteIcon
+  Palette as PaletteIcon,
+  Trash2,
+  Save
 } from 'lucide-react';
 import QRCode from 'qrcode';
 import jsPDF from 'jspdf';
@@ -48,6 +50,8 @@ export interface BibRunnerData {
   gender: 'Male' | 'Female' | string;
   genderLabel: string;
   affiliationType?: string;
+  affiliationTypeLabel?: string;
+  commune?: string;
   qrDataUrl?: string;
 }
 
@@ -77,6 +81,7 @@ export const BibGeneratorModal: React.FC<BibGeneratorModalProps> = ({
 
   // Cross Country Races Multi-Selection State (كل سباق على حدا مع إمكانية تحديد أكثر من سباق)
   const [selectedRaces, setSelectedRaces] = useState<string[]>(CROSS_COUNTRY_CATEGORIES.map(c => c.id));
+  const [isEmptied, setIsEmptied] = useState<boolean>(false);
   const [separatePagesPerRace, setSeparatePagesPerRace] = useState<boolean>(true);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedGender, setSelectedGender] = useState<string>('ALL');
@@ -98,10 +103,12 @@ export const BibGeneratorModal: React.FC<BibGeneratorModalProps> = ({
 
   // Runner details font size scale (0.7: 70% to 1.4: 140%)
   const [textScale, setTextScale] = useState<number>(1.0);
+  const [isCustomizationVisible, setIsCustomizationVisible] = useState<boolean>(false);
 
   // Preview Pagination
   const [previewPage, setPreviewPage] = useState<number>(1);
   const [isGeneratingPdf, setIsGeneratingPdf] = useState<boolean>(false);
+  const [isSyncingBibs, setIsSyncingBibs] = useState<boolean>(false);
   const [qrCodeMap, setQrCodeMap] = useState<Record<string, string>>({});
 
   // Printable container ref
@@ -162,27 +169,60 @@ export const BibGeneratorModal: React.FC<BibGeneratorModalProps> = ({
     return map;
   }, [schools]);
 
-  // Helper to normalize and match category
+  // Helper to normalize and match category strictly and accurately
   const matchCategoryDef = (student: Student): CrossCountryCategoryDef | undefined => {
     const sCat = (student.category || '').toLowerCase().trim();
     const sGen = (student.gender || '').toLowerCase().trim();
 
-    return CROSS_COUNTRY_CATEGORIES.find(cat => {
-      const cCat = cat.category.toLowerCase().trim();
-      const cGen = cat.gender.toLowerCase().trim();
+    // 1. Direct ID match (e.g. 'u12_male')
+    if (sCat) {
+      const direct = CROSS_COUNTRY_CATEGORIES.find(c => c.id.toLowerCase() === sCat);
+      if (direct) return direct;
+    }
 
-      const catMatches = sCat === cCat ||
-        (cCat === 'u12' && (sCat.includes('براعم') || sCat.includes('12') || sCat.includes('برعم'))) ||
-        (cCat === 'u15' && (sCat.includes('صغار') || sCat.includes('15') || sCat.includes('صغير'))) ||
-        (cCat === 'u18' && (sCat.includes('فتيان') || sCat.includes('18') || sCat.includes('فتيات') || sCat.includes('فتي'))) ||
-        (cCat === 'u20' && (sCat.includes('شبان') || sCat.includes('20') || sCat.includes('شابات') || sCat.includes('شب')));
+    // 2. Strict Gender Check (avoiding 'female'.includes('male'))
+    const isFemale =
+      sGen === 'female' ||
+      sGen === 'f' ||
+      sGen.includes('أنثى') ||
+      sGen.includes('انثى') ||
+      sGen.includes('إناث') ||
+      sGen.includes('اناث') ||
+      sGen.includes('بنت') ||
+      sCat.includes('برعمات') ||
+      sCat.includes('صغيرات') ||
+      sCat.includes('فتيات') ||
+      sCat.includes('شابات') ||
+      sCat.includes('female');
 
-      const genMatches = sGen === cGen ||
-        (cGen === 'male' && (sGen.includes('ذكر') || sGen.includes('ذكور') || sGen === 'm' || sGen === 'male' || sGen.includes('ولد'))) ||
-        (cGen === 'female' && (sGen.includes('أنثى') || sGen.includes('انثى') || sGen.includes('إناث') || sGen.includes('اناث') || sGen === 'f' || sGen === 'female' || sGen.includes('بنت')));
+    const targetGender = isFemale ? 'Female' : 'Male';
 
-      return catMatches && genMatches;
-    });
+    // 3. Category from Name / Tag
+    if (sCat.includes('براعم') || sCat.includes('برعمات') || sCat.includes('u12') || sCat.includes('12')) {
+      return CROSS_COUNTRY_CATEGORIES.find(c => c.category === 'U12' && c.gender === targetGender);
+    }
+    if (sCat.includes('صغار') || sCat.includes('صغيرات') || sCat.includes('u15') || sCat.includes('15')) {
+      return CROSS_COUNTRY_CATEGORIES.find(c => c.category === 'U15' && c.gender === targetGender);
+    }
+    if (sCat.includes('فتيان') || sCat.includes('فتيات') || sCat.includes('u18') || sCat.includes('18')) {
+      return CROSS_COUNTRY_CATEGORIES.find(c => c.category === 'U18' && c.gender === targetGender);
+    }
+    if (sCat.includes('شبان') || sCat.includes('شابات') || sCat.includes('u20') || sCat.includes('20')) {
+      return CROSS_COUNTRY_CATEGORIES.find(c => c.category === 'U20' && c.gender === targetGender);
+    }
+
+    // 4. Fallback to birth year / date
+    const bYear = (student as any).birthYear ? parseInt(String((student as any).birthYear)) : (
+      student.birthDate ? parseInt(student.birthDate.split('-')[0]) : null
+    );
+    if (bYear && !isNaN(bYear)) {
+      if (bYear >= 2015) return CROSS_COUNTRY_CATEGORIES.find(c => c.category === 'U12' && c.gender === targetGender);
+      if (bYear >= 2012) return CROSS_COUNTRY_CATEGORIES.find(c => c.category === 'U15' && c.gender === targetGender);
+      if (bYear >= 2009) return CROSS_COUNTRY_CATEGORIES.find(c => c.category === 'U18' && c.gender === targetGender);
+      return CROSS_COUNTRY_CATEGORIES.find(c => c.category === 'U20' && c.gender === targetGender);
+    }
+
+    return CROSS_COUNTRY_CATEGORIES.find(cat => cat.gender === targetGender);
   };
 
   // Build list of all runners with normalized bib numbers
@@ -199,16 +239,19 @@ export const BibGeneratorModal: React.FC<BibGeneratorModalProps> = ({
       // Category display name
       let categoryLabel = catDef ? catDef.titleAr.replace('سباق ', '') : (student.category || 'مشارك');
 
-      // Bib number: use assigned bibNumber if exists, otherwise generate systematic starting from 101
-      const bibNumber = student.bibNumber || (101 + idx);
+      // Bib number: check assigned bibNumber or crossCountryBibNumber from database, otherwise generate systematic starting from 101
+      const assignedBib = student.bibNumber ?? (student as any).crossCountryBibNumber;
+      const bibNumber = (assignedBib !== undefined && assignedBib !== null && String(assignedBib).trim() !== '')
+        ? assignedBib
+        : (101 + idx);
 
       return {
         id: student.id || `runner-${idx}`,
         bibNumber,
         fullName: student.fullName || student.name || `متسابق ${idx + 1}`,
         massarNumber: student.massarNumber || student.nationalId || `${150000 + idx}`,
-        birthDate: student.birthDate || (student.birthYear ? `01/01/${student.birthYear}` : '2012/01/01'),
-        birthYear: student.birthYear || '2012',
+        birthDate: student.birthDate || ((student as any).birthYear ? `01/01/${(student as any).birthYear}` : '2012/01/01'),
+        birthYear: (student as any).birthYear || (student.birthDate ? student.birthDate.split('-')[0] : '2012'),
         schoolName,
         commune,
         directorateName,
@@ -216,13 +259,17 @@ export const BibGeneratorModal: React.FC<BibGeneratorModalProps> = ({
         categoryLabel,
         gender: isFemale ? 'Female' : 'Male',
         genderLabel,
-        affiliationType: student.affiliationType || 'non_club'
+        affiliationType: student.affiliationType || 'non_club',
+        affiliationTypeLabel: student.affiliationType === 'club_affiliated' ? 'مشاركة فريق' : 'مشاركة فردية',
+        commune
       };
     });
   }, [students, schoolMap, directorateName]);
 
-  // Filter runners based on selected races (multi-race selection), gender, and search query
+  // Filter runners based on selected races (multi-race selection), gender, search query, and empty state
   const filteredRunners = useMemo(() => {
+    if (isEmptied) return [];
+
     return allRunners.filter(runner => {
       // Race filter (multi-race selection)
       if (selectedRaces.length > 0) {
@@ -262,7 +309,7 @@ export const BibGeneratorModal: React.FC<BibGeneratorModalProps> = ({
 
       return true;
     });
-  }, [allRunners, selectedRaces, selectedGender, selectedAffiliation, searchQuery]);
+  }, [allRunners, selectedRaces, selectedGender, selectedAffiliation, searchQuery, isEmptied]);
 
   // Race counts for each of the 8 individual races
   const raceCounts = useMemo(() => {
@@ -303,6 +350,7 @@ export const BibGeneratorModal: React.FC<BibGeneratorModalProps> = ({
 
   // Toggle single race selection
   const toggleRace = (raceId: string) => {
+    setIsEmptied(false);
     setSelectedRaces(prev => {
       if (prev.includes(raceId)) {
         return prev.filter(id => id !== raceId);
@@ -315,12 +363,14 @@ export const BibGeneratorModal: React.FC<BibGeneratorModalProps> = ({
 
   // Solo select a single race
   const selectSingleRace = (raceId: string) => {
+    setIsEmptied(false);
     setSelectedRaces([raceId]);
     setPreviewRaceFilter('ALL');
     setPreviewPage(1);
   };
 
   const selectAllRaces = () => {
+    setIsEmptied(false);
     setSelectedRaces(CROSS_COUNTRY_CATEGORIES.map(c => c.id));
     setPreviewPage(1);
   };
@@ -331,13 +381,103 @@ export const BibGeneratorModal: React.FC<BibGeneratorModalProps> = ({
   };
 
   const selectMaleRaces = () => {
+    setIsEmptied(false);
     setSelectedRaces(CROSS_COUNTRY_CATEGORIES.filter(c => c.gender === 'Male').map(c => c.id));
     setPreviewPage(1);
   };
 
   const selectFemaleRaces = () => {
+    setIsEmptied(false);
     setSelectedRaces(CROSS_COUNTRY_CATEGORIES.filter(c => c.gender === 'Female').map(c => c.id));
     setPreviewPage(1);
+  };
+
+  // Function to empty / reset the bib generator app ("تفريغ تطبيق إنشاء الصدريات")
+  const handleClearBibApp = () => {
+    setSelectedRaces([]);
+    setSearchQuery('');
+    setSelectedGender('ALL');
+    setSelectedAffiliation('ALL');
+    setPreviewRaceFilter('ALL');
+    setPreviewPage(1);
+    setIsEmptied(true);
+    toast.success('تم تفريغ تطبيق إنشاء الصدريات بنجاح. يمكنك الآن اختيار وتحديد السباق المراد من قاعدة البيانات.', {
+      icon: '🗑️',
+      duration: 4000
+    });
+  };
+
+  // Function to restore / reload from database
+  const handleReloadDatabase = async () => {
+    setIsLoadingData(true);
+    try {
+      const [loadedStudents, loadedSchools, loadedDir] = await Promise.all([
+        DataService.getStudents(),
+        DataService.getSchools(),
+        DataService.getActiveDirectorate()
+      ]);
+      const cc = loadedStudents.filter(s => s.sportId === 'cross_country' || !s.sportId);
+      setStudents(cc.length > 0 ? cc : loadedStudents);
+      setSchools(loadedSchools);
+      if (loadedDir?.name) {
+        setDirectorateName(loadedDir.shortName || loadedDir.name);
+      }
+      setSelectedRaces(CROSS_COUNTRY_CATEGORIES.map(c => c.id));
+      setIsEmptied(false);
+      setPreviewRaceFilter('ALL');
+      setPreviewPage(1);
+      toast.success('تمت إعادة تعبئة وتحميل كافة بيانات المشاركين من قاعدة البيانات بنجاح! 🔄');
+    } catch (err) {
+      console.error(err);
+      toast.error('حدث خطأ أثناء تحميل البيانات');
+    } finally {
+      setIsLoadingData(false);
+    }
+  };
+
+  // Function to select race from entered database ("إنشاء الصدريات حسب السباق الذي تم تحديده من قاعدة البيانات التي تم إدخالها")
+  const handleSelectRaceFromDatabase = (raceId: string) => {
+    if (!raceId) return;
+    setIsEmptied(false);
+    if (raceId === 'ALL') {
+      setSelectedRaces(CROSS_COUNTRY_CATEGORIES.map(c => c.id));
+      setPreviewRaceFilter('ALL');
+      toast.success(`تم اختيار جميع السباقات (${allRunners.length} مشارك في قاعدة البيانات)`);
+    } else {
+      setSelectedRaces([raceId]);
+      setPreviewRaceFilter(raceId);
+      const cat = CROSS_COUNTRY_CATEGORIES.find(c => c.id === raceId);
+      const count = raceCounts[raceId] || 0;
+      toast.success(`تم تحديد "${cat?.titleAr || raceId}" (${count} مشارك مسجل في قاعدة البيانات)`, {
+        icon: '🎯'
+      });
+    }
+    setPreviewPage(1);
+  };
+
+  // Save / Sync assigned bib numbers to database for seamless coordination with Finish Line Scanner
+  const handleSyncBibsToDatabase = async () => {
+    if (filteredRunners.length === 0) {
+      toast.error('لا توجد صدريات محددة لحفظها');
+      return;
+    }
+    setIsSyncingBibs(true);
+    const toastId = toast.loading('جاري حفظ ومزامنة أرقام الصدريات في قاعدة البيانات...');
+    try {
+      const items = filteredRunners.map(r => ({
+        id: r.id,
+        bibNumber: r.bibNumber
+      }));
+      await DataService.updateBibNumbersBulk(items);
+      toast.dismiss(toastId);
+      toast.success(`تم حفظ ومزامنة ${items.length} رقم صدرية في قاعدة البيانات بنجاح! جاهزة للمسح الآلي في تطبيق الماسح 🎯`);
+    } catch (e) {
+      console.error(e);
+      toast.dismiss(toastId);
+      toast.error('حدث خطأ أثناء مزامنة أرقام الصدريات');
+    } finally {
+      setIsSyncingBibs(false);
+    }
   };
 
   // Runners displayed in preview (can be narrowed by previewRaceFilter)
@@ -595,11 +735,14 @@ export const BibGeneratorModal: React.FC<BibGeneratorModalProps> = ({
         await drawStyledText(runner.genderLabel, bx + 2 * colW, by + 2 * rowH, colW, rowH, fSize);
         await drawStyledText(runner.directorateName, bx + 2 * colW, by + 3 * rowH, colW, rowH, fSize);
 
-        // LEFT COLUMN (Name, Massar, School, Directorate)
+        // LEFT COLUMN (Name, Massar, School, Commune)
         await drawStyledText(runner.fullName, bx, by, colW, rowH, fSize);
         await drawStyledText(runner.massarNumber, bx, by + rowH, colW, rowH, fSize);
         await drawStyledText(runner.schoolName, bx, by + 2 * rowH, colW, rowH, fSize);
-        await drawStyledText(runner.directorateName, bx, by + 3 * rowH, colW, rowH, fSize);
+        await drawStyledText(runner.commune || '', bx, by + 3 * rowH, colW, rowH, fSize);
+
+        // MIDDLE - BELOW QR (Participation Type)
+        await drawStyledText(runner.affiliationTypeLabel || '', bx + colW, by + topH - rowH, colW, rowH, fSize * 0.8);
 
         // 8. Bib Number (Bottom Large) - Unconstrained, huge size for maximum legibility
         const bibStr = String(runner.bibNumber);
@@ -772,18 +915,145 @@ export const BibGeneratorModal: React.FC<BibGeneratorModalProps> = ({
             </div>
           </div>
 
-          <button
-            onClick={onClose}
-            className="w-8 h-8 rounded-xl bg-white/10 hover:bg-white/20 text-slate-200 hover:text-white flex items-center justify-center transition-all cursor-pointer"
-            title="إغلاق"
-          >
-            <X className="w-4 h-4" />
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleClearBibApp}
+              className="px-3 py-1.5 bg-rose-500/20 hover:bg-rose-500/30 text-rose-200 hover:text-white border border-rose-400/40 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer shadow-3xs"
+              title="تفريغ تطبيق إنشاء الصدريات وإلغاء أي تحديد سابق"
+            >
+              <Trash2 className="w-3.5 h-3.5 text-rose-300" />
+              <span>تفريغ التطبيق 🗑️</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleReloadDatabase}
+              className="px-3 py-1.5 bg-white/10 hover:bg-white/20 text-slate-200 hover:text-white border border-white/20 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-3xs"
+              title="إعادة تعبئة وتحميل كافة بيانات المشاركين من قاعدة البيانات"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">إعادة تعبئة 🔄</span>
+            </button>
+
+            <button
+              onClick={onClose}
+              className="w-8 h-8 rounded-xl bg-white/10 hover:bg-white/20 text-slate-200 hover:text-white flex items-center justify-center transition-all cursor-pointer"
+              title="إغلاق"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
         </div>
 
         {/* Modal Body Container */}
         <div className="p-4 sm:p-6 overflow-y-auto flex-1 bg-slate-50 space-y-5">
           
+          {/* 🎯 Section 1: Dedicated Race Selector from Entered Database & App Empty Action */}
+          <div className="bg-gradient-to-r from-blue-900 via-indigo-900 to-slate-900 text-white border border-indigo-500/30 rounded-2xl p-4 sm:p-5 shadow-sm space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-blue-500/20 border border-blue-400/30 text-blue-300 flex items-center justify-center font-black text-base shadow-inner">
+                  🎯
+                </div>
+                <div>
+                  <h4 className="text-sm font-black text-white flex items-center gap-2">
+                    <span>إنشاء الصدريات حسب السباق المحدد من قاعدة البيانات</span>
+                    <span className="text-[10px] font-mono font-bold px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-400/30">
+                      {isEmptied ? 'التطبيق مفرغ' : `${filteredRunners.length} صدرية جاهزة`}
+                    </span>
+                  </h4>
+                  <p className="text-xs text-indigo-200">
+                    حدد السباق المطلوب لتوليد صدريات العدائين المسجلين فيه من قاعدة البيانات تلقائياً، أو اضغط زر التفريغ للبدء من جديد.
+                  </p>
+                </div>
+              </div>
+
+              {/* Action Buttons: تفريغ تطبيق إنشاء الصدريات + مزامنة مع الماسح + إعادة تعبئة */}
+              <div className="flex items-center gap-2 shrink-0 flex-wrap">
+                <button
+                  type="button"
+                  onClick={handleClearBibApp}
+                  className="px-3.5 py-2 bg-rose-600 hover:bg-rose-700 active:scale-95 text-white rounded-xl text-xs font-black flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
+                  title="تفريغ تطبيق إنشاء الصدريات وإلغاء أي تحديد سابق"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  <span>تفريغ تطبيق إنشاء الصدريات 🗑️</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleSyncBibsToDatabase}
+                  disabled={isSyncingBibs || filteredRunners.length === 0}
+                  className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white rounded-xl text-xs font-black flex items-center gap-1.5 shadow-sm transition-all cursor-pointer disabled:opacity-50"
+                  title="حفظ أرقام الصدريات الحالية في قاعدة البيانات للمزامنة مع الماسح"
+                >
+                  <Save className="w-4 h-4" />
+                  <span>{isSyncingBibs ? 'جاري المزامنة...' : 'مزامنة مع الماسح 💾'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleReloadDatabase}
+                  className="px-3 py-2 bg-white/10 hover:bg-white/20 active:scale-95 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer border border-white/20"
+                  title="إعادة تعبئة وتحميل كافة بيانات المشاركين من قاعدة البيانات"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  <span>إعادة تعبئة 🔄</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Quick Dropdown: تحديد السباق المحدد من قاعدة البيانات */}
+            <div className="pt-2 border-t border-indigo-800/80 flex flex-col md:flex-row items-stretch md:items-center gap-3">
+              <label className="text-xs font-bold text-indigo-100 shrink-0">
+                اختر السباق المراد إنشاء صدرياته:
+              </label>
+
+              <select
+                value={selectedRaces.length === 1 ? selectedRaces[0] : (selectedRaces.length === CROSS_COUNTRY_CATEGORIES.length ? 'ALL' : '')}
+                onChange={(e) => handleSelectRaceFromDatabase(e.target.value)}
+                className="flex-1 bg-white text-slate-900 font-black text-xs rounded-xl px-3.5 py-2.5 border border-indigo-300 focus:outline-hidden focus:ring-2 focus:ring-blue-400 shadow-xs cursor-pointer"
+              >
+                <option value="">— اختر السباق المحدد لإنشاء صدرياته من قاعدة البيانات المدخلة —</option>
+                <option value="ALL">جميع السباقات والفئات ({allRunners.length} مشارك مسجل في قاعدة البيانات)</option>
+                {CROSS_COUNTRY_CATEGORIES.map(cat => {
+                  const count = raceCounts[cat.id] || 0;
+                  return (
+                    <option key={cat.id} value={cat.id}>
+                      {cat.titleAr} ({cat.genderLabel} • مسافة {cat.distance}) — [{count} مشارك مسجل في قاعدة البيانات]
+                    </option>
+                  );
+                })}
+              </select>
+
+              {/* Quick pill badges for races that have registered students */}
+              <div className="flex items-center gap-1.5 flex-wrap overflow-x-auto py-1">
+                {CROSS_COUNTRY_CATEGORIES.filter(c => (raceCounts[c.id] || 0) > 0).map(cat => {
+                  const isSelected = selectedRaces.length === 1 && selectedRaces[0] === cat.id;
+                  return (
+                    <button
+                      key={cat.id}
+                      type="button"
+                      onClick={() => handleSelectRaceFromDatabase(cat.id)}
+                      className={`text-[11px] px-2.5 py-1 rounded-lg font-bold transition-all cursor-pointer whitespace-nowrap flex items-center gap-1 ${
+                        isSelected
+                          ? 'bg-emerald-500 text-white shadow-xs font-black'
+                          : 'bg-white/10 hover:bg-white/20 text-indigo-100 border border-white/15'
+                      }`}
+                      title={`توليد صدريات ${cat.titleAr} (${raceCounts[cat.id]} مشارك)`}
+                    >
+                      <span>{cat.shortLabel}</span>
+                      <span className="text-[10px] px-1 rounded-sm bg-black/20 font-mono">
+                        {raceCounts[cat.id]}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+
           {/* Top Control Card */}
           <div className="bg-white border border-slate-200/90 rounded-2xl p-4 sm:p-5 shadow-xs space-y-4">
             
@@ -1048,14 +1318,22 @@ export const BibGeneratorModal: React.FC<BibGeneratorModalProps> = ({
               </div>
             )}
 
-            {/* Row 2: Visual Customization with Range Sliders (أشرطة إزاحة لتغيير الأحجام بدقة وتكييفها حسب الفراغ) */}
-            <div className="pt-3 border-t border-slate-100 space-y-2.5">
+            {/* Row 2: Visual Customization & Sliders (لوحة تخصيص المقاسات والألوان مع إمكانية الإظهار/الإخفاء) */}
+            <div className="pt-2 border-t border-slate-100 dark:border-slate-800 space-y-2">
               <div className="flex items-center justify-between">
-                <span className="text-xs font-black text-slate-800 flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setIsCustomizationVisible(!isCustomizationVisible)}
+                  className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 rounded-xl text-xs font-black flex items-center gap-2 transition-all cursor-pointer border border-slate-200 dark:border-slate-700 shadow-2xs"
+                >
                   <Sliders className="w-3.5 h-3.5 text-blue-600" />
-                  <span>تعديل المقاسات والخطوط (أشرطة إزاحة لتكييف الأحجام مع الفراغ المتاح):</span>
-                </span>
-                {(qrScale !== 1.0 || bibNumberScale !== 1.0 || textScale !== 1.0 || bibBgColor !== '#FFFFFF' || bibFont !== 'mono') && (
+                  <span>تخصيص المقاسات والألوان والخطوط</span>
+                  <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-300">
+                    {isCustomizationVisible ? 'إخفاء ▴' : 'إظهار ▾'}
+                  </span>
+                </button>
+
+                {isCustomizationVisible && (qrScale !== 1.0 || bibNumberScale !== 1.0 || textScale !== 1.0 || bibBgColor !== '#FFFFFF' || bibFont !== 'mono') && (
                   <button
                     type="button"
                     onClick={() => {
@@ -1065,43 +1343,29 @@ export const BibGeneratorModal: React.FC<BibGeneratorModalProps> = ({
                       setBibFont('mono');
                       setBibBgColor('#FFFFFF');
                     }}
-                    className="text-[10px] font-bold text-slate-500 hover:text-blue-700 flex items-center gap-1 cursor-pointer transition-colors"
+                    className="text-[10px] font-bold text-slate-500 hover:text-blue-700 flex items-center gap-1 cursor-pointer transition-colors bg-white dark:bg-slate-800 px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700"
                     title="إعادة ضبط كافة المقاسات والألوان إلى الوضع الافتراضي"
                   >
                     <RotateCcw className="w-3 h-3" />
-                    <span>إعادة الضبط الافتراضي</span>
+                    <span>إعادة الضبط</span>
                   </button>
                 )}
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 bg-slate-50/70 p-3.5 rounded-2xl border border-slate-200/70">
-                
-                {/* Customization 1: Slider for QR Code Size (شريط حجم كود المسح) */}
-                <div className="space-y-2 bg-white p-2.5 rounded-xl border border-slate-200/80 shadow-3xs">
-                  <div className="flex items-center justify-between">
-                    <label className="text-[11px] font-black text-slate-800 flex items-center gap-1">
-                      <QrCode className="w-3.5 h-3.5 text-amber-600" />
-                      <span>حجم كود المسح (QR):</span>
-                    </label>
-                    <div className="flex items-center gap-1">
-                      <span className="text-[11px] font-black text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded-md border border-amber-200 font-mono">
+              {isCustomizationVisible && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 bg-slate-50/80 dark:bg-slate-900/60 p-3 rounded-2xl border border-slate-200/80 dark:border-slate-800 animate-fadeIn">
+                  
+                  {/* Customization 1: Slider for QR Code Size */}
+                  <div className="space-y-1.5 bg-white dark:bg-slate-800 p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 shadow-3xs">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[11px] font-black text-slate-800 dark:text-slate-200 flex items-center gap-1">
+                        <QrCode className="w-3.5 h-3.5 text-amber-600" />
+                        <span>حجم QR:</span>
+                      </label>
+                      <span className="text-[10px] font-black text-amber-700 bg-amber-50 dark:bg-amber-950/60 px-1.5 py-0.2 rounded border border-amber-200 dark:border-amber-800 font-mono">
                         {Math.round(qrScale * 100)}%
                       </span>
-                      {qrScale !== 1.0 && (
-                        <button
-                          type="button"
-                          onClick={() => setQrScale(1.0)}
-                          className="text-slate-400 hover:text-amber-600 p-0.5 rounded cursor-pointer transition-colors"
-                          title="إعادة للحجم الافتراضي 100%"
-                        >
-                          <RotateCcw className="w-2.5 h-2.5" />
-                        </button>
-                      )}
                     </div>
-                  </div>
-
-                  {/* Range Slider for QR */}
-                  <div className="space-y-1">
                     <input
                       type="range"
                       min="0.5"
@@ -1109,49 +1373,26 @@ export const BibGeneratorModal: React.FC<BibGeneratorModalProps> = ({
                       step="0.05"
                       value={qrScale}
                       onChange={(e) => setQrScale(parseFloat(e.target.value))}
-                      className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-amber-600 focus:outline-hidden"
-                      title={`حجم كود المسح الحالي: ${Math.round(qrScale * 100)}%`}
+                      className="w-full h-1.5 bg-slate-200 dark:bg-slate-700 rounded-lg appearance-none cursor-pointer accent-amber-600"
                     />
                     <div className="flex justify-between text-[9px] font-bold text-slate-400 font-mono px-0.5">
                       <span>50%</span>
-                      <button 
-                        type="button" 
-                        onClick={() => setQrScale(1.0)} 
-                        className="hover:text-amber-600 cursor-pointer"
-                      >
-                        100% (افتراضي)
-                      </button>
+                      <button type="button" onClick={() => setQrScale(1.0)} className="hover:text-amber-600 cursor-pointer">افتراضي</button>
                       <span>160%</span>
                     </div>
                   </div>
-                </div>
 
-                {/* Customization 2: Slider for Bib Number Size (شريط حجم رقم الصدرية - تكبير بدون قيود) */}
-                <div className="space-y-2.5 bg-white p-2.5 rounded-xl border border-slate-200/80 shadow-3xs">
-                  <div className="flex items-center justify-between">
-                    <label className="text-[11px] font-black text-slate-800 flex items-center gap-1">
-                      <Maximize2 className="w-3.5 h-3.5 text-blue-600" />
-                      <span>حجم رقم الصدرية (تكبير بارز):</span>
-                    </label>
-                    <div className="flex items-center gap-1">
-                      <span className="text-[11px] font-black text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded-md border border-blue-200 font-mono">
+                  {/* Customization 2: Slider for Bib Number Size */}
+                  <div className="space-y-1.5 bg-white dark:bg-slate-800 p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 shadow-3xs">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[11px] font-black text-slate-800 dark:text-slate-200 flex items-center gap-1">
+                        <Maximize2 className="w-3.5 h-3.5 text-blue-600" />
+                        <span>حجم رقم الصدرية:</span>
+                      </label>
+                      <span className="text-[10px] font-black text-blue-700 bg-blue-50 dark:bg-blue-950/60 px-1.5 py-0.2 rounded border border-blue-200 dark:border-blue-800 font-mono">
                         {Math.round(bibNumberScale * 100)}%
                       </span>
-                      {bibNumberScale !== 1.0 && (
-                        <button
-                          type="button"
-                          onClick={() => setBibNumberScale(1.0)}
-                          className="text-slate-400 hover:text-blue-600 p-0.5 rounded cursor-pointer transition-colors"
-                          title="إعادة للحجم الافتراضي 100%"
-                        >
-                          <RotateCcw className="w-2.5 h-2.5" />
-                        </button>
-                      )}
                     </div>
-                  </div>
-
-                  {/* Range Slider for Bib Number (up to 250%) */}
-                  <div className="space-y-1">
                     <input
                       type="range"
                       min="0.7"
@@ -1159,184 +1400,23 @@ export const BibGeneratorModal: React.FC<BibGeneratorModalProps> = ({
                       step="0.05"
                       value={bibNumberScale}
                       onChange={(e) => setBibNumberScale(parseFloat(e.target.value))}
-                      className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-blue-600 focus:outline-hidden"
-                      title={`حجم رقم الصدرية الحالي: ${Math.round(bibNumberScale * 100)}%`}
+                      className="w-full h-1.5 bg-slate-200 dark:bg-slate-700 rounded-lg appearance-none cursor-pointer accent-blue-600"
                     />
-                    <div className="flex justify-between text-[9px] font-bold text-slate-400 font-mono px-0.5">
-                      <span>70%</span>
-                      <button 
-                        type="button" 
-                        onClick={() => setBibNumberScale(1.0)} 
-                        className="hover:text-blue-600 cursor-pointer"
-                      >
-                        100% (افتراضي)
-                      </button>
-                      <span>250% (عملاق)</span>
-                    </div>
-                  </div>
-
-                  {/* Quick Preset Buttons for Bib Size */}
-                  <div className="grid grid-cols-4 gap-1 pt-1">
-                    <button
-                      type="button"
-                      onClick={() => setBibNumberScale(1.0)}
-                      className={`py-1 px-1 text-[9px] font-black rounded-lg transition-all cursor-pointer text-center ${
-                        bibNumberScale === 1.0 ? 'bg-blue-600 text-white shadow-xs' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-                      }`}
-                    >
-                      100% قياسي
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setBibNumberScale(1.35)}
-                      className={`py-1 px-1 text-[9px] font-black rounded-lg transition-all cursor-pointer text-center ${
-                        bibNumberScale === 1.35 ? 'bg-blue-600 text-white shadow-xs' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-                      }`}
-                    >
-                      135% كبير
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setBibNumberScale(1.7)}
-                      className={`py-1 px-1 text-[9px] font-black rounded-lg transition-all cursor-pointer text-center ${
-                        bibNumberScale === 1.7 ? 'bg-blue-600 text-white shadow-xs' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-                      }`}
-                    >
-                      170% بارز جداً
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setBibNumberScale(2.1)}
-                      className={`py-1 px-1 text-[9px] font-black rounded-lg transition-all cursor-pointer text-center ${
-                        bibNumberScale === 2.1 ? 'bg-blue-600 text-white shadow-xs' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-                      }`}
-                    >
-                      210% أقصى حجم
-                    </button>
-                  </div>
-                </div>
-
-                {/* Customization 3: Slider for Runner Info Text Size (شريط حجم خط البيانات والاسم والمؤسسة) */}
-                <div className="space-y-2 bg-white p-2.5 rounded-xl border border-slate-200/80 shadow-3xs">
-                  <div className="flex items-center justify-between">
-                    <label className="text-[11px] font-black text-slate-800 flex items-center gap-1">
-                      <Type className="w-3.5 h-3.5 text-emerald-600" />
-                      <span>حجم خط البيانات (الاسم/المؤسسة):</span>
-                    </label>
-                    <div className="flex items-center gap-1">
-                      <span className="text-[11px] font-black text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded-md border border-emerald-200 font-mono">
-                        {Math.round(textScale * 100)}%
-                      </span>
-                      {textScale !== 1.0 && (
-                        <button
-                          type="button"
-                          onClick={() => setTextScale(1.0)}
-                          className="text-slate-400 hover:text-emerald-600 p-0.5 rounded cursor-pointer transition-colors"
-                          title="إعادة للحجم الافتراضي 100%"
-                        >
-                          <RotateCcw className="w-2.5 h-2.5" />
-                        </button>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Range Slider for Text Scale */}
-                  <div className="space-y-1">
-                    <input
-                      type="range"
-                      min="0.7"
-                      max="1.4"
-                      step="0.05"
-                      value={textScale}
-                      onChange={(e) => setTextScale(parseFloat(e.target.value))}
-                      className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-emerald-600 focus:outline-hidden"
-                      title={`حجم خط البيانات الحالي: ${Math.round(textScale * 100)}%`}
-                    />
-                    <div className="flex justify-between text-[9px] font-bold text-slate-400 font-mono px-0.5">
-                      <span>70%</span>
-                      <button 
-                        type="button" 
-                        onClick={() => setTextScale(1.0)} 
-                        className="hover:text-emerald-600 cursor-pointer"
-                      >
-                        100% (افتراضي)
-                      </button>
-                      <span>140%</span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Customization 4: Font Family & Color (نوع الخط ولون الصدرية) */}
-                <div className="space-y-2 bg-white p-2.5 rounded-xl border border-slate-200/80 shadow-3xs">
-                  <div className="flex items-center justify-between">
-                    <label className="text-[11px] font-black text-slate-800 flex items-center gap-1">
-                      <PaletteIcon className="w-3.5 h-3.5 text-purple-600" />
-                      <span>لون خلفية الصدرية:</span>
-                    </label>
-                    <div className="flex items-center gap-1.5">
-                      <input
-                        type="color"
-                        value={bibBgColor}
-                        onChange={(e) => setBibBgColor(e.target.value)}
-                        className="w-5 h-5 rounded-md border border-slate-300 p-0 cursor-pointer bg-white"
-                        title="اختر لون خلفية الصدرية"
-                      />
-                      {bibBgColor !== '#FFFFFF' && (
-                        <button
-                          type="button"
-                          onClick={() => setBibBgColor('#FFFFFF')}
-                          className="text-[9px] text-blue-600 hover:underline font-bold"
-                          title="إعادة للأبيض"
-                        >
-                          أبيض
-                        </button>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Color Presets */}
-                  <div className="flex items-center gap-1.5 flex-wrap">
-                    {[
-                      { color: '#FFFFFF', label: 'أبيض' },
-                      { color: '#E0F2FE', label: 'أزرق' },
-                      { color: '#DCFCE7', label: 'أخضر' },
-                      { color: '#FEF9C3', label: 'أصفر' },
-                      { color: '#FFE4E6', label: 'وردي' },
-                      { color: '#F3E8FF', label: 'بنفسجي' },
-                      { color: '#FFEDD5', label: 'برتقالي' },
-                    ].map((preset) => (
-                      <button
-                        key={preset.color}
-                        type="button"
-                        onClick={() => setBibBgColor(preset.color)}
-                        className={`w-5 h-5 rounded-full border border-slate-200 cursor-pointer transition-transform hover:scale-110 ${
-                          bibBgColor === preset.color ? 'ring-2 ring-purple-500 ring-offset-1' : ''
-                        }`}
-                        style={{ backgroundColor: preset.color }}
-                        title={preset.label}
-                      />
-                    ))}
-                  </div>
-
-                  <div className="pt-2 border-t border-slate-100">
-                    <label className="text-[11px] font-black text-slate-800 flex items-center gap-1 mb-1.5">
-                      <Type className="w-3.5 h-3.5 text-purple-600" />
-                      <span>نوع خط رقم الصدرية:</span>
-                    </label>
-                    <div className="grid grid-cols-3 gap-1">
+                    <div className="grid grid-cols-4 gap-1 pt-1">
                       {[
-                        { id: 'mono', label: 'رقمي', fontClass: 'font-mono' },
-                        { id: 'sans', label: 'عصري', fontClass: 'font-sans font-black' },
-                        { id: 'serif', label: 'رسمي', fontClass: 'font-serif' }
+                        { val: 1.0, label: '100%' },
+                        { val: 1.35, label: '135%' },
+                        { val: 1.7, label: '170%' },
+                        { val: 2.1, label: '210%' }
                       ].map((item) => (
                         <button
-                          key={item.id}
+                          key={item.val}
                           type="button"
-                          onClick={() => setBibFont(item.id as 'mono' | 'sans' | 'serif')}
-                          className={`py-1 text-[10px] font-bold rounded-lg border transition-all cursor-pointer ${item.fontClass} ${
-                            bibFont === item.id
-                              ? 'bg-purple-600 text-white border-purple-600 shadow-xs'
-                              : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
+                          onClick={() => setBibNumberScale(item.val)}
+                          className={`py-0.5 text-[9px] font-black rounded border transition-all cursor-pointer text-center ${
+                            bibNumberScale === item.val
+                              ? 'bg-blue-600 text-white border-blue-600 shadow-2xs'
+                              : 'bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-600 hover:bg-slate-200'
                           }`}
                         >
                           {item.label}
@@ -1344,9 +1424,95 @@ export const BibGeneratorModal: React.FC<BibGeneratorModalProps> = ({
                       ))}
                     </div>
                   </div>
-                </div>
 
-              </div>
+                  {/* Customization 3: Slider for Runner Info Text Size */}
+                  <div className="space-y-1.5 bg-white dark:bg-slate-800 p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 shadow-3xs">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[11px] font-black text-slate-800 dark:text-slate-200 flex items-center gap-1">
+                        <Type className="w-3.5 h-3.5 text-emerald-600" />
+                        <span>حجم خط البيانات:</span>
+                      </label>
+                      <span className="text-[10px] font-black text-emerald-700 bg-emerald-50 dark:bg-emerald-950/60 px-1.5 py-0.2 rounded border border-emerald-200 dark:border-emerald-800 font-mono">
+                        {Math.round(textScale * 100)}%
+                      </span>
+                    </div>
+                    <input
+                      type="range"
+                      min="0.7"
+                      max="1.4"
+                      step="0.05"
+                      value={textScale}
+                      onChange={(e) => setTextScale(parseFloat(e.target.value))}
+                      className="w-full h-1.5 bg-slate-200 dark:bg-slate-700 rounded-lg appearance-none cursor-pointer accent-emerald-600"
+                    />
+                    <div className="flex justify-between text-[9px] font-bold text-slate-400 font-mono px-0.5 pt-1">
+                      <span>70%</span>
+                      <button type="button" onClick={() => setTextScale(1.0)} className="hover:text-emerald-600 cursor-pointer">افتراضي (100%)</button>
+                      <span>140%</span>
+                    </div>
+                  </div>
+
+                  {/* Customization 4: Font Family & Color */}
+                  <div className="space-y-1.5 bg-white dark:bg-slate-800 p-2.5 rounded-xl border border-slate-200 dark:border-slate-700 shadow-3xs">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[11px] font-black text-slate-800 dark:text-slate-200 flex items-center gap-1">
+                        <Palette className="w-3.5 h-3.5 text-purple-600" />
+                        <span>اللون والخط:</span>
+                      </label>
+                      <div className="flex items-center gap-1">
+                        <input
+                          type="color"
+                          value={bibBgColor}
+                          onChange={(e) => setBibBgColor(e.target.value)}
+                          className="w-5 h-5 rounded border border-slate-300 p-0 cursor-pointer bg-white"
+                          title="اختر لون الخلفية"
+                        />
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1 flex-wrap">
+                      {[
+                        { color: '#FFFFFF', label: 'أبيض' },
+                        { color: '#E0F2FE', label: 'أزرق' },
+                        { color: '#DCFCE7', label: 'أخضر' },
+                        { color: '#FEF9C3', label: 'أصفر' },
+                        { color: '#FFE4E6', label: 'وردي' },
+                      ].map((preset) => (
+                        <button
+                          key={preset.color}
+                          type="button"
+                          onClick={() => setBibBgColor(preset.color)}
+                          className={`w-4 h-4 rounded-full border border-slate-300 cursor-pointer transition-transform hover:scale-110 ${
+                            bibBgColor === preset.color ? 'ring-2 ring-purple-500' : ''
+                          }`}
+                          style={{ backgroundColor: preset.color }}
+                          title={preset.label}
+                        />
+                      ))}
+                    </div>
+                    <div className="grid grid-cols-3 gap-1 pt-1">
+                      {[
+                        { id: 'mono', label: 'رقمي' },
+                        { id: 'sans', label: 'عصري' },
+                        { id: 'serif', label: 'رسمي' }
+                      ].map((item) => (
+                        <button
+                          key={item.id}
+                          type="button"
+                          onClick={() => setBibFont(item.id as 'mono' | 'sans' | 'serif')}
+                          className={`py-0.5 text-[9px] font-bold rounded border transition-all cursor-pointer text-center ${
+                            bibFont === item.id
+                              ? 'bg-purple-600 text-white border-purple-600 shadow-2xs'
+                              : 'bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-600 hover:bg-slate-200'
+                          }`}
+                        >
+                          {item.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                </div>
+              )}
             </div>
 
             {/* Subtitle / Status text */}
@@ -1511,10 +1677,40 @@ export const BibGeneratorModal: React.FC<BibGeneratorModalProps> = ({
                 }}
               >
                 {currentPageRunners.length === 0 ? (
-                  <div className="py-20 text-center text-slate-400">
-                    <Users className="w-12 h-12 mx-auto mb-2 opacity-40" />
-                    <p className="text-xs font-bold">لا يوجد مشاركون يطابقون خيارات التصفية الحالية</p>
-                  </div>
+                  isEmptied ? (
+                    <div className="py-20 text-center text-slate-500 space-y-3">
+                      <div className="w-16 h-16 mx-auto rounded-2xl bg-rose-50 text-rose-500 border border-rose-200 flex items-center justify-center text-2xl shadow-inner">
+                        🗑️
+                      </div>
+                      <h4 className="text-base font-black text-slate-800">تطبيق إنشاء الصدريات فارغ حالياً</h4>
+                      <p className="text-xs text-slate-500 max-w-md mx-auto leading-relaxed">
+                        تم تفريغ التطبيق بنجاح. يمكنك الآن اختيار وتحديد السباق المراد من القائمة العلوية لتوليد صدرياته من قاعدة البيانات أو الضغط على زر إعادة التعبئة.
+                      </p>
+                      <div className="flex items-center justify-center gap-2 pt-2">
+                        <button
+                          type="button"
+                          onClick={handleReloadDatabase}
+                          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
+                        >
+                          <RotateCcw className="w-3.5 h-3.5" />
+                          <span>إعادة تعبئة البيانات من قاعدة البيانات</span>
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="py-20 text-center text-slate-400 space-y-2">
+                      <Users className="w-12 h-12 mx-auto mb-2 opacity-40" />
+                      <p className="text-xs font-bold text-slate-600">لا يوجد مشاركون يطابقون خيارات التصفية أو السباق المحدد</p>
+                      <p className="text-[11px] text-slate-400">تأكد من اختيار السباق الصحيح من قاعدة البيانات أو إعادة تعيين الفلاتر</p>
+                      <button
+                        type="button"
+                        onClick={() => { setSelectedRaces(CROSS_COUNTRY_CATEGORIES.map(c => c.id)); setSearchQuery(''); }}
+                        className="mt-2 px-3 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-bold transition-all cursor-pointer"
+                      >
+                        عرض جميع السباقات
+                      </button>
+                    </div>
+                  )
                 ) : bibsPerPage === 6 ? (
                   // ===============================================
                   // 🎽 PREVIEW: 6 BIBS PER PAGE (2 COLS x 3 ROWS)

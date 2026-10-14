@@ -153,7 +153,7 @@ export function resolveRunnerParticipationType(
     raw = runner.participationType;
   }
 
-  if (!raw) return 'individual';
+  if (!raw) return 'school_team';
 
   const lower = raw.trim().toLowerCase();
   if (

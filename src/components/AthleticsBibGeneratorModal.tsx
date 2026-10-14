@@ -24,7 +24,8 @@ import {
   Flame,
   FileSpreadsheet,
   Type,
-  Upload
+  Upload,
+  Trash2
 } from 'lucide-react';
 import QRCode from 'qrcode';
 import jsPDF from 'jspdf';
@@ -1224,6 +1225,17 @@ export const AthleticsBibGeneratorModal: React.FC<AthleticsBibGeneratorModalProp
     }
   };
 
+  // Empty / Clear bib generator
+  const handleClearBibApp = () => {
+    setSelectedDisciplineId('ALL');
+    setSelectedCategory('ALL');
+    setSelectedGender('ALL');
+    setSearchQuery('');
+    setGenerationSource('sequential');
+    setSeqCount(0);
+    toast.success('تم تفريغ تطبيق صدريات ألعاب القوى بنجاح! 🗑️');
+  };
+
   const themeClasses = getThemeClasses();
 
   if (!isOpen) return null;
@@ -1257,6 +1269,15 @@ export const AthleticsBibGeneratorModal: React.FC<AthleticsBibGeneratorModalProp
           </div>
 
           <div className="flex items-center gap-2">
+            <button
+              onClick={handleClearBibApp}
+              className="px-3.5 py-2 bg-rose-700/60 hover:bg-rose-700/80 text-white rounded-xl text-xs font-black flex items-center gap-1.5 shadow-sm transition-all cursor-pointer border border-rose-300/30"
+              title="تفريغ تطبيق إنشاء الصدريات"
+            >
+              <Trash2 className="w-4 h-4" />
+              <span>تفريغ التطبيق 🗑️</span>
+            </button>
+
             <button
               onClick={handlePrint}
               disabled={bibRunners.length === 0}

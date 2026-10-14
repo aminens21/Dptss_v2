@@ -55,7 +55,7 @@ import {
 } from 'firebase/auth';
 import { doc, setDoc, getDoc, serverTimestamp } from 'firebase/firestore';
 import { auth, db } from '../firebase/config';
-import { Role, Directorate, School, Tournament, Match, Student, CrossCountryCategoryResult, AthleticsCategoryResult, AthleticsWinner } from '../types';
+import { Role, Directorate, School, Tournament, Match, Student, CrossCountryCategoryResult, AthleticsCategoryResult, AthleticsWinner, Sport } from '../types';
 import { DataService, SPORTS_MAP, getAgeCategoriesForSeason, getCategoryYearsLabel } from '../lib/dataService';
 import { calculateTeamRankings, resolveRunnerParticipationType } from '../lib/crossCountryConfig';
 import { AppLogo } from '../components/AppLogo';
@@ -83,6 +83,7 @@ export const Login: React.FC = () => {
   const [students, setStudents] = useState<Student[]>([]);
   const [crossCountryResults, setCrossCountryResults] = useState<Record<string, CrossCountryCategoryResult>>({});
   const [athleticsResults, setAthleticsResults] = useState<Record<string, AthleticsCategoryResult>>({});
+  const [sportsConfig, setSportsConfig] = useState<Sport[]>([]);
   const [loadingData, setLoadingData] = useState(true);
 
   // Public Filters
@@ -368,19 +369,21 @@ export const Login: React.FC = () => {
         setActiveDirectorate(activeDir);
       }
 
-      const [dirs, schs, tours, mtchs, stds, ccRes, athRes] = await Promise.all([
+      const [dirs, schs, tours, mtchs, stds, ccRes, athRes, sps] = await Promise.all([
         DataService.getDirectorates(),
         DataService.getSchools(effectiveDirId),
         DataService.getTournaments(effectiveDirId),
         DataService.getMatches(effectiveDirId),
         DataService.getStudents(effectiveDirId),
         DataService.getCrossCountryResults(effectiveDirId),
-        DataService.getAthleticsResults(effectiveDirId)
+        DataService.getAthleticsResults(effectiveDirId),
+        DataService.getSportsConfig()
       ]);
 
       setDirectorates(dirs || []);
       setSchools(schs || []);
       setTournaments(tours || []);
+      setSportsConfig(sps || []);
 
       // Inject Demo Matches only if directorate is taourirt and none exist
       let finalMatches = mtchs || [];
@@ -1317,6 +1320,16 @@ export const Login: React.FC = () => {
     ];
   }, [activePublicTab, tournaments, crossCountryResults, athleticsResults, selectedSport]);
 
+  // Filtered sports for sports bar (only activated or programmed sports)
+  const programmedSportsEntries = useMemo(() => {
+    return Object.entries(SPORTS_MAP).filter(([sportKey]) => {
+      const hasTournaments = tournaments.some(t => t.sportId === sportKey);
+      const sportConf = sportsConfig.find(s => s.id === sportKey);
+      const isProg = sportConf ? (sportConf.isProgrammed !== undefined ? sportConf.isProgrammed : true) : true;
+      return hasTournaments || isProg;
+    });
+  }, [tournaments, sportsConfig]);
+
   // News Marquee Items
   const marqueeNews = [
     { id: 1, icon: '🏆', text: 'اعتماد ومصادقة نتائج العدو الريفي المدرسي والإقليمي لموسم 2026/2027 مع التمييز الدقيق بين المنتمين وغير المنتمين للأندية.' },
@@ -2194,7 +2207,7 @@ export const Login: React.FC = () => {
                       <span>جميع الرياضات</span>
                     </button>
 
-                    {Object.entries(SPORTS_MAP).map(([sportKey, sport]) => {
+                    {programmedSportsEntries.map(([sportKey, sport]) => {
                       const isSelected = selectedSport === sportKey;
                       return (
                         <button
@@ -2246,7 +2259,7 @@ export const Login: React.FC = () => {
                       <span>جميع الرياضات</span>
                     </button>
 
-                    {Object.entries(SPORTS_MAP).map(([sportKey, sport]) => {
+                    {programmedSportsEntries.map(([sportKey, sport]) => {
                       const isSelected = selectedSport === sportKey;
                       return (
                         <button

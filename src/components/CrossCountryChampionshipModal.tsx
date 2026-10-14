@@ -38,11 +38,13 @@ import {
   CreditCard,
   Edit,
   Upload,
+  Printer,
   Image as ImageIcon
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { downloadIndividualCardPdf } from '../lib/participationPdfService';
 import { compressImageToBase64 } from '../lib/imageUtils';
+import { BibGeneratorModal } from './BibGeneratorModal';
 
 interface CrossCountryChampionshipModalProps {
   isOpen: boolean;
@@ -90,6 +92,7 @@ export const CrossCountryChampionshipModal: React.FC<CrossCountryChampionshipMod
   const [isBulkRegisterModalOpen, setIsBulkRegisterModalOpen] = useState(false);
   const [isEditDeadlineOpen, setIsEditDeadlineOpen] = useState(false);
   const [isPdfModalOpen, setIsPdfModalOpen] = useState(false);
+  const [isBibGeneratorOpen, setIsBibGeneratorOpen] = useState(false);
   const [isHeaderCollapsed, setIsHeaderCollapsed] = useState(false);
   const [isFullScreen, setIsFullScreen] = useState(false);
 
@@ -541,6 +544,17 @@ export const CrossCountryChampionshipModal: React.FC<CrossCountryChampionshipMod
                   </div>
 
                   <div className="flex flex-wrap items-center justify-end gap-2 shrink-0">
+                    {canManage && (
+                      <button
+                        onClick={() => setIsBibGeneratorOpen(true)}
+                        className="px-3.5 py-2 bg-gradient-to-r from-emerald-500/20 to-teal-500/20 hover:from-emerald-500/30 hover:to-teal-500/30 text-emerald-300 border border-emerald-400/40 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-1.5 shadow-3xs"
+                        title="تطبيق إعداد وطباعة الصدريات للعدو الريفي (حسب السباق المحدد من قاعدة البيانات)"
+                      >
+                        <Printer className="w-3.5 h-3.5 text-emerald-400" />
+                        <span>إعداد وطباعة الصدريات 🎽</span>
+                      </button>
+                    )}
+
                     {canManage && onProgramTournament && (
                       <div className="flex items-center gap-2">
                         <button
@@ -1620,6 +1634,17 @@ export const CrossCountryChampionshipModal: React.FC<CrossCountryChampionshipMod
             </form>
           </div>
         </div>
+      )}
+
+      {/* 🎽 BIB GENERATOR MODAL (CROSS COUNTRY) */}
+      {isBibGeneratorOpen && (
+        <BibGeneratorModal
+          isOpen={true}
+          onClose={() => setIsBibGeneratorOpen(false)}
+          students={allStudents}
+          schools={schools}
+          initialCategoryId={selectedCatId}
+        />
       )}
     </>
   );

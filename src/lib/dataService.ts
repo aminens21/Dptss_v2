@@ -2998,6 +2998,45 @@ export const DataService = {
     }
   },
 
+  async updateBibNumbersBulk(items: Array<{ id: string; bibNumber: string | number }>): Promise<void> {
+    if (!items || items.length === 0) return;
+    const localList = getLocal<Student>('taourirt_students_data', []);
+    const bibMap = new Map(items.map(it => [it.id, String(it.bibNumber)]));
+    const nowIso = new Date().toISOString();
+    const updated = localList.map(s => {
+      if (bibMap.has(s.id)) {
+        const b = bibMap.get(s.id)!;
+        return {
+          ...s,
+          bibNumber: b,
+          crossCountryBibNumber: b,
+          updatedAt: nowIso
+        } as Student;
+      }
+      return s;
+    });
+    setLocal('taourirt_students_data', updated);
+
+    // Sync to Firestore in background
+    try {
+      await Promise.all(
+        items.map(async (item) => {
+          try {
+            await updateDoc(doc(db, 'students', item.id), {
+              bibNumber: String(item.bibNumber),
+              crossCountryBibNumber: String(item.bibNumber),
+              updatedAt: serverTimestamp()
+            });
+          } catch (err) {
+            // ignore individual doc fail
+          }
+        })
+      );
+    } catch (e) {
+      console.warn("Synced bib numbers locally; Firestore background sync:", e);
+    }
+  },
+
   // NOTIFICATIONS SYSTEM
   async getNotifications(): Promise<AppNotification[]> {
     try {
