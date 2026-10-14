@@ -37,7 +37,7 @@ import { SportChampionshipModal } from '../components/SportChampionshipModal';
 import { AthleticsChampionshipModal } from '../components/AthleticsChampionshipModal';
 import { EditTournamentScheduleModal } from '../components/EditTournamentScheduleModal';
 import { ProgramExportModal } from '../components/ProgramExportModal';
-import { ElectronicDrawModal } from '../components/ElectronicDrawModal';
+import { ElectronicDrawModal, TEAM_SPORTS_IDS } from '../components/ElectronicDrawModal';
 import { DemoDataModal } from '../components/DemoDataModal';
 import { TeacherTeams } from './TeacherTeams';
 import { OfficialLogos } from '../lib/dataService';
@@ -1316,22 +1316,10 @@ export const Tournaments: React.FC = () => {
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
-                              setSelectedSportForSchedule(sport);
-                              setIsScheduleModalOpen(true);
-                            }}
-                            title="برمجة التواريخ وآخر أجل للتسجيل"
-                            className="p-2.5 bg-amber-500/30 hover:bg-amber-500/50 text-amber-200 rounded-xl transition-colors cursor-pointer shrink-0 border border-amber-400/30 flex items-center justify-center"
-                          >
-                            <Calendar className="h-4 w-4" />
-                          </button>
-
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
                               handleOpenProgramModal(sport.id);
                             }}
-                            title="تعديل فئات وإعدادات البطولة"
-                            className="p-2.5 bg-slate-500/30 hover:bg-slate-500/50 text-slate-200 rounded-xl transition-colors cursor-pointer shrink-0 border border-slate-400/30 flex items-center justify-center"
+                            title="تعديل وإعداد وبرمجة بطولة العدو الريفي"
+                            className="p-2.5 bg-amber-500/30 hover:bg-amber-500/50 text-amber-200 rounded-xl transition-colors cursor-pointer shrink-0 border border-amber-400/30 flex items-center justify-center"
                           >
                             <Edit className="h-4 w-4" />
                           </button>
@@ -1609,20 +1597,21 @@ export const Tournaments: React.FC = () => {
 
                     {canManageThis && (
                       <div className="flex items-center gap-1.5">
-                        {/* Direct Electronic Draw Button for this Sport (Icon only) */}
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setSelectedSportForDraw(sport.id);
-                            setSelectedTournamentForDraw(undefined);
-                            setIsDrawModalOpen(true);
-                          }}
-                          title={`إجراء القرعة الإلكترونية لبطولة ${sport.name}`}
-                          className="p-2 text-emerald-700 hover:text-emerald-900 hover:bg-emerald-100/90 bg-emerald-50 border border-emerald-300 rounded-xl transition-colors cursor-pointer shrink-0 flex items-center justify-center shadow-3xs"
-                        >
-                          <Shuffle className="h-4 w-4" />
-                        </button>
+                        {TEAM_SPORTS_IDS.includes(sport.id) && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedSportForDraw(sport.id);
+                              setSelectedTournamentForDraw(undefined);
+                              setIsDrawModalOpen(true);
+                            }}
+                            title={`إجراء القرعة الإلكترونية لبطولة ${sport.name}`}
+                            className="p-2 text-emerald-700 hover:text-emerald-900 hover:bg-emerald-100/90 bg-emerald-50 border border-emerald-300 rounded-xl transition-colors cursor-pointer shrink-0 flex items-center justify-center shadow-3xs"
+                          >
+                            <Shuffle className="h-4 w-4" />
+                          </button>
+                        )}
 
                         {isCentralAdmin && (
                           <button
@@ -1634,25 +1623,12 @@ export const Tournaments: React.FC = () => {
                           </button>
                         )}
 
-
-
-                        <button
-                          onClick={() => {
-                            setSelectedSportForSchedule(sport);
-                            setIsScheduleModalOpen(true);
-                          }}
-                          title="تعديل وبرمجة تواريخ البطولة وآخر أجل للتسجيل"
-                          className="p-2 text-amber-600 hover:text-amber-800 hover:bg-amber-50 rounded-xl transition-colors cursor-pointer border border-amber-200 bg-amber-50/60 flex items-center justify-center shrink-0"
-                        >
-                          <Calendar className="h-4 w-4" />
-                        </button>
-
                         <button
                           onClick={() => {
                             handleOpenProgramModal(sport.id);
                           }}
-                          title="تعديل فئات وجنس وإعدادات البطولة"
-                          className="p-2 text-slate-500 hover:text-blue-700 hover:bg-blue-50 rounded-xl transition-colors cursor-pointer border border-slate-200 bg-white"
+                          title="تعديل وإعداد وبرمجة البطولة"
+                          className="p-2 text-amber-600 hover:text-amber-800 hover:bg-amber-50 rounded-xl transition-colors cursor-pointer border border-amber-200 bg-amber-50/60 flex items-center justify-center shrink-0"
                         >
                           <Edit className="h-4 w-4" />
                         </button>
@@ -1775,6 +1751,10 @@ export const Tournaments: React.FC = () => {
         currentUser={userProfile}
         directorateName={activeDirObj?.name || undefined}
         season={activeSeason}
+        onProgramTournament={(sId) => {
+          setIsSportModalOpen(false);
+          handleOpenProgramModal(sId);
+        }}
       />
 
       {/* Edit Tournament Schedule & Dates Modal */}

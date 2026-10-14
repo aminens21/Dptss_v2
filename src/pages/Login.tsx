@@ -2284,8 +2284,8 @@ export const Login: React.FC = () => {
         </section>
       </div>
 
-      {/* MAIN CONTAINER (TRIPLE LAYOUT: LEFT WIDGETS | PUBLIC RESULTS | SIDE TEACHER LOGIN) */}
-      <main className="max-w-7xl mx-auto px-3 sm:px-6 py-6">
+      {/* MAIN CONTAINER (TRIPLE LAYOUT: RIGHT WIDGETS | PUBLIC RESULTS | SIDE TEACHER LOGIN) */}
+      <main className="max-w-7xl 2xl:max-w-[1600px] mx-auto px-3 sm:px-6 py-6">
         {/* MOBILE LOGIN PANEL (Appears at the TOP on mobile if active) */}
         {showLoginPanel && (
           <div ref={loginPanelRef} className="lg:hidden mb-6 animate-in slide-in-from-top-4 fade-in duration-300">
@@ -2297,8 +2297,13 @@ export const Login: React.FC = () => {
 
         <div className="flex flex-col lg:grid lg:grid-cols-12 gap-6 items-start">
 
-          {/* MAIN COLUMN: PUBLIC RESULTS & CHAMPIONSHIPS PORTAL (FIRST IN DOM FOR MOBILE) */}
-          <div className={`w-full space-y-5 transition-all duration-300 ${
+          {/* RIGHT SIDEBAR WIDGETS (DESKTOP: SIDEBAR IN ROW 1 / MOBILE: AUXILIARY WIDGETS BELOW PODIUM) */}
+          <div className="w-full order-2 lg:order-1 lg:col-span-3 lg:col-start-1 lg:row-start-1 space-y-5">
+            {renderRightSidebar()}
+          </div>
+
+          {/* MAIN COLUMN: PUBLIC RESULTS & CHAMPIONSHIPS PORTAL (FIRST ON MOBILE) */}
+          <div className={`w-full space-y-5 transition-all duration-300 order-1 lg:order-2 lg:row-start-1 ${
             showLoginPanel 
               ? 'lg:col-span-6 lg:col-start-4' 
               : 'lg:col-span-9 lg:col-start-4'
@@ -3162,15 +3167,10 @@ export const Login: React.FC = () => {
 
           </div>
 
-          {/* RIGHT SIDEBAR WIDGETS (DESKTOP: SIDEBAR / MOBILE: AUXILIARY WIDGETS BELOW PODIUM) */}
-          <div className="w-full lg:col-span-3 lg:col-start-1 space-y-5">
-            {renderRightSidebar()}
-          </div>
-
           {/* SIDE COLUMN (3 COLS ON DESKTOP): TEACHERS & MANAGERS LOGIN PANEL */}
           <div 
             ref={loginPanelRef}
-            className={`space-y-5 transition-all duration-300 order-3 lg:order-none lg:col-span-3 lg:col-start-10 ${
+            className={`space-y-5 transition-all duration-300 order-3 lg:order-3 lg:row-start-1 lg:col-span-3 lg:col-start-10 ${
               showLoginPanel ? 'block animate-in slide-in-from-left-4 fade-in duration-300' : 'hidden'
             }`}
           >

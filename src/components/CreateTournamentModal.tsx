@@ -263,7 +263,7 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
               sportId,
               ageCategory: catId,
               gender: gen,
-              level: catId === 'U12' ? 'Primary' : catId === 'U15' ? 'Middle' : (catId === 'U18' || catId === 'U20') ? 'High' : 'Primary,Middle,High',
+              level: selectedLevels && selectedLevels.length > 0 ? selectedLevels.join(',') : (catId === 'U12' ? 'Primary' : catId === 'U15' ? 'Middle' : (catId === 'U18' || catId === 'U20') ? 'High' : 'Primary,Middle,High'),
               scope,
               affiliationType: aff,
               startDate: new Date(startDate),
@@ -275,6 +275,20 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
             });
           }
         }
+      }
+
+      // Sync sport dates & settings across tournaments
+      try {
+        await DataService.updateSportDates(sportId, {
+          startDate: new Date(startDate),
+          endDate: new Date(endDate),
+          registrationDeadline: registrationDeadline ? new Date(registrationDeadline) : null,
+          status,
+          description: description.trim(),
+          level: selectedLevels.join(',')
+        });
+      } catch (err) {
+        console.warn("Could not updateSportDates:", err);
       }
 
       // Submit batch array of tournaments
@@ -304,15 +318,23 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
         {/* Header */}
         <div className="flex items-center justify-between p-4 md:p-5 border-b border-slate-100 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-800/60">
           <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-xl bg-emerald-600 text-white flex items-center justify-center shadow-xs">
-              <Trophy className="h-5 w-5" />
+            <div className="w-10 h-10 rounded-2xl bg-emerald-600 text-white flex items-center justify-center shadow-md shadow-emerald-600/20 text-lg font-black shrink-0">
+              {activeSportConfig?.icon || SPORTS_MAP[sportId]?.icon || <Trophy className="h-5 w-5" />}
             </div>
             <div>
-              <h3 className="text-sm font-bold text-slate-800 dark:text-white">
-                {isEditing ? `تعديل وإعداد بطولة ${activeSportConfig?.name || SPORTS_MAP[sportId]?.name || ''}` : 'إضافة وإعداد بطولة إقليمية متعددة'}
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30">
+                  {isEditing ? 'نافذة موحدة ومختصرة' : 'برمجة جديدة'}
+                </span>
+                <span className="text-[10px] text-slate-400 font-bold">
+                  {status === 'Scheduled' ? '🟢 مبرمجة' : status === 'Ongoing' ? '🔴 جارية' : '⚪ مسودة'}
+                </span>
+              </div>
+              <h3 className="text-sm sm:text-base font-black text-slate-800 dark:text-white mt-0.5">
+                {isEditing ? `تعديل وإعداد وبرمجة بطولة ${activeSportConfig?.name || SPORTS_MAP[sportId]?.name || ''}` : 'إضافة وإعداد وبرمجة بطولة إقليمية'}
               </h3>
               <p className="text-[11px] text-slate-500 dark:text-slate-400 font-medium">
-                {isEditing ? 'تعديل الفئات العمرية، الجنس، الانتساب، التواريخ والضوابط التنظيمية' : 'يقوم النظام بتوليد بطولات منفصلة لكل فئة وجنس ونوع انتساب محدد'}
+                {isEditing ? 'نافذة واحدة مختصرة لتعديل الفئات، وضوابط البرمجة، والتواريخ، وآخر أجل للتسجيل' : 'يقوم النظام بتوليد بطولات منفصلة لكل فئة وجنس ونوع انتساب محدد مع برمجة المواعيد'}
               </p>
             </div>
           </div>

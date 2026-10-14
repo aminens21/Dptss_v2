@@ -80,6 +80,7 @@ interface AthleticsChampionshipModalProps {
   currentUser?: User | null;
   directorateName?: string;
   season?: string;
+  onProgramTournament?: (sportId: string) => void;
 }
 
 export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProps> = ({
@@ -90,7 +91,8 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
   students = [],
   currentUser,
   directorateName = 'المديرية الإقليمية تاوريرت',
-  season = '2026/2027'
+  season = '2026/2027',
+  onProgramTournament
 }) => {
   const { isDarkMode, toggleDarkMode } = useTheme();
   // Role determination
@@ -1780,6 +1782,19 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
               >
                 <SettingsIcon className="w-4 h-4 group-hover:rotate-45 transition-transform text-amber-400" />
                 <span className="hidden sm:inline">{effectiveRole === 'ADMIN' ? 'الإعدادات والتحكم' : 'أدوات التحكم'}</span>
+              </button>
+            )}
+
+            {/* Unified Edit & Program Athletics Championship */}
+            {onProgramTournament && isSuperOrAdmin && (
+              <button
+                type="button"
+                onClick={() => onProgramTournament('athletics')}
+                className="p-2 sm:px-3 sm:py-2 bg-gradient-to-r from-amber-600/30 to-amber-500/20 hover:from-amber-600/40 hover:to-amber-500/30 text-amber-300 border border-amber-400/40 rounded-xl text-xs font-black flex items-center gap-1.5 shadow-xs transition-all cursor-pointer active:scale-95"
+                title="تعديل وإعداد وبرمجة بطولة ألعاب القوى وتحديد المواعيد والتواريخ"
+              >
+                <Edit2 className="w-4 h-4 text-amber-400" />
+                <span className="hidden sm:inline">تعديل وبرمجة البطولة</span>
               </button>
             )}
 

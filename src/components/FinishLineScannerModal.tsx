@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   X,
   Camera,
@@ -38,7 +38,7 @@ import {
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
 import toast from 'react-hot-toast';
 import * as XLSX from 'xlsx';
-import { CROSS_COUNTRY_CATEGORIES, CrossCountryCategoryDef, calculateTeamRankings } from '../lib/crossCountryConfig';
+import { CROSS_COUNTRY_CATEGORIES, CrossCountryCategoryDef, calculateTeamRankings, resolveRunnerParticipationType } from '../lib/crossCountryConfig';
 import { CrossCountryCategoryResult, PodiumWinner, Student } from '../types';
 import { DataService } from '../lib/dataService';
 
@@ -372,7 +372,8 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
 
         const mappedArrivals = combinedArrivals.map((arr, i) => ({
           ...arr,
-          overallRank: arr.overallRank || (i + 1)
+          overallRank: arr.overallRank || (i + 1),
+          participationType: resolveRunnerParticipationType(arr, allStudentsRef.current)
         }));
         
         // Only set arrivals if no live arrivals have been scanned yet
@@ -975,7 +976,14 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
       schoolName: finalSchool || (matchedStudent ? matchedStudent.schoolName : 'مؤسسة تعليمية'),
       time: currentTimeStr,
       bibNumber: displayBib,
-      participationType: (matchedStudent?.participationType === 'school_team' || (matchedStudent as any)?.participationType === 'فريق') ? 'school_team' : 'individual',
+      participationType: resolveRunnerParticipationType(
+        matchedStudent || {
+          studentId: matchedStudent?.id,
+          fullName: finalName,
+          participationType: (matchedStudent as any)?.participationType
+        },
+        allStudents
+      ),
       affiliationType: matchedStudent?.affiliationType || raceAffiliation,
       directorateName: matchedStudent?.directorateName || 'مديرية تاوريرت',
       academyName: matchedStudent?.academyName || 'الأكاديمية الجهوية',
@@ -1282,8 +1290,39 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
     setTimerRunning(false);
   };
 
-  // Calculate live team standings for current race
-  const liveTeamRankings = calculateTeamRankings(arrivals, allStudents);
+  // Calculate live team standings matching public results space rules:
+  // 1. School teams are strictly for non-club (school) participants
+  // 2. Filtered to current category / race
+  // 3. Runners ranked within category (1, 2, 3...)
+  // 4. Only runners with participationType === 'school_team'
+  // 5. Team total points = sum of top 4 runner ranks (lowest points = 1st place)
+  const liveTeamRankings = useMemo(() => {
+    if (raceAffiliation === 'club_affiliated') return [];
+
+    const targetCatId = viewCategoryFilter !== 'ALL' ? viewCategoryFilter : activeCategory.id;
+    const catArrivals = arrivals.filter(a => {
+      const aCatId = (a.categoryId || '').replace(/_club(_affiliated)?$/, '');
+      if (viewCategoryFilter !== 'ALL') {
+        return aCatId === targetCatId;
+      }
+      return !a.categoryId || aCatId === activeCategory.id;
+    });
+
+    const nonClubRunners = catArrivals.filter(a => {
+      const s = allStudents.find(stud => stud.id === a.studentId || stud.fullName === a.fullName);
+      const isClub = s?.affiliationType === 'club_affiliated' || a.affiliationType === 'club_affiliated';
+      return !isClub;
+    });
+
+    const rankedNonClub = nonClubRunners.map((r, idx) => ({
+      ...r,
+      participationType: resolveRunnerParticipationType(r, allStudents),
+      recalculatedRank: idx + 1,
+      rank: idx + 1
+    }));
+
+    return calculateTeamRankings(rankedNonClub, allStudents, true);
+  }, [arrivals, allStudents, raceAffiliation, viewCategoryFilter, activeCategory.id]);
 
   // Robust matching helper to count participants for any category
   const getCategoryRunnersCount = (cat: CrossCountryCategoryDef, aff?: 'non_club' | 'club_affiliated') => {

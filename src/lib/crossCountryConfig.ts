@@ -178,7 +178,11 @@ export function resolveRunnerParticipationType(
  * 3. مجموع النقاط: جمع رتب الوصول الفردية لأول 4 عداءين من المؤسسة (المجموع الأقل هو الأفضل 🏆).
  * 4. معيار الحسم عند التعادل (Tie-Breaker): عند تساوي مجموع النقاط، يتم الاحتكام لـ رتبة العداء الرابع المكمل للفريق (الأفضل/الأسبق رتبة يفوز).
  */
-export function calculateTeamRankings(runners: PodiumWinner[], studentsPool?: Student[]): TeamRankingResult[] {
+export function calculateTeamRankings(
+  runners: PodiumWinner[], 
+  studentsPool?: Student[],
+  includeIncomplete: boolean = false
+): TeamRankingResult[] {
   if (!runners || runners.length === 0) return [];
 
   const schoolGroups: Record<string, PodiumWinner[]> = {};
@@ -235,14 +239,34 @@ export function calculateTeamRankings(runners: PodiumWinner[], studentsPool?: St
         top4Runners: top4,
         isValidTeam: true
       });
+    } else if (includeIncomplete && sorted.length > 0) {
+      const totalPoints = sorted.reduce((sum, r) => sum + rRank(r), 0);
+      validTeams.push({
+        schoolName,
+        totalPoints,
+        fourthRunnerRank: 9999,
+        thirdRunnerRank: sorted[2] ? rRank(sorted[2]) : 9999,
+        secondRunnerRank: sorted[1] ? rRank(sorted[1]) : 9999,
+        firstRunnerRank: sorted[0] ? rRank(sorted[0]) : 9999,
+        runners: sorted,
+        top4Runners: sorted,
+        isValidTeam: false
+      });
     }
   });
 
   // معايير الترتيب وحسم التعادل طبقاً لقوانين الجامعة الملكية المغربية للرياضة المدرسية:
-  // 1- المجموع الأقل من النقاط لأول 4 عداءين
-  // 2- عند التعادل في النقاط: الاحتكام لـ رتبة العداء الرابع المكمل للفريق (الأقل رتبة/الأسبق وصولاً يفوز)
-  // 3- عند التعادل في العداء الرابع: الاحتكام للعداء الثالث، ثم الثاني، ثم الأول
+  // 1- الفرق المكتملة (4 عداءين على الأقل) تتقدم دائماً على الفرق غير المكتملة
+  // 2- المجموع الأقل من النقاط لأول 4 عداءين هو الأفضل
+  // 3- عند التعادل في النقاط: الاحتكام لـ رتبة العداء الرابع المكمل للفريق (الأقل رتبة/الأسبق وصولاً يفوز)
+  // 4- عند التعادل في العداء الرابع: الاحتكام للعداء الثالث، ثم الثاني، ثم الأول
   validTeams.sort((a, b) => {
+    if (a.isValidTeam && !b.isValidTeam) return -1;
+    if (!a.isValidTeam && b.isValidTeam) return 1;
+    if (!a.isValidTeam && !b.isValidTeam) {
+      if (b.runners.length !== a.runners.length) return b.runners.length - a.runners.length;
+      return a.totalPoints - b.totalPoints;
+    }
     if (a.totalPoints !== b.totalPoints) {
       return a.totalPoints - b.totalPoints; // المجموع الأقل هو الأفضل
     }
@@ -261,7 +285,7 @@ export function calculateTeamRankings(runners: PodiumWinner[], studentsPool?: St
   return validTeams.map((team, idx) => ({
     ...team,
     rank: idx + 1,
-    isWinnerTeam: idx === 0
+    isWinnerTeam: idx === 0 && team.isValidTeam
   }));
 }
 

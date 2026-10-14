@@ -541,26 +541,16 @@ export const CrossCountryChampionshipModal: React.FC<CrossCountryChampionshipMod
                   </div>
 
                   <div className="flex flex-wrap items-center justify-end gap-2 shrink-0">
-                    {canManage && (
+                    {canManage && onProgramTournament && (
                       <div className="flex items-center gap-2">
                         <button
-                          onClick={() => setIsEditDeadlineOpen(true)}
-                          className="px-3 py-2 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-400/40 rounded-xl text-xs font-bold transition-colors cursor-pointer flex items-center gap-1.5"
+                          onClick={() => onProgramTournament('cross_country')}
+                          className="px-3.5 py-2 bg-gradient-to-r from-amber-500/20 to-blue-500/20 hover:from-amber-500/30 hover:to-blue-500/30 text-amber-300 border border-amber-400/40 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-1.5 shadow-3xs"
+                          title="تعديل وإعداد وبرمجة بطولة العدو الريفي وتحديد المواعيد"
                         >
-                          <Clock className="w-3.5 h-3.5 text-amber-400" />
-                          <span>تعديل آخر أجل للتسجيل ✏️</span>
+                          <Settings className="w-3.5 h-3.5 text-amber-400" />
+                          <span>تعديل وإعداد وبرمجة البطولة ⚙️</span>
                         </button>
-
-                        {onProgramTournament && (
-                          <button
-                            onClick={() => onProgramTournament('cross_country')}
-                            className="px-3 py-2 bg-blue-500/20 hover:bg-blue-500/30 text-blue-300 border border-blue-400/40 rounded-xl text-xs font-bold transition-colors cursor-pointer flex items-center gap-1.5"
-                            title="تعديل فئات وإعدادات البطولة"
-                          >
-                            <Settings className="w-3.5 h-3.5" />
-                            <span>إعدادات البطولة ⚙️</span>
-                          </button>
-                        )}
                       </div>
                     )}
                   </div>

@@ -261,15 +261,17 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
         }
       }
 
-      // 2. Team Sports Filter (الرياضات الجماعية)
-      if (sportsCategoryFilter === 'TEAM_SPORTS') {
-        const isTeamSport = TEAM_SPORTS_IDS.includes(t.sportId) || (t.name && (
-          t.name.includes('قدم') || t.name.includes('سلة') || t.name.includes('يد') || t.name.includes('طائرة') || t.name.includes('ريكبي')
-        ));
-        if (!isTeamSport) return false;
+      // 2. Electronic Draw is strictly for Team Sports (الألعاب الجماعية فقط)
+      if (t.sportId === 'athletics' || t.sportId === 'cross_country' || t.sportId === 'table_tennis') {
+        return false;
       }
 
-      // 3. Sport Type Filter
+      const isTeamSport = TEAM_SPORTS_IDS.includes(t.sportId) || (t.name && (
+        t.name.includes('قدم') || t.name.includes('سلة') || t.name.includes('يد') || t.name.includes('طائرة') || t.name.includes('ريكبي')
+      ));
+      if (!isTeamSport) return false;
+
+      // 3. Sport Type Filter (كل رياضة ترى بطولاتها وقرعتها مستقلة)
       if (selectedSportFilter !== 'ALL' && t.sportId !== selectedSportFilter) {
         return false;
       }
