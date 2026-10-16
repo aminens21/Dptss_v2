@@ -133,15 +133,18 @@ export interface RegionalQualifiedIndividual {
  * بالاعتماد على قاعدة بيانات تسجيل التلاميذ كمرجع أساسي موحد وموثوق.
  */
 export function resolveRunnerParticipationType(
-  runner: { studentId?: string; fullName?: string; participationType?: string },
+  runner: { studentId?: string; fullName?: string; participationType?: string; bibNumber?: string | number },
   studentsPool?: Student[]
 ): 'school_team' | 'individual' {
   let raw: string | undefined = undefined;
 
   if (studentsPool && studentsPool.length > 0) {
     const sName = runner.fullName?.trim().toLowerCase();
+    const rBib = runner.bibNumber !== undefined && runner.bibNumber !== null ? String(runner.bibNumber).trim() : '';
+
     const matched = studentsPool.find(s => 
       (runner.studentId && s.id === runner.studentId) ||
+      (rBib && (String(s.bibNumber).trim() === rBib || String((s as any).crossCountryBibNumber).trim() === rBib)) ||
       (sName && s.fullName && s.fullName.trim().toLowerCase() === sName)
     );
     if (matched && matched.participationType) {
@@ -153,7 +156,7 @@ export function resolveRunnerParticipationType(
     raw = runner.participationType;
   }
 
-  if (!raw) return 'school_team';
+  if (!raw) return 'individual';
 
   const lower = raw.trim().toLowerCase();
   if (
@@ -161,6 +164,7 @@ export function resolveRunnerParticipationType(
     lower === 'team' ||
     lower === 'فريق' ||
     lower === 'فريق المؤسسة' ||
+    lower === 'فريق مؤسسة' ||
     lower.includes('team') ||
     lower.includes('فريق') ||
     lower.includes('جماعي')
@@ -175,7 +179,7 @@ export function resolveRunnerParticipationType(
  * حساب ترتيب الفرق للمؤسسات التعليمية طبقاً للقوانين الرسمية للرياضة المدرسية في العدو الريفي:
  * 1. شروط تكوين الفريق: اقتصار الحساب على المشاركين بصفتهم "فريق المؤسسة" (استبعاد المشاركة الفردية).
  * 2. الحد الأدنى للوصول: يجب وصول 4 عداءين على الأقل من نفس المؤسسة لخط النهاية لاحتساب نتائج الفريق.
- * 3. مجموع النقاط: جمع رتب الوصول الفردية لأول 4 عداءين من المؤسسة (المجموع الأقل هو الأفضل 🏆).
+ * 3. مجموع النقاط: جمع رتب الوصول الفردية الحقيقية لأول 4 عداءين من المؤسسة (مثال: الرتب 1 + 5 + 7 + 10 = 23 نقطة 🏆، المجموع الأقل يفوز).
  * 4. معيار الحسم عند التعادل (Tie-Breaker): عند تساوي مجموع النقاط، يتم الاحتكام لـ رتبة العداء الرابع المكمل للفريق (الأفضل/الأسبق رتبة يفوز).
  */
 export function calculateTeamRankings(
@@ -215,7 +219,8 @@ export function calculateTeamRankings(
     isValidTeam: boolean;
   }[] = [];
 
-  const rRank = (r: PodiumWinner) => (r as any).recalculatedRank || r.rank;
+  // الرتبة الحقيقية للعداء في السباق (1, 5, 7, 10...)
+  const rRank = (r: PodiumWinner) => r.rank || (r as any).overallRank || (r as any).recalculatedRank || 1;
 
   Object.entries(schoolGroups).forEach(([schoolName, schoolRunners]) => {
     const sorted = [...schoolRunners].sort((a, b) => rRank(a) - rRank(b));

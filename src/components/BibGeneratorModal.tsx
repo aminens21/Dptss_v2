@@ -51,7 +51,6 @@ export interface BibRunnerData {
   genderLabel: string;
   affiliationType?: string;
   affiliationTypeLabel?: string;
-  commune?: string;
   qrDataUrl?: string;
 }
 
@@ -260,8 +259,7 @@ export const BibGeneratorModal: React.FC<BibGeneratorModalProps> = ({
         gender: isFemale ? 'Female' : 'Male',
         genderLabel,
         affiliationType: student.affiliationType || 'non_club',
-        affiliationTypeLabel: student.affiliationType === 'club_affiliated' ? 'مشاركة فريق' : 'مشاركة فردية',
-        commune
+        affiliationTypeLabel: student.affiliationType === 'club_affiliated' ? 'مشاركة فريق' : 'مشاركة فردية'
       };
     });
   }, [students, schoolMap, directorateName]);
@@ -903,43 +901,70 @@ export const BibGeneratorModal: React.FC<BibGeneratorModalProps> = ({
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-xs p-2 sm:p-4 overflow-y-auto" dir="rtl">
       <div className="bg-white border border-slate-200 rounded-3xl shadow-2xl max-w-4xl w-full max-h-[96vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200">
         
-        {/* Modal Top Header */}
-        <div className="px-5 py-4 bg-gradient-to-r from-emerald-800 via-teal-900 to-slate-900 text-white flex items-center justify-between border-b border-slate-800 shrink-0">
-          <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-xl bg-white/15 border border-white/20 text-white flex items-center justify-center text-base shadow-inner">
-              <Eye className="w-4 h-4" />
+        {/* Modal Top Header - Polished, High Contrast, Responsive */}
+        <div className="px-3.5 sm:px-6 py-3 sm:py-4 bg-gradient-to-r from-slate-950 via-slate-900 to-emerald-950 text-white flex items-center justify-between border-b border-slate-800 shrink-0 shadow-md">
+          <div className="flex items-center gap-2.5 sm:gap-3">
+            <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-2xl bg-emerald-500/20 border border-emerald-400/30 text-emerald-300 flex items-center justify-center text-lg shadow-inner">
+              🎽
             </div>
             <div>
-              <h3 className="text-base font-black text-white">إنشاء الصدريات وبطاقات الأرقام (PDF)</h3>
-              <p className="text-[10px] text-emerald-100 font-medium">توليد وطباعة أرقام الصدريات للعدائين بدقة عالية</p>
+              <div className="flex items-center gap-2 flex-wrap">
+                <h3 className="text-sm sm:text-base font-black text-white tracking-wide">
+                  إعداد وإنشاء صدريات العدو الريفي
+                </h3>
+                <span className="text-[10px] font-mono font-bold px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-400/30">
+                  {isEmptied ? 'التطبيق مفرغ' : `${filteredRunners.length} صدرية جاهزة`}
+                </span>
+              </div>
+              <p className="text-[10px] sm:text-xs text-slate-300 font-medium">
+                توليد وطباعة بطاقات الصدريات بدقة عالية ومطابقة للمواصفات الرسمية
+              </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 sm:gap-2">
+            {/* Sync with Scanner button */}
             <button
               type="button"
-              onClick={handleClearBibApp}
-              className="px-3 py-1.5 bg-rose-500/20 hover:bg-rose-500/30 text-rose-200 hover:text-white border border-rose-400/40 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer shadow-3xs"
-              title="تفريغ تطبيق إنشاء الصدريات وإلغاء أي تحديد سابق"
+              onClick={handleSyncBibsToDatabase}
+              disabled={isSyncingBibs || filteredRunners.length === 0}
+              className="p-2 sm:px-3 sm:py-2 bg-emerald-600/80 hover:bg-emerald-600 text-white border border-emerald-400/40 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer shadow-3xs active:scale-95 disabled:opacity-40"
+              title="مزامنة وحفظ أرقام الصدريات في قاعدة البيانات للماسح"
+              aria-label="مزامنة مع الماسح"
             >
-              <Trash2 className="w-3.5 h-3.5 text-rose-300" />
-              <span>تفريغ التطبيق 🗑️</span>
+              <Save className="w-3.5 sm:w-4 h-3.5 sm:h-4 text-emerald-200" />
+              <span className="hidden md:inline">{isSyncingBibs ? 'جاري المزامنة...' : 'مزامنة مع الماسح 💾'}</span>
             </button>
 
+            {/* Reload Database button */}
             <button
               type="button"
               onClick={handleReloadDatabase}
-              className="px-3 py-1.5 bg-white/10 hover:bg-white/20 text-slate-200 hover:text-white border border-white/20 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-3xs"
+              className="p-2 sm:px-3 sm:py-2 bg-white/10 hover:bg-white/20 text-slate-200 hover:text-white border border-white/20 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-3xs active:scale-95"
               title="إعادة تعبئة وتحميل كافة بيانات المشاركين من قاعدة البيانات"
+              aria-label="إعادة تعبئة البيانات"
             >
-              <RotateCcw className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">إعادة تعبئة 🔄</span>
+              <RotateCcw className="w-3.5 sm:w-4 h-3.5 sm:h-4" />
+              <span className="hidden md:inline">إعادة تعبئة 🔄</span>
             </button>
 
+            {/* Clear Bib App Button - ICON ONLY without text as requested */}
+            <button
+              type="button"
+              onClick={handleClearBibApp}
+              className="p-2 sm:p-2.5 bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 hover:text-white border border-rose-400/40 rounded-xl transition-all cursor-pointer shadow-3xs active:scale-95"
+              title="تفريغ تطبيق إنشاء الصدريات وإلغاء أي تحديد سابق"
+              aria-label="تفريغ تطبيق إنشاء الصدريات"
+            >
+              <Trash2 className="w-4 h-4 text-rose-300" />
+            </button>
+
+            {/* Close Modal button */}
             <button
               onClick={onClose}
-              className="w-8 h-8 rounded-xl bg-white/10 hover:bg-white/20 text-slate-200 hover:text-white flex items-center justify-center transition-all cursor-pointer"
+              className="p-2 sm:p-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-slate-200 hover:text-white flex items-center justify-center transition-all cursor-pointer active:scale-95"
               title="إغلاق"
+              aria-label="إغلاق"
             >
               <X className="w-4 h-4" />
             </button>
@@ -947,112 +972,7 @@ export const BibGeneratorModal: React.FC<BibGeneratorModalProps> = ({
         </div>
 
         {/* Modal Body Container */}
-        <div className="p-4 sm:p-6 overflow-y-auto flex-1 bg-slate-50 space-y-5">
-          
-          {/* 🎯 Section 1: Dedicated Race Selector from Entered Database & App Empty Action */}
-          <div className="bg-gradient-to-r from-blue-900 via-indigo-900 to-slate-900 text-white border border-indigo-500/30 rounded-2xl p-4 sm:p-5 shadow-sm space-y-3">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div className="flex items-center gap-2.5">
-                <div className="w-9 h-9 rounded-xl bg-blue-500/20 border border-blue-400/30 text-blue-300 flex items-center justify-center font-black text-base shadow-inner">
-                  🎯
-                </div>
-                <div>
-                  <h4 className="text-sm font-black text-white flex items-center gap-2">
-                    <span>إنشاء الصدريات حسب السباق المحدد من قاعدة البيانات</span>
-                    <span className="text-[10px] font-mono font-bold px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-400/30">
-                      {isEmptied ? 'التطبيق مفرغ' : `${filteredRunners.length} صدرية جاهزة`}
-                    </span>
-                  </h4>
-                  <p className="text-xs text-indigo-200">
-                    حدد السباق المطلوب لتوليد صدريات العدائين المسجلين فيه من قاعدة البيانات تلقائياً، أو اضغط زر التفريغ للبدء من جديد.
-                  </p>
-                </div>
-              </div>
-
-              {/* Action Buttons: تفريغ تطبيق إنشاء الصدريات + مزامنة مع الماسح + إعادة تعبئة */}
-              <div className="flex items-center gap-2 shrink-0 flex-wrap">
-                <button
-                  type="button"
-                  onClick={handleClearBibApp}
-                  className="px-3.5 py-2 bg-rose-600 hover:bg-rose-700 active:scale-95 text-white rounded-xl text-xs font-black flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
-                  title="تفريغ تطبيق إنشاء الصدريات وإلغاء أي تحديد سابق"
-                >
-                  <Trash2 className="w-4 h-4" />
-                  <span>تفريغ تطبيق إنشاء الصدريات 🗑️</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={handleSyncBibsToDatabase}
-                  disabled={isSyncingBibs || filteredRunners.length === 0}
-                  className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white rounded-xl text-xs font-black flex items-center gap-1.5 shadow-sm transition-all cursor-pointer disabled:opacity-50"
-                  title="حفظ أرقام الصدريات الحالية في قاعدة البيانات للمزامنة مع الماسح"
-                >
-                  <Save className="w-4 h-4" />
-                  <span>{isSyncingBibs ? 'جاري المزامنة...' : 'مزامنة مع الماسح 💾'}</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={handleReloadDatabase}
-                  className="px-3 py-2 bg-white/10 hover:bg-white/20 active:scale-95 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer border border-white/20"
-                  title="إعادة تعبئة وتحميل كافة بيانات المشاركين من قاعدة البيانات"
-                >
-                  <RotateCcw className="w-3.5 h-3.5" />
-                  <span>إعادة تعبئة 🔄</span>
-                </button>
-              </div>
-            </div>
-
-            {/* Quick Dropdown: تحديد السباق المحدد من قاعدة البيانات */}
-            <div className="pt-2 border-t border-indigo-800/80 flex flex-col md:flex-row items-stretch md:items-center gap-3">
-              <label className="text-xs font-bold text-indigo-100 shrink-0">
-                اختر السباق المراد إنشاء صدرياته:
-              </label>
-
-              <select
-                value={selectedRaces.length === 1 ? selectedRaces[0] : (selectedRaces.length === CROSS_COUNTRY_CATEGORIES.length ? 'ALL' : '')}
-                onChange={(e) => handleSelectRaceFromDatabase(e.target.value)}
-                className="flex-1 bg-white text-slate-900 font-black text-xs rounded-xl px-3.5 py-2.5 border border-indigo-300 focus:outline-hidden focus:ring-2 focus:ring-blue-400 shadow-xs cursor-pointer"
-              >
-                <option value="">— اختر السباق المحدد لإنشاء صدرياته من قاعدة البيانات المدخلة —</option>
-                <option value="ALL">جميع السباقات والفئات ({allRunners.length} مشارك مسجل في قاعدة البيانات)</option>
-                {CROSS_COUNTRY_CATEGORIES.map(cat => {
-                  const count = raceCounts[cat.id] || 0;
-                  return (
-                    <option key={cat.id} value={cat.id}>
-                      {cat.titleAr} ({cat.genderLabel} • مسافة {cat.distance}) — [{count} مشارك مسجل في قاعدة البيانات]
-                    </option>
-                  );
-                })}
-              </select>
-
-              {/* Quick pill badges for races that have registered students */}
-              <div className="flex items-center gap-1.5 flex-wrap overflow-x-auto py-1">
-                {CROSS_COUNTRY_CATEGORIES.filter(c => (raceCounts[c.id] || 0) > 0).map(cat => {
-                  const isSelected = selectedRaces.length === 1 && selectedRaces[0] === cat.id;
-                  return (
-                    <button
-                      key={cat.id}
-                      type="button"
-                      onClick={() => handleSelectRaceFromDatabase(cat.id)}
-                      className={`text-[11px] px-2.5 py-1 rounded-lg font-bold transition-all cursor-pointer whitespace-nowrap flex items-center gap-1 ${
-                        isSelected
-                          ? 'bg-emerald-500 text-white shadow-xs font-black'
-                          : 'bg-white/10 hover:bg-white/20 text-indigo-100 border border-white/15'
-                      }`}
-                      title={`توليد صدريات ${cat.titleAr} (${raceCounts[cat.id]} مشارك)`}
-                    >
-                      <span>{cat.shortLabel}</span>
-                      <span className="text-[10px] px-1 rounded-sm bg-black/20 font-mono">
-                        {raceCounts[cat.id]}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          </div>
+        <div className="p-3 sm:p-5 overflow-y-auto flex-1 bg-slate-50 space-y-4">
 
           {/* Top Control Card */}
           <div className="bg-white border border-slate-200/90 rounded-2xl p-4 sm:p-5 shadow-xs space-y-4">
@@ -1872,7 +1792,7 @@ export const BibGeneratorModal: React.FC<BibGeneratorModalProps> = ({
                                 {runner.schoolName}
                               </div>
                               <div className="flex-1 flex items-center justify-center px-1 truncate leading-tight text-slate-950" style={textSmallStyle}>
-                                {runner.directorateName}
+                                {runner.affiliationTypeLabel || runner.directorateName}
                               </div>
                             </div>
 
@@ -1934,7 +1854,7 @@ export const BibGeneratorModal: React.FC<BibGeneratorModalProps> = ({
                               <div className="flex-1 flex items-center justify-center px-1 truncate leading-tight" style={textBaseStyle}>{runner.fullName}</div>
                               <div className="flex-1 flex items-center justify-center px-1 font-mono leading-tight" style={textBaseStyle}>{runner.massarNumber}</div>
                               <div className="flex-1 flex items-center justify-center px-1 truncate leading-tight" style={textSmallStyle}>{runner.schoolName}</div>
-                              <div className="flex-1 flex items-center justify-center px-1 truncate leading-tight" style={textSmallStyle}>{runner.directorateName}</div>
+                              <div className="flex-1 flex items-center justify-center px-1 truncate leading-tight" style={textSmallStyle}>{runner.affiliationTypeLabel || runner.directorateName}</div>
                             </div>
                           </div>
 

@@ -143,7 +143,7 @@ export function generateBibsPrintHtml(
             <div class="bib-cell" style="font-size: ${textPt}pt; font-weight: 800;">${runner.fullName || ''}</div>
             <div class="bib-cell font-mono" style="font-size: ${textPt}pt; font-weight: 700;">${runner.massarNumber || ''}</div>
             <div class="bib-cell" style="font-size: ${textSmallPt}pt; font-weight: 700;">${runner.schoolName || ''}</div>
-            ${rowCount === 4 ? `<div class="bib-cell" style="font-size: ${textSmallPt}pt; font-weight: 700;">${runner.directorateName || ''}</div>` : ''}
+            ${rowCount === 4 ? `<div class="bib-cell" style="font-size: ${textSmallPt}pt; font-weight: 700;">${runner.affiliationTypeLabel || runner.directorateName || ''}</div>` : ''}
           </div>
 
         </div>

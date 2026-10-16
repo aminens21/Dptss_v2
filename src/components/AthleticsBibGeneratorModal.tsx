@@ -139,6 +139,10 @@ export interface AthleticsBibRunnerData {
   fullName: string;
   massarNumber?: string;
   schoolName: string;
+  commune?: string;
+  directorateName?: string;
+  birthDate?: string;
+  birthYear?: string | number;
   disciplineId: string;
   disciplineNameAr: string;
   disciplineType: string;
@@ -146,6 +150,10 @@ export interface AthleticsBibRunnerData {
   categoryLabel: string;
   gender: 'Male' | 'Female' | string;
   genderLabel: string;
+  participationType?: 'individual' | 'school_team' | string;
+  participationTypeLabel?: string;
+  affiliationType?: string;
+  affiliationTypeLabel?: string;
   qrDataUrl?: string;
 }
 
@@ -154,16 +162,22 @@ export const DEMO_ATHLETICS_PARTICIPANTS: AthleticsBibRunnerData[] = [
   {
     id: 'demo-ath-1',
     bibNumber: 101,
-    fullName: 'سفيان البقالي',
-    massarNumber: 'G134098712',
-    schoolName: 'ثانوية مولاي علي الشريف',
-    disciplineId: 'sprint_100m',
-    disciplineNameAr: '100م سرعة (جري)',
+    fullName: 'أمين التازي',
+    massarNumber: 'J539220932',
+    schoolName: 'ثانوية الفتح التأهيلية',
+    commune: 'تاوريرت المركز',
+    directorateName: 'تاوريرت',
+    birthDate: '2014-12-01',
+    birthYear: '2014',
+    disciplineId: 'sprint_60m',
+    disciplineNameAr: 'البراعم ذكور',
     disciplineType: 'track_sprint',
-    category: 'فتيان',
-    categoryLabel: 'فتيان (U18)',
+    category: 'براعم',
+    categoryLabel: 'البراعم ذكور',
     gender: 'Male',
-    genderLabel: 'ذكور (M)'
+    genderLabel: 'ذكر',
+    participationType: 'school_team',
+    participationTypeLabel: 'فريق المؤسسة'
   },
   {
     id: 'demo-ath-2',
@@ -171,13 +185,19 @@ export const DEMO_ATHLETICS_PARTICIPANTS: AthleticsBibRunnerData[] = [
     fullName: 'فاطمة الزهراء الإدريسي',
     massarNumber: 'D139876541',
     schoolName: 'إعدادية علال الفاسي',
+    commune: 'تاوريرت',
+    directorateName: 'تاوريرت',
+    birthDate: '2011-05-14',
+    birthYear: '2011',
     disciplineId: 'sprint_100m',
     disciplineNameAr: '100م سرعة (جري)',
     disciplineType: 'track_sprint',
     category: 'فتيات',
     categoryLabel: 'فتيات (U18)',
     gender: 'Female',
-    genderLabel: 'إناث (F)'
+    genderLabel: 'أنثى',
+    participationType: 'individual',
+    participationTypeLabel: 'مشاركة فردية'
   },
   {
     id: 'demo-ath-3',
@@ -185,13 +205,19 @@ export const DEMO_ATHLETICS_PARTICIPANTS: AthleticsBibRunnerData[] = [
     fullName: 'أنس العمراني',
     massarNumber: 'F142091823',
     schoolName: 'ثانوية المنصور الذهبي',
+    commune: 'تاوريرت المركز',
+    directorateName: 'تاوريرت',
+    birthDate: '2009-08-20',
+    birthYear: '2009',
     disciplineId: 'long_jump',
     disciplineNameAr: 'الوثب الطولي (قفز)',
     disciplineType: 'field_jump',
     category: 'فتيان',
     categoryLabel: 'فتيان (U18)',
     gender: 'Male',
-    genderLabel: 'ذكور (M)'
+    genderLabel: 'ذكر',
+    participationType: 'school_team',
+    participationTypeLabel: 'فريق المؤسسة'
   },
   {
     id: 'demo-ath-4',
@@ -199,13 +225,19 @@ export const DEMO_ATHLETICS_PARTICIPANTS: AthleticsBibRunnerData[] = [
     fullName: 'مريم الصقلي',
     massarNumber: 'K131092837',
     schoolName: 'إعدادية طارق بن زياد',
+    commune: 'تاوريرت',
+    directorateName: 'تاوريرت',
+    birthDate: '2012-11-03',
+    birthYear: '2012',
     disciplineId: 'long_jump',
     disciplineNameAr: 'الوثب الطولي (قفز)',
     disciplineType: 'field_jump',
     category: 'صغيرات',
     categoryLabel: 'صغيرات (U15)',
     gender: 'Female',
-    genderLabel: 'إناث (F)'
+    genderLabel: 'أنثى',
+    participationType: 'school_team',
+    participationTypeLabel: 'فريق المؤسسة'
   },
   {
     id: 'demo-ath-5',
@@ -213,13 +245,19 @@ export const DEMO_ATHLETICS_PARTICIPANTS: AthleticsBibRunnerData[] = [
     fullName: 'حمزة التازي',
     massarNumber: 'G135678912',
     schoolName: 'ثانوية ابن رشد',
+    commune: 'تاوريرت المركز',
+    directorateName: 'تاوريرت',
+    birthDate: '2007-03-12',
+    birthYear: '2007',
     disciplineId: 'shot_put',
     disciplineNameAr: 'دفع الجلة (رمي)',
     disciplineType: 'field_throw',
     category: 'شبان',
     categoryLabel: 'شبان (U20)',
     gender: 'Male',
-    genderLabel: 'ذكور (M)'
+    genderLabel: 'ذكر',
+    participationType: 'individual',
+    participationTypeLabel: 'مشاركة فردية'
   },
   {
     id: 'demo-ath-6',
@@ -227,13 +265,19 @@ export const DEMO_ATHLETICS_PARTICIPANTS: AthleticsBibRunnerData[] = [
     fullName: 'سناء المرابط',
     massarNumber: 'M134567890',
     schoolName: 'إعدادية القدس',
+    commune: 'تاوريرت',
+    directorateName: 'تاوريرت',
+    birthDate: '2009-07-25',
+    birthYear: '2009',
     disciplineId: 'shot_put',
     disciplineNameAr: 'دفع الجلة (رمي)',
     disciplineType: 'field_throw',
     category: 'فتيات',
     categoryLabel: 'فتيات (U18)',
     gender: 'Female',
-    genderLabel: 'إناث (F)'
+    genderLabel: 'أنثى',
+    participationType: 'school_team',
+    participationTypeLabel: 'فريق المؤسسة'
   },
   {
     id: 'demo-ath-7',
@@ -241,13 +285,19 @@ export const DEMO_ATHLETICS_PARTICIPANTS: AthleticsBibRunnerData[] = [
     fullName: 'ياسين العلمي',
     massarNumber: 'G139823411',
     schoolName: 'مؤسسة النور التعليمية',
+    commune: 'تاوريرت المركز',
+    directorateName: 'تاوريرت',
+    birthDate: '2015-02-18',
+    birthYear: '2015',
     disciplineId: 'sprint_60m',
-    disciplineNameAr: '60م سرعة (جري)',
+    disciplineNameAr: 'البراعم ذكور',
     disciplineType: 'track_sprint',
     category: 'براعم',
-    categoryLabel: 'براعم (U12)',
+    categoryLabel: 'البراعم ذكور',
     gender: 'Male',
-    genderLabel: 'ذكور (M)'
+    genderLabel: 'ذكر',
+    participationType: 'school_team',
+    participationTypeLabel: 'فريق المؤسسة'
   },
   {
     id: 'demo-ath-8',
@@ -463,27 +513,49 @@ export const AthleticsBibGeneratorModal: React.FC<AthleticsBibGeneratorModalProp
   useEffect(() => {
     if (!isOpen) return;
     setIsLoading(true);
-    try {
-      const discs = AthleticsService.getDisciplines();
-      setDisciplines(discs);
+    let isCancelled = false;
 
-      const parts = AthleticsService.getParticipants();
-      setParticipants(parts);
+    const loadData = async () => {
+      try {
+        const discs = AthleticsService.getDisciplines();
+        setDisciplines(Array.isArray(discs) ? discs : []);
 
-      const schs = DataService.getSchools();
-      setSchools(schs);
+        const parts = AthleticsService.getParticipants();
+        setParticipants(Array.isArray(parts) ? parts : []);
 
-      const studs = DataService.getStudents();
-      setStudents(studs);
+        const [schs, studs] = await Promise.all([
+          DataService.getSchools().catch(err => {
+            console.warn('Failed loading schools:', err);
+            return [];
+          }),
+          DataService.getStudents().catch(err => {
+            console.warn('Failed loading students:', err);
+            return [];
+          })
+        ]);
 
-      if (initialDisciplineId) {
-        setSelectedDisciplineId(initialDisciplineId);
+        if (isCancelled) return;
+
+        setSchools(Array.isArray(schs) ? schs : []);
+        setStudents(Array.isArray(studs) ? studs : []);
+
+        if (initialDisciplineId) {
+          setSelectedDisciplineId(initialDisciplineId);
+        }
+      } catch (e) {
+        console.error('Error loading athletics data for bib generator:', e);
+      } finally {
+        if (!isCancelled) {
+          setIsLoading(false);
+        }
       }
-    } catch (e) {
-      console.error('Error loading athletics data for bib generator:', e);
-    } finally {
-      setIsLoading(false);
-    }
+    };
+
+    loadData();
+
+    return () => {
+      isCancelled = true;
+    };
   }, [isOpen, initialDisciplineId]);
 
   // Filtered disciplines based on group (الجري، القفز، دفع الجلة والرمي)
@@ -647,25 +719,40 @@ export const AthleticsBibGeneratorModal: React.FC<AthleticsBibGeneratorModalProp
           p.category === 'U20' ? (p.gender === 'Female' ? 'شابات (U20)' : 'شبان (U20)') :
           (p.category || 'عام');
 
+        const studentList = Array.isArray(students) ? students : [];
+        const matchingStudent = studentList.find(s => s.id === p.studentId || (p.massarNumber && s.massarNumber === p.massarNumber) || (p.studentName && s.fullName === p.studentName));
+        const commune = (p as any).commune || matchingStudent?.commune || 'تاوريرت المركز';
+        const directorate = (p as any).directorateName || matchingStudent?.directorateName || 'تاوريرت';
+        const birthDate = (p as any).birthDate || matchingStudent?.birthDate || (p.birthYear ? `01/01/${p.birthYear}` : '2014-12-01');
+        const birthYear = p.birthYear || matchingStudent?.birthYear || '2014';
+        const partType = (p as any).participationType || matchingStudent?.participationType || 'school_team';
+        const partTypeLabel = (partType === 'school_team' || partType === 'team' || String(partType).includes('فريق')) ? 'فريق المؤسسة' : 'مشاركة فردية';
+
         return {
           id: p.id || `reg-${idx}`,
           bibNumber: p.bibNumber || (idx + 1),
           fullName: p.studentName || 'تلميذ(ة)',
           massarNumber: p.massarNumber,
           schoolName: p.schoolName || '',
+          commune,
+          directorateName: directorate,
+          birthDate,
+          birthYear,
           disciplineId: pDiscipline ? pDiscipline.id : (selectedDisciplineId !== 'ALL' ? selectedDisciplineId : 'general'),
           disciplineNameAr: pDiscipline ? pDiscipline.nameAr : defaultDiscName,
           disciplineType: pDiscipline ? pDiscipline.type : defaultDiscType,
           category: p.category || selectedCategory,
           categoryLabel: catLabel,
           gender: p.gender || 'Male',
-          genderLabel: p.gender === 'Female' ? 'إناث (F)' : 'ذكور (M)'
+          genderLabel: p.gender === 'Female' ? 'أنثى' : 'ذكر',
+          participationType: partType,
+          participationTypeLabel: partTypeLabel
         };
       });
     }
 
     if (generationSource === 'all_students') {
-      let filtered = students;
+      let filtered = Array.isArray(students) ? students : [];
       if (selectedGender !== 'ALL') {
         filtered = filtered.filter(s => s.gender === selectedGender);
       }
@@ -678,20 +765,35 @@ export const AthleticsBibGeneratorModal: React.FC<AthleticsBibGeneratorModalProp
         );
       }
 
-      return filtered.slice(0, 100).map((s, idx) => ({
-        id: s.id || `stud-${idx}`,
-        bibNumber: idx + 1,
-        fullName: s.fullName,
-        massarNumber: s.massarNumber,
-        schoolName: s.schoolName,
-        disciplineId: selectedDisciplineId,
-        disciplineNameAr: defaultDiscName,
-        disciplineType: defaultDiscType,
-        category: selectedCategory !== 'ALL' ? selectedCategory : 'تلاميذ',
-        categoryLabel: selectedCategory !== 'ALL' ? selectedCategory : 'تلاميذ',
-        gender: s.gender || 'Male',
-        genderLabel: s.gender === 'Female' ? 'إناث (F)' : 'ذكور (M)'
-      }));
+      return filtered.slice(0, 100).map((s, idx) => {
+        const commune = s.commune || 'تاوريرت المركز';
+        const directorate = s.directorateName || 'تاوريرت';
+        const birthDate = s.birthDate || (s.birthYear ? `01/01/${s.birthYear}` : '2014-12-01');
+        const birthYear = s.birthYear || '2014';
+        const partType = s.participationType || 'school_team';
+        const partTypeLabel = (partType === 'school_team' || partType === 'team' || String(partType).includes('فريق')) ? 'فريق المؤسسة' : 'مشاركة فردية';
+
+        return {
+          id: s.id || `stud-${idx}`,
+          bibNumber: idx + 1,
+          fullName: s.fullName,
+          massarNumber: s.massarNumber,
+          schoolName: s.schoolName,
+          commune,
+          directorateName: directorate,
+          birthDate,
+          birthYear,
+          disciplineId: selectedDisciplineId,
+          disciplineNameAr: defaultDiscName,
+          disciplineType: defaultDiscType,
+          category: selectedCategory !== 'ALL' ? selectedCategory : 'تلاميذ',
+          categoryLabel: selectedCategory !== 'ALL' ? selectedCategory : 'تلاميذ',
+          gender: s.gender || 'Male',
+          genderLabel: s.gender === 'Female' ? 'أنثى' : 'ذكر',
+          participationType: partType,
+          participationTypeLabel: partTypeLabel
+        };
+      });
     }
 
     return [];
@@ -858,7 +960,7 @@ export const AthleticsBibGeneratorModal: React.FC<AthleticsBibGeneratorModalProp
     }
   };
 
-  // Helper function to draw a bib card in jsPDF with 100% Arabic support
+  // Helper function to draw a bib card in jsPDF with 100% Arabic support matching the official 3-column layout
   const drawPdfBib = (
     doc: jsPDF,
     runner: AthleticsBibRunnerData,
@@ -875,214 +977,99 @@ export const AthleticsBibGeneratorModal: React.FC<AthleticsBibGeneratorModalProp
     headerTitle?: string,
     isCompact?: boolean
   ) => {
-    // Outer border & background
+    // 1. Background & Solid Outer Border (matching official image)
     doc.setFillColor(255, 255, 255);
-    doc.setDrawColor(30, 41, 59);
-    doc.setLineWidth(1.2);
-    doc.roundedRect(x, y, w, h, 4, 4, 'FD');
+    doc.rect(x, y, w, h, 'F');
+    doc.setDrawColor(0, 0, 0);
+    doc.setLineWidth(isCompact ? 0.6 : 1.0);
+    doc.rect(x, y, w, h, 'S');
 
     // Punch hole guides in 4 corners for safety pins
-    doc.setDrawColor(160, 160, 160);
-    doc.setLineWidth(0.5);
-    doc.circle(x + 6, y + 6, 2, 'S');
-    doc.circle(x + w - 6, y + 6, 2, 'S');
-    doc.circle(x + 6, y + h - 6, 2, 'S');
-    doc.circle(x + w - 6, y + h - 6, 2, 'S');
+    doc.setDrawColor(180, 180, 180);
+    doc.setLineWidth(0.3);
+    doc.circle(x + 5, y + 5, 1.8, 'S');
+    doc.circle(x + w - 5, y + 5, 1.8, 'S');
+    doc.circle(x + 5, y + h - 5, 1.8, 'S');
+    doc.circle(x + w - 5, y + h - 5, 1.8, 'S');
 
-    // Header Bar in selected theme color
-    const headerHeight = isCompact ? 13 : 17;
-    const themeRgb = getThemeRgb(bibThemeColor);
-    doc.setFillColor(themeRgb.r, themeRgb.g, themeRgb.b);
-    doc.roundedRect(x + 1, y + 1, w - 2, headerHeight, 3, 3, 'F');
+    // 2. Horizontal line separating top 3-column table from bottom huge number
+    const topH = h * 0.42;
+    doc.setDrawColor(0, 0, 0);
+    doc.setLineWidth(isCompact ? 0.6 : 1.0);
+    doc.line(x, y + topH, x + w, y + topH);
 
-    // Right & Left University / Federation Logo (لوغو الجامعة فوق على اليمين واليسار)
-    const logoSize = isCompact ? 9 : 12;
-    const logoY = y + 1 + (headerHeight - logoSize) / 2;
+    // 3. Vertical lines for 3 columns
+    const colW = w / 3;
+    doc.line(x + colW, y, x + colW, y + topH);
+    doc.line(x + 2 * colW, y, x + 2 * colW, y + topH);
 
-    if (showUniversityLogo && universityLogoDataUrl) {
-      try {
-        // Logo Top Right (على اليمين)
-        doc.addImage(universityLogoDataUrl, 'PNG', x + 3, logoY, logoSize, logoSize, undefined, 'FAST');
-        // Logo Top Left (على اليسار)
-        doc.addImage(universityLogoDataUrl, 'PNG', x + w - logoSize - 3, logoY, logoSize, logoSize, undefined, 'FAST');
-      } catch (e) {
-        console.warn('PDF logo render issue:', e);
-      }
+    // 4. Horizontal sub-lines for 4 info rows in left & right columns
+    const rowH = topH / 4;
+    doc.setLineWidth(isCompact ? 0.4 : 0.6);
+    for (let i = 1; i < 4; i++) {
+      doc.line(x, y + i * rowH, x + colW, y + i * rowH);
+      doc.line(x + 2 * colW, y + i * rowH, x + w, y + i * rowH);
     }
 
-    // Arabic Header Title (No Symbols!) centered between logos
-    const titlePadding = (showUniversityLogo && universityLogoDataUrl) ? logoSize + 4 : 5;
-    drawArabicTextToPdf(
-      doc,
-      headerTitle || 'البطولة المدرسية لألعاب القوى',
-      x + titlePadding,
-      y + 1,
-      w - (titlePadding * 2),
-      headerHeight,
-      isCompact ? 9 : 12,
-      'bold',
-      '#FFFFFF',
-      'center'
-    );
-
-    // Competition Discipline Banner (CRITICAL USER REQUIREMENT)
-    let currentY = y + headerHeight + 3.5;
-    if (showDisc) {
-      const bannerH = isCompact ? 8.5 : 11.5;
-      doc.setFillColor(248, 250, 252);
-      doc.setDrawColor(203, 213, 225);
-      doc.roundedRect(x + 4, currentY, w - 8, bannerH, 2, 2, 'FD');
-
-      drawArabicTextToPdf(
-        doc,
-        `مسابقة: ${runner.disciplineNameAr}`,
-        x + 6,
-        currentY,
-        w - 12,
-        bannerH,
-        isCompact ? 8.5 : 11,
-        'bold',
-        '#0F172A',
-        'center'
-      );
-      currentY += bannerH + 3;
-    }
-
-    // Category and Gender Banner (CRITICAL USER REQUIREMENT: إظهار الفئة والجنس)
-    if (showCat) {
-      const catH = isCompact ? 7 : 9;
-      doc.setFillColor(254, 243, 199);
-      doc.setDrawColor(251, 191, 36);
-      doc.roundedRect(x + 6, currentY, w - 12, catH, 2, 2, 'FD');
-
-      const genderTxt = showGender ? ` • الجنس: ${runner.genderLabel}` : '';
-      drawArabicTextToPdf(
-        doc,
-        `الفئة: ${runner.categoryLabel}${genderTxt}`,
-        x + 8,
-        currentY,
-        w - 16,
-        catH,
-        isCompact ? 7 : 9,
-        'bold',
-        '#92400E',
-        'center'
-      );
-      currentY += catH + 2;
-    }
-
-    // Bottom info area definition first to calculate exact empty space in center
-    const bottomH = isCompact ? 25 : 33;
-    const bottomY = y + h - bottomH - 3;
-
-    // Huge Bib Number in Center - PROPORTIONALLY MAXIMIZED TO EMPTY SPACE
-    const bannerBottom = currentY;
-    const emptySpaceH = Math.max(20, bottomY - bannerBottom - 4);
-
-    const baseNumH = isMaximizedNumber
-      ? (isCompact ? Math.min(emptySpaceH - 2, 36) : Math.min(emptySpaceH - 2, w > 120 ? 62 : 48))
-      : (isCompact ? 24 : (w > 120 ? 40 : 30));
-
-    const baseFontSizePt = isMaximizedNumber
-      ? (isCompact ? 46 : (w > 120 ? 82 : 62))
-      : (isCompact ? 30 : (w > 120 ? 52 : 38));
-
-    // Apply teacher's custom scale slider (من 70% إلى 250%)
-    const numH = Math.min(emptySpaceH, Math.max(16, baseNumH * bibNumberScale));
-    const fontSizePt = Math.round(baseFontSizePt * bibNumberScale);
-
-    const numY = bannerBottom + (emptySpaceH - numH) / 2;
-
-    const activeFontDef = BIB_FONTS.find(f => f.id === bibNumberFont) || BIB_FONTS[0];
-
-    drawArabicTextToPdf(
-      doc,
-      String(runner.bibNumber),
-      x + 6,
-      numY,
-      w - 12,
-      numH,
-      fontSizePt,
-      'bold',
-      themeRgb.hex,
-      'center',
-      activeFontDef.family
-    );
-
-    // Bottom info area with QR and details
-    doc.setFillColor(248, 250, 252);
-    doc.setDrawColor(226, 232, 240);
-    doc.roundedRect(x + 4, bottomY, w - 8, bottomH, 2, 2, 'FD');
-
-    // QR Code on one side
-    const qrSize = isCompact ? 19 : 25;
-    const qrX = x + 6;
-    const qrY = bottomY + (bottomH - qrSize) / 2;
-
+    // 5. Center Column: Large high-contrast QR Code
     const activeQrUrl = qrCache[`${runner.id}-${qrContentMode}`] || qrUrl || qrCache[runner.id];
     if (showQr && activeQrUrl) {
+      const qPad = 2;
+      const qSize = Math.min(colW, topH) - qPad * 2;
+      const qx = x + colW + (colW - qSize) / 2;
+      const qy = y + (topH - qSize) / 2;
       try {
-        doc.addImage(activeQrUrl, 'PNG', qrX, qrY, qrSize, qrSize, undefined, 'FAST');
+        doc.addImage(activeQrUrl, 'PNG', qx, qy, qSize, qSize, undefined, 'FAST');
       } catch (e) {
         // ignore
       }
     }
 
-    // Metadata lines on the other side
-    const infoX = qrX + qrSize + 3;
-    const infoW = x + w - infoX - 6;
-    const lineH = isCompact ? 5.2 : 7.2;
-    let lineY = bottomY + 2;
+    // 6. Arabic Text Information with crisp styling
+    const textBasePt = isCompact ? 7.5 : (w > 120 ? 10.5 : 8.5);
+    const textSmallPt = isCompact ? 6.5 : (w > 120 ? 9.5 : 7.5);
 
-    if (showAthl && runner.fullName) {
-      drawArabicTextToPdf(
-        doc,
-        `👤 ${runner.fullName}`,
-        infoX,
-        lineY,
-        infoW,
-        lineH,
-        isCompact ? 7.5 : 9.5,
-        'bold',
-        '#0F172A',
-        'right'
-      );
-      lineY += lineH;
-    }
+    // Right Column in RTL (Column 3 on page: x + 2 * colW to x + w)
+    // Row 1: الفئة / المسابقة (e.g. "البراعم ذكور" أو "100م سرعة - فتيان")
+    // Row 2: تاريخ الازدياد (e.g. "2014-12-01")
+    // Row 3: الجنس (e.g. "ذكر")
+    // Row 4: الجماعة / التجمع (e.g. "تاوريرت المركز")
+    const rightColX = x + 2 * colW;
+    const catOrDisc = runner.disciplineNameAr || runner.categoryLabel;
+    drawArabicTextToPdf(doc, catOrDisc, rightColX, y, colW, rowH, textBasePt, 'bold', '#000000', 'center');
+    drawArabicTextToPdf(doc, runner.birthDate || String(runner.birthYear || '2014-12-01'), rightColX, y + rowH, colW, rowH, textBasePt, 'bold', '#000000', 'center');
+    drawArabicTextToPdf(doc, runner.genderLabel || 'ذكر', rightColX, y + 2 * rowH, colW, rowH, textBasePt, 'bold', '#000000', 'center');
+    drawArabicTextToPdf(doc, runner.commune || runner.directorateName || 'تاوريرت المركز', rightColX, y + 3 * rowH, colW, rowH, textSmallPt, 'bold', '#000000', 'center');
 
-    if (showSch && runner.schoolName) {
-      drawArabicTextToPdf(
-        doc,
-        `🏫 ${runner.schoolName}`,
-        infoX,
-        lineY,
-        infoW,
-        lineH,
-        isCompact ? 7 : 8.5,
-        'bold',
-        '#334155',
-        'right'
-      );
-      lineY += lineH;
-    }
+    // Left Column in RTL (Column 1 on page: x to x + colW)
+    // Row 1: الاسم الكامل للعداء
+    // Row 2: رقم مسار
+    // Row 3: المؤسسة التعليمية
+    // Row 4: نوع المشاركة (فريق المؤسسة / مشاركة فردية)
+    const leftColX = x;
+    const partType = runner.participationTypeLabel || (runner.participationType === 'school_team' ? 'فريق المؤسسة' : 'مشاركة فردية');
+    drawArabicTextToPdf(doc, runner.fullName, leftColX, y, colW, rowH, textBasePt, 'bold', '#000000', 'center');
+    drawArabicTextToPdf(doc, runner.massarNumber || '', leftColX, y + rowH, colW, rowH, textBasePt, 'bold', '#000000', 'center');
+    drawArabicTextToPdf(doc, runner.schoolName, leftColX, y + 2 * rowH, colW, rowH, textSmallPt, 'bold', '#000000', 'center');
+    drawArabicTextToPdf(doc, partType, leftColX, y + 3 * rowH, colW, rowH, textSmallPt, 'bold', '#000000', 'center');
 
-    // Sub-line: Gender + Massar / Lane / QR Mode label
-    const massarText = runner.massarNumber ? `مسار: ${runner.massarNumber}` : '';
-    const genderTag = showGender ? runner.genderLabel : '';
-    const qrModeTag = qrContentMode === 'name' ? 'QR: بالاسم' : qrContentMode === 'massar' ? 'QR: برقم مسار' : qrContentMode === 'bib' ? 'QR: بالصدرية' : 'QR: شامل';
-    const bottomTags = [genderTag, massarText, qrModeTag].filter(Boolean).join(' • ');
+    // 7. Bottom Section: HUGE BIB NUMBER (Dominant & Centered as in image)
+    const bottomH = h - topH;
+    const activeFontDef = BIB_FONTS.find(f => f.id === bibNumberFont) || BIB_FONTS[0];
+    const bibFontPt = (isCompact ? 58 : (w > 120 ? 115 : 90)) * bibNumberScale;
 
     drawArabicTextToPdf(
       doc,
-      bottomTags,
-      infoX,
-      lineY,
-      infoW,
-      lineH,
-      isCompact ? 6 : 7.5,
+      String(runner.bibNumber),
+      x,
+      y + topH,
+      w,
+      bottomH,
+      bibFontPt,
       'bold',
-      '#64748B',
-      'right'
+      '#000000',
+      'center',
+      activeFontDef.family
     );
   };
 
@@ -1248,62 +1235,64 @@ export const AthleticsBibGeneratorModal: React.FC<AthleticsBibGeneratorModalProp
       >
         
         {/* ========================================================================= */}
-        {/* HEADER BAR */}
+        {/* HEADER BAR - Enhanced, High Contrast & Responsive */}
         {/* ========================================================================= */}
-        <div className="bg-gradient-to-r from-amber-500 via-orange-600 to-rose-600 px-6 py-4 flex items-center justify-between text-white shrink-0 shadow-md">
-          <div className="flex items-center gap-3">
-            <div className="w-12 h-12 rounded-2xl bg-white/20 backdrop-blur-md border border-white/30 flex items-center justify-center shadow-inner">
-              <span className="text-2xl">🎽</span>
+        <div className="bg-gradient-to-r from-amber-600 via-orange-600 to-rose-700 px-3.5 sm:px-6 py-3 sm:py-4 flex items-center justify-between text-white shrink-0 shadow-md">
+          <div className="flex items-center gap-2.5 sm:gap-3">
+            <div className="w-9 h-9 sm:w-11 sm:h-11 rounded-2xl bg-white/20 backdrop-blur-md border border-white/30 flex items-center justify-center text-lg sm:text-2xl shadow-inner">
+              🎽
             </div>
             <div>
-              <div className="flex items-center gap-2">
-                <h2 className="text-lg sm:text-xl font-black">تطبيق إعداد صدريات ألعاب القوى</h2>
-                <span className="px-2 py-0.5 text-[10px] font-black bg-white/20 rounded-full border border-white/30">
-                  الجري • القفز • دفع الجلة
+              <div className="flex items-center gap-2 flex-wrap">
+                <h2 className="text-base sm:text-xl font-black">تطبيق إعداد صدريات ألعاب القوى</h2>
+                <span className="px-2 py-0.5 text-[10px] font-mono font-bold bg-white/20 rounded-full border border-white/30">
+                  {bibRunners.length} صدرية جاهزة
                 </span>
               </div>
-              <p className="text-xs text-orange-100 font-medium mt-0.5">
-                توليد بطاقات الصدريات لمسابقات ألعاب القوى مع إظهار نوع وتخصص المسابقة وتجهيزها للطباعة
+              <p className="text-[10px] sm:text-xs text-orange-100 font-medium mt-0.5">
+                توليد بطاقات الصدريات الرسمية (الجري • القفز • الرمي) ومطابقتها للمواصفات
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 sm:gap-2">
+            {/* Clear Bib App Button - ICON ONLY without text as requested */}
             <button
               onClick={handleClearBibApp}
-              className="px-3.5 py-2 bg-rose-700/60 hover:bg-rose-700/80 text-white rounded-xl text-xs font-black flex items-center gap-1.5 shadow-sm transition-all cursor-pointer border border-rose-300/30"
-              title="تفريغ تطبيق إنشاء الصدريات"
+              className="p-2 sm:p-2.5 bg-rose-700/60 hover:bg-rose-700/90 text-white rounded-xl transition-all cursor-pointer border border-rose-300/30 shadow-sm active:scale-95"
+              title="تفريغ تطبيق إنشاء الصدريات وإلغاء أي تحديد سابق"
+              aria-label="تفريغ تطبيق إنشاء الصدريات"
             >
               <Trash2 className="w-4 h-4" />
-              <span>تفريغ التطبيق 🗑️</span>
             </button>
 
             <button
               onClick={handlePrint}
               disabled={bibRunners.length === 0}
-              className="px-3.5 py-2 bg-white text-orange-700 hover:bg-orange-50 rounded-xl text-xs font-black flex items-center gap-1.5 shadow-sm transition-all cursor-pointer disabled:opacity-50 active:scale-95"
+              className="p-2 sm:px-3.5 sm:py-2 bg-white text-orange-700 hover:bg-orange-50 rounded-xl text-xs font-black flex items-center gap-1.5 shadow-sm transition-all cursor-pointer disabled:opacity-50 active:scale-95"
               title="طباعة الصدريات مباشرة"
             >
               <Printer className="w-4 h-4" />
-              <span>طباعة مباشرة</span>
+              <span className="hidden sm:inline">طباعة مباشرة</span>
             </button>
 
             <button
               onClick={handleExportPdf}
               disabled={bibRunners.length === 0 || isExportingPdf}
-              className="px-3.5 py-2 bg-black/20 hover:bg-black/30 text-white rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-50 active:scale-95"
+              className="p-2 sm:px-3.5 sm:py-2 bg-black/20 hover:bg-black/30 text-white rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-50 active:scale-95"
               title="تصدير الصدريات إلى PDF"
             >
               {isExportingPdf ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
-              <span>تصدير PDF</span>
+              <span className="hidden sm:inline">تصدير PDF</span>
             </button>
 
             <button
               onClick={onClose}
-              className="p-2 hover:bg-white/20 text-white rounded-xl transition-colors cursor-pointer"
+              className="p-2 sm:p-2.5 hover:bg-white/20 text-white rounded-xl transition-colors cursor-pointer active:scale-95"
               title="إغلاق"
+              aria-label="إغلاق"
             >
-              <X className="w-5 h-5" />
+              <X className="w-4 sm:w-5 h-4 sm:h-5" />
             </button>
           </div>
         </div>
@@ -1528,7 +1517,7 @@ export const AthleticsBibGeneratorModal: React.FC<AthleticsBibGeneratorModalProp
                     onChange={() => setGenerationSource('all_students')}
                     className="text-orange-600 focus:ring-orange-500"
                   />
-                  <span>توليد لتلاميذ المؤسسات المسجلين ({students.length} تلميذ)</span>
+                  <span>توليد لتلاميذ المؤسسات المسجلين ({Array.isArray(students) ? students.length : 0} تلميذ)</span>
                 </label>
               </div>
 
@@ -2111,168 +2100,87 @@ export const AthleticsBibGeneratorModal: React.FC<AthleticsBibGeneratorModalProp
                 ref={printContainerRef}
                 className="grid grid-cols-1 md:grid-cols-2 gap-5 flex-1 items-start"
               >
-                {currentPreviewRunners.map((runner, idx) => (
-                  <div
-                    key={`bib-runner-${runner.id}-${idx}`}
-                    className="bg-white rounded-3xl border-2 border-slate-900 shadow-xl overflow-hidden relative flex flex-col justify-between transition-all hover:shadow-2xl select-none"
-                    style={{ minHeight: '300px' }}
-                  >
-                    {/* Punch hole indicators (4 corners for safety pins) */}
-                    <div className="absolute top-2.5 right-2.5 w-3 h-3 rounded-full border border-slate-400 bg-slate-100 z-10 flex items-center justify-center">
-                      <div className="w-1 h-1 rounded-full bg-slate-400" />
-                    </div>
-                    <div className="absolute top-2.5 left-2.5 w-3 h-3 rounded-full border border-slate-400 bg-slate-100 z-10 flex items-center justify-center">
-                      <div className="w-1 h-1 rounded-full bg-slate-400" />
-                    </div>
-                    <div className="absolute bottom-2.5 right-2.5 w-3 h-3 rounded-full border border-slate-400 bg-slate-100 z-10 flex items-center justify-center">
-                      <div className="w-1 h-1 rounded-full bg-slate-400" />
-                    </div>
-                    <div className="absolute bottom-2.5 left-2.5 w-3 h-3 rounded-full border border-slate-400 bg-slate-100 z-10 flex items-center justify-center">
-                      <div className="w-1 h-1 rounded-full bg-slate-400" />
-                    </div>
+                {currentPreviewRunners.map((runner, idx) => {
+                  const activeQrUrl = qrCache[`${runner.id}-${qrContentMode}`] || runner.qrDataUrl || qrCache[runner.id];
+                  const fontDef = BIB_FONTS.find(f => f.id === bibNumberFont) || BIB_FONTS[0];
+                  const partType = runner.participationTypeLabel || (runner.participationType === 'school_team' ? 'فريق المؤسسة' : 'مشاركة فردية');
+                  const catOrDisc = runner.disciplineNameAr || runner.categoryLabel || runner.category;
 
-                    {/* Top Header Bar with Right and Left University Logos */}
-                    <div className={`${themeClasses.headerBg} text-white px-3 py-2 flex items-center justify-between text-center relative overflow-hidden`}>
-                      {/* Right Logo (لوغو الجامعة على اليمين) */}
-                      {showUniversityLogo ? (
-                        <div className="w-8 h-8 rounded-lg bg-white/20 backdrop-blur-xs p-1 shrink-0 border border-white/30 flex items-center justify-center shadow-xs">
-                          {universityLogo ? (
-                            <img src={universityLogo} alt="شعار الجامعة" className="w-full h-full object-contain" />
+                  return (
+                    <div
+                      key={`bib-runner-${runner.id}-${idx}`}
+                      className="bg-white border-4 border-black shadow-xl flex flex-col relative select-none transition-all hover:shadow-2xl overflow-hidden"
+                      style={{ height: '320px', minHeight: '320px' }}
+                    >
+                      {/* TOP SECTION: 3 Columns Grid with black borders (matching image) */}
+                      <div className="grid grid-cols-12 border-b-4 border-black h-[135px] bg-white text-slate-950 shrink-0">
+                        
+                        {/* Right Column in RTL (Column 1 in DOM under dir="rtl"): 4 Rows */}
+                        <div className="col-span-4 border-l-2 border-black flex flex-col justify-between text-center font-black text-slate-950 bg-white divide-y-2 divide-black">
+                          <div className="flex-1 flex items-center justify-center px-1 text-xs truncate leading-tight font-black text-slate-950">
+                            {catOrDisc}
+                          </div>
+                          <div className="flex-1 flex items-center justify-center px-1 font-mono text-xs leading-tight font-black text-slate-950">
+                            {runner.birthDate || runner.birthYear || '2014-12-01'}
+                          </div>
+                          <div className="flex-1 flex items-center justify-center px-1 text-xs leading-tight font-black text-slate-950">
+                            {runner.genderLabel || 'ذكر'}
+                          </div>
+                          <div className="flex-1 flex items-center justify-center px-1 text-[11px] truncate leading-tight font-black text-slate-950">
+                            {runner.commune || runner.directorateName || 'تاوريرت المركز'}
+                          </div>
+                        </div>
+
+                        {/* Center Column: High Contrast Crisp QR Code */}
+                        <div className="col-span-4 flex items-center justify-center p-1.5 bg-white border-l-2 border-r-2 border-black overflow-hidden">
+                          {activeQrUrl ? (
+                            <img
+                              src={activeQrUrl}
+                              alt={`QR for ${runner.bibNumber}`}
+                              className="w-24 h-24 object-contain max-w-[95%] max-h-[95%]"
+                            />
                           ) : (
-                            <AppLogo size={20} />
+                            <div className="w-20 h-20 bg-slate-100 flex items-center justify-center">
+                              <QrCode className="w-10 h-10 text-slate-400" />
+                            </div>
                           )}
                         </div>
-                      ) : (
-                        <span className="text-[10px] font-black tracking-wider uppercase opacity-90">
-                          ATHLETICS
-                        </span>
-                      )}
 
-                      {/* Center Title */}
-                      <div className="flex flex-col items-center justify-center flex-1 px-2 min-w-0">
-                        <span className="text-xs sm:text-sm font-black truncate max-w-[220px] drop-shadow-xs">
-                          {championshipHeaderTitle}
-                        </span>
-                        {subHeaderTitle && (
-                          <span className="text-[9px] text-white/80 font-bold truncate max-w-[200px]">
-                            {subHeaderTitle}
-                          </span>
-                        )}
+                        {/* Left Column in RTL (Column 3 in DOM under dir="rtl"): 4 Rows */}
+                        <div className="col-span-4 border-r-2 border-black flex flex-col justify-between text-center font-black text-slate-950 bg-white divide-y-2 divide-black">
+                          <div className="flex-1 flex items-center justify-center px-1 text-xs truncate leading-tight font-black text-slate-950">
+                            {runner.fullName}
+                          </div>
+                          <div className="flex-1 flex items-center justify-center px-1 font-mono text-xs leading-tight font-black text-slate-950">
+                            {runner.massarNumber || '—'}
+                          </div>
+                          <div className="flex-1 flex items-center justify-center px-1 text-[11px] truncate leading-tight font-black text-slate-950">
+                            {runner.schoolName || 'المؤسسة التعليمية'}
+                          </div>
+                          <div className="flex-1 flex items-center justify-center px-1 text-[11px] truncate leading-tight font-black text-slate-950">
+                            {partType}
+                          </div>
+                        </div>
+
                       </div>
 
-                      {/* Left Logo (لوغو الجامعة على اليسار) */}
-                      {showUniversityLogo ? (
-                        <div className="w-8 h-8 rounded-lg bg-white/20 backdrop-blur-xs p-1 shrink-0 border border-white/30 flex items-center justify-center shadow-xs">
-                          {universityLogo ? (
-                            <img src={universityLogo} alt="شعار الجامعة" className="w-full h-full object-contain" />
-                          ) : (
-                            <AppLogo size={20} />
-                          )}
-                        </div>
-                      ) : (
-                        <span className="text-[10px] font-black tracking-wider uppercase opacity-90">
-                          BIB
+                      {/* BOTTOM SECTION: HUGE BIB NUMBER (dominant, centered, as in uploaded image) */}
+                      <div className="flex-1 flex items-center justify-center bg-white text-slate-950 overflow-visible py-2">
+                        <span
+                          style={{
+                            fontFamily: fontDef.family,
+                            fontSize: `calc(${String(runner.bibNumber).length <= 2 ? 'clamp(5.5rem, 16vw, 8rem)' : String(runner.bibNumber).length === 3 ? 'clamp(4.5rem, 13vw, 6.8rem)' : 'clamp(3.5rem, 10vw, 5.2rem)'} * ${bibNumberScale})`,
+                            lineHeight: 0.9,
+                            color: '#000000'
+                          }}
+                          className="font-black tracking-tight select-all leading-none"
+                        >
+                          {runner.bibNumber}
                         </span>
-                      )}
-                    </div>
-
-                    {/* THE CRITICAL REQUIREMENT: Competition Name Banner on Bib */}
-                    {showDisciplineName && (
-                      <div className="mx-4 mt-2 px-3 py-1.5 rounded-xl border border-dashed border-slate-300 bg-slate-50 flex items-center justify-between gap-1 flex-wrap">
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-sm">
-                            {runner.disciplineType === 'field_jump' ? '🦘' : runner.disciplineType === 'field_throw' ? '☄️' : '🏃‍♂️'}
-                          </span>
-                          <span className="text-xs font-black text-slate-900">
-                            مسابقة: {runner.disciplineNameAr}
-                          </span>
-                        </div>
-                        {showCategoryGender && (
-                          <div className="flex items-center gap-1">
-                            <span className="px-2 py-0.5 bg-slate-200 text-slate-800 rounded-md text-[10px] font-black">
-                              {runner.category}
-                            </span>
-                            {showGender && (
-                              <span className={`px-2 py-0.5 rounded-md text-[10px] font-black flex items-center gap-1 ${
-                                runner.gender === 'Female' ? 'bg-rose-100 text-rose-800 border border-rose-200' : 'bg-blue-100 text-blue-800 border border-blue-200'
-                              }`}>
-                                {runner.gender === 'Female' ? '👧 إناث' : '👦 ذكور'}
-                              </span>
-                            )}
-                          </div>
-                        )}
                       </div>
-                    )}
-
-                    {/* Huge Bib Number in Center - Proportionally Maximized to Empty Space with dynamic scale slider */}
-                    <div className="flex-1 my-auto py-2 px-2 flex items-center justify-center text-center overflow-hidden">
-                      <span 
-                        style={{ 
-                          fontFamily: BIB_FONTS.find(f => f.id === bibNumberFont)?.family || "'Changa', sans-serif",
-                          fontSize: `calc(${
-                            isMaximizedNumber 
-                              ? (String(runner.bibNumber).length <= 2 ? 'clamp(5rem, 15vw, 7.5rem)' : String(runner.bibNumber).length === 3 ? 'clamp(4.2rem, 12vw, 6.2rem)' : 'clamp(3.2rem, 9vw, 4.8rem)')
-                              : (String(runner.bibNumber).length <= 2 ? 'clamp(3.8rem, 10vw, 5.2rem)' : String(runner.bibNumber).length === 3 ? 'clamp(3rem, 8vw, 4.2rem)' : 'clamp(2.4rem, 6vw, 3.4rem)')
-                          } * ${bibNumberScale})`,
-                          lineHeight: 0.95
-                        }}
-                        className={`font-black tracking-tight select-none transition-all duration-150 ${themeClasses.numberColor}`}
-                      >
-                        {runner.bibNumber}
-                      </span>
                     </div>
-
-                    {/* Bottom Metadata Area: Name, School, QR */}
-                    <div className="px-4 pb-3 pt-1 border-t border-slate-200 bg-slate-50/70 flex items-center justify-between gap-2">
-                      <div className="space-y-0.5 text-right flex-1 truncate">
-                        {showAthleteName && (
-                          <div className="text-xs font-black text-slate-900 truncate">
-                            👤 {runner.fullName}
-                          </div>
-                        )}
-                        {showSchoolName && (
-                          <div className="text-[10px] font-bold text-slate-600 truncate">
-                            🏫 {runner.schoolName || 'المؤسسة التعليمية'}
-                          </div>
-                        )}
-                        <div className="flex items-center gap-2 text-[10px] text-slate-500 font-bold truncate">
-                          {showGender && (
-                            <span className={`font-black ${runner.gender === 'Female' ? 'text-rose-600' : 'text-blue-600'}`}>
-                              {runner.gender === 'Female' ? '👧 إناث' : '👦 ذكور'}
-                            </span>
-                          )}
-                          {runner.massarNumber && (
-                            <span className="font-mono text-[9px] bg-slate-200 px-1.5 py-0.2 rounded">
-                              مسار: {runner.massarNumber}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Scannable QR Code */}
-                      {showQrCode && (
-                        <div className="shrink-0 flex flex-col items-center">
-                          <div className="bg-white p-1 rounded-xl border border-slate-300 shadow-xs">
-                            {qrCache[`${runner.id}-${qrContentMode}`] || qrCache[runner.id] ? (
-                              <img
-                                src={qrCache[`${runner.id}-${qrContentMode}`] || qrCache[runner.id]}
-                                alt={`QR for ${runner.bibNumber}`}
-                                className="w-14 h-14 object-contain"
-                              />
-                            ) : (
-                              <div className="w-14 h-14 bg-slate-100 flex items-center justify-center">
-                                <QrCode className="w-8 h-8 text-slate-400" />
-                              </div>
-                            )}
-                          </div>
-                          <span className="text-[9px] font-black text-slate-500 mt-1">
-                            {qrContentMode === 'name' ? 'QR: بالاسم' : qrContentMode === 'massar' ? 'QR: برقم مسار' : qrContentMode === 'bib' ? 'QR: بالصدرية' : 'QR: شامل'}
-                          </span>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
 

@@ -1307,6 +1307,25 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
     toast.success(`تم إنهاء السباق بنجاح! تم حفظ النتائج والترتيب النهائي للفئة 🏆`);
   };
 
+  // Merge Save & Adopt Results in one unified action
+  const handleSaveAndAdoptResults = async () => {
+    if (arrivals.length === 0) {
+      toast.error('لا يوجد أي واصلين مسجلين لحفظهم واعتماد نتائجهم');
+      return;
+    }
+    setTimerRunning(false);
+    setIsSavingLive(true);
+    try {
+      await saveLiveResults(arrivals, false, 'completed');
+      setPhase('summary');
+      toast.success(`تم حفظ جميع الواصلين (${arrivals.length}) واعتماد النتائج والترتيب النهائي بنجاح! 🏆💾`);
+    } catch {
+      toast.error('حدث خطأ أثناء حفظ واعتماد النتائج');
+    } finally {
+      setIsSavingLive(false);
+    }
+  };
+
   // Transition to Another Race (Resets states for another category)
   const handleTransitionToAnotherRace = () => {
     setPhase('setup');
@@ -1339,11 +1358,11 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
       return !isClub;
     });
 
-    const rankedNonClub = nonClubRunners.map((r, idx) => ({
+    const rankedNonClub = nonClubRunners.map((r) => ({
       ...r,
       participationType: resolveRunnerParticipationType(r, allStudents),
-      recalculatedRank: idx + 1,
-      rank: idx + 1
+      rank: r.rank,
+      overallRank: r.overallRank || r.rank
     }));
 
     return calculateTeamRankings(rankedNonClub, allStudents, true);
@@ -1560,18 +1579,18 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
               </button>
             )}
 
-            {/* Clear Scanner Application button */}
+            {/* Clear Scanner Application button - Icon only */}
             <button
               type="button"
               onClick={() => {
                 setClearScope('current');
                 setShowClearModal(true);
               }}
-              className="flex items-center gap-1 px-2 sm:px-3 py-2 bg-red-500/20 hover:bg-red-500/30 text-red-200 hover:text-white border border-red-400/30 rounded-xl text-[10px] sm:text-xs font-black transition-all cursor-pointer shadow-xs active:scale-95"
+              className="p-2 sm:p-2.5 bg-red-500/20 hover:bg-red-500/30 text-red-200 hover:text-white border border-red-400/30 rounded-xl transition-all cursor-pointer shadow-xs active:scale-95"
               title="تفريغ وإعادة ضبط بيانات تطبيق المسح"
+              aria-label="تفريغ وإعادة ضبط بيانات تطبيق المسح"
             >
-              <Trash2 className="w-3 sm:w-3.5 h-3 sm:h-3.5 text-red-400" />
-              <span className="hidden xs:inline">تفريغ</span>
+              <Trash2 className="w-4 h-4 text-red-400" />
             </button>
 
             <button
@@ -2048,8 +2067,8 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
                       </div>
                     </div>
 
-                    {/* Touch Onscreen Keypad for Quick Mobile / Tablet Use */}
-                    <div className="pt-2">
+                    {/* Touch Onscreen Keypad for Quick Mobile / Tablet Use (Hidden on phone view as requested) */}
+                    <div className="pt-2 hidden md:block">
                       <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block mb-1.5">لوحة لمسية سريعة:</span>
                       <div className="grid grid-cols-3 gap-1.5 sm:gap-2">
                         {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((num) => (
@@ -2151,31 +2170,54 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
                     {liveTeamRankings.length === 0 ? (
                       <p className="text-[11px] text-slate-500 dark:text-slate-400">في انتظار وصول 4 عداءين على الأقل لتحديد ترتيب الفرق المكتملة.</p>
                     ) : (
-                      <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
-                        {liveTeamRankings.filter(t => t.isValidTeam).map((team, idx) => (
-                          <div
-                            key={team.schoolName}
-                            className={`p-2 rounded-xl text-xs flex items-center justify-between border ${
-                              team.isWinnerTeam
-                                ? 'bg-amber-100 dark:bg-amber-950/80 border-amber-300 dark:border-amber-700 font-bold text-amber-950 dark:text-amber-200 shadow-2xs'
-                                : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200'
-                            }`}
-                          >
-                            <div className="flex items-center gap-2">
-                              <span className="font-black text-slate-900 dark:text-slate-100">#{idx + 1}</span>
-                              <span className="font-bold truncate max-w-[150px] text-slate-800 dark:text-slate-200">{team.schoolName}</span>
-                            </div>
+                      <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
+                        {liveTeamRankings.filter(t => t.isValidTeam).map((team, idx) => {
+                          const formulaStr = team.top4Runners.map(r => r.rank).join(' + ');
+                          return (
+                            <div
+                              key={team.schoolName}
+                              className={`p-2.5 rounded-xl text-xs border ${
+                                team.isWinnerTeam
+                                  ? 'bg-amber-100 dark:bg-amber-950/80 border-amber-300 dark:border-amber-700 font-bold text-amber-950 dark:text-amber-200 shadow-2xs'
+                                  : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200'
+                              }`}
+                            >
+                              <div className="flex items-center justify-between gap-2">
+                                <div className="flex items-center gap-2 overflow-hidden">
+                                  <span className="font-black text-slate-900 dark:text-slate-100 shrink-0">
+                                    {idx === 0 ? '🥇 #1' : idx === 1 ? '🥈 #2' : idx === 2 ? '🥉 #3' : `#${idx + 1}`}
+                                  </span>
+                                  <span className="font-black truncate text-slate-900 dark:text-slate-100" title={team.schoolName}>
+                                    {team.schoolName}
+                                  </span>
+                                </div>
 
-                            <div className="flex items-center gap-2">
-                              <span className="text-[10px] bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-full text-slate-700 dark:text-slate-300 font-mono">
-                                {team.runners.length} واصلين
-                              </span>
-                              <span className="font-black text-blue-900 dark:text-blue-400">
-                                {team.isValidTeam ? `${team.totalPoints} ن` : 'غ.مكتمل'}
-                              </span>
+                                <div className="flex items-center gap-1.5 shrink-0">
+                                  <span className="font-mono text-[10px] bg-blue-100 dark:bg-blue-900/60 text-blue-900 dark:text-blue-200 font-black px-2 py-0.5 rounded-lg border border-blue-200 dark:border-blue-800">
+                                    {team.totalPoints} نقطة ({formulaStr} = {team.totalPoints})
+                                  </span>
+                                </div>
+                              </div>
+
+                              {/* 4 Runners Breakdown: Ranks (1, 5, 7, 10...) */}
+                              <div className="mt-2 pt-1.5 border-t border-slate-200/70 dark:border-slate-700/70 grid grid-cols-1 sm:grid-cols-2 gap-1 text-[10px]">
+                                {team.top4Runners.map((r, rIdx) => (
+                                  <div key={r.id || rIdx} className="flex items-center justify-between bg-slate-50 dark:bg-slate-800/80 px-2 py-0.5 rounded border border-slate-200/50 dark:border-slate-700/50">
+                                    <span className="font-black text-amber-700 dark:text-amber-400">
+                                      المرتبة {r.rank}
+                                    </span>
+                                    <span className="truncate max-w-[110px] font-medium text-slate-700 dark:text-slate-300" title={r.fullName}>
+                                      {r.fullName}
+                                    </span>
+                                    <span className="font-mono text-[9px] text-slate-500 dark:text-slate-400">
+                                      #{r.bibNumber}
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
                             </div>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     )}
                   </div>
@@ -2198,13 +2240,13 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
                     <div className="flex items-center gap-2">
                       <button
                         type="button"
-                        onClick={() => saveLiveResults(arrivals, true)}
+                        onClick={handleSaveAndAdoptResults}
                         disabled={isSavingLive || arrivals.length === 0}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-black text-xs rounded-xl shadow-sm transition-all cursor-pointer active:scale-95 disabled:opacity-50"
-                        title="حفظ جميع المتسابقين الذين عبروا خط الوصول في قاعدة البيانات"
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-emerald-600 via-teal-600 to-indigo-600 hover:from-emerald-500 hover:to-indigo-500 text-white font-black text-xs rounded-xl shadow-sm transition-all cursor-pointer active:scale-95 disabled:opacity-50"
+                        title="حفظ الواصلين في قاعدة البيانات واعتماد النتائج فورياً"
                       >
                         <Save className="w-3.5 h-3.5" />
-                        <span>حفظ جميع الواصلين ({arrivals.length}) 💾</span>
+                        <span>حفظ واعتماد النتائج ({arrivals.length}) 💾 🏁</span>
                       </button>
 
                       {arrivals.length > 0 && (
@@ -2214,11 +2256,11 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
                             setClearScope('current');
                             setShowClearModal(true);
                           }}
-                          className="text-[11px] font-bold text-red-600 dark:text-red-400 hover:text-red-800 hover:underline cursor-pointer flex items-center gap-1 bg-red-50 dark:bg-red-950/50 hover:bg-red-100 dark:hover:bg-red-900/50 px-2 py-1 rounded-lg border border-red-200 dark:border-red-800 transition-colors"
+                          className="p-1.5 text-red-600 dark:text-red-400 hover:text-red-800 cursor-pointer flex items-center justify-center bg-red-50 dark:bg-red-950/50 hover:bg-red-100 dark:hover:bg-red-900/50 rounded-lg border border-red-200 dark:border-red-800 transition-colors shadow-3xs active:scale-95"
                           title="تفريغ جميع الواصلين في هذا السباق"
+                          aria-label="تفريغ"
                         >
-                          <Trash2 className="w-3 h-3" />
-                          <span>تفريغ</span>
+                          <Trash2 className="w-3.5 h-3.5" />
                         </button>
                       )}
                     </div>
@@ -2319,21 +2361,35 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
                         <p className="text-[10px] text-amber-800/70 dark:text-amber-300/70 font-medium">في انتظار وصول 4 عداءين من أي مؤسسة لاحتساب ترتيب الفرق.</p>
                       ) : (
                         <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                          {liveTeamRankings.filter(t => t.isValidTeam).slice(0, 3).map((team, idx) => (
-                            <div key={team.schoolName} className="bg-white dark:bg-slate-800 border border-amber-200/80 dark:border-amber-800/60 p-2 rounded-lg flex items-center justify-between text-[11px] shadow-3xs">
-                              <div className="flex items-center gap-1 overflow-hidden">
-                                <span className="font-extrabold text-xs">
-                                  {idx === 0 ? '🥇' : idx === 1 ? '🥈' : '🥉'}
-                                </span>
-                                <span className="font-extrabold text-slate-800 dark:text-slate-200 truncate max-w-[110px]" title={team.schoolName}>
-                                  {team.schoolName}
-                                </span>
+                          {liveTeamRankings.filter(t => t.isValidTeam).slice(0, 3).map((team, idx) => {
+                            const formulaStr = team.top4Runners.map(r => r.rank).join(' + ');
+                            return (
+                              <div key={team.schoolName} className="bg-white dark:bg-slate-800 border border-amber-200/80 dark:border-amber-800/60 p-2.5 rounded-xl text-[11px] shadow-3xs space-y-1.5">
+                                <div className="flex items-center justify-between gap-1">
+                                  <div className="flex items-center gap-1 overflow-hidden">
+                                    <span className="font-extrabold text-xs">
+                                      {idx === 0 ? '🥇' : idx === 1 ? '🥈' : '🥉'}
+                                    </span>
+                                    <span className="font-black text-slate-800 dark:text-slate-200 truncate max-w-[120px]" title={team.schoolName}>
+                                      {team.schoolName}
+                                    </span>
+                                  </div>
+                                  <span className="font-black text-amber-950 dark:text-amber-200 bg-amber-100 dark:bg-amber-900/60 px-2 py-0.5 rounded-md text-[10px] shrink-0 font-mono">
+                                    {team.totalPoints} ن ({formulaStr})
+                                  </span>
+                                </div>
+                                <div className="text-[9px] text-slate-500 dark:text-slate-400 border-t border-slate-100 dark:border-slate-700/50 pt-1 space-y-0.5">
+                                  {team.top4Runners.map((r, rIdx) => (
+                                    <div key={r.id || rIdx} className="flex items-center justify-between">
+                                      <span className="font-bold text-amber-800 dark:text-amber-400">المرتبة {r.rank}:</span>
+                                      <span className="truncate max-w-[100px] text-slate-700 dark:text-slate-300">{r.fullName}</span>
+                                      <span className="font-mono text-[8.5px]">#{r.bibNumber}</span>
+                                    </div>
+                                  ))}
+                                </div>
                               </div>
-                              <span className="font-black text-amber-950 dark:text-amber-200 bg-amber-100 dark:bg-amber-900/60 px-1.5 py-0.5 rounded-md text-[9px] shrink-0 font-mono">
-                                {team.totalPoints} ن
-                              </span>
-                            </div>
-                          ))}
+                            );
+                          })}
                         </div>
                       )}
                     </div>
@@ -2449,30 +2505,22 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
                   <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
                     <button
                       type="button"
-                      onClick={() => saveLiveResults(arrivals, true)}
-                      disabled={isSavingLive || arrivals.length === 0}
-                      className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs rounded-xl shadow-md transition-all active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
-                      title="حفظ جميع المتسابقين الذين عبروا خط الوصول"
-                    >
-                      <Save className="w-3.5 h-3.5" />
-                      <span>حفظ جميع الواصلين ({arrivals.length}) 💾</span>
-                    </button>
-
-                    <button
-                      type="button"
                       onClick={() => setPhase('setup')}
-                      className="px-3.5 py-2 text-slate-700 dark:text-slate-200 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-xl text-xs font-bold flex items-center gap-1 transition-all cursor-pointer border border-slate-300/30 dark:border-slate-700"
+                      className="px-3.5 py-2.5 text-slate-700 dark:text-slate-200 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer border border-slate-300/30 dark:border-slate-700 shrink-0"
                     >
-                      <ArrowLeft className="w-3.5 h-3.5" />
+                      <ArrowLeft className="w-4 h-4" />
                       <span>رجوع للإعداد</span>
                     </button>
 
                     <button
                       type="button"
-                      onClick={handleEndRace}
-                      className="px-5 py-2 bg-gradient-to-r from-red-600 to-amber-600 hover:from-red-700 hover:to-amber-700 text-white font-black text-xs rounded-xl shadow-md transition-all active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer"
+                      onClick={handleSaveAndAdoptResults}
+                      disabled={isSavingLive || arrivals.length === 0}
+                      className="flex-1 sm:flex-none px-6 py-2.5 bg-gradient-to-r from-emerald-600 via-teal-600 to-indigo-600 hover:from-emerald-500 hover:to-indigo-500 text-white font-black text-xs sm:text-sm rounded-xl shadow-lg hover:shadow-xl transition-all active:scale-95 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                      title="حفظ جميع المتسابقين الواصلين في قاعدة البيانات واعتماد النتائج فورياً"
                     >
-                      <span>إنهاء السباق واعتماد النتائج 🏁</span>
+                      <Save className="w-4 h-4" />
+                      <span>حفظ واعتماد النتائج ({arrivals.length}) 💾 🏁</span>
                     </button>
                   </div>
                 </div>
@@ -2537,18 +2585,36 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
                   <p className="text-xs text-slate-400 text-center py-6">في انتظار واصلين لحساب نقاط الفرق.</p>
                 ) : (
                   <div className="space-y-2">
-                    {liveTeamRankings.slice(0, 3).map((team, idx) => (
-                      <div
-                        key={team.schoolName}
-                        className="bg-white dark:bg-slate-900 p-3 rounded-xl border border-slate-200 dark:border-slate-700 flex items-center justify-between text-xs font-bold"
-                      >
-                        <div className="flex items-center gap-2">
-                          <span className="text-slate-500 dark:text-slate-400">#{idx + 1}</span>
-                          <span className="text-slate-900 dark:text-slate-100">{team.schoolName}</span>
+                    {liveTeamRankings.slice(0, 3).map((team, idx) => {
+                      const formulaStr = team.top4Runners.map(r => r.rank).join(' + ');
+                      return (
+                        <div
+                          key={team.schoolName}
+                          className="bg-white dark:bg-slate-900 p-3 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-bold space-y-2 shadow-xs"
+                        >
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <span className="text-base">{idx === 0 ? '🥇' : idx === 1 ? '🥈' : '🥉'}</span>
+                              <span className="font-black text-slate-900 dark:text-slate-100 text-sm">{team.schoolName}</span>
+                            </div>
+                            <span className="text-blue-900 dark:text-blue-300 font-mono font-black bg-blue-50 dark:bg-blue-950/60 px-2.5 py-1 rounded-lg border border-blue-200 dark:border-blue-800">
+                              {team.totalPoints} نقطة ({formulaStr} = {team.totalPoints})
+                            </span>
+                          </div>
+
+                          {/* Top 4 Runners list */}
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 pt-1.5 border-t border-slate-100 dark:border-slate-800 text-[11px]">
+                            {team.top4Runners.map((r, rIdx) => (
+                              <div key={r.id || rIdx} className="flex items-center justify-between bg-slate-50 dark:bg-slate-800/60 px-2 py-1 rounded-lg border border-slate-200/60 dark:border-slate-700/60">
+                                <span className="font-black text-amber-700 dark:text-amber-400">المرتبة {r.rank}</span>
+                                <span className="truncate max-w-[120px] font-semibold text-slate-800 dark:text-slate-200" title={r.fullName}>{r.fullName}</span>
+                                <span className="font-mono text-[9px] text-slate-500">#{r.bibNumber}</span>
+                              </div>
+                            ))}
+                          </div>
                         </div>
-                        <span className="text-blue-900 dark:text-blue-400 font-black">{team.totalPoints} نقطة</span>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>
