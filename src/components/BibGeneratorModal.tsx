@@ -623,30 +623,52 @@ export const BibGeneratorModal: React.FC<BibGeneratorModalProps> = ({
       ) => {
         if (!sharedCtx || !text) return;
 
+        const isNumericBib = /^\d+$/.test(text.trim());
         const scale = 3; // Optimized scale: super sharp, 60% faster than scale 5
-        const fontPx = Math.max(16, Math.round(fontSize * scale * 3.2));
+        const fontPx = Math.max(16, Math.round(fontSize * scale * (isNumericBib ? 3.6 : 3.2)));
         sharedCtx.font = `${fontWeight} ${fontPx}px ${fontFamily}`;
         
         const metrics = sharedCtx.measureText(text);
         const textWidth = Math.ceil(metrics.width);
         const textHeight = Math.ceil(fontPx * 1.35);
 
-        sharedCanvas.width = textWidth + 20;
-        sharedCanvas.height = textHeight + 20;
+        if (isNumericBib) {
+          const ascent = metrics.actualBoundingBoxAscent || (fontPx * 0.73);
+          const descent = metrics.actualBoundingBoxDescent || (fontPx * 0.08);
+          const left = metrics.actualBoundingBoxLeft || 0;
+          const right = metrics.actualBoundingBoxRight || textWidth;
 
-        // Re-apply font after resize
-        sharedCtx.font = `${fontWeight} ${fontPx}px ${fontFamily}`;
-        sharedCtx.textBaseline = 'middle';
-        sharedCtx.textAlign = 'center';
-        sharedCtx.fillStyle = '#000000';
-        sharedCtx.fillText(text, sharedCanvas.width / 2, sharedCanvas.height / 2);
+          const glyphW = Math.max(10, Math.ceil(left + right));
+          const glyphH = Math.max(10, Math.ceil(ascent + descent));
+          const padX = Math.max(4, Math.ceil(glyphW * 0.015));
+          const padY = Math.max(4, Math.ceil(glyphH * 0.015));
+
+          sharedCanvas.width = glyphW + padX * 2;
+          sharedCanvas.height = glyphH + padY * 2;
+
+          sharedCtx.font = `${fontWeight} ${fontPx}px ${fontFamily}`;
+          sharedCtx.textBaseline = 'alphabetic';
+          sharedCtx.textAlign = 'left';
+          sharedCtx.fillStyle = '#000000';
+          sharedCtx.fillText(text, padX + left, padY + ascent);
+        } else {
+          sharedCanvas.width = textWidth + 20;
+          sharedCanvas.height = textHeight + 20;
+
+          // Re-apply font after resize
+          sharedCtx.font = `${fontWeight} ${fontPx}px ${fontFamily}`;
+          sharedCtx.textBaseline = 'middle';
+          sharedCtx.textAlign = 'center';
+          sharedCtx.fillStyle = '#000000';
+          sharedCtx.fillText(text, sharedCanvas.width / 2, sharedCanvas.height / 2);
+        }
 
         const imgData = sharedCanvas.toDataURL('image/png');
         const aspect = sharedCanvas.width / sharedCanvas.height;
         
         // Target dimensions in mm
-        const maxW = tw * 0.95;
-        const maxH = th * 0.92;
+        const maxW = isNumericBib ? tw * 0.95 : tw * 0.95;
+        const maxH = isNumericBib ? th * 0.94 : th * 0.92;
         
         let drawW = maxW;
         let drawH = drawW / aspect;

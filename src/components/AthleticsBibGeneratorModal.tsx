@@ -575,10 +575,10 @@ export const AthleticsBibGeneratorModal: React.FC<AthleticsBibGeneratorModalProp
     });
   }, [disciplines, disciplineGroupFilter]);
 
-  // Selected discipline object
   const activeDisciplineObj = useMemo(() => {
     if (selectedDisciplineId === 'ALL') return null;
-    return disciplines.find(d => d.id === selectedDisciplineId) || null;
+    const list = Array.isArray(disciplines) ? disciplines : [];
+    return list.find(d => d.id === selectedDisciplineId) || null;
   }, [disciplines, selectedDisciplineId]);
 
   // Build the list of bib items to display & print
@@ -700,14 +700,15 @@ export const AthleticsBibGeneratorModal: React.FC<AthleticsBibGeneratorModalProp
 
       return filtered.map((p, idx) => {
         let pDiscipline: AthleticsDisciplineDef | undefined;
+        const discList = Array.isArray(disciplines) ? disciplines : [];
         if (selectedDisciplineId !== 'ALL') {
-          pDiscipline = disciplines.find(d => d.id === selectedDisciplineId);
+          pDiscipline = discList.find(d => d.id === selectedDisciplineId);
         }
         if (!pDiscipline && p.disciplineId) {
-          pDiscipline = disciplines.find(d => d.id === p.disciplineId);
+          pDiscipline = discList.find(d => d.id === p.disciplineId);
         }
         if (!pDiscipline && p.secondDisciplineId) {
-          pDiscipline = disciplines.find(d => d.id === p.secondDisciplineId);
+          pDiscipline = discList.find(d => d.id === p.secondDisciplineId);
         }
         if (!pDiscipline) {
           pDiscipline = activeDisciplineObj || undefined;
@@ -960,6 +961,83 @@ export const AthleticsBibGeneratorModal: React.FC<AthleticsBibGeneratorModalProp
     }
   };
 
+  // Helper to draw the giant bib number filling ALL the available empty space in PDF without blank margins
+  const drawGiantBibNumberToPdf = (
+    doc: jsPDF,
+    text: string,
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    fontFamily: string = "Impact, 'Arial Black', sans-serif"
+  ) => {
+    if (!text || text.trim() === '') return;
+
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    if (!ctx) return;
+
+    // Use a large base font size for ultra-sharp, crisp rendering
+    const baseFontSize = 380;
+    const fontSpec = `900 ${baseFontSize}px ${fontFamily}`;
+    ctx.font = fontSpec;
+
+    // Measure glyph metrics tightly to remove ALL top/bottom blank canvas margins
+    const metrics = ctx.measureText(text);
+    const ascent = metrics.actualBoundingBoxAscent || (baseFontSize * 0.73);
+    const descent = metrics.actualBoundingBoxDescent || (baseFontSize * 0.05);
+    const left = metrics.actualBoundingBoxLeft || 0;
+    const right = metrics.actualBoundingBoxRight || metrics.width;
+
+    const glyphW = Math.max(10, Math.ceil(left + right));
+    const glyphH = Math.max(10, Math.ceil(ascent + descent));
+
+    // A tiny 1% margin to prevent any anti-aliasing edge pixels from clipping
+    const padX = Math.max(4, Math.ceil(glyphW * 0.015));
+    const padY = Math.max(4, Math.ceil(glyphH * 0.015));
+
+    canvas.width = glyphW + padX * 2;
+    canvas.height = glyphH + padY * 2;
+
+    // Re-apply styles after resizing canvas
+    ctx.font = fontSpec;
+    ctx.fillStyle = '#000000';
+    ctx.textBaseline = 'alphabetic';
+    ctx.textAlign = 'left';
+
+    // Draw with exact baseline placement matching the ascent
+    ctx.fillText(text, padX + left, padY + ascent);
+
+    const imgData = canvas.toDataURL('image/png');
+    const aspect = canvas.width / canvas.height;
+
+    // Fill the empty space: up to 95% of available width and 94% of available height
+    const maxTargetW = w * 0.95;
+    const maxTargetH = h * 0.94;
+
+    let drawW = maxTargetW;
+    let drawH = drawW / aspect;
+
+    if (drawH > maxTargetH) {
+      drawH = maxTargetH;
+      drawW = drawH * aspect;
+    }
+
+    // Apply scale slider adjustment if configured
+    if (bibNumberScale && bibNumberScale > 1.0) {
+      const scaledW = Math.min(w * 0.98, drawW * bibNumberScale);
+      const scaledH = Math.min(h * 0.96, drawH * bibNumberScale);
+      drawW = scaledW;
+      drawH = scaledH;
+    }
+
+    // Center horizontally and vertically within the empty bottom section
+    const drawX = x + (w - drawW) / 2;
+    const drawY = y + (h - drawH) / 2;
+
+    doc.addImage(imgData, 'PNG', drawX, drawY, drawW, drawH, undefined, 'FAST');
+  };
+
   // Helper function to draw a bib card in jsPDF with 100% Arabic support matching the official 3-column layout
   const drawPdfBib = (
     doc: jsPDF,
@@ -993,7 +1071,8 @@ export const AthleticsBibGeneratorModal: React.FC<AthleticsBibGeneratorModalProp
     doc.circle(x + w - 5, y + h - 5, 1.8, 'S');
 
     // 2. Horizontal line separating top 3-column table from bottom huge number
-    const topH = h * 0.42;
+    // 38% for the top 3-column table, leaving 62% of empty space for the giant bib number!
+    const topH = h * 0.38;
     doc.setDrawColor(0, 0, 0);
     doc.setLineWidth(isCompact ? 0.6 : 1.0);
     doc.line(x, y + topH, x + w, y + topH);
@@ -1053,22 +1132,17 @@ export const AthleticsBibGeneratorModal: React.FC<AthleticsBibGeneratorModalProp
     drawArabicTextToPdf(doc, runner.schoolName, leftColX, y + 2 * rowH, colW, rowH, textSmallPt, 'bold', '#000000', 'center');
     drawArabicTextToPdf(doc, partType, leftColX, y + 3 * rowH, colW, rowH, textSmallPt, 'bold', '#000000', 'center');
 
-    // 7. Bottom Section: HUGE BIB NUMBER (Dominant & Centered as in image)
+    // 7. Bottom Section: HUGE BIB NUMBER (Dominant & Centered, FILLING ALL EMPTY SPACE as requested)
     const bottomH = h - topH;
     const activeFontDef = BIB_FONTS.find(f => f.id === bibNumberFont) || BIB_FONTS[0];
-    const bibFontPt = (isCompact ? 58 : (w > 120 ? 115 : 90)) * bibNumberScale;
 
-    drawArabicTextToPdf(
+    drawGiantBibNumberToPdf(
       doc,
       String(runner.bibNumber),
       x,
       y + topH,
       w,
       bottomH,
-      bibFontPt,
-      'bold',
-      '#000000',
-      'center',
       activeFontDef.family
     );
   };
@@ -2164,13 +2238,13 @@ export const AthleticsBibGeneratorModal: React.FC<AthleticsBibGeneratorModalProp
 
                       </div>
 
-                      {/* BOTTOM SECTION: HUGE BIB NUMBER (dominant, centered, as in uploaded image) */}
-                      <div className="flex-1 flex items-center justify-center bg-white text-slate-950 overflow-visible py-2">
+                      {/* BOTTOM SECTION: HUGE BIB NUMBER (dominant, centered, filling all empty space) */}
+                      <div className="flex-1 flex items-center justify-center bg-white text-slate-950 overflow-visible py-0">
                         <span
                           style={{
                             fontFamily: fontDef.family,
-                            fontSize: `calc(${String(runner.bibNumber).length <= 2 ? 'clamp(5.5rem, 16vw, 8rem)' : String(runner.bibNumber).length === 3 ? 'clamp(4.5rem, 13vw, 6.8rem)' : 'clamp(3.5rem, 10vw, 5.2rem)'} * ${bibNumberScale})`,
-                            lineHeight: 0.9,
+                            fontSize: `calc(${String(runner.bibNumber).length <= 2 ? 'clamp(7rem, 22vw, 9.5rem)' : String(runner.bibNumber).length === 3 ? 'clamp(5.8rem, 18vw, 8rem)' : 'clamp(4.6rem, 14vw, 6.5rem)'} * ${bibNumberScale})`,
+                            lineHeight: 0.85,
                             color: '#000000'
                           }}
                           className="font-black tracking-tight select-all leading-none"
