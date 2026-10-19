@@ -923,28 +923,29 @@ export const BibGeneratorModal: React.FC<BibGeneratorModalProps> = ({
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-xs p-2 sm:p-4 overflow-y-auto" dir="rtl">
       <div className="bg-white border border-slate-200 rounded-3xl shadow-2xl max-w-4xl w-full max-h-[96vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200">
         
-        {/* Modal Top Header - Polished, High Contrast, Responsive */}
-        <div className="px-3.5 sm:px-6 py-3 sm:py-4 bg-gradient-to-r from-slate-950 via-slate-900 to-emerald-950 text-white flex items-center justify-between border-b border-slate-800 shrink-0 shadow-md">
-          <div className="flex items-center gap-2.5 sm:gap-3">
-            <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-2xl bg-emerald-500/20 border border-emerald-400/30 text-emerald-300 flex items-center justify-center text-lg shadow-inner">
-              🎽
-            </div>
-            <div>
-              <div className="flex items-center gap-2 flex-wrap">
-                <h3 className="text-sm sm:text-base font-black text-white tracking-wide">
-                  إعداد وإنشاء صدريات العدو الريفي
-                </h3>
-                <span className="text-[10px] font-mono font-bold px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-400/30">
-                  {isEmptied ? 'التطبيق مفرغ' : `${filteredRunners.length} صدرية جاهزة`}
-                </span>
+        {/* Modal Top Header - Polished, High Contrast, Responsive (Centered on Mobile) */}
+        <div className="px-3.5 sm:px-6 py-2.5 sm:py-4 bg-gradient-to-r from-slate-950 via-slate-900 to-emerald-950 text-white flex flex-col sm:flex-row items-center sm:justify-between gap-2.5 sm:gap-4 border-b border-slate-800 shrink-0 shadow-md">
+          {/* Main Title - Centered & Compact on Mobile */}
+          <div className="flex flex-col sm:flex-row items-center gap-2 sm:gap-3 text-center sm:text-right w-full sm:w-auto">
+            <div className="flex items-center justify-center gap-2 flex-wrap">
+              <div className="w-7 h-7 sm:w-10 sm:h-10 rounded-xl sm:rounded-2xl bg-emerald-500/20 border border-emerald-400/30 text-emerald-300 flex items-center justify-center text-sm sm:text-lg shadow-inner shrink-0">
+                🎽
               </div>
-              <p className="text-[10px] sm:text-xs text-slate-300 font-medium">
-                توليد وطباعة بطاقات الصدريات بدقة عالية ومطابقة للمواصفات الرسمية
-              </p>
+              <h3 className="text-xs sm:text-base font-black text-white tracking-wide">
+                إعداد وإنشاء صدريات العدو الريفي
+              </h3>
+              <span className="hidden sm:inline-block text-[9px] sm:text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-400/30">
+                {isEmptied ? 'التطبيق مفرغ' : `${filteredRunners.length} صدرية جاهزة`}
+              </span>
             </div>
+            {/* Details subtitle: Hidden on mobile */}
+            <p className="hidden sm:block text-[10px] sm:text-xs text-slate-300 font-medium">
+              توليد وطباعة بطاقات الصدريات بدقة عالية ومطابقة للمواصفات الرسمية
+            </p>
           </div>
 
-          <div className="flex items-center gap-1.5 sm:gap-2">
+          {/* Action Buttons: Centered Underneath on Mobile, Row on Desktop */}
+          <div className="flex items-center justify-center gap-1.5 sm:gap-2 w-full sm:w-auto shrink-0">
             {/* Sync with Scanner button */}
             <button
               type="button"
@@ -988,7 +989,7 @@ export const BibGeneratorModal: React.FC<BibGeneratorModalProps> = ({
               title="إغلاق"
               aria-label="إغلاق"
             >
-              <X className="w-4 h-4" />
+              <X className="w-4 sm:w-5 h-4 sm:h-5" />
             </button>
           </div>
         </div>

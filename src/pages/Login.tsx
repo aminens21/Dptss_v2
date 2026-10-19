@@ -45,7 +45,8 @@ import {
   Zap,
   Info,
   Menu,
-  MoreHorizontal
+  MoreHorizontal,
+  Boxes
 } from 'lucide-react';
 import {
   GoogleAuthProvider,
@@ -59,6 +60,14 @@ import { Role, Directorate, School, Tournament, Match, Student, CrossCountryCate
 import { DataService, SPORTS_MAP, getAgeCategoriesForSeason, getCategoryYearsLabel } from '../lib/dataService';
 import { calculateTeamRankings, resolveRunnerParticipationType } from '../lib/crossCountryConfig';
 import { AppLogo } from '../components/AppLogo';
+import { SportsIntroAnimation } from '../components/SportsIntroAnimation';
+import { HelperAppsDrawer } from '../components/HelperAppsDrawer';
+import { AthleticsChampionshipModal } from '../components/AthleticsChampionshipModal';
+import { AthleticsBibGeneratorModal } from '../components/AthleticsBibGeneratorModal';
+import { FinishLineScannerModal } from '../components/FinishLineScannerModal';
+import { BibGeneratorModal } from '../components/BibGeneratorModal';
+import { ElectronicDrawModal } from '../components/ElectronicDrawModal';
+import { CrossCountryPodiumView } from '../components/CrossCountryPodiumView';
 import toast from 'react-hot-toast';
 import { cn } from '../lib/utils';
 
@@ -76,6 +85,16 @@ export const Login: React.FC = () => {
   // Data states for Public View
   const [activeDirectorate, setActiveDirectorate] = useState<Directorate | null>(null);
   const [isAboutModalOpen, setIsAboutModalOpen] = useState(false);
+  const [isIntroOpen, setIsIntroOpen] = useState(() => {
+    return !sessionStorage.getItem('sports_intro_seen');
+  });
+  const [isAppsDrawerOpen, setIsAppsDrawerOpen] = useState(false);
+  const [isAthleticsChampionshipOpen, setIsAthleticsChampionshipOpen] = useState(false);
+  const [isAthleticsBibOpen, setIsAthleticsBibOpen] = useState(false);
+  const [isFinishLineScannerOpen, setIsFinishLineScannerOpen] = useState(false);
+  const [isBibGeneratorOpen, setIsBibGeneratorOpen] = useState(false);
+  const [isElectronicDrawOpen, setIsElectronicDrawOpen] = useState(false);
+  const [isCrossCountryPodiumOpen, setIsCrossCountryPodiumOpen] = useState(false);
   const [directorates, setDirectorates] = useState<Directorate[]>([]);
   const [schools, setSchools] = useState<School[]>([]);
   const [tournaments, setTournaments] = useState<Tournament[]>([]);
@@ -1320,15 +1339,58 @@ export const Login: React.FC = () => {
     ];
   }, [activePublicTab, tournaments, crossCountryResults, athleticsResults, selectedSport]);
 
-  // Filtered sports for sports bar (only activated or programmed sports)
+  // Filtered sports for sports bar: ONLY sports that have recorded results as explicitly requested
   const programmedSportsEntries = useMemo(() => {
+    // 1. Cross country results: check if any category has podium, winners, or arrivals
+    const hasCcResults = Object.values(crossCountryResults || {}).some((res: any) => 
+      res && (
+        (Array.isArray(res.podium) && res.podium.length > 0) || 
+        (Array.isArray(res.winners) && res.winners.length > 0) || 
+        (Array.isArray(res.arrivals) && res.arrivals.length > 0) || 
+        (Array.isArray(res.teamRankings) && res.teamRankings.length > 0)
+      )
+    );
+
+    // 2. Athletics results: check if any event/category has winners, podium or records
+    const hasAthResults = Object.values(athleticsResults || {}).some((res: any) =>
+      res && (
+        (Array.isArray(res.podium) && res.podium.length > 0) || 
+        (Array.isArray(res.winners) && res.winners.length > 0) || 
+        (Array.isArray(res.records) && res.records.length > 0)
+      )
+    );
+
     return Object.entries(SPORTS_MAP).filter(([sportKey]) => {
-      const hasTournaments = tournaments.some(t => t.sportId === sportKey);
-      const sportConf = sportsConfig.find(s => s.id === sportKey);
-      const isProg = sportConf ? (sportConf.isProgrammed !== undefined ? sportConf.isProgrammed : true) : true;
-      return hasTournaments || isProg;
+      if (sportKey === 'cross_country') {
+        return hasCcResults;
+      }
+      if (sportKey === 'athletics') {
+        return hasAthResults;
+      }
+
+      // 3. For team sports / matches: check if there are completed matches or matches with scores
+      const hasCompletedMatches = matches.some(m => {
+        const tourn = tournaments.find(t => t.id === m.tournamentId);
+        const mSport = m.sportId || tourn?.sportId;
+        if (mSport !== sportKey) return false;
+        const hasScore = (m.scoreA !== undefined && m.scoreA !== null && String(m.scoreA).trim() !== '' &&
+                          m.scoreB !== undefined && m.scoreB !== null && String(m.scoreB).trim() !== '');
+        const isDone = m.status === 'COMPLETED' || (m as any).isCompleted || !!m.winnerTeamId || !!m.winnerTeamName;
+        return hasScore || isDone;
+      });
+
+      // 4. Also check if any tournament in this sport has recorded results / podium
+      const hasTournResults = tournaments.some(t => 
+        t.sportId === sportKey && (
+          (t as any).isCompleted || 
+          (Array.isArray((t as any).podium) && (t as any).podium.length > 0) ||
+          (Array.isArray((t as any).results) && (t as any).results.length > 0)
+        )
+      );
+
+      return hasCompletedMatches || hasTournResults;
     });
-  }, [tournaments, sportsConfig]);
+  }, [tournaments, matches, crossCountryResults, athleticsResults]);
 
   // News Marquee Items
   const marqueeNews = [
@@ -1946,75 +2008,94 @@ export const Login: React.FC = () => {
       {/* FIXED TOP NAVIGATION WRAPPER (HEADER + SPORTS BAR + MARQUEE + DATE BAR) */}
       <div className="sticky top-0 z-40 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md shadow-sm transition-all duration-300">
         
-        {/* TOP HEADER BAR */}
-        <header className="border-b border-slate-200 dark:border-slate-800 px-3 sm:px-6 py-2.5 transition-colors">
-          <div className="max-w-7xl mx-auto flex items-center justify-between gap-3">
+        {/* TOP HEADER BAR - Centered & Optimized on Mobile */}
+        <header className="border-b border-slate-200 dark:border-slate-800 px-3 sm:px-6 py-2 sm:py-2.5 transition-colors">
+          <div className="max-w-7xl mx-auto flex flex-col lg:flex-row items-center lg:justify-between gap-2.5 lg:gap-4">
             
-            {/* Logo & Platform Name */}
-            <div className="flex items-center gap-3 min-w-0">
-              <AppLogo size={42} showText={false} className="shrink-0" />
-              <div className="min-w-0">
-                <h1 className="text-xs sm:text-sm md:text-base font-black text-slate-900 dark:text-white tracking-tight truncate">
+            {/* Logo & Platform Name - Centered on Mobile */}
+            <div className="flex flex-col sm:flex-row items-center gap-2 sm:gap-3 text-center sm:text-right w-full lg:w-auto">
+              <div className="flex items-center justify-center gap-2">
+                <AppLogo size={38} showText={false} className="shrink-0" />
+                <h1 className="text-xs sm:text-sm md:text-base font-black text-slate-900 dark:text-white tracking-tight">
                   نتائج البطولات الإقليمية للرياضة المدرسية
                 </h1>
-                <div className="flex items-center gap-1.5 mt-0.5">
-                  <Building2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
-                  <select
-                    value={activeDirectorate?.id || 'taourirt'}
-                    onChange={(e) => handleDirectorateChange(e.target.value)}
-                    className="text-[11px] sm:text-xs font-bold text-emerald-800 dark:text-emerald-300 bg-emerald-50/90 dark:bg-emerald-950/70 border border-emerald-300/80 dark:border-emerald-700 rounded-lg px-2 py-0.5 focus:outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer max-w-[200px] sm:max-w-xs truncate shadow-3xs"
-                    title="تغيير واختيار المديرية الإقليمية"
-                  >
-                    {directorates.map(dir => (
-                      <option key={dir.id} value={dir.id} className="text-slate-900 bg-white">
-                        {dir.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+              </div>
+              
+              <div className="flex items-center justify-center gap-1.5">
+                <Building2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                <select
+                  value={activeDirectorate?.id || 'taourirt'}
+                  onChange={(e) => handleDirectorateChange(e.target.value)}
+                  className="text-[11px] sm:text-xs font-bold text-emerald-800 dark:text-emerald-300 bg-emerald-50/90 dark:bg-emerald-950/70 border border-emerald-300/80 dark:border-emerald-700 rounded-lg px-2 py-0.5 focus:outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer max-w-[200px] sm:max-w-xs truncate shadow-3xs"
+                  title="تغيير واختيار المديرية الإقليمية"
+                >
+                  {directorates.map(dir => (
+                    <option key={dir.id} value={dir.id} className="text-slate-900 bg-white">
+                      {dir.name}
+                    </option>
+                  ))}
+                </select>
               </div>
             </div>
 
-            {/* Controls Right */}
-            <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
-              
-              {/* Desktop Only Buttons */}
-              <div className="hidden lg:flex items-center gap-2">
-                {/* Dark Mode Toggle (Desktop) */}
-                <button
-                  type="button"
-                  onClick={toggleDarkMode}
-                  className="p-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700 rounded-full text-xs font-bold transition-all cursor-pointer shadow-2xs"
-                  title={isDarkMode ? 'التحويل للوضع النهار' : 'التحويل للوضع الليلي'}
-                >
-                  {isDarkMode ? (
-                    <Sun className="w-4 h-4 text-amber-400 shrink-0" />
-                  ) : (
-                    <Moon className="w-4 h-4 text-indigo-600 shrink-0" />
-                  )}
-                </button>
+            {/* Action Buttons: Centered Underneath on Mobile */}
+            <div className="flex items-center justify-center gap-1.5 sm:gap-2 shrink-0 flex-wrap w-full lg:w-auto">
+              {/* Apps Drawer Toggle Button */}
+              <button
+                type="button"
+                onClick={() => setIsAppsDrawerOpen(true)}
+                className="px-3 py-1.5 bg-gradient-to-r from-orange-500 via-amber-600 to-rose-600 hover:from-orange-600 hover:to-rose-700 text-white rounded-full text-xs font-black transition-all flex items-center gap-1.5 cursor-pointer shadow-sm active:scale-95"
+                title="فتح قائمة التطبيقات والأدوات الذكية (ألعاب القوى، الصدريات، المسح والقرعة)"
+              >
+                <Boxes className="w-4 h-4" />
+                <span>قائمة التطبيقات ⚡</span>
+              </button>
 
-                {/* Teacher Login Button */}
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (loginMode === 'REGISTER_TEACHER') setLoginMode('PUBLIC');
-                    const nextState = !showLoginPanel;
-                    setShowLoginPanel(nextState);
-                    if (nextState) {
-                      setTimeout(() => loginPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 100);
-                    }
-                  }}
-                  className={`px-3.5 py-1.5 rounded-full text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-sm ${
-                    showLoginPanel 
-                      ? 'bg-emerald-700 text-white ring-2 ring-emerald-400' 
-                      : 'bg-emerald-600 hover:bg-emerald-700 text-white'
-                  }`}
-                >
-                  <LogIn className="w-4 h-4" />
-                  <span>دخول الأطر والمسيرين</span>
-                </button>
-              </div>
+              {/* Replay Intro Animation Button */}
+              <button
+                type="button"
+                onClick={() => setIsIntroOpen(true)}
+                className="p-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 rounded-full text-xs font-bold transition-all cursor-pointer shadow-2xs"
+                title="إعادة تشغيل الدخلة الرياضية الترحيبية"
+              >
+                <Play className="w-3.5 h-3.5 text-amber-500 fill-current" />
+              </button>
+
+              {/* Dark Mode Toggle */}
+              <button
+                type="button"
+                onClick={toggleDarkMode}
+                className="p-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700 rounded-full text-xs font-bold transition-all cursor-pointer shadow-2xs"
+                title={isDarkMode ? 'التحويل للوضع النهاري' : 'التحويل للوضع الليلي'}
+              >
+                {isDarkMode ? (
+                  <Sun className="w-4 h-4 text-amber-400 shrink-0" />
+                ) : (
+                  <Moon className="w-4 h-4 text-indigo-600 shrink-0" />
+                )}
+              </button>
+
+              {/* Teacher Login Button */}
+              <button
+                type="button"
+                onClick={() => {
+                  if (loginMode === 'REGISTER_TEACHER') setLoginMode('PUBLIC');
+                  const nextState = !showLoginPanel;
+                  setShowLoginPanel(nextState);
+                  if (nextState) {
+                    setTimeout(() => loginPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 100);
+                  }
+                }}
+                className={`px-3 py-1.5 sm:px-3.5 sm:py-1.5 rounded-full text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-sm ${
+                  showLoginPanel 
+                    ? 'bg-emerald-700 text-white ring-2 ring-emerald-400' 
+                    : 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                }`}
+              >
+                <LogIn className="w-4 h-4" />
+                <span className="hidden sm:inline">دخول الأطر والمسيرين</span>
+                <span className="sm:hidden">تسجيل الدخول</span>
+              </button>
 
               {/* Mobile Menu Dropdown Toggle */}
               <div className="relative lg:hidden">
@@ -2070,6 +2151,17 @@ export const Login: React.FC = () => {
                       </div>
 
                       <div className="p-2 space-y-1">
+                        <button
+                          onClick={() => {
+                            setIsAppsDrawerOpen(true);
+                            setIsMobileMenuOpen(false);
+                          }}
+                          className="w-full flex items-center gap-3 px-3 py-3 text-right text-xs font-black text-amber-600 dark:text-amber-400 bg-amber-50/70 dark:bg-amber-950/40 hover:bg-amber-100 dark:hover:bg-amber-900/40 rounded-xl transition-colors border border-amber-200/50 dark:border-amber-800/40"
+                        >
+                          <Boxes className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+                          <span>قائمة التطبيقات والأدوات الذكية ⚡</span>
+                        </button>
+
                         <button
                           onClick={() => {
                             if (loginMode === 'REGISTER_TEACHER') setLoginMode('PUBLIC');
@@ -3282,6 +3374,115 @@ export const Login: React.FC = () => {
                 كل الحقوق محفوظة &copy; 2026
               </p>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* FLOATING QUICK APPS SIDEBAR TAB */}
+      <button
+        type="button"
+        onClick={() => setIsAppsDrawerOpen(true)}
+        className="fixed right-0 top-1/2 -translate-y-1/2 z-40 bg-gradient-to-l from-orange-500 via-amber-600 to-rose-600 hover:from-orange-600 hover:to-rose-700 text-white py-3 px-1.5 sm:px-2 rounded-l-2xl shadow-2xl flex flex-col items-center gap-1.5 cursor-pointer group active:scale-95 transition-all border-y border-l border-white/30"
+        title="فتح قائمة التطبيقات والأدوات الذكية"
+      >
+        <Boxes className="w-4 sm:w-5 h-4 sm:h-5 group-hover:scale-110 transition-transform" />
+        <span className="text-[9px] sm:text-[10px] font-black [writing-mode:vertical-rl] tracking-wider select-none">
+          التطبيقات
+        </span>
+      </button>
+
+      {/* HELPER APPS SIDEBAR DRAWER */}
+      <HelperAppsDrawer
+        isOpen={isAppsDrawerOpen}
+        onClose={() => setIsAppsDrawerOpen(false)}
+        onOpenAthleticsChampionship={() => setIsAthleticsChampionshipOpen(true)}
+        onOpenAthleticsBib={() => setIsAthleticsBibOpen(true)}
+        onOpenFinishLineScanner={() => setIsFinishLineScannerOpen(true)}
+        onOpenBibGenerator={() => setIsBibGeneratorOpen(true)}
+        onOpenElectronicDraw={() => setIsElectronicDrawOpen(true)}
+        onOpenCrossCountryPodium={() => setIsCrossCountryPodiumOpen(true)}
+        onReplayIntro={() => setIsIntroOpen(true)}
+      />
+
+      {/* SPORTS INTRO ANIMATION */}
+      {isIntroOpen && (
+        <SportsIntroAnimation
+          isOpen={isIntroOpen}
+          onComplete={() => {
+            setIsIntroOpen(false);
+            sessionStorage.setItem('sports_intro_seen', 'true');
+          }}
+        />
+      )}
+
+      {/* ATHLETICS CHAMPIONSHIP MODAL */}
+      {isAthleticsChampionshipOpen && (
+        <AthleticsChampionshipModal
+          isOpen={isAthleticsChampionshipOpen}
+          onClose={() => setIsAthleticsChampionshipOpen(false)}
+          schools={schools}
+          students={students}
+          currentUser={currentUser}
+          directorateName={activeDirectorate?.name || 'تاوريرت'}
+        />
+      )}
+
+      {/* ATHLETICS BIB GENERATOR MODAL */}
+      {isAthleticsBibOpen && (
+        <AthleticsBibGeneratorModal
+          isOpen={isAthleticsBibOpen}
+          onClose={() => setIsAthleticsBibOpen(false)}
+        />
+      )}
+
+      {/* FINISH LINE SCANNER MODAL */}
+      {isFinishLineScannerOpen && (
+        <FinishLineScannerModal
+          isOpen={isFinishLineScannerOpen}
+          onClose={() => setIsFinishLineScannerOpen(false)}
+        />
+      )}
+
+      {/* BIB GENERATOR MODAL (CROSS COUNTRY) */}
+      {isBibGeneratorOpen && (
+        <BibGeneratorModal
+          isOpen={isBibGeneratorOpen}
+          onClose={() => setIsBibGeneratorOpen(false)}
+        />
+      )}
+
+      {/* ELECTRONIC DRAW MODAL */}
+      {isElectronicDrawOpen && (
+        <ElectronicDrawModal
+          isOpen={isElectronicDrawOpen}
+          onClose={() => setIsElectronicDrawOpen(false)}
+          tournaments={tournaments}
+          schools={schools}
+        />
+      )}
+
+      {/* CROSS COUNTRY PODIUM MODAL */}
+      {isCrossCountryPodiumOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-2 sm:p-4 overflow-y-auto" dir="rtl">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl w-full max-w-6xl max-h-[92vh] overflow-y-auto p-4 sm:p-6 relative border border-slate-200 dark:border-slate-800 shadow-2xl">
+            <div className="flex items-center justify-between pb-3 mb-4 border-b border-slate-200 dark:border-slate-800">
+              <h3 className="text-base sm:text-lg font-black text-slate-900 dark:text-white flex items-center gap-2">
+                <Trophy className="w-5 h-5 text-amber-500" />
+                <span>منصة تتويج العدو الريفي المدرسي</span>
+              </h3>
+              <button
+                type="button"
+                onClick={() => setIsCrossCountryPodiumOpen(false)}
+                className="p-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-500 hover:text-slate-900 dark:hover:text-white transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <CrossCountryPodiumView
+              results={crossCountryResults}
+              students={students}
+              selectedAffiliation="ALL"
+            />
           </div>
         </div>
       )}

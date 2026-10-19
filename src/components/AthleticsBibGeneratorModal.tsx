@@ -1309,27 +1309,30 @@ export const AthleticsBibGeneratorModal: React.FC<AthleticsBibGeneratorModalProp
       >
         
         {/* ========================================================================= */}
-        {/* HEADER BAR - Enhanced, High Contrast & Responsive */}
+        {/* HEADER BAR - Enhanced, High Contrast & Responsive (Centered on Mobile) */}
         {/* ========================================================================= */}
-        <div className="bg-gradient-to-r from-amber-600 via-orange-600 to-rose-700 px-3.5 sm:px-6 py-3 sm:py-4 flex items-center justify-between text-white shrink-0 shadow-md">
-          <div className="flex items-center gap-2.5 sm:gap-3">
-            <div className="w-9 h-9 sm:w-11 sm:h-11 rounded-2xl bg-white/20 backdrop-blur-md border border-white/30 flex items-center justify-center text-lg sm:text-2xl shadow-inner">
-              🎽
-            </div>
-            <div>
-              <div className="flex items-center gap-2 flex-wrap">
-                <h2 className="text-base sm:text-xl font-black">تطبيق إعداد صدريات ألعاب القوى</h2>
-                <span className="px-2 py-0.5 text-[10px] font-mono font-bold bg-white/20 rounded-full border border-white/30">
-                  {bibRunners.length} صدرية جاهزة
-                </span>
+        <div className="bg-gradient-to-r from-amber-600 via-orange-600 to-rose-700 px-3.5 sm:px-6 py-2.5 sm:py-4 flex flex-col sm:flex-row items-center sm:justify-between gap-2.5 sm:gap-4 text-white shrink-0 shadow-md">
+          {/* Main Title - Centered & Compact on Mobile */}
+          <div className="flex flex-col sm:flex-row items-center gap-2 sm:gap-3 text-center sm:text-right w-full sm:w-auto">
+            <div className="flex items-center justify-center gap-2 flex-wrap">
+              <div className="w-7 h-7 sm:w-11 sm:h-11 rounded-xl sm:rounded-2xl bg-white/20 backdrop-blur-md border border-white/30 flex items-center justify-center text-sm sm:text-2xl shadow-inner shrink-0">
+                🎽
               </div>
-              <p className="text-[10px] sm:text-xs text-orange-100 font-medium mt-0.5">
-                توليد بطاقات الصدريات الرسمية (الجري • القفز • الرمي) ومطابقتها للمواصفات
-              </p>
+              <h2 className="text-xs sm:text-xl font-black tracking-tight">
+                تطبيق إعداد صدريات ألعاب القوى
+              </h2>
+              <span className="hidden sm:inline-block px-2 py-0.5 text-[9px] sm:text-[10px] font-mono font-bold bg-white/20 rounded-full border border-white/30">
+                {bibRunners.length} صدرية جاهزة
+              </span>
             </div>
+            {/* Details subtitle: Hidden on mobile as explicitly requested ("دون كتابة التفاصيل توليد بطاقات .....") */}
+            <p className="hidden sm:block text-[10px] sm:text-xs text-orange-100 font-medium mt-0.5">
+              توليد بطاقات الصدريات الرسمية (الجري • القفز • الرمي) ومطابقتها للمواصفات
+            </p>
           </div>
 
-          <div className="flex items-center gap-1.5 sm:gap-2">
+          {/* Action Buttons: Centered Underneath on Mobile, Row on Desktop */}
+          <div className="flex items-center justify-center gap-2 sm:gap-2 w-full sm:w-auto shrink-0">
             {/* Clear Bib App Button - ICON ONLY without text as requested */}
             <button
               onClick={handleClearBibApp}

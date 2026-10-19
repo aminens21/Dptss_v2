@@ -49,7 +49,9 @@ import {
   ClipboardList,
   UserX,
   XCircle,
-  Volume2
+  Volume2,
+  Camera,
+  QrCode
 } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 import {
@@ -69,6 +71,7 @@ import { AthleticsService } from '../lib/athleticsService';
 import { User, School, Student } from '../types';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
 import { AthleticsBibGeneratorModal } from './AthleticsBibGeneratorModal';
+import { AthleticsTrackQrScannerModal } from './AthleticsTrackQrScannerModal';
 import toast from 'react-hot-toast';
 
 interface AthleticsChampionshipModalProps {
@@ -324,6 +327,15 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
 
   // --- ASSIGN PARTICIPANTS BY FINISH ORDER (اختيار أسماء التلاميذ حسب الترتيب عند انتهاء الاختبار) STATE ---
   const [isAssignByOrderModalOpen, setIsAssignByOrderModalOpen] = useState(false);
+
+  // --- TRACK QR SCANNER (مسح كود الاستجابة لتحديد المتسابقين بالترتيب) STATE ---
+  const [isTrackQrScannerOpen, setIsTrackQrScannerOpen] = useState(false);
+  const [trackQrScannerTargetRank, setTrackQrScannerTargetRank] = useState<number | undefined>(undefined);
+
+  const handleOpenTrackQrScanner = (targetRank?: number) => {
+    setTrackQrScannerTargetRank(targetRank);
+    setIsTrackQrScannerOpen(true);
+  };
 
   // --- CLEAR RACE DATA (تفريغ بيانات السباق مع اختيار السباق والتأكيد) STATE ---
   const [isClearRaceModalOpen, setIsClearRaceModalOpen] = useState(false);
@@ -1727,48 +1739,47 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
       <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl w-full max-w-7xl h-[92vh] flex flex-col shadow-2xl overflow-hidden text-slate-900 dark:text-slate-100 transition-colors duration-300">
         
         {/* ========================================================================= */}
-        {/* MODAL HEADER WITH APP IDENTITY & SETTINGS BUTTON */}
+        {/* MODAL HEADER WITH APP IDENTITY & SETTINGS BUTTON - Responsive & Centered on Mobile */}
         {/* ========================================================================= */}
-        <div className="bg-gradient-to-r from-blue-700 via-slate-700 to-indigo-900 dark:from-blue-900 dark:via-slate-900 dark:to-indigo-950 border-b border-slate-200 dark:border-slate-800 px-3 sm:px-6 py-2.5 sm:py-3.5 flex items-center justify-between shrink-0 transition-colors">
-          <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
-            <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-2xl bg-gradient-to-tr from-amber-500 via-orange-500 to-rose-600 text-white flex items-center justify-center shadow-lg shadow-orange-500/20 text-xl sm:text-2xl font-black shrink-0">
-              🏃‍♂️
-            </div>
-            <div className="min-w-0">
-              <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
-                <h2 className="text-sm sm:text-lg font-black text-white truncate">
-                  <span className="hidden sm:inline">تدبير البطولة المدرسية لألعاب القوى (Athletics Manager)</span>
-                  <span className="inline sm:hidden">ألعاب القوى المدرسية</span>
-                </h2>
-                <span className="hidden xs:inline-block px-2 sm:px-2.5 py-0.5 text-[9px] sm:text-[10px] font-black bg-white/20 dark:bg-amber-500/20 text-white dark:text-amber-300 border border-white/30 dark:border-amber-500/30 rounded-full">
-                  {season}
-                </span>
-
-                {/* User Role & Access Status Badge */}
-                {currentUser && (
-                  <span className={`px-2 py-0.5 text-[9px] sm:text-[10px] font-bold rounded-lg border hidden sm:flex items-center gap-1 ${
-                    userAccess.canManage
-                      ? 'bg-emerald-500/20 dark:bg-emerald-950/80 text-white dark:text-emerald-300 border-emerald-400/30 dark:border-emerald-800'
-                      : 'bg-amber-500/20 dark:bg-amber-950/80 text-white dark:text-amber-300 border-amber-400/30 dark:border-amber-800'
-                  }`}>
-                    {userAccess.canManage ? <Unlock className="w-3 h-3 text-emerald-200 dark:text-emerald-400" /> : <Lock className="w-3 h-3 text-amber-200 dark:text-amber-400" />}
-                    <span>{userAccess.canManage ? 'تحكيم مفعل' : 'قراءة فقط'}</span>
-                  </span>
-                )}
-
-                {userAssignedCommittee && (
-                  <span className="px-2.5 py-0.5 text-[10px] font-black bg-gradient-to-r from-amber-500 to-orange-500 text-slate-950 rounded-lg shadow-sm flex items-center gap-1">
-                    <span>🏁 صفة التحكيم: {userAssignedCommittee}</span>
-                  </span>
-                )}
+        <div className="bg-gradient-to-r from-blue-700 via-slate-700 to-indigo-900 dark:from-blue-900 dark:via-slate-900 dark:to-indigo-950 border-b border-slate-200 dark:border-slate-800 px-3 sm:px-6 py-2.5 sm:py-3.5 flex flex-col sm:flex-row items-center sm:justify-between gap-2.5 sm:gap-4 shrink-0 transition-colors">
+          <div className="flex flex-col sm:flex-row items-center gap-2 sm:gap-3 text-center sm:text-right w-full sm:w-auto">
+            <div className="flex items-center justify-center gap-2 flex-wrap">
+              <div className="w-8 h-8 sm:w-11 sm:h-11 rounded-xl sm:rounded-2xl bg-gradient-to-tr from-amber-500 via-orange-500 to-rose-600 text-white flex items-center justify-center shadow-lg shadow-orange-500/20 text-base sm:text-2xl font-black shrink-0">
+                🏃‍♂️
               </div>
-              <p className="hidden md:block text-xs text-white/80 dark:text-slate-300 font-medium">
-                إدارة اللجان، توزيع مهام الأساتذة، تسجيل المشاركين، والميقاتي الذكي للسباقات
-              </p>
+              <h2 className="text-xs sm:text-lg font-black text-white tracking-tight">
+                <span className="hidden sm:inline">تدبير البطولة المدرسية لألعاب القوى (Athletics Manager)</span>
+                <span className="inline sm:hidden">ألعاب القوى المدرسية</span>
+              </h2>
+              <span className="hidden sm:inline-block px-2 py-0.5 text-[9px] sm:text-[10px] font-black bg-white/20 dark:bg-amber-500/20 text-white dark:text-amber-300 border border-white/30 dark:border-amber-500/30 rounded-full">
+                {season}
+              </span>
+
+              {/* User Role & Access Status Badge */}
+              {currentUser && (
+                <span className={`px-2 py-0.5 text-[9px] sm:text-[10px] font-bold rounded-lg border hidden sm:flex items-center gap-1 ${
+                  userAccess.canManage
+                    ? 'bg-emerald-500/20 dark:bg-emerald-950/80 text-white dark:text-emerald-300 border-emerald-400/30 dark:border-emerald-800'
+                    : 'bg-amber-500/20 dark:bg-amber-950/80 text-white dark:text-amber-300 border-amber-400/30 dark:border-amber-800'
+                }`}>
+                  {userAccess.canManage ? <Unlock className="w-3 h-3 text-emerald-200 dark:text-emerald-400" /> : <Lock className="w-3 h-3 text-amber-200 dark:text-amber-400" />}
+                  <span>{userAccess.canManage ? 'تحكيم مفعل' : 'قراءة فقط'}</span>
+                </span>
+              )}
+
+              {userAssignedCommittee && (
+                <span className="hidden sm:flex px-2.5 py-0.5 text-[10px] font-black bg-gradient-to-r from-amber-500 to-orange-500 text-slate-950 rounded-lg shadow-sm items-center gap-1">
+                  <span>🏁 صفة التحكيم: {userAssignedCommittee}</span>
+                </span>
+              )}
             </div>
+            {/* Details subtitle: strictly hidden on mobile as requested */}
+            <p className="hidden md:block text-xs text-white/80 dark:text-slate-300 font-medium">
+              إدارة اللجان، توزيع مهام الأساتذة، تسجيل المشاركين، والميقاتي الذكي للسباقات
+            </p>
           </div>
 
-          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+          <div className="flex items-center justify-center gap-1.5 sm:gap-2 flex-wrap w-full sm:w-auto shrink-0">
             
             {/* Admin/Teacher Controls consolidated into Settings */}
             {(effectiveRole === 'ADMIN' || isTeacher) && (
@@ -3524,29 +3535,40 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                         </div>
                       </div>
 
-                      {/* Action Bar: Assign pupils by finish order at end of test */}
+                      {/* Action Bar: Assign pupils by finish order & QR Scanner at end of test */}
                       {recordedLaps.length > 0 && (
-                        <div className="mb-2.5 flex items-center justify-between gap-2 p-2.5 bg-slate-900 border border-amber-500/30 rounded-2xl">
+                        <div className="mb-2.5 flex items-center justify-between gap-2 p-2.5 bg-slate-900 border border-emerald-500/30 rounded-2xl flex-wrap">
                           <div className="flex items-center gap-2">
-                            <span className="text-base p-1.5 bg-amber-500/10 text-amber-400 rounded-xl">🎯</span>
+                            <span className="text-base p-1.5 bg-emerald-500/10 text-emerald-400 rounded-xl">🎯</span>
                             <div>
-                              <span className="text-xs font-black text-amber-300 block">
-                                عند انتهاء السباق: تحديد التلاميذ حسب الترتيب
+                              <span className="text-xs font-black text-white block">
+                                عند انتهاء السباق: تحديد المتسابقين بالترتيب
                               </span>
                               <span className="text-[10px] text-slate-400 font-medium">
-                                اختيار يدوي إلزامي • تم تحديد {recordedLaps.filter(l => l.participantId).length} من {recordedLaps.length} وصول
+                                مسح كود QR تلقائياً أو اختيار يدوي • تم تحديد {recordedLaps.filter(l => l.participantId).length} من {recordedLaps.length} وصول
                               </span>
                             </div>
                           </div>
-                          <button
-                            type="button"
-                            onClick={() => setIsAssignByOrderModalOpen(true)}
-                            className="px-3 py-1.5 bg-gradient-to-r from-amber-500 via-orange-600 to-rose-600 hover:from-amber-400 hover:to-rose-500 text-white rounded-xl text-xs font-black shadow-md flex items-center gap-1.5 cursor-pointer active:scale-95 shrink-0"
-                            title="فتح نافذة اختيار وتعيين التلاميذ حسب ترتيب الوصول"
-                          >
-                            <Trophy className="w-3.5 h-3.5" />
-                            <span>تعيين بالترتيب</span>
-                          </button>
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => handleOpenTrackQrScanner()}
+                              className="px-3 py-1.5 bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl text-xs font-black shadow-md shadow-emerald-700/20 flex items-center gap-1.5 cursor-pointer active:scale-95 shrink-0"
+                              title="مسح كود الاستجابة (QR) لتحديد المتسابقين تلقائياً بالكاميرا"
+                            >
+                              <QrCode className="w-3.5 h-3.5" />
+                              <span>مسح كود QR 📷</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setIsAssignByOrderModalOpen(true)}
+                              className="px-3 py-1.5 bg-gradient-to-r from-amber-500 via-orange-600 to-rose-600 hover:from-amber-400 hover:to-rose-500 text-white rounded-xl text-xs font-black shadow-md flex items-center gap-1.5 cursor-pointer active:scale-95 shrink-0"
+                              title="فتح نافذة اختيار وتعيين التلاميذ حسب ترتيب الوصول"
+                            >
+                              <Trophy className="w-3.5 h-3.5" />
+                              <span>تعيين بالترتيب</span>
+                            </button>
+                          </div>
                         </div>
                       )}
 
@@ -3657,7 +3679,16 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                                 </div>
 
                                 {/* Manual Participant Selector Dropdown With Color & Bottom Position For Chosen Athletes */}
-                                <div className="w-full sm:w-auto shrink-0">
+                                <div className="w-full sm:w-auto shrink-0 flex items-center gap-1.5">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleOpenTrackQrScanner(displayRank)}
+                                    className="p-1.5 sm:px-2.5 sm:py-1.5 bg-emerald-600/20 hover:bg-emerald-600 text-emerald-400 hover:text-white border border-emerald-500/40 rounded-xl text-xs font-bold transition-all flex items-center gap-1 cursor-pointer shrink-0 active:scale-95 shadow-xs"
+                                    title={`مسح كود الصدرية أو رقم مسار للمرتبة #${displayRank}`}
+                                  >
+                                    <Camera className="w-3.5 h-3.5" />
+                                    <span className="hidden sm:inline text-[11px] font-black">مسح QR</span>
+                                  </button>
                                   <select
                                     value={lap.participantId || ''}
                                     onChange={(e) => handleAssignParticipantToLap(origIdx, e.target.value)}
@@ -5895,9 +5926,20 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                 </span>
               </div>
 
-              <span className="text-xs font-bold text-slate-500 dark:text-slate-400">
-                المحددون: <strong className="text-emerald-500">{recordedLaps.filter(l => l.participantId).length}</strong> / {recordedLaps.length}
-              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleOpenTrackQrScanner()}
+                  className="px-3 py-1.5 bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl text-xs font-black shadow-md flex items-center gap-1.5 cursor-pointer active:scale-95 transition-all"
+                  title="مسح أكواد الاستجابة للمتسابقين بالكاميرا"
+                >
+                  <QrCode className="w-3.5 h-3.5 text-emerald-300" />
+                  <span>مسح كود الاستجابة (QR) 📷</span>
+                </button>
+                <span className="text-xs font-bold text-slate-500 dark:text-slate-400">
+                  المحددون: <strong className="text-emerald-500">{recordedLaps.filter(l => l.participantId).length}</strong> / {recordedLaps.length}
+                </span>
+              </div>
             </div>
 
             {/* Laps Assignment List */}
@@ -5966,8 +6008,17 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                           </div>
                         </div>
 
-                        {/* Manual Dropdown Selector with Color change & bottom placement */}
-                        <div className="w-full sm:w-72 shrink-0">
+                        {/* Manual Dropdown Selector with Color change & bottom placement & Quick Scan Button */}
+                        <div className="w-full sm:w-80 shrink-0 flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => handleOpenTrackQrScanner(officialRank)}
+                            className="px-2.5 py-2 bg-emerald-50 dark:bg-emerald-950/60 hover:bg-emerald-600 text-emerald-700 dark:text-emerald-300 hover:text-white border border-emerald-300 dark:border-emerald-800 rounded-xl text-xs font-bold transition-all flex items-center gap-1 cursor-pointer shrink-0 shadow-xs active:scale-95"
+                            title={`مسح كود الاستجابة للمرتبة #${officialRank}`}
+                          >
+                            <Camera className="w-3.5 h-3.5" />
+                            <span className="text-[11px] font-black">مسح QR</span>
+                          </button>
                           <select
                             value={lap.participantId || ''}
                             onChange={(e) => handleAssignParticipantToLap(origIdx, e.target.value)}
@@ -6558,6 +6609,25 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
 
           </div>
         </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* 📷 MODAL: ATHLETICS TRACK QR SCANNER (مسح كود الاستجابة لتحديد المتسابقين) 📷 */}
+      {/* ========================================================================= */}
+      {isTrackQrScannerOpen && (
+        <AthleticsTrackQrScannerModal
+          isOpen={isTrackQrScannerOpen}
+          onClose={() => setIsTrackQrScannerOpen(false)}
+          activeDiscipline={activeDiscipline}
+          selectedCategory={selectedCategory}
+          selectedGender={selectedGender}
+          currentEventParticipants={currentEventParticipants}
+          allParticipants={participants}
+          attendanceMap={attendanceMap}
+          recordedLaps={recordedLaps}
+          onAssignParticipantToLap={handleAssignParticipantToLap}
+          initialTargetRank={trackQrScannerTargetRank}
+        />
       )}
 
       {/* ========================================================================= */}

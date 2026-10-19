@@ -1544,26 +1544,25 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
     <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-2 sm:p-4 overflow-y-auto">
       <div className="bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 w-full max-w-5xl overflow-hidden flex flex-col max-h-[95vh] my-auto">
         
-        {/* Modal Main Header */}
-        <div className="bg-gradient-to-r from-emerald-800 via-teal-900 to-slate-900 dark:from-emerald-950 dark:via-teal-950 dark:to-slate-950 text-white p-3 sm:p-5 flex items-center justify-between gap-2 shrink-0 relative border-b border-emerald-900/50">
-          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
-            <div className="w-9 h-9 sm:w-11 sm:h-11 rounded-xl sm:rounded-2xl bg-white/15 border border-white/20 flex items-center justify-center text-xl sm:text-2xl shrink-0 shadow-inner">
-              🏁
-            </div>
-            <div className="min-w-0">
-              <div className="flex items-center gap-1.5 flex-wrap">
-                <h2 className="text-sm sm:text-lg font-black truncate text-white">مدير توقيت العدو الريفي</h2>
-                <span className="px-1.5 py-0.5 rounded-full text-[8px] sm:text-[10px] font-extrabold bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 whitespace-nowrap">
-                  تحديث فوري ⚡
-                </span>
+        {/* Modal Main Header - Centered & Responsive on Mobile */}
+        <div className="bg-gradient-to-r from-emerald-800 via-teal-900 to-slate-900 dark:from-emerald-950 dark:via-teal-950 dark:to-slate-950 text-white p-2.5 sm:p-5 flex flex-col sm:flex-row items-center sm:justify-between gap-2.5 sm:gap-4 shrink-0 relative border-b border-emerald-900/50">
+          <div className="flex flex-col sm:flex-row items-center gap-2 sm:gap-3 text-center sm:text-right w-full sm:w-auto">
+            <div className="flex items-center justify-center gap-2 flex-wrap">
+              <div className="w-8 h-8 sm:w-11 sm:h-11 rounded-xl sm:rounded-2xl bg-white/15 border border-white/20 flex items-center justify-center text-base sm:text-2xl shrink-0 shadow-inner">
+                🏁
               </div>
-              <p className="text-[10px] sm:text-xs text-emerald-100 dark:text-emerald-200/90 mt-0.5 line-clamp-1 sm:line-clamp-none hidden xs:block">
-                استيراد المشاركين، ضبط السباقات والتوثيق الآني للنتائج
-              </p>
+              <h2 className="text-xs sm:text-lg font-black tracking-tight text-white">مدير توقيت العدو الريفي</h2>
+              <span className="hidden sm:inline-block px-1.5 py-0.5 rounded-full text-[8px] sm:text-[10px] font-extrabold bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 whitespace-nowrap">
+                تحديث فوري ⚡
+              </span>
             </div>
+            {/* Details subtitle: Hidden on mobile */}
+            <p className="hidden sm:block text-[10px] sm:text-xs text-emerald-100 dark:text-emerald-200/90 mt-0.5">
+              استيراد المشاركين، ضبط السباقات والتوثيق الآني للنتائج
+            </p>
           </div>
 
-          <div className="flex items-center gap-1.5 shrink-0">
+          <div className="flex items-center justify-center gap-1.5 sm:gap-2 flex-wrap w-full sm:w-auto shrink-0">
             {/* Quick Save All Arrivals Button */}
             {arrivals.length > 0 && (
               <button

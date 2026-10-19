@@ -839,46 +839,46 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
         isFullScreen ? 'max-w-[98vw] h-[96vh]' : 'max-w-6xl xl:max-w-7xl h-[92vh] sm:h-[85vh] max-h-[96vh] sm:max-h-[92vh]'
       }`}>
         
-        {/* Top Header */}
-        <div className={`p-3 sm:p-4 md:p-5 border-b flex items-center justify-between gap-3 flex-wrap ${
+        {/* Top Header - Responsive & Centered on Mobile */}
+        <div className={`p-2.5 sm:p-4 md:p-5 border-b flex flex-col sm:flex-row items-center sm:justify-between gap-2.5 sm:gap-4 ${
           isProgrammed
             ? 'bg-gradient-to-r from-blue-900 via-indigo-900 to-slate-900 text-white border-slate-800'
             : 'bg-gradient-to-r from-slate-700 via-slate-800 to-slate-900 text-white border-slate-700'
         }`}>
-          <div className="flex items-center gap-3">
-            <div className={`w-10 h-10 md:w-12 md:h-12 rounded-2xl text-xl md:text-2xl flex items-center justify-center border shadow-xs shrink-0 ${
+          <div className="flex flex-col sm:flex-row items-center gap-2 sm:gap-3 text-center sm:text-right w-full sm:w-auto">
+            <div className={`w-8 h-8 md:w-12 md:h-12 rounded-xl md:rounded-2xl text-base md:text-2xl flex items-center justify-center border shadow-xs shrink-0 ${
               isProgrammed ? 'bg-white/10 border-white/20' : 'bg-slate-600/40 border-slate-500/40 opacity-80'
             }`}>
               {sport.icon || '🏆'}
             </div>
 
-            <div>
-              <div className="flex flex-wrap items-center gap-2">
-                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+            <div className="w-full sm:w-auto">
+              <div className="flex flex-wrap items-center justify-center sm:justify-start gap-1.5 sm:gap-2">
+                <span className={`text-[9px] sm:text-[10px] font-bold px-2 py-0.5 rounded-full border ${
                   isProgrammed
                     ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
                     : 'bg-amber-500/20 text-amber-300 border-amber-500/30'
                 }`}>
-                  {isProgrammed ? '🟢 مبرمجة ومفتوحة للتسجيل' : '⚪ غير مبرمجة (في طور الإعداد)'}
+                  {isProgrammed ? '🟢 مبرمجة ومفتوحة' : '⚪ غير مبرمجة'}
                 </span>
 
-                <span className="text-[10px] font-medium text-slate-300 bg-white/10 px-2 py-0.5 rounded border border-white/10">
+                <span className="hidden xs:inline-block text-[9px] sm:text-[10px] font-medium text-slate-300 bg-white/10 px-2 py-0.5 rounded border border-white/10">
                   الموسم الدراسي {activeSeason}
                 </span>
               </div>
 
-              <h2 className="text-base md:text-lg font-black text-white mt-1 leading-tight">
+              <h2 className="text-xs sm:text-base md:text-lg font-black text-white mt-1 leading-tight tracking-tight">
                 {customTitle}
               </h2>
               {!isHeaderCollapsed && (
-                <p className="text-xs text-slate-300 mt-0.5 font-medium line-clamp-1">
+                <p className="hidden sm:block text-xs text-slate-300 mt-0.5 font-medium line-clamp-1">
                   {sport.description || `المسابقات والبطولات المدرسية الخاصة بـ ${sport.name} بمديرية تاوريرت`}
                 </p>
               )}
             </div>
           </div>
 
-          <div className="flex items-center gap-2 shrink-0 mr-auto">
+          <div className="flex items-center justify-center gap-1.5 sm:gap-2 flex-wrap w-full sm:w-auto shrink-0 mr-auto">
             {/* Direct Electronic Draw Button for Managers / Tech Committee */}
             {canManage && isProgrammed && (
               <button

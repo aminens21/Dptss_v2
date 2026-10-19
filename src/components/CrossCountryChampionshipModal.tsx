@@ -457,35 +457,33 @@ export const CrossCountryChampionshipModal: React.FC<CrossCountryChampionshipMod
         <div className={`relative w-full bg-white rounded-2xl shadow-2xl border border-slate-200 my-4 sm:my-8 flex flex-col transition-all duration-200 ${
           isFullScreen ? 'max-w-[98vw]' : 'max-w-6xl xl:max-w-7xl'
         }`}>
-          {/* Modal Top Header Banner */}
-          <div className="p-3 sm:p-4 md:p-5 bg-gradient-to-r from-slate-900 via-blue-950 to-slate-900 text-white border-b border-slate-800 shrink-0">
-            <div className="flex items-center justify-between gap-3 flex-wrap">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-white/10 backdrop-blur-xs border border-white/20 flex items-center justify-center shrink-0">
-                  <AppLogo size={isHeaderCollapsed ? 28 : 36} />
-                </div>
-                <div>
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <h2 className="text-sm sm:text-base md:text-lg font-black tracking-tight text-white">
-                      {customTitle}
-                    </h2>
-                    <span className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[10px] font-extrabold px-2 py-0.5 rounded-full">
-                      8 فئات عمرية مدمجة
-                    </span>
-                    <span className="bg-blue-500/20 text-blue-300 border border-blue-500/30 text-[10px] font-bold px-2 py-0.5 rounded">
-                      الموسم {activeSeason}
-                    </span>
+          {/* Modal Top Header Banner - Responsive & Centered on Mobile */}
+          <div className="p-2.5 sm:p-4 md:p-5 bg-gradient-to-r from-slate-900 via-blue-950 to-slate-900 text-white border-b border-slate-800 shrink-0">
+            <div className="flex flex-col sm:flex-row items-center sm:justify-between gap-2.5 sm:gap-4">
+              <div className="flex flex-col sm:flex-row items-center gap-2 sm:gap-3 text-center sm:text-right w-full sm:w-auto">
+                <div className="flex items-center justify-center gap-2 flex-wrap">
+                  <div className="w-8 h-8 sm:w-12 sm:h-12 rounded-xl bg-white/10 backdrop-blur-xs border border-white/20 flex items-center justify-center shrink-0">
+                    <AppLogo size={isHeaderCollapsed ? 22 : 32} />
                   </div>
-                  {!isHeaderCollapsed && (
-                    <p className="text-xs text-slate-300 mt-0.5 font-medium">
-                      المديرية الإقليمية تاوريرت • الفرع الإقليمي للجامعة الملكية للرياضة المدرسية
-                    </p>
-                  )}
+                  <h2 className="text-xs sm:text-base md:text-lg font-black tracking-tight text-white">
+                    {customTitle}
+                  </h2>
+                  <span className="hidden sm:inline-block bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[9px] sm:text-[10px] font-extrabold px-2 py-0.5 rounded-full">
+                    8 فئات عمرية
+                  </span>
+                  <span className="hidden sm:inline-block bg-blue-500/20 text-blue-300 border border-blue-500/30 text-[9px] sm:text-[10px] font-bold px-2 py-0.5 rounded">
+                    الموسم {activeSeason}
+                  </span>
                 </div>
+                {!isHeaderCollapsed && (
+                  <p className="hidden sm:block text-xs text-slate-300 mt-0.5 font-medium">
+                    المديرية الإقليمية تاوريرت • الفرع الإقليمي للجامعة الملكية للرياضة المدرسية
+                  </p>
+                )}
               </div>
 
               {/* Header controls: collapse/expand, quick register, fullscreen, and close */}
-              <div className="flex items-center gap-2 shrink-0 mr-auto">
+              <div className="flex items-center justify-center gap-1.5 sm:gap-2 flex-wrap w-full sm:w-auto shrink-0 mr-auto">
                 <button
                   type="button"
                   onClick={() => setIsHeaderCollapsed(!isHeaderCollapsed)}

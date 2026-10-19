@@ -847,22 +847,23 @@ export const DailyWhatsAppNotificationCenter: React.FC<DailyWhatsAppNotification
             <XCircle className="w-6 h-6 text-emerald-200 hover:text-white" />
           </button>
 
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pl-10">
-            <div className="flex items-start gap-3">
-              <div className="w-12 h-12 rounded-xl bg-emerald-500/20 border border-emerald-400/40 flex items-center justify-center shrink-0 text-emerald-300 shadow-xs">
-                <BellRing className="w-6 h-6 text-emerald-400" />
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 sm:gap-4 pl-0 sm:pl-10">
+            <div className="flex flex-col sm:flex-row items-center gap-2 sm:gap-3 text-center sm:text-right w-full sm:w-auto">
+              <div className="w-8 h-8 sm:w-12 sm:h-12 rounded-xl bg-emerald-500/20 border border-emerald-400/40 flex items-center justify-center shrink-0 text-emerald-300 shadow-xs">
+                <BellRing className="w-4 h-4 sm:w-6 sm:h-6 text-emerald-400" />
               </div>
               <div>
-                <h3 className="text-base md:text-lg font-bold text-white">
+                <h3 className="text-xs sm:text-base md:text-lg font-bold text-white tracking-tight">
                   مركز الإشعارات اليومية والتذكير الفردي عبر الواتساب
                 </h3>
-                <p className="text-xs text-emerald-100/80 mt-1 max-w-2xl leading-relaxed">
+                {/* Details subtitle: Hidden on mobile */}
+                <p className="hidden sm:block text-xs text-emerald-100/80 mt-1 max-w-2xl leading-relaxed">
                   يمكنك إرسال إشعارات تذكيرية فردية لكل طرف معني بالمقابلة (الأستاذ، الحكم، أو المدير) مباشرة وبسهولة.
                 </p>
               </div>
             </div>
 
-          <div className="flex flex-wrap items-center gap-2 self-start md:self-auto">
+          <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2 w-full sm:w-auto">
             {/* Live Refresh Button */}
             <button
               type="button"

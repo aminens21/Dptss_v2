@@ -315,35 +315,38 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-xs" dir="rtl">
       <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xl max-w-xl w-full overflow-hidden animate-in fade-in zoom-in-95 duration-150 text-slate-900 dark:text-slate-100">
-        {/* Header */}
-        <div className="flex items-center justify-between p-4 md:p-5 border-b border-slate-100 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-800/60">
-          <div className="flex items-center gap-2.5">
-            <div className="w-10 h-10 rounded-2xl bg-emerald-600 text-white flex items-center justify-center shadow-md shadow-emerald-600/20 text-lg font-black shrink-0">
-              {activeSportConfig?.icon || SPORTS_MAP[sportId]?.icon || <Trophy className="h-5 w-5" />}
+        {/* Header - Responsive & Centered on Mobile */}
+        <div className="flex flex-col sm:flex-row items-center sm:justify-between gap-2.5 sm:gap-4 p-3.5 sm:p-5 border-b border-slate-100 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-800/60">
+          <div className="flex flex-col sm:flex-row items-center gap-2 sm:gap-2.5 text-center sm:text-right w-full sm:w-auto">
+            <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl sm:rounded-2xl bg-emerald-600 text-white flex items-center justify-center shadow-md shadow-emerald-600/20 text-base sm:text-lg font-black shrink-0">
+              {activeSportConfig?.icon || SPORTS_MAP[sportId]?.icon || <Trophy className="h-4 w-4 sm:h-5 sm:w-5" />}
             </div>
             <div>
-              <div className="flex items-center gap-2">
-                <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30">
+              <div className="flex items-center justify-center sm:justify-start gap-1.5 sm:gap-2 flex-wrap">
+                <span className="text-[9px] sm:text-[10px] font-black px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30">
                   {isEditing ? 'نافذة موحدة ومختصرة' : 'برمجة جديدة'}
                 </span>
-                <span className="text-[10px] text-slate-400 font-bold">
+                <span className="text-[9px] sm:text-[10px] text-slate-400 font-bold">
                   {status === 'Scheduled' ? '🟢 مبرمجة' : status === 'Ongoing' ? '🔴 جارية' : '⚪ مسودة'}
                 </span>
               </div>
-              <h3 className="text-sm sm:text-base font-black text-slate-800 dark:text-white mt-0.5">
+              <h3 className="text-xs sm:text-base font-black text-slate-800 dark:text-white mt-0.5 tracking-tight">
                 {isEditing ? `تعديل وإعداد وبرمجة بطولة ${activeSportConfig?.name || SPORTS_MAP[sportId]?.name || ''}` : 'إضافة وإعداد وبرمجة بطولة إقليمية'}
               </h3>
-              <p className="text-[11px] text-slate-500 dark:text-slate-400 font-medium">
+              {/* Details: hidden on mobile */}
+              <p className="hidden sm:block text-[11px] text-slate-500 dark:text-slate-400 font-medium">
                 {isEditing ? 'نافذة واحدة مختصرة لتعديل الفئات، وضوابط البرمجة، والتواريخ، وآخر أجل للتسجيل' : 'يقوم النظام بتوليد بطولات منفصلة لكل فئة وجنس ونوع انتساب محدد مع برمجة المواعيد'}
               </p>
             </div>
           </div>
-          <button
-            onClick={onClose}
-            className="p-1.5 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 rounded-lg hover:bg-slate-200/60 dark:hover:bg-slate-800 transition-colors"
-          >
-            <X className="h-5 w-5" />
-          </button>
+          <div className="flex items-center justify-center gap-2 w-full sm:w-auto shrink-0">
+            <button
+              onClick={onClose}
+              className="p-1.5 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 rounded-lg hover:bg-slate-200/60 dark:hover:bg-slate-800 transition-colors"
+            >
+              <X className="h-4 w-4 sm:h-5 sm:w-5" />
+            </button>
+          </div>
         </div>
 
         {/* Form */}
