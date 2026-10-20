@@ -45,8 +45,7 @@ import {
   Zap,
   Info,
   Menu,
-  MoreHorizontal,
-  Boxes
+  MoreHorizontal
 } from 'lucide-react';
 import {
   GoogleAuthProvider,
@@ -61,12 +60,6 @@ import { DataService, SPORTS_MAP, getAgeCategoriesForSeason, getCategoryYearsLab
 import { calculateTeamRankings, resolveRunnerParticipationType } from '../lib/crossCountryConfig';
 import { AppLogo } from '../components/AppLogo';
 import { SportsIntroAnimation } from '../components/SportsIntroAnimation';
-import { HelperAppsDrawer } from '../components/HelperAppsDrawer';
-import { AthleticsChampionshipModal } from '../components/AthleticsChampionshipModal';
-import { AthleticsBibGeneratorModal } from '../components/AthleticsBibGeneratorModal';
-import { FinishLineScannerModal } from '../components/FinishLineScannerModal';
-import { BibGeneratorModal } from '../components/BibGeneratorModal';
-import { ElectronicDrawModal } from '../components/ElectronicDrawModal';
 import { CrossCountryPodiumView } from '../components/CrossCountryPodiumView';
 import toast from 'react-hot-toast';
 import { cn } from '../lib/utils';
@@ -85,15 +78,7 @@ export const Login: React.FC = () => {
   // Data states for Public View
   const [activeDirectorate, setActiveDirectorate] = useState<Directorate | null>(null);
   const [isAboutModalOpen, setIsAboutModalOpen] = useState(false);
-  const [isIntroOpen, setIsIntroOpen] = useState(() => {
-    return !sessionStorage.getItem('sports_intro_seen');
-  });
-  const [isAppsDrawerOpen, setIsAppsDrawerOpen] = useState(false);
-  const [isAthleticsChampionshipOpen, setIsAthleticsChampionshipOpen] = useState(false);
-  const [isAthleticsBibOpen, setIsAthleticsBibOpen] = useState(false);
-  const [isFinishLineScannerOpen, setIsFinishLineScannerOpen] = useState(false);
-  const [isBibGeneratorOpen, setIsBibGeneratorOpen] = useState(false);
-  const [isElectronicDrawOpen, setIsElectronicDrawOpen] = useState(false);
+  const [isIntroOpen, setIsIntroOpen] = useState(true);
   const [isCrossCountryPodiumOpen, setIsCrossCountryPodiumOpen] = useState(false);
   const [directorates, setDirectorates] = useState<Directorate[]>([]);
   const [schools, setSchools] = useState<School[]>([]);
@@ -2040,17 +2025,6 @@ export const Login: React.FC = () => {
 
             {/* Action Buttons: Centered Underneath on Mobile */}
             <div className="flex items-center justify-center gap-1.5 sm:gap-2 shrink-0 flex-wrap w-full lg:w-auto">
-              {/* Apps Drawer Toggle Button */}
-              <button
-                type="button"
-                onClick={() => setIsAppsDrawerOpen(true)}
-                className="px-3 py-1.5 bg-gradient-to-r from-orange-500 via-amber-600 to-rose-600 hover:from-orange-600 hover:to-rose-700 text-white rounded-full text-xs font-black transition-all flex items-center gap-1.5 cursor-pointer shadow-sm active:scale-95"
-                title="فتح قائمة التطبيقات والأدوات الذكية (ألعاب القوى، الصدريات، المسح والقرعة)"
-              >
-                <Boxes className="w-4 h-4" />
-                <span>قائمة التطبيقات ⚡</span>
-              </button>
-
               {/* Replay Intro Animation Button */}
               <button
                 type="button"
@@ -2151,17 +2125,6 @@ export const Login: React.FC = () => {
                       </div>
 
                       <div className="p-2 space-y-1">
-                        <button
-                          onClick={() => {
-                            setIsAppsDrawerOpen(true);
-                            setIsMobileMenuOpen(false);
-                          }}
-                          className="w-full flex items-center gap-3 px-3 py-3 text-right text-xs font-black text-amber-600 dark:text-amber-400 bg-amber-50/70 dark:bg-amber-950/40 hover:bg-amber-100 dark:hover:bg-amber-900/40 rounded-xl transition-colors border border-amber-200/50 dark:border-amber-800/40"
-                        >
-                          <Boxes className="w-4 h-4 text-amber-600 dark:text-amber-400" />
-                          <span>قائمة التطبيقات والأدوات الذكية ⚡</span>
-                        </button>
-
                         <button
                           onClick={() => {
                             if (loginMode === 'REGISTER_TEACHER') setLoginMode('PUBLIC');
@@ -3378,86 +3341,13 @@ export const Login: React.FC = () => {
         </div>
       )}
 
-      {/* FLOATING QUICK APPS SIDEBAR TAB */}
-      <button
-        type="button"
-        onClick={() => setIsAppsDrawerOpen(true)}
-        className="fixed right-0 top-1/2 -translate-y-1/2 z-40 bg-gradient-to-l from-orange-500 via-amber-600 to-rose-600 hover:from-orange-600 hover:to-rose-700 text-white py-3 px-1.5 sm:px-2 rounded-l-2xl shadow-2xl flex flex-col items-center gap-1.5 cursor-pointer group active:scale-95 transition-all border-y border-l border-white/30"
-        title="فتح قائمة التطبيقات والأدوات الذكية"
-      >
-        <Boxes className="w-4 sm:w-5 h-4 sm:h-5 group-hover:scale-110 transition-transform" />
-        <span className="text-[9px] sm:text-[10px] font-black [writing-mode:vertical-rl] tracking-wider select-none">
-          التطبيقات
-        </span>
-      </button>
-
-      {/* HELPER APPS SIDEBAR DRAWER */}
-      <HelperAppsDrawer
-        isOpen={isAppsDrawerOpen}
-        onClose={() => setIsAppsDrawerOpen(false)}
-        onOpenAthleticsChampionship={() => setIsAthleticsChampionshipOpen(true)}
-        onOpenAthleticsBib={() => setIsAthleticsBibOpen(true)}
-        onOpenFinishLineScanner={() => setIsFinishLineScannerOpen(true)}
-        onOpenBibGenerator={() => setIsBibGeneratorOpen(true)}
-        onOpenElectronicDraw={() => setIsElectronicDrawOpen(true)}
-        onOpenCrossCountryPodium={() => setIsCrossCountryPodiumOpen(true)}
-        onReplayIntro={() => setIsIntroOpen(true)}
-      />
-
       {/* SPORTS INTRO ANIMATION */}
       {isIntroOpen && (
         <SportsIntroAnimation
           isOpen={isIntroOpen}
           onComplete={() => {
             setIsIntroOpen(false);
-            sessionStorage.setItem('sports_intro_seen', 'true');
           }}
-        />
-      )}
-
-      {/* ATHLETICS CHAMPIONSHIP MODAL */}
-      {isAthleticsChampionshipOpen && (
-        <AthleticsChampionshipModal
-          isOpen={isAthleticsChampionshipOpen}
-          onClose={() => setIsAthleticsChampionshipOpen(false)}
-          schools={schools}
-          students={students}
-          currentUser={currentUser}
-          directorateName={activeDirectorate?.name || 'تاوريرت'}
-        />
-      )}
-
-      {/* ATHLETICS BIB GENERATOR MODAL */}
-      {isAthleticsBibOpen && (
-        <AthleticsBibGeneratorModal
-          isOpen={isAthleticsBibOpen}
-          onClose={() => setIsAthleticsBibOpen(false)}
-        />
-      )}
-
-      {/* FINISH LINE SCANNER MODAL */}
-      {isFinishLineScannerOpen && (
-        <FinishLineScannerModal
-          isOpen={isFinishLineScannerOpen}
-          onClose={() => setIsFinishLineScannerOpen(false)}
-        />
-      )}
-
-      {/* BIB GENERATOR MODAL (CROSS COUNTRY) */}
-      {isBibGeneratorOpen && (
-        <BibGeneratorModal
-          isOpen={isBibGeneratorOpen}
-          onClose={() => setIsBibGeneratorOpen(false)}
-        />
-      )}
-
-      {/* ELECTRONIC DRAW MODAL */}
-      {isElectronicDrawOpen && (
-        <ElectronicDrawModal
-          isOpen={isElectronicDrawOpen}
-          onClose={() => setIsElectronicDrawOpen(false)}
-          tournaments={tournaments}
-          schools={schools}
         />
       )}
 
