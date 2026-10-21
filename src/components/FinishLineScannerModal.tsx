@@ -2174,7 +2174,7 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
                           const formulaStr = team.top4Runners.map(r => r.rank).join(' + ');
                           return (
                             <div
-                              key={team.schoolName}
+                              key={`team-rank-${team.schoolName}-${idx}`}
                               className={`p-2.5 rounded-xl text-xs border ${
                                 team.isWinnerTeam
                                   ? 'bg-amber-100 dark:bg-amber-950/80 border-amber-300 dark:border-amber-700 font-bold text-amber-950 dark:text-amber-200 shadow-2xs'
@@ -2363,7 +2363,7 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
                           {liveTeamRankings.filter(t => t.isValidTeam).slice(0, 3).map((team, idx) => {
                             const formulaStr = team.top4Runners.map(r => r.rank).join(' + ');
                             return (
-                              <div key={team.schoolName} className="bg-white dark:bg-slate-800 border border-amber-200/80 dark:border-amber-800/60 p-2.5 rounded-xl text-[11px] shadow-3xs space-y-1.5">
+                              <div key={`winning-team-${team.schoolName}-${idx}`} className="bg-white dark:bg-slate-800 border border-amber-200/80 dark:border-amber-800/60 p-2.5 rounded-xl text-[11px] shadow-3xs space-y-1.5">
                                 <div className="flex items-center justify-between gap-1">
                                   <div className="flex items-center gap-1 overflow-hidden">
                                     <span className="font-extrabold text-xs">
@@ -2588,7 +2588,7 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
                       const formulaStr = team.top4Runners.map(r => r.rank).join(' + ');
                       return (
                         <div
-                          key={team.schoolName}
+                          key={`ranking-team-${team.schoolName}-${idx}`}
                           className="bg-white dark:bg-slate-900 p-3 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-bold space-y-2 shadow-xs"
                         >
                           <div className="flex items-center justify-between">
