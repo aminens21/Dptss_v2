@@ -606,9 +606,6 @@ export const AppLayout: React.FC = () => {
                     if (isTournamentsItem) {
                       setIsTournamentsExpanded(prev => !prev);
                     }
-                    if (isTeachersItem) {
-                      setIsTeachersExpanded(prev => !prev);
-                    }
                     if (isMatchesItem) {
                       setIsMatchesExpanded(prev => !prev);
                     }
@@ -659,36 +656,6 @@ export const AppLayout: React.FC = () => {
                     })}
                   </div>
                 )}
-
-                {/* Teacher Sub-Branches */}
-                {isTeachersItem && isTeachersExpanded && !isSidebarCollapsed && (
-                  <div className="mr-5 my-1 pr-2 border-r border-slate-200 dark:border-slate-700/60 space-y-1 animate-in fade-in slide-in-from-top-1 duration-150">
-                    {[
-                      { name: 'أستاذ التعليم الابتدائي', cadre: 'PRIMARY', icon: '🏫' },
-                      { name: 'أستاذ التعليم الثانوي الإعدادي', cadre: 'MIDDLE', icon: '📘' },
-                      { name: 'أستاذ التعليم الثانوي التأهيلي', cadre: 'HIGH', icon: '🎓' },
-                    ].map((sub) => {
-                      const isSubActive = location.pathname === '/teachers' && location.search.includes(`cadre=${sub.cadre}`);
-                      return (
-                        <NavLink
-                          key={sub.cadre}
-                          to={`/teachers?cadre=${sub.cadre}`}
-                          className={cn(
-                            'flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-[11px] font-normal transition-all',
-                            isSubActive
-                              ? 'bg-emerald-50 text-emerald-800 font-black border-r-2 border-emerald-500 dark:bg-emerald-600/30 dark:text-emerald-200 dark:border-emerald-400'
-                              : 'text-slate-600 font-bold hover:text-emerald-800 hover:bg-emerald-50/50 dark:text-slate-200 dark:hover:text-white dark:hover:bg-slate-800/80'
-                          )}
-                        >
-                          <span className="text-[11px] opacity-80">{sub.icon}</span>
-                          <span className="truncate">{sub.name}</span>
-                        </NavLink>
-                      );
-                    })}
-                  </div>
-                )}
-
-                {/* Matches & Calendar Sub-Branches */}
                 {isMatchesItem && isMatchesExpanded && !isSidebarCollapsed && (
                   <div className="mr-5 my-1 pr-2 border-r border-slate-200 dark:border-slate-700/60 space-y-1 animate-in fade-in slide-in-from-top-1 duration-150">
                     {[
@@ -1178,20 +1145,16 @@ export const AppLayout: React.FC = () => {
                   const isSchoolsItem = item.href === '/schools';
                   const isMatchesItem = item.href === '/matches';
 
-                  const hasSubItems = isTournamentsItem || isTeachersItem || isSchoolsItem || isMatchesItem;
+                  const hasSubItems = isTournamentsItem || isMatchesItem;
 
                   let isExpanded = false;
                   if (isTournamentsItem) isExpanded = isTournamentsExpanded;
-                  if (isTeachersItem) isExpanded = isTeachersExpanded;
-                  if (isSchoolsItem) isExpanded = isSchoolsExpanded;
                   if (isMatchesItem) isExpanded = isMatchesExpanded;
 
                   const handleParentClick = (e: React.MouseEvent) => {
                     if (hasSubItems) {
                       e.preventDefault();
                       if (isTournamentsItem) setIsTournamentsExpanded(prev => !prev);
-                      if (isTeachersItem) setIsTeachersExpanded(prev => !prev);
-                      if (isSchoolsItem) setIsSchoolsExpanded(prev => !prev);
                       if (isMatchesItem) setIsMatchesExpanded(prev => !prev);
                     } else {
                       setIsMobileMenuOpen(false);
@@ -1234,49 +1197,6 @@ export const AppLayout: React.FC = () => {
                             <NavLink
                               key={sub.tab}
                               to={`/tournaments?tab=${sub.tab}`}
-                              onClick={() => setIsMobileMenuOpen(false)}
-                              className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-600 hover:text-emerald-800 hover:bg-emerald-50/60 dark:text-slate-300 dark:hover:text-white dark:hover:bg-slate-800/80 transition-colors"
-                            >
-                              <span className="text-xs">{sub.icon}</span>
-                              <span>{sub.name}</span>
-                            </NavLink>
-                          ))}
-                        </div>
-                      )}
-
-                      {/* Teachers Sub-Branches */}
-                      {isTeachersItem && isTeachersExpanded && (
-                        <div className="mr-5 my-1 pr-2 border-r-2 border-emerald-500/60 space-y-1 animate-in fade-in slide-in-from-top-1 duration-150">
-                          {[
-                            { name: 'أستاذ التعليم الابتدائي', cadre: 'PRIMARY', icon: '🏫' },
-                            { name: 'أستاذ التعليم الثانوي الإعدادي', cadre: 'MIDDLE', icon: '📘' },
-                            { name: 'أستاذ التعليم الثانوي التأهيلي', cadre: 'HIGH', icon: '🎓' },
-                          ].map((sub) => (
-                            <NavLink
-                              key={sub.cadre}
-                              to={`/teachers?cadre=${sub.cadre}`}
-                              onClick={() => setIsMobileMenuOpen(false)}
-                              className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-600 hover:text-emerald-800 hover:bg-emerald-50/60 dark:text-slate-300 dark:hover:text-white dark:hover:bg-slate-800/80 transition-colors"
-                            >
-                              <span className="text-xs">{sub.icon}</span>
-                              <span>{sub.name}</span>
-                            </NavLink>
-                          ))}
-                        </div>
-                      )}
-
-                      {/* Schools Sub-Branches */}
-                      {isSchoolsItem && isSchoolsExpanded && (
-                        <div className="mr-5 my-1 pr-2 border-r-2 border-emerald-500/60 space-y-1 animate-in fade-in slide-in-from-top-1 duration-150">
-                          {[
-                            { name: 'جميع المؤسسات التعليمية', level: 'ALL', icon: '🏫' },
-                            { name: 'التعليم الابتدائي', level: 'PRIMARY', icon: '👧' },
-                            { name: 'التعليم الثانوي الإعدادي', level: 'MIDDLE', icon: '👦' },
-                            { name: 'التعليم الثانوي التأهيلي', level: 'HIGH', icon: '🎓' },
-                          ].map((sub) => (
-                            <NavLink
-                              key={sub.level}
-                              to={sub.level === 'ALL' ? '/schools' : `/schools?level=${sub.level}`}
                               onClick={() => setIsMobileMenuOpen(false)}
                               className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-600 hover:text-emerald-800 hover:bg-emerald-50/60 dark:text-slate-300 dark:hover:text-white dark:hover:bg-slate-800/80 transition-colors"
                             >

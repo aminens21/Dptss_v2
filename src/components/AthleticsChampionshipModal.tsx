@@ -540,11 +540,25 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
     );
   }, [participants, activeDiscipline, selectedCategory, selectedGender]);
 
+  // Helper to normalize Arabic text for search matching
+  const normalizeArabic = (text: string): string => {
+    if (!text) return '';
+    return text
+      .trim()
+      .toLowerCase()
+      .replace(/[أإآ]/g, 'ا')
+      .replace(/[ة]/g, 'ه')
+      .replace(/[ى]/g, 'ي')
+      .replace(/[ًٌٍَُِّْ]/g, '');
+  };
+
   // CRITICAL USER REQUIREMENT:
-  // "عند اختيار التلميذ في مسابقة ما المرجو تغيير لونه في القائمة المنسدلة ووضعه في أسفل القائمة"
+  // "عند مسح الكود او ادخال الصدرية اضهر اسم المشارك في مكان اضغط لاختيار التلميذ مع امكانية اختيار تلميذ من المشاركين المسجلين"
   // Helper to categorize & order participants for manual lap assignment:
-  // 1. Available (unassigned) athletes at the TOP with bright prominent colors
-  // 2. Already assigned athletes placed at the BOTTOM with changed muted colors and checked badge
+  // 1. Current assigned participant at the TOP with their full name & bib
+  // 2. Available in current race at the top with bright prominent colors
+  // 3. Other registered participants in championship available for selection
+  // 4. Already assigned athletes placed at the BOTTOM with changed muted colors and checked badge
   const getCategorizedParticipantsForLap = (currentLapParticipantId?: string) => {
     const assignedIdsInOtherLaps = new Set(
       recordedLaps
@@ -552,18 +566,37 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
         .map(l => l.participantId as string)
     );
 
-    const available: AthleticsParticipantRecord[] = [];
+    const currentAssigned = currentLapParticipantId
+      ? participants.find(p => p.id === currentLapParticipantId)
+      : undefined;
+
+    const currentEventPartIds = new Set(currentEventParticipants.map(p => p.id));
+
+    const availableInEvent: AthleticsParticipantRecord[] = [];
+    const otherRegistered: AthleticsParticipantRecord[] = [];
     const alreadyChosen: AthleticsParticipantRecord[] = [];
 
+    // 1. Current event participants
     currentEventParticipants.forEach(p => {
       if (assignedIdsInOtherLaps.has(p.id)) {
         alreadyChosen.push(p);
       } else {
-        available.push(p);
+        availableInEvent.push(p);
       }
     });
 
-    available.sort((a, b) => {
+    // 2. All other registered participants in the championship
+    participants.forEach(p => {
+      if (!currentEventPartIds.has(p.id)) {
+        if (assignedIdsInOtherLaps.has(p.id)) {
+          alreadyChosen.push(p);
+        } else {
+          otherRegistered.push(p);
+        }
+      }
+    });
+
+    availableInEvent.sort((a, b) => {
       const aAtt = attendanceMap[a.id]?.status || 'pending';
       const bAtt = attendanceMap[b.id]?.status || 'pending';
       if (aAtt === 'present' && bAtt !== 'present') return -1;
@@ -573,9 +606,58 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
       return (parseInt(a.bibNumber) || 0) - (parseInt(b.bibNumber) || 0);
     });
 
+    otherRegistered.sort((a, b) => {
+      const bibDiff = (parseInt(a.bibNumber) || 0) - (parseInt(b.bibNumber) || 0);
+      if (bibDiff !== 0) return bibDiff;
+      return a.studentName.localeCompare(b.studentName);
+    });
+
     alreadyChosen.sort((a, b) => (parseInt(a.bibNumber) || 0) - (parseInt(b.bibNumber) || 0));
 
-    return { available, alreadyChosen };
+    return { currentAssigned, availableInEvent, otherRegistered, alreadyChosen };
+  };
+
+  // Quick Bib number / code assignment directly from the table or lap card:
+  const handleQuickBibAssign = (origIdx: number, bibQuery: string) => {
+    if (!userAccess.canManage) {
+      toast.error('لا تملك صلاحية تغيير التعيين');
+      return;
+    }
+    const cleaned = (bibQuery || '').replace(/^#/, '').trim();
+    if (!cleaned) return;
+
+    // 1. Look in current event participants by bibNumber
+    let matched = currentEventParticipants.find(
+      p => String(p.bibNumber).trim() === cleaned || (!isNaN(Number(cleaned)) && Number(p.bibNumber) === Number(cleaned))
+    );
+
+    // 2. Look in all registered championship participants by bibNumber
+    if (!matched) {
+      matched = participants.find(
+        p => String(p.bibNumber).trim() === cleaned || (!isNaN(Number(cleaned)) && Number(p.bibNumber) === Number(cleaned))
+      );
+    }
+
+    // 3. Look by Massar number
+    if (!matched) {
+      const cleanMassar = cleaned.toUpperCase();
+      matched = participants.find(p => p.massarNumber && p.massarNumber.trim().toUpperCase() === cleanMassar);
+    }
+
+    // 4. Look by student name
+    if (!matched && cleaned.length >= 3) {
+      const norm = normalizeArabic(cleaned);
+      matched = participants.find(p => normalizeArabic(p.studentName).includes(norm));
+    }
+
+    if (matched) {
+      handleAssignParticipantToLap(origIdx, matched.id);
+      toast.success(`تم تعيين التلميذ(ة): ${matched.studentName} (#${matched.bibNumber}) للمرتبة #${origIdx + 1}`, {
+        icon: '🏃'
+      });
+    } else {
+      toast.error(`⚠️ لم يتم العثور على تلميذ مسجل برقم الصدرية #${cleaned}`);
+    }
   };
 
   // Sorted participants for assignment: present athletes first!
@@ -3599,7 +3681,7 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                           {lapsToDisplay.map((lap) => {
                             const origIdx = lap.origIdx;
                             const displayRank = lap.rank;
-                            const { available, alreadyChosen } = getCategorizedParticipantsForLap(lap.participantId);
+                            const { currentAssigned, availableInEvent, otherRegistered, alreadyChosen } = getCategorizedParticipantsForLap(lap.participantId);
 
                             return (
                               <div
@@ -3672,14 +3754,36 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                                       </div>
                                     ) : (
                                       <span className="text-[11px] text-amber-400 font-bold block mt-0.5 animate-pulse">
-                                        ⚠️ يرجى اختيار التلميذ(ة) يدوياً من القائمة ⬅️
+                                        ⚠️ يرجى إدخال الصدرية أو مسح الكود أو اختيار التلميذ ⬅️
                                       </span>
                                     )}
                                   </div>
                                 </div>
 
-                                {/* Manual Participant Selector Dropdown With Color & Bottom Position For Chosen Athletes */}
-                                <div className="w-full sm:w-auto shrink-0 flex items-center gap-1.5">
+                                {/* Manual Participant Selector & Quick Bib Input & QR Scanner */}
+                                <div className="w-full sm:w-auto shrink-0 flex items-center gap-1.5 flex-wrap">
+                                  {/* Quick Bib Number Entry */}
+                                  <input
+                                    type="text"
+                                    key={`bib-quick-${origIdx}-${lap.bibNumber || ''}`}
+                                    defaultValue={lap.bibNumber || ''}
+                                    placeholder="صدرية #"
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter') {
+                                        e.preventDefault();
+                                        handleQuickBibAssign(origIdx, (e.target as HTMLInputElement).value);
+                                      }
+                                    }}
+                                    onBlur={(e) => {
+                                      const val = e.target.value.trim();
+                                      if (val && val !== lap.bibNumber) {
+                                        handleQuickBibAssign(origIdx, val);
+                                      }
+                                    }}
+                                    className="w-16 px-2 py-1.5 bg-slate-900 border border-slate-700 focus:border-amber-500 rounded-xl text-xs font-mono font-bold text-center text-amber-300 placeholder:text-slate-600 outline-none focus:ring-1 focus:ring-amber-500 transition-all shadow-xs"
+                                    title="أدخل رقم صدرية التلميذ واضغط Enter للتعيين الفوري"
+                                  />
+
                                   <button
                                     type="button"
                                     onClick={() => handleOpenTrackQrScanner(displayRank)}
@@ -3689,57 +3793,100 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                                     <Camera className="w-3.5 h-3.5" />
                                     <span className="hidden sm:inline text-[11px] font-black">مسح QR</span>
                                   </button>
+
                                   <select
-                                    value={lap.participantId || ''}
+                                    value={lap.participantId || (currentAssigned?.id || '')}
                                     onChange={(e) => handleAssignParticipantToLap(origIdx, e.target.value)}
-                                    className={`w-full sm:w-56 px-2.5 py-1.5 rounded-xl text-xs font-bold outline-none cursor-pointer transition-all ${
-                                      lap.participantId
-                                        ? 'bg-slate-900 border border-emerald-600 text-emerald-300 focus:ring-1 focus:ring-emerald-500'
+                                    className={`w-full sm:w-60 px-2.5 py-1.5 rounded-xl text-xs font-bold outline-none cursor-pointer transition-all ${
+                                      lap.participantId || lap.studentName
+                                        ? 'bg-slate-900 border border-emerald-500 text-emerald-300 focus:ring-1 focus:ring-emerald-500'
                                         : 'bg-slate-900 border-2 border-amber-500 text-amber-300 focus:ring-2 focus:ring-amber-500 ring-2 ring-amber-500/20'
                                     }`}
                                   >
-                                    <option value="" className="text-slate-400 bg-slate-900">-- اضغط لاختيار التلميذ(ة) يدوياً --</option>
-                                    
-                                    {/* 1. Unselected athletes at the TOP with bright prominent colors */}
-                                    {available.length > 0 && (
-                                      <optgroup label="⚡ العداؤون المتاحون للاختيار (لم يتم اختيارهم بعد)">
-                                        {available.map(p => {
-                                          const att = attendanceMap[p.id];
-                                          const isPresent = att?.status === 'present';
-                                          const isAbsent = att?.status === 'absent';
-                                          const mark = isPresent ? '✅ ' : isAbsent ? '❌ [غائب] ' : '🏃 ';
-                                          const lane = att?.lane ? ` [ممر ${att.lane}]` : '';
-                                          return (
-                                            <option
-                                              key={`avail-${p.id}`}
-                                              value={p.id}
-                                              style={{ color: '#4ade80', backgroundColor: '#020617', fontWeight: 'bold' }}
-                                              className="text-emerald-400 bg-slate-950 font-bold"
-                                            >
-                                              {mark}#{p.bibNumber} - {p.studentName} ({p.schoolName}){lane}
-                                            </option>
-                                          );
-                                        })}
+                                    {/* CRITICAL: If student is assigned, show their name in place of placeholder */}
+                                    {currentAssigned ? (
+                                      <option value={currentAssigned.id} className="text-emerald-400 bg-slate-950 font-black">
+                                        ✅ #{currentAssigned.bibNumber} - {currentAssigned.studentName} ({currentAssigned.schoolName})
+                                      </option>
+                                    ) : lap.studentName ? (
+                                      <option value={lap.participantId || ''} className="text-emerald-400 bg-slate-950 font-black">
+                                        ✅ {lap.bibNumber ? `#${lap.bibNumber} - ` : ''}{lap.studentName} {lap.schoolName ? `(${lap.schoolName})` : ''}
+                                      </option>
+                                    ) : (
+                                      <option value="" className="text-slate-400 bg-slate-900">
+                                        -- اضغط لاختيار التلميذ(ة) من المسجلين --
+                                      </option>
+                                    )}
+
+                                    {/* Clear assignment option */}
+                                    {(lap.participantId || lap.studentName) && (
+                                      <option value="" className="text-rose-400 bg-slate-950 font-bold">
+                                        ❌ إلغاء التعيين (إفراغ المرتبة)
+                                      </option>
+                                    )}
+
+                                    {/* 1. Unselected athletes in current race at the TOP */}
+                                    {availableInEvent.length > 0 && (
+                                      <optgroup label={`⚡ متسابقو هذا السباق (${activeDiscipline?.nameAr || 'السباق الحالي'})`}>
+                                        {availableInEvent
+                                          .filter(p => p.id !== lap.participantId && p.id !== currentAssigned?.id)
+                                          .map(p => {
+                                            const att = attendanceMap[p.id];
+                                            const isPresent = att?.status === 'present';
+                                            const isAbsent = att?.status === 'absent';
+                                            const mark = isPresent ? '✅ ' : isAbsent ? '❌ [غائب] ' : '🏃 ';
+                                            const lane = att?.lane ? ` [ممر ${att.lane}]` : '';
+                                            return (
+                                              <option
+                                                key={`avail-${p.id}`}
+                                                value={p.id}
+                                                style={{ color: '#4ade80', backgroundColor: '#020617', fontWeight: 'bold' }}
+                                                className="text-emerald-400 bg-slate-950 font-bold"
+                                              >
+                                                {mark}#{p.bibNumber} - {p.studentName} ({p.schoolName}){lane}
+                                              </option>
+                                            );
+                                          })}
                                       </optgroup>
                                     )}
 
-                                    {/* 2. Selected athletes placed at the BOTTOM with changed muted colors */}
+                                    {/* 2. All other registered participants in the championship (مع امكانية اختيار تلميذ من المشاركين المسجلين) */}
+                                    {otherRegistered.length > 0 && (
+                                      <optgroup label="👥 باقي المشاركين المسجلين في البطولة">
+                                        {otherRegistered
+                                          .filter(p => p.id !== lap.participantId && p.id !== currentAssigned?.id)
+                                          .map(p => (
+                                            <option
+                                              key={`other-${p.id}`}
+                                              value={p.id}
+                                              style={{ color: '#67e8f9', backgroundColor: '#020617' }}
+                                              className="text-cyan-300 bg-slate-950"
+                                            >
+                                              #{p.bibNumber} - {p.studentName} ({p.schoolName}) • {p.category}
+                                            </option>
+                                          ))}
+                                      </optgroup>
+                                    )}
+
+                                    {/* 3. Selected athletes placed at the BOTTOM with changed muted colors */}
                                     {alreadyChosen.length > 0 && (
                                       <optgroup label="⬇️ تم اختيارهم مسبقاً في وصول آخر (أسفل القائمة)">
-                                        {alreadyChosen.map(p => {
-                                          const assignedLap = recordedLaps.find((l, lIdx) => lIdx !== origIdx && l.participantId === p.id);
-                                          const rankLabel = assignedLap ? ` (المرتبة ${assignedLap.rank})` : '';
-                                          return (
-                                            <option
-                                              key={`chosen-${p.id}`}
-                                              value={p.id}
-                                              style={{ color: '#64748b', backgroundColor: '#0f172a', fontStyle: 'italic' }}
-                                              className="text-slate-500 bg-slate-900"
-                                            >
-                                              ✓ [تم اختياره] #{p.bibNumber} - {p.studentName} ({p.schoolName}){rankLabel}
-                                            </option>
-                                          );
-                                        })}
+                                        {alreadyChosen
+                                          .filter(p => p.id !== lap.participantId && p.id !== currentAssigned?.id)
+                                          .map(p => {
+                                            const assignedLap = recordedLaps.find((l, lIdx) => lIdx !== origIdx && l.participantId === p.id);
+                                            const rankLabel = assignedLap ? ` (المرتبة ${assignedLap.rank})` : '';
+                                            return (
+                                              <option
+                                                key={`chosen-${p.id}`}
+                                                value={p.id}
+                                                style={{ color: '#64748b', backgroundColor: '#0f172a', fontStyle: 'italic' }}
+                                                className="text-slate-500 bg-slate-900"
+                                              >
+                                                ✓ [تم اختياره] #{p.bibNumber} - {p.studentName} ({p.schoolName}){rankLabel}
+                                              </option>
+                                            );
+                                          })}
                                       </optgroup>
                                     )}
                                   </select>
@@ -5960,7 +6107,7 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                   .map((lap, orderIdx) => {
                     const officialRank = orderIdx + 1;
                     const origIdx = lap.origIdx;
-                    const { available, alreadyChosen } = getCategorizedParticipantsForLap(lap.participantId);
+                    const { currentAssigned, availableInEvent, otherRegistered, alreadyChosen } = getCategorizedParticipantsForLap(lap.participantId);
 
                     return (
                       <div
@@ -6008,8 +6155,29 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                           </div>
                         </div>
 
-                        {/* Manual Dropdown Selector with Color change & bottom placement & Quick Scan Button */}
-                        <div className="w-full sm:w-80 shrink-0 flex items-center gap-1.5">
+                        {/* Manual Dropdown Selector & Quick Bib Input & Quick Scan Button */}
+                        <div className="w-full sm:w-auto shrink-0 flex items-center gap-1.5 flex-wrap">
+                          <input
+                            type="text"
+                            key={`modal-bib-quick-${origIdx}-${lap.bibNumber || ''}`}
+                            defaultValue={lap.bibNumber || ''}
+                            placeholder="صدرية #"
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                e.preventDefault();
+                                handleQuickBibAssign(origIdx, (e.target as HTMLInputElement).value);
+                              }
+                            }}
+                            onBlur={(e) => {
+                              const val = e.target.value.trim();
+                              if (val && val !== lap.bibNumber) {
+                                handleQuickBibAssign(origIdx, val);
+                              }
+                            }}
+                            className="w-16 px-2 py-2 bg-slate-100 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 focus:border-amber-500 rounded-xl text-xs font-mono font-bold text-center text-amber-700 dark:text-amber-300 placeholder:text-slate-400 dark:placeholder:text-slate-600 outline-none focus:ring-1 focus:ring-amber-500 transition-all shadow-xs"
+                            title="أدخل رقم صدرية التلميذ واضغط Enter للتعيين الفوري"
+                          />
+
                           <button
                             type="button"
                             onClick={() => handleOpenTrackQrScanner(officialRank)}
@@ -6019,57 +6187,98 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                             <Camera className="w-3.5 h-3.5" />
                             <span className="text-[11px] font-black">مسح QR</span>
                           </button>
+
                           <select
-                            value={lap.participantId || ''}
+                            value={lap.participantId || (currentAssigned?.id || '')}
                             onChange={(e) => handleAssignParticipantToLap(origIdx, e.target.value)}
-                            className={`w-full px-3 py-2 rounded-xl text-xs font-bold outline-none cursor-pointer transition-all ${
-                              lap.participantId
+                            className={`w-full sm:w-64 px-3 py-2 rounded-xl text-xs font-bold outline-none cursor-pointer transition-all ${
+                              lap.participantId || lap.studentName
                                 ? 'bg-white dark:bg-slate-900 border border-emerald-500 text-emerald-800 dark:text-emerald-300'
                                 : 'bg-white dark:bg-slate-900 border-2 border-amber-500 text-amber-800 dark:text-amber-300 focus:ring-2 focus:ring-amber-400 ring-1 ring-amber-400/30'
                             }`}
                           >
-                            <option value="">-- اضغط لاختيار صاحب المرتبة {officialRank} --</option>
+                            {/* CRITICAL: Show participant name in place of placeholder */}
+                            {currentAssigned ? (
+                              <option value={currentAssigned.id} className="text-emerald-600 dark:text-emerald-400 font-black">
+                                ✅ #{currentAssigned.bibNumber} - {currentAssigned.studentName} ({currentAssigned.schoolName})
+                              </option>
+                            ) : lap.studentName ? (
+                              <option value={lap.participantId || ''} className="text-emerald-600 dark:text-emerald-400 font-black">
+                                ✅ {lap.bibNumber ? `#${lap.bibNumber} - ` : ''}{lap.studentName} {lap.schoolName ? `(${lap.schoolName})` : ''}
+                              </option>
+                            ) : (
+                              <option value="">-- اضغط لاختيار صاحب المرتبة {officialRank} --</option>
+                            )}
+
+                            {/* Clear option */}
+                            {(lap.participantId || lap.studentName) && (
+                              <option value="" className="text-rose-600 dark:text-rose-400 font-bold">
+                                ❌ إلغاء تعيين هذه المرتبة (إفراغ)
+                              </option>
+                            )}
                             
-                            {/* 1. Unselected Available Athletes at the TOP with bright prominent colors */}
-                            {available.length > 0 && (
-                              <optgroup label="⚡ العداؤون المتاحون للاختيار (لم يتم اختيارهم بعد)">
-                                {available.map(p => {
-                                  const att = attendanceMap[p.id];
-                                  const isPresent = att?.status === 'present';
-                                  const isAbsent = att?.status === 'absent';
-                                  const mark = isPresent ? '✅ ' : isAbsent ? '❌ [غائب] ' : '🏃 ';
-                                  const lane = att?.lane ? ` [ممر ${att.lane}]` : '';
-                                  return (
-                                    <option
-                                      key={`assign-avail-${p.id}`}
-                                      value={p.id}
-                                      style={{ color: '#16a34a', fontWeight: 'bold' }}
-                                      className="text-emerald-600 dark:text-emerald-400 font-bold"
-                                    >
-                                      {mark}#{p.bibNumber} - {p.studentName} ({p.schoolName}){lane}
-                                    </option>
-                                  );
-                                })}
+                            {/* 1. Unselected Available Athletes in current race at the TOP */}
+                            {availableInEvent.length > 0 && (
+                              <optgroup label={`⚡ متسابقو هذا السباق (${activeDiscipline?.nameAr || 'السباق الحالي'})`}>
+                                {availableInEvent
+                                  .filter(p => p.id !== lap.participantId && p.id !== currentAssigned?.id)
+                                  .map(p => {
+                                    const att = attendanceMap[p.id];
+                                    const isPresent = att?.status === 'present';
+                                    const isAbsent = att?.status === 'absent';
+                                    const mark = isPresent ? '✅ ' : isAbsent ? '❌ [غائب] ' : '🏃 ';
+                                    const lane = att?.lane ? ` [ممر ${att.lane}]` : '';
+                                    return (
+                                      <option
+                                        key={`assign-avail-${p.id}`}
+                                        value={p.id}
+                                        style={{ color: '#16a34a', fontWeight: 'bold' }}
+                                        className="text-emerald-600 dark:text-emerald-400 font-bold"
+                                      >
+                                        {mark}#{p.bibNumber} - {p.studentName} ({p.schoolName}){lane}
+                                      </option>
+                                    );
+                                  })}
                               </optgroup>
                             )}
 
-                            {/* 2. Already selected Athletes placed at the BOTTOM with changed muted colors */}
+                            {/* 2. All other registered participants in championship */}
+                            {otherRegistered.length > 0 && (
+                              <optgroup label="👥 باقي المشاركين المسجلين في البطولة">
+                                {otherRegistered
+                                  .filter(p => p.id !== lap.participantId && p.id !== currentAssigned?.id)
+                                  .map(p => (
+                                    <option
+                                      key={`assign-other-${p.id}`}
+                                      value={p.id}
+                                      style={{ color: '#0284c7' }}
+                                      className="text-sky-600 dark:text-sky-400"
+                                    >
+                                      #{p.bibNumber} - {p.studentName} ({p.schoolName}) • {p.category}
+                                    </option>
+                                  ))}
+                              </optgroup>
+                            )}
+
+                            {/* 3. Already selected Athletes placed at the BOTTOM */}
                             {alreadyChosen.length > 0 && (
                               <optgroup label="⬇️ تم اختيارهم مسبقاً في مرتبة وصول أخرى (أسفل القائمة)">
-                                {alreadyChosen.map(p => {
-                                  const assignedLap = recordedLaps.find((l, lIdx) => lIdx !== origIdx && l.participantId === p.id);
-                                  const rankLabel = assignedLap ? ` (المرتبة ${assignedLap.rank})` : '';
-                                  return (
-                                    <option
-                                      key={`assign-chosen-${p.id}`}
-                                      value={p.id}
-                                      style={{ color: '#94a3b8', fontStyle: 'italic' }}
-                                      className="text-slate-400 dark:text-slate-500"
-                                    >
-                                      ✓ [تم اختياره] #{p.bibNumber} - {p.studentName} ({p.schoolName}){rankLabel}
-                                    </option>
-                                  );
-                                })}
+                                {alreadyChosen
+                                  .filter(p => p.id !== lap.participantId && p.id !== currentAssigned?.id)
+                                  .map(p => {
+                                    const assignedLap = recordedLaps.find((l, lIdx) => lIdx !== origIdx && l.participantId === p.id);
+                                    const rankLabel = assignedLap ? ` (المرتبة ${assignedLap.rank})` : '';
+                                    return (
+                                      <option
+                                        key={`assign-chosen-${p.id}`}
+                                        value={p.id}
+                                        style={{ color: '#94a3b8', fontStyle: 'italic' }}
+                                        className="text-slate-400 dark:text-slate-500"
+                                      >
+                                        ✓ [تم اختياره] #{p.bibNumber} - {p.studentName} ({p.schoolName}){rankLabel}
+                                      </option>
+                                    );
+                                  })}
                               </optgroup>
                             )}
                           </select>

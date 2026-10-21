@@ -400,12 +400,13 @@ export const AthleticsTrackQrScannerModal: React.FC<AthleticsTrackQrScannerModal
     // E. Search across all registered participants in championship as fallback
     if (!matched && (massarQuery || bibQuery || nameQuery)) {
       const cleanMassar = massarQuery.replace(/^(مسار-|MASSAR-)/i, '').trim().toUpperCase();
+      const normName = nameQuery ? normalizeArabic(nameQuery) : '';
       matched = allParticipants.find(p =>
-        (p.massarNumber && p.massarNumber.trim().toUpperCase() === cleanMassar) ||
-        (bibQuery && String(p.bibNumber).trim() === bibQuery) ||
-        (nameQuery && normalizeArabic(p.studentName) === normalizeArabic(nameQuery))
+        (cleanMassar && p.massarNumber && p.massarNumber.trim().toUpperCase() === cleanMassar) ||
+        (bibQuery && (String(p.bibNumber).trim() === bibQuery || (!isNaN(Number(bibQuery)) && Number(p.bibNumber) === Number(bibQuery)))) ||
+        (normName && normName.length >= 3 && (normalizeArabic(p.studentName) === normName || normalizeArabic(p.studentName).includes(normName)))
       );
-      if (matched) matchReason = `قاعدة بيانات البطولة (${matched.studentName})`;
+      if (matched) matchReason = `قاعدة بيانات البطولة (#${matched.bibNumber} - ${matched.studentName})`;
     }
 
     // Handled outcome

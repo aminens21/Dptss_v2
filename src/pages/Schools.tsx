@@ -40,10 +40,14 @@ import { ConfirmDeleteModal } from '../components/ConfirmDeleteModal';
 import { SchoolParticipantsModal } from '../components/SchoolParticipantsModal';
 import toast from 'react-hot-toast';
 import { useRolePermissions } from '../hooks/useRolePermissions';
+import { useSearchParams } from 'react-router-dom';
 
 export const Schools: React.FC = () => {
   const { userProfile } = useAuth();
   const { canDo } = useRolePermissions();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const levelQuery = searchParams.get('level');
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [schools, setSchools] = useState<School[]>([]);
   const [activeDirObj, setActiveDirObj] = useState<Directorate | null>(null);
@@ -52,12 +56,26 @@ export const Schools: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
   const [search, setSearch] = useState('');
-  const [typeFilter, setTypeFilter] = useState<string>('ALL');
+  
+  const getInitialTypeFilter = (lvl: string | null) => {
+    if (lvl === 'PRIMARY') return 'ابتدائي';
+    if (lvl === 'MIDDLE') return 'إعدادي';
+    if (lvl === 'HIGH') return 'تأهيلي';
+    return 'ALL';
+  };
+
+  const [typeFilter, setTypeFilter] = useState<string>(() => getInitialTypeFilter(levelQuery));
   const [communeFilter, setCommuneFilter] = useState<string>('ALL');
   const [selectedSport, setSelectedSport] = useState<string>('ALL');
   const [selectedSchoolFilter, setSelectedSchoolFilter] = useState<string>('ALL');
   const [schoolSelectQuery, setSchoolSelectQuery] = useState<string>('');
   const [isSchoolDropdownOpen, setIsSchoolDropdownOpen] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (levelQuery) {
+      setTypeFilter(getInitialTypeFilter(levelQuery));
+    }
+  }, [levelQuery]);
   const [viewMode, setViewMode] = useState<'cards' | 'table'>('table');
   const [expandedSchoolIds, setExpandedSchoolIds] = useState<Record<string, boolean>>({});
 
@@ -801,7 +819,7 @@ export const Schools: React.FC = () => {
       ) : (
         <div className="grid grid-cols-3 gap-3">
           <button
-            onClick={() => setTypeFilter('تأهيلي')}
+            onClick={() => setTypeFilter(typeFilter === 'تأهيلي' ? 'ALL' : 'تأهيلي')}
             className={`p-3 rounded-xl border text-right transition-all cursor-pointer ${
               typeFilter === 'تأهيلي'
                 ? 'bg-blue-50/80 border-blue-300 ring-2 ring-blue-500/20'
@@ -813,7 +831,7 @@ export const Schools: React.FC = () => {
           </button>
 
           <button
-            onClick={() => setTypeFilter('إعدادي')}
+            onClick={() => setTypeFilter(typeFilter === 'إعدادي' ? 'ALL' : 'إعدادي')}
             className={`p-3 rounded-xl border text-right transition-all cursor-pointer ${
               typeFilter === 'إعدادي'
                 ? 'bg-emerald-50/80 border-emerald-300 ring-2 ring-emerald-500/20'
@@ -825,7 +843,7 @@ export const Schools: React.FC = () => {
           </button>
 
           <button
-            onClick={() => setTypeFilter('ابتدائي')}
+            onClick={() => setTypeFilter(typeFilter === 'ابتدائي' ? 'ALL' : 'ابتدائي')}
             className={`p-3 rounded-xl border text-right transition-all cursor-pointer ${
               typeFilter === 'ابتدائي'
                 ? 'bg-amber-50/80 border-amber-300 ring-2 ring-amber-500/20'
@@ -952,23 +970,25 @@ export const Schools: React.FC = () => {
         </div>
 
         <div className="flex items-center justify-between gap-2 w-full sm:w-auto overflow-x-auto pb-1 sm:pb-0">
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-1.5 flex-wrap">
             {[
-              { id: 'ALL', label: `الكل (${schools.length})` },
-              { id: 'تأهيلي', label: 'تأهيلي' },
-              { id: 'إعدادي', label: 'إعدادي' },
-              { id: 'ابتدائي', label: 'ابتدائي' },
+              { id: 'ALL', label: `جميع المؤسسات (${effectiveSchools.length})`, icon: '🏫' },
+              { id: 'تأهيلي', label: `الثانوي التأهيلي (${highSchoolsCount})`, icon: '🎓' },
+              { id: 'إعدادي', label: `الثانوي الإعدادي (${middleSchoolsCount})`, icon: '👦' },
+              { id: 'ابتدائي', label: `التعليم الابتدائي (${primarySchoolsCount})`, icon: '👧' },
             ].map(f => (
               <button
                 key={f.id}
+                type="button"
                 onClick={() => setTypeFilter(f.id)}
-                className={`px-3 py-1.5 text-xs font-bold rounded-lg whitespace-nowrap transition-colors cursor-pointer ${
+                className={`px-3 py-1.5 text-xs font-bold rounded-xl whitespace-nowrap transition-all cursor-pointer flex items-center gap-1.5 ${
                   typeFilter === f.id
-                    ? 'bg-slate-900 text-white shadow-xs'
-                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                    ? 'bg-emerald-600 text-white shadow-xs font-black'
+                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-900'
                 }`}
               >
-                {f.label}
+                <span>{f.icon}</span>
+                <span>{f.label}</span>
               </button>
             ))}
           </div>

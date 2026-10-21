@@ -24,7 +24,11 @@ import {
   Eye,
   Move,
   Type,
-  ChevronDown
+  ChevronDown,
+  ArrowUp,
+  ArrowDown,
+  ArrowLeft,
+  ArrowRight
 } from 'lucide-react';
 import { toPng, toBlob } from 'html-to-image';
 import jsPDF from 'jspdf';
@@ -279,6 +283,8 @@ export const TournamentPosterModal: React.FC<TournamentPosterModalProps> = ({
 
   const [customBgImage, setCustomBgImage] = useState<string | null>(null);
   const [bgOverlayOpacity, setBgOverlayOpacity] = useState<number>(75);
+  const [bgOpacity, setBgOpacity] = useState<number>(100);
+  const [bgPosition, setBgPosition] = useState<{ x: number, y: number }>({ x: 0, y: 0 });
   const [customSilhouette, setCustomSilhouette] = useState<string | null>(null);
   const [silhouetteScale, setSilhouetteScale] = useState<number>(50);
   const [silhouetteOpacity, setSilhouetteOpacity] = useState<number>(40);
@@ -1598,7 +1604,7 @@ export const TournamentPosterModal: React.FC<TournamentPosterModalProps> = ({
                       </div>
 
                       {customBgImage && (
-                        <div className="bg-slate-100/80 p-2 rounded-xl border border-slate-200 space-y-1">
+                        <div className="bg-slate-100/80 p-2.5 rounded-xl border border-slate-200 space-y-2">
                           <div className="flex items-center justify-between text-[10px] font-bold text-slate-700">
                             <span>وضوح نصوص الملصق فوق الصورة:</span>
                             <span className="text-orange-600 font-mono">{bgOverlayOpacity}%</span>
@@ -1612,6 +1618,52 @@ export const TournamentPosterModal: React.FC<TournamentPosterModalProps> = ({
                             onChange={(e) => setBgOverlayOpacity(Number(e.target.value))}
                             className="w-full h-1.5 bg-slate-300 rounded-lg appearance-none cursor-pointer accent-orange-600"
                           />
+
+                          {/* Background Image Opacity / Transparency */}
+                          <div className="flex items-center justify-between text-[10px] font-bold text-slate-700 pt-1 border-t border-slate-200">
+                            <span>شفافية صورة الخلفية:</span>
+                            <span className="text-indigo-600 font-mono">{bgOpacity}%</span>
+                          </div>
+                          <input
+                            type="range"
+                            min="10"
+                            max="100"
+                            step="5"
+                            value={bgOpacity}
+                            onChange={(e) => setBgOpacity(Number(e.target.value))}
+                            className="w-full h-1.5 bg-slate-300 rounded-lg appearance-none cursor-pointer accent-indigo-600"
+                          />
+
+                          {/* Background Image X / Y Position */}
+                          <div className="space-y-1 pt-1 border-t border-slate-200">
+                            <span className="text-[10px] font-bold text-slate-700 block">تحريك صورة الخلفية:</span>
+                            <div className="flex items-center gap-2">
+                              <span className="text-[9px] text-slate-500 font-bold w-6">أفقي:</span>
+                              <input
+                                type="range"
+                                min="-100"
+                                max="100"
+                                step="1"
+                                value={bgPosition.x}
+                                onChange={(e) => setBgPosition(prev => ({ ...prev, x: Number(e.target.value) }))}
+                                className="flex-1 h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-indigo-500"
+                              />
+                              <span className="text-[10px] text-slate-600 font-mono w-8 text-left">{bgPosition.x}%</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <span className="text-[9px] text-slate-500 font-bold w-6">عمودي:</span>
+                              <input
+                                type="range"
+                                min="-100"
+                                max="100"
+                                step="1"
+                                value={bgPosition.y}
+                                onChange={(e) => setBgPosition(prev => ({ ...prev, y: Number(e.target.value) }))}
+                                className="flex-1 h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-indigo-500"
+                              />
+                              <span className="text-[10px] text-slate-600 font-mono w-8 text-left">{bgPosition.y}%</span>
+                            </div>
+                          </div>
                         </div>
                       )}
                     </div>
@@ -1719,7 +1771,8 @@ export const TournamentPosterModal: React.FC<TournamentPosterModalProps> = ({
                   fontFamily: (POSTER_FONTS.find(f => f.id === selectedFont)?.css || "'Cairo', sans-serif"),
                   backgroundImage: customBgImage ? `url(${customBgImage})` : undefined,
                   backgroundSize: 'cover',
-                  backgroundPosition: 'center',
+                  backgroundPosition: `${50 + bgPosition.x}% ${50 + bgPosition.y}%`,
+                  opacity: customBgImage ? bgOpacity / 100 : 1,
                   transform: previewZoom !== 1 ? `scale(${previewZoom})` : undefined,
                   transformOrigin: 'top center'
                 }}

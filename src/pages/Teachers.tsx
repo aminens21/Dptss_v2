@@ -389,6 +389,37 @@ export const Teachers: React.FC = () => {
           />
         </div>
 
+        {/* Quick Level Filter Pills */}
+        <div className="flex items-center gap-1.5 overflow-x-auto w-full pb-1 sm:pb-0 pt-1">
+          {[
+            { id: '', label: `جميع الأسلاك (${teachers.length})`, icon: '👥' },
+            { id: 'HIGH', label: `الثانوي التأهيلي (${teachers.filter(t => (t.teachingCadre || 'HIGH') === 'HIGH').length})`, icon: '🎓' },
+            { id: 'MIDDLE', label: `الثانوي الإعدادي (${teachers.filter(t => t.teachingCadre === 'MIDDLE').length})`, icon: '📘' },
+            { id: 'PRIMARY', label: `التعليم الابتدائي (${teachers.filter(t => t.teachingCadre === 'PRIMARY').length})`, icon: '🏫' },
+          ].map(f => (
+            <button
+              key={f.id}
+              type="button"
+              onClick={() => {
+                setSelectedCadre(f.id);
+                if (f.id) {
+                  setSearchParams({ cadre: f.id });
+                } else {
+                  setSearchParams({});
+                }
+              }}
+              className={`px-3 py-1.5 text-xs font-bold rounded-xl whitespace-nowrap transition-all cursor-pointer flex items-center gap-1.5 ${
+                selectedCadre === f.id
+                  ? 'bg-emerald-600 text-white shadow-xs font-black'
+                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300'
+              }`}
+            >
+              <span>{f.icon}</span>
+              <span>{f.label}</span>
+            </button>
+          ))}
+        </div>
+
         <div className="flex flex-wrap sm:flex-nowrap items-center gap-2.5 w-full md:w-auto">
           <Filter className="h-4 w-4 text-slate-400 shrink-0 hidden sm:block" />
 
@@ -625,86 +656,83 @@ export const Teachers: React.FC = () => {
                   onClick={() => handleOpenTeacherDetail(teacher)}
                   className="p-4 space-y-3 hover:bg-blue-50/30 transition-colors cursor-pointer"
                 >
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-full bg-slate-100 border border-slate-200 text-slate-700 flex items-center justify-center font-bold text-sm shrink-0 overflow-hidden">
-                        {teacher.photoUrl ? (
-                          <img src={teacher.photoUrl} alt={teacher.fullName} className="w-full h-full object-cover" />
-                        ) : (
-                          <span>{teacher.fullName[0].toUpperCase()}</span>
-                        )}
-                      </div>
-                      <div>
-                        <p className="font-bold text-slate-800 text-sm flex items-center gap-1 flex-wrap">
-                          <span>{teacher.fullName}</span>
-                          <span className={`text-[9px] font-bold px-1.5 py-0.2 rounded border ${getCadreBadge(teacher.teachingCadre).bg}`}>
-                            {getCadreBadge(teacher.teachingCadre).text}
-                          </span>
-                          {teacher.isTechCommitteeHead && (
-                            <span className="text-[9px] bg-blue-100 text-blue-800 font-black px-1.5 py-0.2 rounded border border-blue-200">
-                              رئيس لجنة
-                            </span>
-                          )}
-                          {teacher.isTechCommitteeMember && (
-                            <span className="text-[9px] bg-indigo-100 text-indigo-800 font-black px-1.5 py-0.2 rounded border border-indigo-200">
-                              عضو لجنة
-                            </span>
-                          )}
-                        </p>
-                        <p className="text-[10px] text-slate-400 font-medium">{teacher.email}</p>
-                      </div>
-                    </div>
+                  {/* Mobile Action Buttons: Icons only, centered above name */}
+                  <div className="flex items-center justify-center gap-3 w-full pb-2.5 border-b border-slate-100">
+                    {(userProfile?.role === 'CENTRAL_ADMIN' || userProfile?.role === 'SPORT_MANAGER') && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleOpenEditRole(teacher);
+                          }}
+                          className="p-2 bg-emerald-50 hover:bg-emerald-100 active:scale-95 text-emerald-700 rounded-xl border border-emerald-200 transition-all cursor-pointer shadow-3xs flex items-center justify-center"
+                          title="تعديل بيانات الأستاذ ومهامه"
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => handleDeleteClick(e, teacher)}
+                          className="p-2 bg-red-50 hover:bg-red-100 active:scale-95 text-red-600 rounded-xl border border-red-200 transition-all cursor-pointer shadow-3xs flex items-center justify-center"
+                          title="حذف حساب الأستاذ نهائياً"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </>
+                    )}
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setPreselectedTeacherId(teacher.id);
+                        setIsBadgesModalOpen(true);
+                      }}
+                      className="p-2 bg-amber-50 hover:bg-amber-100 active:scale-95 text-amber-700 rounded-xl border border-amber-200 transition-all cursor-pointer shadow-3xs flex items-center justify-center"
+                      title="توليد شارة الاعتماد الرسمية"
+                    >
+                      <span className="text-sm leading-none">🪪</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleOpenTeacherDetail(teacher);
+                      }}
+                      className="p-2 bg-blue-50 hover:bg-blue-100 active:scale-95 text-blue-700 rounded-xl border border-blue-200 transition-all cursor-pointer shadow-3xs flex items-center justify-center"
+                      title="عرض تفاصيل الأستاذ"
+                    >
+                      <Eye className="h-4 w-4" />
+                    </button>
+                  </div>
 
-                     <div className="flex items-center gap-1.5 flex-wrap">
-                      {(userProfile?.role === 'CENTRAL_ADMIN' || userProfile?.role === 'SPORT_MANAGER') ? (
-                        <>
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleOpenEditRole(teacher);
-                            }}
-                            className="px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-bold text-[11px] rounded-lg border border-emerald-200 flex items-center gap-1 cursor-pointer transition-colors"
-                            title="تعديل بيانات الأستاذ ومهامه"
-                          >
-                            <Pencil className="h-3 w-3" />
-                            <span>تعديل</span>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={(e) => handleDeleteClick(e, teacher)}
-                            className="px-2.5 py-1 bg-red-50 hover:bg-red-100 text-red-600 font-bold text-[11px] rounded-lg border border-red-200 flex items-center gap-1 cursor-pointer transition-colors"
-                            title="حذف حساب الأستاذ نهائياً"
-                          >
-                            <Trash2 className="h-3 w-3" />
-                            <span>حذف</span>
-                          </button>
-                        </>
-                      ) : null}
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setPreselectedTeacherId(teacher.id);
-                          setIsBadgesModalOpen(true);
-                        }}
-                        className="px-2.5 py-1 bg-amber-50 hover:bg-amber-100 text-amber-700 font-bold text-[11px] rounded-lg border border-amber-200 flex items-center gap-1 cursor-pointer transition-colors"
-                        title="توليد شارة الاعتماد"
-                      >
-                        <span>🪪</span>
-                        <span>الشارة</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleOpenTeacherDetail(teacher);
-                        }}
-                        className="px-2.5 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold text-[11px] rounded-lg border border-blue-200 flex items-center gap-1 cursor-pointer transition-colors"
-                      >
-                        <Eye className="h-3 w-3" />
-                        <span>التفاصيل</span>
-                      </button>
+                  {/* Teacher Info Row */}
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-full bg-slate-100 border border-slate-200 text-slate-700 flex items-center justify-center font-bold text-sm shrink-0 overflow-hidden shadow-2xs">
+                      {teacher.photoUrl ? (
+                        <img src={teacher.photoUrl} alt={teacher.fullName} className="w-full h-full object-cover" />
+                      ) : (
+                        <span>{teacher.fullName[0].toUpperCase()}</span>
+                      )}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="font-bold text-slate-800 text-sm flex items-center gap-1.5 flex-wrap">
+                        <span>{teacher.fullName}</span>
+                        <span className={`text-[9px] font-bold px-1.5 py-0.2 rounded border ${getCadreBadge(teacher.teachingCadre).bg}`}>
+                          {getCadreBadge(teacher.teachingCadre).text}
+                        </span>
+                        {teacher.isTechCommitteeHead && (
+                          <span className="text-[9px] bg-blue-100 text-blue-800 font-black px-1.5 py-0.2 rounded border border-blue-200">
+                            رئيس لجنة
+                          </span>
+                        )}
+                        {teacher.isTechCommitteeMember && (
+                          <span className="text-[9px] bg-indigo-100 text-indigo-800 font-black px-1.5 py-0.2 rounded border border-indigo-200">
+                            عضو لجنة
+                          </span>
+                        )}
+                      </p>
+                      <p className="text-[10px] text-slate-400 font-medium truncate mt-0.5">{teacher.email}</p>
                     </div>
                   </div>
 
