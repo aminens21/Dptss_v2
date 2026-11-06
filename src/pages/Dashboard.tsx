@@ -1,0 +1,646 @@
+import React, { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../contexts/AuthContext';
+import { formatMatchDate } from '../lib/utils';
+import { DataService, deduplicateById, normalizeCategoryKey, isTeacherLevelAllowedForTournament } from '../lib/dataService';
+import { Match, Tournament, School, Venue, Referee, User } from '../types';
+import {
+  Trophy,
+  CalendarDays,
+  Users,
+  CheckCircle2,
+  Clock,
+  MapPin,
+  ArrowLeft,
+  ChevronLeft,
+  School as SchoolIcon,
+  AlertCircle,
+  BellRing,
+  Activity,
+  Plus,
+  BarChart3,
+  MessageSquare,
+  ShieldCheck,
+  QrCode
+} from 'lucide-react';
+import { CreateTournamentModal } from '../components/CreateTournamentModal';
+import { DailyWhatsAppNotificationCenter } from '../components/DailyWhatsAppNotificationCenter';
+import { FinishLineScannerModal } from '../components/FinishLineScannerModal';
+import { PWAInstallButton } from '../components/PWAInstallButton';
+import { AppLogo } from '../components/AppLogo';
+import { PermissionsModal } from '../components/PermissionsModal';
+import toast from 'react-hot-toast';
+
+export const Dashboard: React.FC = () => {
+  const { userProfile, openProfileModal } = useAuth();
+  const navigate = useNavigate();
+  const [stats, setStats] = useState({
+    tournaments: 0,
+    matches: 0,
+    schools: 0,
+    completedMatches: 0
+  });
+  const [tournaments, setTournaments] = useState<Tournament[]>([]);
+  const [matches, setMatches] = useState<Match[]>([]);
+  const [schools, setSchools] = useState<School[]>([]);
+  const [venues, setVenues] = useState<Venue[]>([]);
+  const [referees, setReferees] = useState<Referee[]>([]);
+  const [teachers, setTeachers] = useState<User[]>([]);
+  const [recentMatches, setRecentMatches] = useState<Match[]>([]);
+  const [teacherMatches, setTeacherMatches] = useState<Match[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [isTournamentModalOpen, setIsTournamentModalOpen] = useState(false);
+  const [isFinishLineScannerOpen, setIsFinishLineScannerOpen] = useState(false);
+  const [isPermissionsModalOpen, setIsPermissionsModalOpen] = useState(false);
+
+  const isCentralAdmin = userProfile?.role === 'CENTRAL_ADMIN';
+  const isRegionalManager = (userProfile?.role as any) === 'REGIONAL_MANAGER';
+  const isSportManager = userProfile?.role === 'SPORT_MANAGER';
+  const isTechCommitteeHead = userProfile?.isTechCommitteeHead === true;
+  const isTeacher = userProfile?.role === 'TEACHER';
+  const isReferee = userProfile?.role === 'REFEREE';
+
+  // Only Central Admin, Regional Manager, Sport Manager, and Technical Committee Heads can view the WhatsApp Notification Center.
+  // Ordinary teachers and referees will not see this window at all; they receive notifications via the bell.
+  const canAccessWhatsAppNotificationCenter =
+    isCentralAdmin || isRegionalManager || isSportManager || isTechCommitteeHead;
+
+  useEffect(() => {
+    loadDashboardData();
+    const handleDirChange = () => {
+      loadDashboardData();
+    };
+
+    const unsubscribeTournaments = DataService.subscribeToTournaments(() => {
+      loadDashboardData();
+    });
+
+    const unsubscribeMatches = DataService.subscribeToMatches(() => {
+      loadDashboardData();
+    });
+
+    const unsubscribeSchools = DataService.subscribeToSchools(() => {
+      loadDashboardData();
+    });
+
+    const unsubscribeVenues = DataService.subscribeToVenues(() => {
+      loadDashboardData();
+    });
+
+    const unsubscribeStudents = DataService.subscribeToStudents(() => {
+      loadDashboardData();
+    });
+
+    const unsubscribeReferees = DataService.subscribeToReferees(() => {
+      loadDashboardData();
+    });
+
+    const unsubscribeUsers = DataService.subscribeToUsers(() => {
+      loadDashboardData();
+    });
+
+    const unsubscribeCC = DataService.subscribeCrossCountryResults(() => {
+      loadDashboardData();
+    });
+
+    window.addEventListener('directorateChanged', handleDirChange);
+    window.addEventListener('seasonChanged', handleDirChange);
+    return () => {
+      window.removeEventListener('directorateChanged', handleDirChange);
+      window.removeEventListener('seasonChanged', handleDirChange);
+      if (unsubscribeTournaments) unsubscribeTournaments();
+      if (unsubscribeMatches) unsubscribeMatches();
+      if (unsubscribeSchools) unsubscribeSchools();
+      if (unsubscribeVenues) unsubscribeVenues();
+      if (unsubscribeStudents) unsubscribeStudents();
+      if (unsubscribeReferees) unsubscribeReferees();
+      if (unsubscribeUsers) unsubscribeUsers();
+      if (unsubscribeCC) unsubscribeCC();
+    };
+  }, []);
+
+  const loadDashboardData = async () => {
+    try {
+      const activeDirId = DataService.getActiveDirectorateId();
+      const [tList, mList, sList, vList, rList, uList] = await Promise.all([
+        DataService.getTournaments(),
+        DataService.getMatches(),
+        DataService.getSchools(),
+        DataService.getVenues(),
+        DataService.getReferees(),
+        DataService.getUsers()
+      ]);
+
+      const dirMatches = mList.filter(m => !activeDirId || activeDirId === 'all' || (m.directorateId || 'taourirt') === activeDirId || (!m.directorateId && activeDirId === 'taourirt'));
+      const dirSchools = sList.filter(s => (s.directorateId || 'taourirt') === activeDirId);
+      const dirVenues = vList.filter(v => (v.directorateId || 'taourirt') === activeDirId);
+      const dirReferees = rList.filter(r => (r.directorateId || 'taourirt') === activeDirId);
+      const dirTeachers = uList.filter(u => (u.directorateId || 'taourirt') === activeDirId);
+
+      const completed = dirMatches.filter(m => m.status === 'Completed').length;
+
+      const dirTournaments = tList.filter(t => (t.directorateId || 'taourirt') === activeDirId);
+
+      setTournaments(dirTournaments);
+      setMatches(dirMatches);
+      setSchools(deduplicateById<School>(dirSchools));
+      setVenues(dirVenues);
+      setReferees(dirReferees);
+      setTeachers(dirTeachers);
+
+      let displayTournamentsCount = dirTournaments.length;
+      let displaySchoolsCount = dirSchools.length;
+
+      if (userProfile?.role === 'TEACHER') {
+        displaySchoolsCount = 1;
+        const teacherCadre = userProfile.teachingCadre;
+        const activeTeacherTourns = dirTournaments.filter(t => 
+          t.status !== 'Draft' && 
+          (t as any).isActive !== false &&
+          (!teacherCadre || isTeacherLevelAllowedForTournament(teacherCadre, t.level))
+        );
+        displayTournamentsCount = activeTeacherTourns.length;
+      }
+
+      setStats({
+        tournaments: displayTournamentsCount,
+        matches: dirMatches.length,
+        schools: displaySchoolsCount,
+        completedMatches: completed
+      });
+      setRecentMatches(dirMatches.slice(0, 5));
+
+      if (userProfile?.role === 'TEACHER') {
+        const tMatches = mList.filter(m => 
+          m.referee1Id === userProfile.id || 
+          m.referee2Id === userProfile.id || 
+          (m.referees && m.referees.some(r => 
+            r === userProfile.id || 
+            r === userProfile.fullName || 
+            r.includes(userProfile.fullName) || 
+            (userProfile.fullName && userProfile.fullName.includes(r))
+          ))
+        ).filter(m => m.status !== 'Completed')
+         .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+        setTeacherMatches(tMatches);
+      }
+
+    } catch (error) {
+      console.error("Error loading dashboard data:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCreateTournament = async (newTourns: Omit<Tournament, 'id'> | Omit<Tournament, 'id'>[]) => {
+    try {
+      const items = Array.isArray(newTourns) ? newTourns : [newTourns];
+      if (items.length === 0) return;
+
+      const targetSportId = items[0].sportId;
+      const targetSeasonId = items[0].seasonId;
+      const targetDirId = items[0].directorateId || DataService.getActiveDirectorateId();
+
+      const latestTournaments = await DataService.getTournaments();
+      const existingSportTournaments = latestTournaments.filter(t => 
+        t.sportId === targetSportId && 
+        (!t.seasonId || !targetSeasonId || t.seasonId === targetSeasonId) &&
+        (!targetDirId || !t.directorateId || (t.directorateId || 'taourirt') === (targetDirId || 'taourirt'))
+      );
+
+      if (existingSportTournaments.length === 0) {
+        for (const item of items) {
+          await DataService.addTournament(item);
+        }
+      } else {
+        const matchedExistingIds = new Set<string>();
+        const itemToExistingIdMap = new Map<number, string>();
+
+        items.forEach((item, idx) => {
+          const exact = existingSportTournaments.find(existing => {
+            if (matchedExistingIds.has(existing.id)) return false;
+            return (
+              normalizeCategoryKey(existing.ageCategory) === normalizeCategoryKey(item.ageCategory) &&
+              existing.gender === item.gender &&
+              (existing.affiliationType || 'non_club') === (item.affiliationType || 'non_club')
+            );
+          });
+          if (exact) {
+            matchedExistingIds.add(exact.id);
+            itemToExistingIdMap.set(idx, exact.id);
+          }
+        });
+
+        items.forEach((item, idx) => {
+          if (itemToExistingIdMap.has(idx)) return;
+          const remaining = existingSportTournaments.find(existing => !matchedExistingIds.has(existing.id));
+          if (remaining) {
+            matchedExistingIds.add(remaining.id);
+            itemToExistingIdMap.set(idx, remaining.id);
+          }
+        });
+
+        for (let idx = 0; idx < items.length; idx++) {
+          const item = items[idx];
+          const existingId = itemToExistingIdMap.get(idx);
+
+          if (existingId) {
+            await DataService.updateTournament(existingId, {
+              name: item.name,
+              startDate: item.startDate,
+              endDate: item.endDate,
+              registrationDeadline: item.registrationDeadline,
+              level: item.level,
+              scope: item.scope,
+              status: item.status,
+              description: item.description,
+              affiliationType: item.affiliationType,
+              seasonId: item.seasonId,
+              gender: item.gender,
+              ageCategory: item.ageCategory,
+              sportId: item.sportId,
+              directorateId: item.directorateId
+            });
+          } else {
+            await DataService.addTournament(item);
+          }
+        }
+
+        const toDelete = existingSportTournaments.filter(existing => !matchedExistingIds.has(existing.id));
+        for (const rem of toDelete) {
+          await DataService.deleteTournament(rem.id);
+        }
+      }
+
+      const newSelectedCats = Array.from(new Set(items.map(i => normalizeCategoryKey(i.ageCategory)).filter(Boolean)));
+
+      await DataService.updateSportCategories(
+        targetSportId, 
+        newSelectedCats, 
+        undefined, 
+        undefined, 
+        undefined, 
+        undefined, 
+        true
+      );
+
+      toast.success('تمت إضافة وتعديل إعدادات البطولة بنجاح!');
+      loadDashboardData();
+    } catch (e) {
+      console.error(e);
+      toast.error('حدث خطأ أثناء حفظ إعدادات البطولة');
+    }
+  };
+
+  return (
+    <div className="space-y-6" dir="rtl">
+      {/* Welcome Banner - Coordinated with Homepage Day Mode */}
+      <div className="bg-linear-to-r from-indigo-900 via-slate-900 to-black rounded-3xl p-5 sm:p-6 text-white shadow-xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 border border-indigo-500/20 relative overflow-hidden">
+        <div className="absolute -left-10 -bottom-10 w-48 h-48 bg-indigo-500/10 rounded-full blur-2xl pointer-events-none"></div>
+        <div className="flex items-start gap-3.5 min-w-0 relative z-10">
+          <AppLogo size={56} className="shrink-0 drop-shadow-md" />
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+              <span className="bg-indigo-500/20 border border-indigo-400/30 text-indigo-300 text-[10px] font-black px-2.5 py-0.5 rounded-full uppercase">
+                {isTeacher ? 'فضاء أستاذ التربية البدنية' : isSportManager ? 'فضاء مسؤول النشاط الرياضي' : 'لوحة الإدارة الإقليمية'}
+              </span>
+              <span className="text-indigo-200/70 text-xs font-bold">| الفرع الإقليمي للرياضة المدرسية</span>
+            </div>
+            <h2 className="text-base sm:text-lg md:text-xl font-black text-white">
+              مرحباً بك، {userProfile?.fullName || (isTeacher ? 'الأستاذ' : isSportManager ? 'مسؤول النشاط' : 'المسير المركزي')} 👋
+            </h2>
+            <p className="text-xs text-indigo-100/80 mt-1 max-w-xl leading-relaxed">
+              {isTeacher
+                ? 'متابعة فورية للمقابلات المبرمجة، ملاعب وقاعات التباري، وجداول النتائج الرسمية المحينة أولاً بأول.'
+                : isSportManager
+                ? 'برمجة وإدارة مباريات البطولة، إضافة وتعديل المؤسسات والفرق المشاركة، وإدارة مراكز التباري.'
+                : 'متابعة فورية للأنشطة والبطولات الرياضية المدرسية، تعيين لجان التحكيم، وبرمجة الإقصائيات الإقليمية.'}
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 self-start sm:self-auto flex-wrap relative z-10">
+          {/* Statistics button hidden as requested */}
+
+          {isCentralAdmin ? (
+            <button
+              onClick={() => setIsTournamentModalOpen(true)}
+              className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl text-xs font-black flex items-center gap-2 shadow-md shadow-indigo-500/20 active:scale-98 transition-all cursor-pointer shrink-0"
+            >
+              <Plus className="h-4 w-4" />
+              <span>إضافة بطولة جديدة</span>
+            </button>
+          ) : isSportManager ? (
+            <button
+              onClick={() => navigate('/matches')}
+              className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl text-xs font-black flex items-center gap-2 shadow-md shadow-indigo-500/20 active:scale-98 transition-all cursor-pointer shrink-0"
+            >
+              <Plus className="h-4 w-4" />
+              <span>برمجة مباراة جديدة</span>
+            </button>
+          ) : (
+            <button
+              onClick={() => navigate('/matches')}
+              className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl text-xs font-black flex items-center gap-2 shadow-md shadow-indigo-500/20 active:scale-98 transition-all cursor-pointer shrink-0"
+            >
+              <CalendarDays className="h-4 w-4" />
+              <span>استعراض جدول المقابلات</span>
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* PWA Mobile App Installation Banner hidden as requested */}
+
+      {/* Teacher Profile Incomplete Banner (Gentle Non-blocking notice) */}
+      {isTeacher && (!userProfile?.workLocation || !userProfile?.leaseNumber) && (
+        <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 text-amber-900 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-amber-100 text-amber-700 rounded-xl shrink-0">
+              <AlertCircle className="w-5 h-5" />
+            </div>
+            <div>
+              <h4 className="text-xs font-black text-amber-950">بيانات الأستاذ(ة) والمؤسسة غير مكتملة</h4>
+              <p className="text-[11px] text-amber-800 mt-0.5">
+                يرجى استكمال مقر العمل ورقم التأجير لتسهيل التواصل والتعيين في لجان التحكيم.
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={openProfileModal}
+            className="bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold px-4 py-2 rounded-xl transition-all shadow-xs cursor-pointer shrink-0 text-center"
+          >
+            استكمال الملف الشخصي ✍️
+          </button>
+        </div>
+      )}
+
+      {/* Daily WhatsApp Notification Center - Only for authorized roles */}
+      {canAccessWhatsAppNotificationCenter && (
+        <DailyWhatsAppNotificationCenter
+          matches={matches}
+          schools={schools}
+          tournaments={tournaments}
+          venues={venues}
+          referees={referees}
+          teachers={teachers}
+          onRefresh={loadDashboardData}
+        />
+      )}
+
+      {/* High Density 4-Column Stat Cards */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        {/* Card 1 */}
+        <div
+          onClick={() => navigate('/tournaments')}
+          className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs hover:border-emerald-300 dark:hover:border-emerald-700 hover:shadow-sm transition-all cursor-pointer"
+        >
+          <p className="text-[10px] text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider mb-1">
+            {userProfile?.role === 'TEACHER' ? 'البطولات المفعلة' : 'إجمالي البطولات'}
+          </p>
+          <div className="flex items-end justify-between">
+            <h3 className="text-2xl font-black text-slate-800 dark:text-white tracking-tight">
+              {stats.tournaments}
+            </h3>
+            <span className="text-emerald-700 dark:text-emerald-400 text-[10px] font-bold bg-emerald-50 dark:bg-emerald-950/50 px-2 py-0.5 rounded border border-emerald-200 dark:border-emerald-800">
+              عرض البطولات ←
+            </span>
+          </div>
+        </div>
+
+        {/* Card 2 */}
+        <div
+          onClick={() => navigate('/matches')}
+          className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs hover:border-emerald-300 dark:hover:border-emerald-700 hover:shadow-sm transition-all cursor-pointer"
+        >
+          <p className="text-[10px] text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider mb-1">المباريات المبرمجة</p>
+          <div className="flex items-end justify-between">
+            <h3 className="text-2xl font-black text-slate-800 dark:text-white tracking-tight">
+              {stats.matches}
+            </h3>
+            <span className="text-emerald-700 dark:text-emerald-400 text-[10px] font-bold bg-emerald-50 dark:bg-emerald-950/50 px-2 py-0.5 rounded border border-emerald-200 dark:border-emerald-800">
+              برنامج المباريات ←
+            </span>
+          </div>
+        </div>
+
+        {/* Card 3 */}
+        <div
+          onClick={() => navigate('/schools')}
+          className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs hover:border-slate-300 dark:hover:border-slate-700 hover:shadow-sm transition-all cursor-pointer"
+        >
+          <p className="text-[10px] text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider mb-1">
+            {userProfile?.role === 'TEACHER' ? 'مؤسستي التعليمية' : 'المؤسسات المشاركة'}
+          </p>
+          <div className="flex items-end justify-between">
+            <h3 className="text-2xl font-black text-slate-800 dark:text-white tracking-tight">
+              {stats.schools}
+            </h3>
+            <span className="text-slate-700 dark:text-slate-300 text-[10px] font-bold bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded border border-slate-200 dark:border-slate-700">
+              {userProfile?.role === 'TEACHER' ? 'مؤسستي' : 'دليل المؤسسات'}
+            </span>
+          </div>
+        </div>
+
+        {/* Card 4 */}
+        <div
+          onClick={() => navigate('/statistics')}
+          className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs hover:border-amber-300 dark:hover:border-amber-700 hover:shadow-sm transition-all cursor-pointer"
+        >
+          <p className="text-[10px] text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider mb-1">المباريات المنجزة والإحصائيات</p>
+          <div className="flex items-end justify-between">
+            <h3 className="text-2xl font-black text-slate-800 dark:text-white tracking-tight">
+              {stats.completedMatches}
+            </h3>
+            <span className="text-amber-800 dark:text-amber-300 text-[10px] font-bold bg-amber-50 dark:bg-amber-950/50 px-2 py-0.5 rounded border border-amber-200 dark:border-amber-800">
+              النتائج والترتيب 🏆
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {/* Main Content Grid */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+        {/* Matches Section */}
+        <div className="lg:col-span-2 flex flex-col gap-6">
+          
+          {/* Teacher Refereeing Matches */}
+          {isTeacher && teacherMatches.length > 0 && (
+            <div className="flex flex-col bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs overflow-hidden">
+              <div className="p-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-emerald-50/60 dark:bg-emerald-950/30">
+                <h4 className="text-xs md:text-sm font-black text-emerald-900 dark:text-emerald-200 flex items-center gap-2">
+                  <span className="text-xl">哨</span>
+                  <span>المباريات التي تم تعييني كحكم فيها</span>
+                </h4>
+              </div>
+              <div className="flex-1 p-4 space-y-3">
+                {teacherMatches.map((m) => (
+                  <div
+                    key={m.id}
+                    onClick={() => navigate('/matches')}
+                    className="flex items-center gap-3 p-3 border border-emerald-100 dark:border-emerald-900/40 rounded-xl hover:border-emerald-300 hover:bg-emerald-50/50 dark:hover:bg-emerald-950/20 transition-all cursor-pointer bg-emerald-50/20 dark:bg-emerald-950/10"
+                  >
+                    <div className="w-20 text-center border-l border-emerald-100 dark:border-emerald-900/50 pl-2">
+                      <p className="text-[10px] font-bold text-slate-500 dark:text-slate-400 mb-0.5">{formatMatchDate(m.date)}</p>
+                      <p className="text-sm font-black text-emerald-700 dark:text-emerald-400">{m.startTime}</p>
+                      <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold mt-0.5">
+                        {m.status === 'Ongoing' ? 'جارية الآن' : 'في الانتظار'}
+                      </p>
+                    </div>
+                    <div className="flex-1 flex flex-col px-2 gap-1.5">
+                      <span className="font-bold text-sm text-slate-800 dark:text-white">
+                        {m.stage || 'مباراة'}
+                      </span>
+                      <div className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400 font-medium">
+                        <CalendarDays className="h-3.5 w-3.5 text-slate-400" />
+                        <span>يوم: {formatMatchDate(m.date)}</span>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="flex flex-col bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs overflow-hidden">
+            <div className="p-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-slate-50/60 dark:bg-slate-800/40">
+              <h4 className="text-xs md:text-sm font-black text-slate-800 dark:text-white flex items-center gap-2">
+                <CalendarDays className="h-4 w-4 text-emerald-600" />
+                <span>أحدث المباريات والبرمجة الإقليمية</span>
+              </h4>
+              <button
+                onClick={() => navigate('/matches')}
+                className="text-emerald-600 hover:text-emerald-700 dark:text-emerald-400 text-xs font-bold hover:underline flex items-center gap-1 cursor-pointer"
+              >
+                <span>البرنامج الكامل</span>
+                <ChevronLeft className="h-3.5 w-3.5" />
+              </button>
+            </div>
+
+            <div className="flex-1 p-4 space-y-3">
+              {recentMatches.map((m) => (
+                <div
+                  key={m.id}
+                  onClick={() => navigate('/matches')}
+                  className="flex items-center gap-3 p-3 border border-slate-100 dark:border-slate-800 rounded-xl hover:border-emerald-200 dark:hover:border-emerald-800 hover:bg-emerald-50/20 dark:hover:bg-emerald-950/20 transition-all cursor-pointer"
+                >
+                  <div className="w-20 text-center border-l border-slate-100 dark:border-slate-800 pl-2 shrink-0">
+                    <p className="text-[10px] font-bold text-slate-500 dark:text-slate-400 mb-0.5">{formatMatchDate(m.date)}</p>
+                    <p className="text-xs font-bold text-emerald-600 dark:text-emerald-400">{m.startTime || '10:00'}</p>
+                    <p className="text-[10px] text-slate-400 font-medium">
+                      {m.status === 'Completed' ? 'انتهت' : m.status === 'Ongoing' ? 'مباشر' : 'مبرمجة'}
+                    </p>
+                  </div>
+                  <div className="flex-1 flex items-center justify-between px-2">
+                    <span className="font-bold text-xs text-slate-800 dark:text-slate-200">
+                      {m.stage || 'مباراة إقليمية'}
+                    </span>
+                    <div className="font-black text-xs px-2.5 py-1 bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 rounded-md border border-slate-200 dark:border-slate-700">
+                      {m.status === 'Completed' ? `${m.score1 || 0} - ${m.score2 || 0}` : 'مقابلة مبرمجة'}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* Side Panel: Quick Actions & Alerts */}
+        <div className="space-y-4">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl p-4 border border-slate-200 dark:border-slate-800 shadow-xs">
+            <h4 className="text-xs font-black text-slate-800 dark:text-white mb-3 flex items-center gap-2">
+              <Trophy className="h-4 w-4 text-amber-500" />
+              <span>{userProfile?.role === 'TEACHER' ? 'روابط سريعة للأستاذ' : 'إجراءات سريعة للمسير'}</span>
+            </h4>
+            <div className="space-y-2">
+              {isTeacher && (
+                <button
+                  onClick={openProfileModal}
+                  className="w-full text-right p-2.5 bg-emerald-50 hover:bg-emerald-100/90 text-emerald-900 rounded-xl text-xs font-bold flex items-center justify-between transition-colors cursor-pointer border border-emerald-200/80"
+                >
+                  <span className="flex items-center gap-1.5">
+                    <span>👤</span>
+                    <span>تعديل بياناتي وصورتي وتخصصات التحكيم</span>
+                  </span>
+                  <span>←</span>
+                </button>
+              )}
+              {isCentralAdmin && (
+                <button
+                  onClick={() => setIsTournamentModalOpen(true)}
+                  className="w-full text-right p-2.5 bg-emerald-50 hover:bg-emerald-100/90 text-emerald-900 rounded-xl text-xs font-bold flex items-center justify-between transition-colors cursor-pointer border border-emerald-200/80"
+                >
+                  <span>➕ برمجة بطولة إقليمية جديدة</span>
+                  <span>←</span>
+                </button>
+              )}
+              <button
+                onClick={() => navigate('/statistics')}
+                className="w-full text-right p-2.5 bg-amber-50 hover:bg-amber-100/90 text-amber-900 rounded-xl text-xs font-bold flex items-center justify-between transition-colors cursor-pointer border border-amber-200/80"
+              >
+                <span>📊 إحصائيات وترتيب المؤسسات</span>
+                <span>←</span>
+              </button>
+              <button
+                onClick={() => navigate('/matches')}
+                className="w-full text-right p-2.5 bg-slate-50 hover:bg-slate-100 text-slate-700 rounded-xl text-xs font-bold flex items-center justify-between transition-colors cursor-pointer border border-slate-200"
+              >
+                <span>📅 جدول المقابلات والنتائج</span>
+                <span>←</span>
+              </button>
+              <button
+                onClick={() => navigate('/tournaments')}
+                className="w-full text-right p-2.5 bg-slate-50 hover:bg-slate-100 text-slate-700 rounded-xl text-xs font-bold flex items-center justify-between transition-colors cursor-pointer border border-slate-200"
+              >
+                <span>🏆 البطولات الإقليمية المبرمجة</span>
+                <span>←</span>
+              </button>
+              <button
+                onClick={() => navigate('/schools')}
+                className="w-full text-right p-2.5 bg-slate-50 hover:bg-slate-100 text-slate-700 rounded-xl text-xs font-bold flex items-center justify-between transition-colors cursor-pointer border border-slate-200"
+              >
+                <span>🏫 المؤسسات والفرق المشاركة</span>
+                <span>←</span>
+              </button>
+            </div>
+          </div>
+
+          {canAccessWhatsAppNotificationCenter && (
+            <div className="bg-gradient-to-br from-emerald-50 to-teal-50/50 p-4 rounded-xl border border-emerald-100 text-slate-700 text-xs">
+              <h5 className="font-bold text-emerald-900 mb-1 flex items-center gap-1.5">
+                <MessageSquare className="w-3.5 h-3.5 text-emerald-600" />
+                <span>تذكير الواتساب التلقائي</span>
+              </h5>
+              <p className="text-[11px] text-emerald-800/90 leading-relaxed">
+                يمكنك بضغطة زر واحدة إرسال تفاصيل المباراة وموعد الحضور مباشرة إلى واتساب الحكام والمؤطرين ومدراء المؤسسات.
+              </p>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Modals */}
+      <CreateTournamentModal
+        isOpen={isTournamentModalOpen}
+        onClose={() => setIsTournamentModalOpen(false)}
+        onCreated={handleCreateTournament}
+      />
+
+      {isFinishLineScannerOpen && (
+        <FinishLineScannerModal
+          isOpen={isFinishLineScannerOpen}
+          onClose={() => setIsFinishLineScannerOpen(false)}
+          onResultsUpdated={loadDashboardData}
+        />
+      )}
+
+      <PermissionsModal
+        isOpen={isPermissionsModalOpen}
+        onClose={() => setIsPermissionsModalOpen(false)}
+      />
+    </div>
+  );
+};
+

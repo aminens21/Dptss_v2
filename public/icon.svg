@@ -1,0 +1,161 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 240" width="512" height="512">
+  <defs>
+    <filter id="logoShadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="2" stdDeviation="2.5" flood-color="#000000" flood-opacity="0.25" />
+    </filter>
+    <linearGradient id="goldCrown" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fef08a" />
+      <stop offset="50%" stop-color="#eab308" />
+      <stop offset="100%" stop-color="#ca8a04" />
+    </linearGradient>
+    <linearGradient id="moroccoRed" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#dc2626" />
+      <stop offset="100%" stop-color="#991b1b" />
+    </linearGradient>
+    <linearGradient id="moroccoGreen" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#15803d" />
+      <stop offset="100%" stop-color="#065f46" />
+    </linearGradient>
+    <linearGradient id="skyBlue" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#38bdf8" />
+      <stop offset="100%" stop-color="#0284c7" />
+    </linearGradient>
+  </defs>
+
+  {/* --- 1. Top Moroccan Crown --- */}
+  <g id="crown" filter="url(#logoShadow)">
+    <polygon
+      points="100,6 102.5,13.5 110,13.5 104,18 106.5,25.5 100,21 93.5,25.5 96,18 90,13.5 97.5,13.5"
+      fill="#15803d"
+      stroke="#166534"
+      stroke-width="0.8"
+    />
+    <path
+      d="M 85 30 Q 100 18 115 30 Q 128 36 122 46 Q 100 40 78 46 Q 72 36 85 30 Z"
+      fill="url(#goldCrown)"
+      stroke="#92400e"
+      stroke-width="1.2"
+    />
+    <circle cx="100" cy="27" r="2.5" fill="#dc2626" />
+    <circle cx="88" cy="31" r="2" fill="#15803d" />
+    <circle cx="112" cy="31" r="2" fill="#15803d" />
+    <path
+      d="M 76 46 L 124 46 L 121 53 L 79 53 Z"
+      fill="url(#goldCrown)"
+      stroke="#92400e"
+      stroke-width="1"
+    />
+    <line x1="79" y1="49.5" x2="121" y2="49.5" stroke="#dc2626" stroke-width="1.5" />
+  </g>
+
+  {/* --- 2. Main Circular Red Ring --- */}
+  <g id="main-circle" filter="url(#logoShadow)">
+    <circle cx="100" cy="115" r="62" fill="url(#moroccoRed)" stroke="#ffffff" stroke-width="2.5" />
+    <circle cx="100" cy="115" r="59" fill="none" stroke="#fef08a" stroke-width="1" opacity="0.8" />
+  </g>
+
+  {/* --- 3. Athletes Silhouettes in Ring --- */}
+  <g id="athletes" fill="#ffffff" opacity="0.95">
+    <circle cx="68" cy="76" r="3.2" />
+    <path d="M 68 80 L 64 92 L 58 97 M 68 83 L 75 90 L 71 98 M 64 85 L 58 84 M 68 84 L 74 81" stroke="#ffffff" stroke-width="2" stroke-linecap="round" />
+
+    <circle cx="132" cy="74" r="3.2" />
+    <path d="M 132 78 L 136 89 L 144 91 M 132 82 L 126 89 L 128 97 M 132 82 L 140 78 M 132 83 L 124 81" stroke="#ffffff" stroke-width="2" stroke-linecap="round" />
+
+    <circle cx="147" cy="115" r="3.2" fill="#86efac" />
+    <path d="M 147 119 L 144 130 L 148 139 M 147 122 L 138 126 L 135 133 M 147 122 L 153 114" stroke="#86efac" stroke-width="2" stroke-linecap="round" />
+    <circle cx="155" cy="111" r="2.8" fill="#fef08a" />
+
+    <circle cx="128" cy="151" r="3" fill="#86efac" />
+    <path d="M 128 154 L 122 163 L 115 165 M 128 156 L 135 164 L 141 163" stroke="#86efac" stroke-width="2" stroke-linecap="round" />
+    <circle cx="111" cy="166" r="2.5" fill="#ffffff" />
+
+    <circle cx="70" cy="151" r="3" />
+    <path d="M 70 154 L 75 163 L 83 166 M 70 156 L 63 163 L 59 161" stroke="#ffffff" stroke-width="2" stroke-linecap="round" />
+
+    <circle cx="53" cy="115" r="3.2" fill="#86efac" />
+    <path d="M 53 119 L 56 128 L 51 137 M 53 122 L 61 125 L 63 133 M 53 122 L 46 113" stroke="#86efac" stroke-width="2" stroke-linecap="round" />
+    <circle cx="43" cy="110" r="2.8" fill="#fef08a" />
+  </g>
+
+  {/* --- 4. Central Education Core (Blue Sky + Book + Track) --- */}
+  <g id="center-core">
+    <circle cx="100" cy="115" r="37" fill="#ffffff" stroke="#f59e0b" stroke-width="1.5" />
+    <path d="M 64 115 A 36 36 0 0 1 136 115 Z" fill="url(#skyBlue)" />
+
+    <path d="M 64 115 A 36 36 0 0 0 136 115 Z" fill="#92400e" />
+    <line x1="68" y1="122" x2="132" y2="122" stroke="#ffffff" stroke-width="1.2" opacity="0.8" />
+    <line x1="72" y1="129" x2="128" y2="129" stroke="#ffffff" stroke-width="1.2" opacity="0.8" />
+    <line x1="78" y1="136" x2="122" y2="136" stroke="#ffffff" stroke-width="1.2" opacity="0.8" />
+    <line x1="86" y1="143" x2="114" y2="143" stroke="#ffffff" stroke-width="1.2" opacity="0.8" />
+
+    <g filter="url(#logoShadow)">
+      <path
+        d="M 100 120 C 92 114 77 114 69 119 C 69 104 84 94 100 100 Z"
+        fill="#ffffff"
+        stroke="#e2e8f0"
+        stroke-width="1"
+      />
+      <path
+        d="M 100 120 C 108 114 123 114 131 119 C 131 104 116 94 100 100 Z"
+        fill="#ffffff"
+        stroke="#e2e8f0"
+        stroke-width="1"
+      />
+      <line x1="100" y1="100" x2="100" y2="121" stroke="#cbd5e1" stroke-width="1.5" />
+      <line x1="75" y1="110" x2="94" y2="107" stroke="#94a3b8" stroke-width="0.8" />
+      <line x1="74" y1="114" x2="95" y2="111" stroke="#94a3b8" stroke-width="0.8" />
+      <line x1="106" y1="107" x2="125" y2="110" stroke="#94a3b8" stroke-width="0.8" />
+      <line x1="105" y1="111" x2="126" y2="114" stroke="#94a3b8" stroke-width="0.8" />
+    </g>
+  </g>
+
+  {/* --- 5. Green Curved Banner with Arabic Title --- */}
+  <g id="green-banner" filter="url(#logoShadow)">
+    <path
+      d="M 15 152 Q 100 206 185 152 L 198 166 Q 100 226 2 166 Z"
+      fill="url(#moroccoGreen)"
+      stroke="#ffffff"
+      stroke-width="1.5"
+    />
+    <path
+      d="M 17 155 Q 100 208 183 155"
+      fill="none"
+      stroke="#fef08a"
+      stroke-width="1"
+    />
+    <path
+      id="textPathGreen"
+      d="M 18 162 Q 100 216 182 162"
+      fill="none"
+    />
+    <text fill="#ffffff" font-size="9.5" font-weight="900" font-family="'Tajawal', 'Cairo', sans-serif">
+      <textPath href="#textPathGreen" startOffset="50%" text-anchor="middle">
+        الجامعة الملكية المغربية للرياضة المدرسية
+      </textPath>
+    </text>
+  </g>
+
+  {/* --- 6. Bottom Red Ribbon (F.R.M.S.S.) --- */}
+  <g id="red-ribbon" filter="url(#logoShadow)">
+    <path d="M 28 200 L 46 195 L 42 225 L 22 226 L 31 213 Z" fill="#065f46" stroke="#ffffff" stroke-width="0.8" />
+    <path d="M 172 200 L 154 195 L 158 225 L 178 226 L 169 213 Z" fill="#065f46" stroke="#ffffff" stroke-width="0.8" />
+
+    <path
+      d="M 36 195 Q 100 230 164 195 L 160 218 Q 100 252 40 218 Z"
+      fill="url(#moroccoRed)"
+      stroke="#ffffff"
+      stroke-width="1.2"
+    />
+    <path
+      id="textPathRed"
+      d="M 40 210 Q 100 242 160 210"
+      fill="none"
+    />
+    <text fill="#ffffff" font-size="13" font-weight="900" letter-spacing="3.5" font-family="'Arial Black', 'Trebuchet MS', sans-serif">
+      <textPath href="#textPathRed" startOffset="50%" text-anchor="middle">
+        F.R.M.S.S.
+      </textPath>
+    </text>
+  </g>
+</svg>
