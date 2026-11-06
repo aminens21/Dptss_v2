@@ -145,6 +145,7 @@ export interface School {
   principalPhone?: string; // هاتف مدير المؤسسة
   directorateId?: string;
   accessCode?: string; // القن السري لولوج وإدارة المؤسسة من طرف الأستاذ المنسق
+  studentLimit?: number; // سقف أقصى عدد من التلاميذ المسموح بمشاركتهم من هذه المؤسسة في البطولات
 }
 
 export interface Team {

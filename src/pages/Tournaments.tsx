@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { DataService, SPORTS_MAP, getAgeCategoriesForSeason, deduplicateById, getCategoryGenderLabel, isClubTournament, normalizeCategoryKey, getTournamentLevelAr, isTeacherLevelAllowedForTournament } from '../lib/dataService';
+import { DataService, SPORTS_MAP, getAgeCategoriesForSeason, deduplicateById, getCategoryGenderLabel, isClubTournament, normalizeCategoryKey, getTournamentLevelAr, isTeacherLevelAllowedForTournament, getCustomCategoryName } from '../lib/dataService';
 import { Tournament, User, Student, School, Sport, Match, Directorate } from '../types';
 import { CountdownTimer } from '../components/CountdownTimer';
 import * as XLSX from 'xlsx';
@@ -175,7 +175,7 @@ export const Tournaments: React.FC = () => {
   }, [activeBranch, hasRegionalQualification, hasNationalQualification, loading, setSearchParams]);
 
   // Helper to format category for badges elegantly in Arabic
-  const formatCategoryBadge = (catId: string, sportTournaments: Tournament[] = []) => {
+  const formatCategoryBadge = (catId: string, sportTournaments: Tournament[] = [], sportId?: string) => {
     const norm = normalizeCategoryKey(catId);
     const match = activeSeason.match(/(\d{4})/);
     const startYear = match ? parseInt(match[1], 10) : 2026;
@@ -184,7 +184,13 @@ export const Tournaments: React.FC = () => {
     const catTournaments = sportTournaments.filter(t => normalizeCategoryKey(t.ageCategory) === norm);
     const hasMale = catTournaments.some(t => t.gender === 'Male' || t.gender === 'Mixed');
     const hasFemale = catTournaments.some(t => t.gender === 'Female' || t.gender === 'Mixed');
-    
+
+    // Custom age categories (e.g. 'cat_1793910455460_TEFB') are not U12/U15/U18/U20
+    if (!['U12', 'U15', 'U18', 'U20'].includes(norm)) {
+      const customName = getCustomCategoryName(catId, sportId);
+      return { label: customName || catId, years: '' };
+    }
+
     if (norm === 'U12') {
       const label = (hasFemale && !hasMale) ? 'برعمات' : (hasFemale && hasMale) ? 'براعم / برعمات' : 'براعم';
       return {
@@ -1549,7 +1555,7 @@ export const Tournaments: React.FC = () => {
                          <span className="text-slate-500 mt-1 shrink-0">الفئات المدمجة:</span>
                          <div className="flex flex-col gap-1 items-end max-w-[75%]">
                            {categoriesList.slice(0, 4).map(c => {
-                             const badge = formatCategoryBadge(c, sportTournaments);
+                             const badge = formatCategoryBadge(c, sportTournaments, sport.id);
                              return (
                                <span 
                                  key={c} 

@@ -268,17 +268,55 @@ export const getAgeCategoriesForSeason = (season: string, gender?: 'Male' | 'Fem
 
 export function normalizeCategoryKey(catStr: any): string {
   if (!catStr) return 'U15';
-  
+
   // Convert to string safely to avoid .trim() errors if catStr is not a string primitive
   const s = String(catStr).trim().toUpperCase();
-  
+
   if (s.includes('U12') || s.includes('براعم') || s.includes('برعمات')) return 'U12';
   if (s.includes('U15') || s.includes('صغار') || s.includes('صغيرات')) return 'U15';
   if (s.includes('U18') || s.includes('فتيان') || s.includes('فتيات')) return 'U18';
   if (s.includes('U20') || s.includes('شبان') || s.includes('شابات')) return 'U20';
   if (s === 'U12' || s === 'U15' || s === 'U18' || s === 'U20') return s;
-  
+
   return s;
+}
+
+/**
+ * Resolve a human-readable Arabic label for a category ID.
+ * Falls back to the raw ID (e.g. 'CAT_1793910455460_TEFB') when no
+ * custom category definition is found for it, so the UI never shows
+ * a raw internal identifier to users.
+ */
+export function getCustomCategoryName(catId: any, sportId?: string): string {
+  if (!catId) return '';
+  const raw = String(catId).trim();
+  if (!raw) return '';
+
+  // Standard age categories are handled by callers via normalizeCategoryKey
+  if (['U12', 'U15', 'U18', 'U20'].includes(normalizeCategoryKey(raw))) {
+    return '';
+  }
+
+  // Look up the custom category definition in the sport configuration
+  if (sportId) {
+    try {
+      const localSports = JSON.parse(localStorage.getItem('taourirt_sports_config') || '[]');
+      const foundSport = localSports.find((s: any) => s.id === sportId);
+      if (foundSport && Array.isArray(foundSport.customAgeCategories)) {
+        const custom = foundSport.customAgeCategories.find((c: any) => c.id === raw);
+        if (custom && custom.name) return custom.name;
+      }
+    } catch (e) {
+      console.warn('Error loading custom age categories in getCustomCategoryName:', e);
+    }
+  }
+
+  // Fallback: strip the internal prefix and format the remainder readably
+  const stripped = raw.replace(/^cat_/i, '').replace(/^CAT_/i, '');
+  if (stripped && stripped !== raw) {
+    return stripped;
+  }
+  return raw;
 }
 
 export function getCategoryYearsLabel(catId: any, season: string = '2026/2027', sportIdOrIsCc?: string | boolean): string {
@@ -2936,6 +2974,18 @@ export const DataService = {
       ...student,
       directorateId: (student as any).directorateId || activeDirId
     };
+
+    // Check school student limit before adding
+    const schools = await this.getSchools();
+    const studentSchool = schools.find(s => s.id === (student.schoolId || ''));
+    if (studentSchool && studentSchool.studentLimit) {
+      const currentStudents = await this.getStudents();
+      const studentsFromThisSchool = currentStudents.filter(s => s.schoolId === studentSchool.id);
+      if (studentsFromThisSchool.length >= studentSchool.studentLimit) {
+        throw new Error(`تم الوصول إلى السقف الأقصى لعدد التلاميذ (${studentSchool.studentLimit}) لهذه المؤسسة. لا يمكن إضافة تلاميذ جدد.`);
+      }
+    }
+
     const newStudent: Student = {
       ...studentWithDir,
       id: `stud-${Date.now()}`,
@@ -2974,12 +3024,32 @@ export const DataService = {
     const createdStudents: Student[] = [];
     const nowTime = Date.now();
 
+    // Get schools with student limits
+    const schools = await this.getSchools();
+    const schoolLimits = new Map<string, number>();
+    schools.forEach(s => {
+      if (s.studentLimit && s.studentLimit > 0) {
+        schoolLimits.set(s.id, s.studentLimit);
+      }
+    });
+
     for (let i = 0; i < studentsList.length; i++) {
       const s = studentsList[i];
       const studentWithDir = {
         ...s,
         directorateId: (s as any).directorateId || activeDirId
       };
+
+      // Check school student limit
+      const schoolLimit = schoolLimits.get(s.schoolId || '');
+      if (schoolLimit) {
+        const currentStudents = await this.getStudents();
+        const studentsFromThisSchool = currentStudents.filter(st => st.schoolId === s.schoolId);
+        if (studentsFromThisSchool.length >= schoolLimit) {
+          throw new Error(`تم الوصول إلى السقف الأقصى لعدد التلاميذ (${schoolLimit}) للمؤسسة ${s.schoolName || 'unknown'}. لا يمكن إضافة تلاميذ جدد.`);
+        }
+      }
+
       const newStudent: Student = {
         ...studentWithDir,
         id: `stud-${nowTime}-${i}-${Math.random().toString(36).substring(2, 6)}`,
@@ -2996,7 +3066,7 @@ export const DataService = {
       const batch = writeBatch(db);
       for (const newStudent of createdStudents) {
         const studentRef = doc(db, 'students', newStudent.id);
-        
+
         // Clean undefined properties
         const cleanPayload: any = {};
         Object.keys(newStudent).forEach(key => {

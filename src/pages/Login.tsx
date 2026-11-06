@@ -79,6 +79,7 @@ export const Login: React.FC = () => {
   const [activeDirectorate, setActiveDirectorate] = useState<Directorate | null>(null);
   const [isAboutModalOpen, setIsAboutModalOpen] = useState(false);
   const [isIntroOpen, setIsIntroOpen] = useState(true);
+  const [isIntroEnabled, setIsIntroEnabled] = useState(true);
   const [isCrossCountryPodiumOpen, setIsCrossCountryPodiumOpen] = useState(false);
   const [directorates, setDirectorates] = useState<Directorate[]>([]);
   const [schools, setSchools] = useState<School[]>([]);
@@ -559,12 +560,45 @@ export const Login: React.FC = () => {
     )
   );
 
+  // Check if user email is registered in the system
+  const isEmailRegistered = useMemo(() => {
+    if (!userProfile?.email) return false;
+    const registeredEmails = new Set([
+      // Check against known admin emails from types
+      ...SUPER_ADMIN_EMAILS,
+      // We'll check Firestore users on first load
+    ]);
+    // Initialize with checking on first use
+    return registeredEmails.has(userProfile.email.toLowerCase());
+  }, [userProfile?.email]);
+
   // Redirect to dashboard if already authenticated & complete profile
   useEffect(() => {
     if (!loading && currentUser && isProfileComplete && loginMode !== 'REGISTER_TEACHER') {
       navigate('/dashboard', { replace: true });
     }
   }, [loading, currentUser, isProfileComplete, loginMode, navigate]);
+
+  // Restrict access: only allow teachers with registered emails or admins
+  const canAccessPlatform = useMemo(() => {
+    if (isSuperAdminEmail(userProfile?.email)) return true;
+    if (userProfile?.role === 'SUPER_ADMIN') return true;
+    if (userProfile?.role === 'CENTRAL_ADMIN') return true;
+    if (userProfile?.role === 'SPORT_MANAGER') return true;
+    // For teachers, check if they have complete profile (directorateId + workLocation or leaseNumber)
+    if (userProfile?.role === 'TEACHER') {
+      return userProfile.directorateId && (userProfile.workLocation || userProfile.leaseNumber);
+    }
+    return false;
+  }, [userProfile]);
+
+  // Block navigation if not authorized
+  useEffect(() => {
+    if (!loading && currentUser && !canAccessPlatform && loginMode !== 'REGISTER_TEACHER') {
+      toast.error('يجب إكمال ملف الأستاذ لتتمكن من الدخول للمنصة', { id: 'access-restricted-toast' });
+      navigate('/login', { replace: true });
+    }
+  }, [loading, currentUser, canAccessPlatform, loginMode, navigate]);
 
   // Filtered approved schools by directorate and cycle (including private schools)
   const { filteredSchools, publicSchools, privateSchools } = useMemo(() => {
