@@ -45,6 +45,8 @@ import toast from 'react-hot-toast';
 import { downloadIndividualCardPdf } from '../lib/participationPdfService';
 import { compressImageToBase64 } from '../lib/imageUtils';
 import { BibGeneratorModal } from './BibGeneratorModal';
+import { ConfirmParticipationModal } from './ConfirmParticipationModal';
+import { useSchoolConfirmations } from '../hooks/useSchoolConfirmations';
 
 interface CrossCountryChampionshipModalProps {
   isOpen: boolean;
@@ -95,6 +97,13 @@ export const CrossCountryChampionshipModal: React.FC<CrossCountryChampionshipMod
   const [isBibGeneratorOpen, setIsBibGeneratorOpen] = useState(false);
   const [isHeaderCollapsed, setIsHeaderCollapsed] = useState(false);
   const [isFullScreen, setIsFullScreen] = useState(false);
+
+  // School Participation Confirmation State
+  const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
+  const { isSchoolConfirmed, getConfirmation, refreshConfirmations } = useSchoolConfirmations();
+  const effectiveSchoolName = teacherSchoolName || userProfile?.schoolName || userProfile?.workLocation || '';
+  const isSchoolCurrentlyConfirmed = isSchoolConfirmed('cross_country', effectiveSchoolName);
+  const currentConfirmationRecord = getConfirmation('cross_country', effectiveSchoolName);
 
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
@@ -290,6 +299,10 @@ export const CrossCountryChampionshipModal: React.FC<CrossCountryChampionshipMod
     const birthVal = validateBirthDateForCategory(editBirthDate, editCategory, activeSeason, editGender, true);
     if (!birthVal.isValid) {
       toast.error(`تاريخ الازدياد غير متوافق مع الفئة المحددة والجنس: ${birthVal.errorMessage}`);
+      return;
+    }
+    if (isTeacherRole && (!editPhoto || !editPhoto.trim())) {
+      toast.error('الصورة الشخصية للتلميذ(ة) إجبارية قبل الحفظ بالنسبة للأستاذ');
       return;
     }
     setIsSavingEditStudent(true);
@@ -690,11 +703,26 @@ export const CrossCountryChampionshipModal: React.FC<CrossCountryChampionshipMod
                 <span className="px-2 py-0.5 bg-blue-100 text-blue-800 rounded-md font-black text-xs">الفئة المحددة: {activeCategory.titleAr}</span>
               </div>
               <div className="flex items-center gap-2 flex-wrap">
+                {isTeacherRole && effectiveSchoolName && (
+                  <button
+                    type="button"
+                    onClick={() => setIsConfirmModalOpen(true)}
+                    className={`px-3.5 py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer flex items-center gap-1.5 ${
+                      isSchoolCurrentlyConfirmed
+                        ? 'bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100'
+                        : 'bg-gradient-to-r from-emerald-600 to-emerald-700 text-white border-emerald-600 hover:from-emerald-500 hover:to-emerald-600 shadow-sm animate-pulse'
+                    }`}
+                  >
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    <span>{isSchoolCurrentlyConfirmed ? 'مشاركة المؤسسة مؤكدة ✓' : 'تأكيد مشاركة المؤسسة أولاً 📋'}</span>
+                  </button>
+                )}
+
                 <button
                   type="button"
                   onClick={() => setIsBulkRegisterModalOpen(true)}
                   className="px-4 py-2 bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 text-slate-950 rounded-xl text-xs font-black shadow-xs transition-all cursor-pointer flex items-center gap-2 hover:scale-102 active:scale-98"
-                  title="تسجيل 8 مشاركين دفعة واحدة (3 فردي + 5 فريق المؤسسة) مع إمكانية التصدير إلى Excel"
+                  title="تسجيل 8 مشاركين دفعة واحدة (3 فردي + 5 فريق المؤسسة)"
                 >
                   <Sparkles className="w-4 h-4 text-slate-950" />
                   <span>تسجيل 8 مشاركين (3 فردي + 5 فريق) ⚡</span>
@@ -732,14 +760,6 @@ export const CrossCountryChampionshipModal: React.FC<CrossCountryChampionshipMod
 
                 {/* Quick Category Actions */}
                 <div className="flex flex-wrap items-center gap-2 shrink-0">
-                  <button
-                    onClick={() => handleExportCategoryExcel(activeCategory)}
-                    className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors shadow-xs cursor-pointer"
-                    title="تصدير لائحة المشاركين المسجلين في هذه الفئة بصيغة Excel"
-                  >
-                    <Download className="h-3.5 w-3.5" />
-                    <span>تصدير المشاركين (Excel)</span>
-                  </button>
 
                   {filterSchool !== 'ALL' && (
                     <button
@@ -1422,9 +1442,20 @@ export const CrossCountryChampionshipModal: React.FC<CrossCountryChampionshipMod
                     )}
                   </div>
                   <div>
-                    <h4 className="text-xs font-bold text-slate-800">صورة العداء(ة)</h4>
-                    <p className="text-[10px] text-slate-400 mt-0.5">
-                      {editPhoto ? 'تم تعيين صورة مخصصة' : 'لم يتم تحديد صورة بعد'}
+                    <h4 className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                      <span>صورة العداء(ة)</span>
+                      {isTeacherRole ? (
+                        <span className="text-[10px] text-red-600 font-black">(إجبارية للأستاذ *)</span>
+                      ) : (
+                        <span className="text-[10px] text-slate-400 font-normal">(اختياري)</span>
+                      )}
+                    </h4>
+                    <p className={`text-[10px] mt-0.5 font-medium ${isTeacherRole && !editPhoto ? 'text-red-500 font-bold' : 'text-slate-400'}`}>
+                      {editPhoto
+                        ? 'تم تعيين صورة المشارك بنجاح'
+                        : isTeacherRole
+                        ? '⚠️ الصورة إجبارية قبل الحفظ بالنسبة للأستاذ'
+                        : 'لم يتم تحديد صورة بعد'}
                     </p>
                   </div>
                 </div>
@@ -1642,6 +1673,34 @@ export const CrossCountryChampionshipModal: React.FC<CrossCountryChampionshipMod
           students={allStudents}
           schools={schools}
           initialCategoryId={selectedCatId}
+        />
+      )}
+
+      {/* 📋 SCHOOL PARTICIPATION CONFIRMATION MODAL */}
+      {isConfirmModalOpen && (
+        <ConfirmParticipationModal
+          isOpen={isConfirmModalOpen}
+          onClose={() => setIsConfirmModalOpen(false)}
+          sport={ccSportObject}
+          schoolName={effectiveSchoolName}
+          schoolId={userProfile?.schoolId || effectiveSchoolName}
+          teacherId={userProfile?.id}
+          teacherName={userProfile?.fullName}
+          teacherPhone={userProfile?.phone}
+          teacherLeaseNumber={userProfile?.leaseNumber}
+          registrationDeadline={currentDeadline}
+          confirmedRecord={currentConfirmationRecord}
+          onConfirmSuccess={() => {
+            refreshConfirmations();
+            if (onRefreshData) onRefreshData();
+          }}
+          onCancelSuccess={() => {
+            refreshConfirmations();
+            if (onRefreshData) onRefreshData();
+          }}
+          onProceedToRegister={() => {
+            setIsBulkRegisterModalOpen(true);
+          }}
         />
       )}
     </>

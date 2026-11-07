@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { DataService, SPORTS_MAP, getAgeCategoriesForSeason } from '../lib/dataService';
-import { Sport, Tournament, RoleKey, RoleSidebarPermissions, CustomAgeCategory } from '../types';
+import { DataService, SPORTS_MAP, getAgeCategoriesForSeason, normalizeCategoryKey } from '../lib/dataService';
+import { Sport, Tournament, RoleKey, RoleSidebarPermissions, CustomAgeCategory, TARGET_AFFILIATIONS } from '../types';
 import { useAuth } from '../contexts/AuthContext';
 import {
   Settings,
@@ -30,7 +30,9 @@ import {
   Upload,
   Image,
   Edit2,
-  Edit3
+  Edit3,
+  Target,
+  Play
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -160,12 +162,14 @@ const SportAgeCategoriesManager: React.FC<{
     }
 
     if (isAdding) {
+      const cleanKey = normalizeCategoryKey(nameInput);
       const newCat: CustomAgeCategory = {
-        id: `cat_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+        id: cleanKey,
         name: nameInput.trim(),
         yearsExpression: yearsInput.trim()
       };
-      onChange([...customCategories, newCat]);
+      const cleanExisting = customCategories.filter(c => !/^CAT_/i.test(c.id) && !/^cat_/i.test(c.id));
+      onChange([...cleanExisting, newCat]);
       toast.success(`تمت إضافة الفئة "${newCat.name}"`);
       setIsAdding(false);
     } else if (editingCatId) {
@@ -173,12 +177,13 @@ const SportAgeCategoriesManager: React.FC<{
         if (cat.id === editingCatId) {
           return {
             ...cat,
+            id: normalizeCategoryKey(cat.id || nameInput),
             name: nameInput.trim(),
             yearsExpression: yearsInput.trim()
           };
         }
         return cat;
-      });
+      }).filter(c => !/^CAT_/i.test(c.id) && !/^cat_/i.test(c.id));
       onChange(updated);
       toast.success(`تم تعديل الفئة بنجاح`);
       setEditingCatId(null);
@@ -234,7 +239,7 @@ const SportAgeCategoriesManager: React.FC<{
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-          {customCategories.map(cat => (
+          {customCategories.filter(cat => cat && !/^CAT_/i.test(cat.id) && !/^CAT_/i.test(cat.name) && !/^cat_/i.test(cat.id)).map(cat => (
             <div key={cat.id} className="flex items-center justify-between p-2.5 bg-white rounded-xl border border-slate-200/60 shadow-3xs">
               <div className="space-y-0.5">
                 <p className="text-xs font-bold text-slate-800">{cat.name}</p>
@@ -451,8 +456,36 @@ export const SportsConfig: React.FC = () => {
   const [newSportCategories, setNewSportCategories] = useState<string[]>([]);
   const [newSportCustomCategories, setNewSportCustomCategories] = useState<CustomAgeCategory[]>([]);
   const [newSportStudentLimit, setNewSportStudentLimit] = useState<string>('');
+  const [newSportCategoryStudentLimits, setNewSportCategoryStudentLimits] = useState<Record<string, number>>({});
+  const [newSportTargetAffiliations, setNewSportTargetAffiliations] = useState<string[]>([
+    'non_club', 'espoir_non_club', 'sports_tracks', 'espoir_club'
+  ]);
   const [newSportIsProgrammed, setNewSportIsProgrammed] = useState<boolean>(true);
   const [isSubmittingSport, setIsSubmittingSport] = useState(false);
+
+  // App intro animation toggle state (persisted in localStorage)
+  const [isIntroEnabled, setIsIntroEnabled] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem('app_intro_enabled');
+      return saved !== null ? saved === 'true' : true;
+    } catch {
+      return true;
+    }
+  });
+
+  const toggleIntroEnabled = () => {
+    setIsIntroEnabled(prev => {
+      const next = !prev;
+      try {
+        localStorage.setItem('app_intro_enabled', String(next));
+        window.dispatchEvent(new CustomEvent('introToggled', { detail: next }));
+      } catch (e) {
+        console.warn(e);
+      }
+      toast.success(next ? 'تم تفعيل عرض شاشة المقدمة (Intro) عند فتح التطبيق' : 'تم تعطيل عرض شاشة المقدمة (Intro) بنجاح');
+      return next;
+    });
+  };
 
   const isCentralAdmin = userProfile?.role === 'CENTRAL_ADMIN';
   const isTechCommitteeHead = userProfile?.isTechCommitteeHead === true;
@@ -726,7 +759,9 @@ export const SportsConfig: React.FC = () => {
     isProgrammed?: boolean,
     name?: string,
     icon?: string,
-    customAgeCategories?: CustomAgeCategory[]
+    customAgeCategories?: CustomAgeCategory[],
+    categoryStudentLimits?: Record<string, number>,
+    targetAffiliations?: string[]
   ) => {
     setSavingId(sportId);
     try {
@@ -738,7 +773,9 @@ export const SportsConfig: React.FC = () => {
         name,
         icon,
         isProgrammed,
-        customAgeCategories
+        customAgeCategories,
+        categoryStudentLimits,
+        targetAffiliations
       );
       setEditingInfoId(null);
       toast.success('تم حفظ وتعديل إعدادات وضوابط التخصص الرياضي بنجاح');
@@ -806,10 +843,12 @@ export const SportsConfig: React.FC = () => {
         description: newSportDescription.trim() || undefined,
         ageCategories: catIds,
         studentLimit: limitVal,
-        customAgeCategories: newSportCustomCategories
+        customAgeCategories: newSportCustomCategories,
+        categoryStudentLimits: newSportCategoryStudentLimits,
+        targetAffiliations: newSportTargetAffiliations
       });
 
-      // Update programmed status
+      // Update programmed status & all details
       await DataService.updateSportCategories(
         addedSport.id,
         catIds,
@@ -818,7 +857,9 @@ export const SportsConfig: React.FC = () => {
         undefined,
         undefined,
         newSportIsProgrammed,
-        newSportCustomCategories
+        newSportCustomCategories,
+        newSportCategoryStudentLimits,
+        newSportTargetAffiliations
       );
 
       toast.success(`تمت إضافة الرياضة الجديدة "${cleanName}" بنجاح وتحديد حالتها وسقف مشاركيها.`);
@@ -1423,6 +1464,47 @@ export const SportsConfig: React.FC = () => {
         </div>
       </div>
 
+      {/* App Interface & Intro Animation Setting Card */}
+      <div className="bg-gradient-to-r from-blue-50/80 via-indigo-50/60 to-purple-50/70 p-5 rounded-2xl border border-blue-200/80 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="flex items-start gap-3">
+          <div className="w-10 h-10 rounded-xl bg-blue-600 text-white flex items-center justify-center shrink-0 shadow-2xs">
+            <Play className="h-5 w-5 fill-current" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <h3 className="text-xs md:text-sm font-black text-slate-900">
+                شاشة المقدمة التقديمية للتطبيق (Intro Animation)
+              </h3>
+              <span className={`text-[10px] font-black px-2 py-0.5 rounded-full border ${
+                isIntroEnabled
+                  ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
+                  : 'bg-slate-200 text-slate-700 border-slate-300'
+              }`}>
+                {isIntroEnabled ? 'مفعلة ✅' : 'معطلة ⏸️'}
+              </span>
+            </div>
+            <p className="text-[11px] text-slate-600 mt-1 leading-relaxed">
+              تفعيل أو تعطيل الحركة التقديمية والشعار الرسمي عند فتح المنصة أو تسجيل الدخول. يمكنك تشغيلها أو إيقافها بنقرة زر واحدة.
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 shrink-0 self-end sm:self-auto">
+          <button
+            type="button"
+            onClick={toggleIntroEnabled}
+            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-black transition-all cursor-pointer shadow-xs ${
+              isIntroEnabled
+                ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-500/20'
+                : 'bg-slate-800 hover:bg-slate-900 text-white'
+            }`}
+          >
+            <span className="text-sm">{isIntroEnabled ? '🟢' : '⚪'}</span>
+            <span>{isIntroEnabled ? 'تعطيل الـ Intro عند الفتح' : 'تفعيل الـ Intro عند الفتح'}</span>
+          </button>
+        </div>
+      </div>
+
       {/* Filter & Search Toolbar */}
       <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-xs flex flex-col sm:flex-row items-center justify-between gap-3">
         {/* Search Bar */}
@@ -1654,29 +1736,150 @@ export const SportsConfig: React.FC = () => {
                     }}
                   />
 
-                  {/* Student Limit Setup */}
-                  <div className="pt-3 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-50/70 p-3 rounded-xl border border-slate-100">
-                    <div className="flex items-center gap-2">
-                      <Users className="h-4 w-4 text-slate-500 shrink-0" />
-                      <label className="text-xs font-bold text-slate-700">
-                        الحد الأقصى لعدد التلاميذ المسموح بمشاركتهم لكل مؤسسة:
+                  {/* Target Classifications Checkboxes (الأصناف المستهدفة) */}
+                  <div className="pt-3 border-t border-slate-100 space-y-2.5 bg-slate-50/70 p-3.5 rounded-xl border border-slate-100">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <label className="text-xs font-bold text-slate-800 flex items-center gap-2">
+                        <Target className="h-4 w-4 text-blue-600" />
+                        <span>الأصناف المستهدفة المتاحة للتسجيل في البطولة (الفئات المستهدفة):</span>
                       </label>
+                      <div className="flex items-center gap-1.5 self-start sm:self-auto">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const allTargetIds = TARGET_AFFILIATIONS.map(t => t.id);
+                            setSportsList(prev => prev.map(s => s.id === sport.id ? { ...s, targetAffiliations: allTargetIds } : s));
+                          }}
+                          className="text-[10px] text-blue-600 hover:underline font-bold px-2 py-0.5 rounded bg-blue-50 border border-blue-200 cursor-pointer"
+                        >
+                          تحديد الكل
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSportsList(prev => prev.map(s => s.id === sport.id ? { ...s, targetAffiliations: ['non_club'] } : s));
+                          }}
+                          className="text-[10px] text-slate-500 hover:underline font-bold px-2 py-0.5 rounded bg-slate-100 border border-slate-200 cursor-pointer"
+                        >
+                          إلغاء التحديد
+                        </button>
+                      </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="number"
-                        min="0"
-                        placeholder="غير محدود"
-                        value={sport.studentLimit ?? ''}
-                        onChange={(e) => {
-                          const val = e.target.value === '' ? undefined : parseInt(e.target.value, 10);
-                          setSportsList(prev => prev.map(s => s.id === sport.id ? { ...s, studentLimit: val } : s));
-                        }}
-                        className="w-28 px-3 py-1.5 text-xs bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 font-bold text-slate-700 text-center"
-                      />
-                      <span className="text-[11px] text-slate-400 font-medium">
-                        تلميذ(ة) (اتركه فارغاً أو 0 بدون سقف)
+                    <p className="text-[11px] text-slate-500 font-medium">
+                      حدد الأصناف المعتمدة التي تظهر كأصناف متاحة للتسجيل عند برمجة بطولة هذا التخصص:
+                    </p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 pt-1">
+                      {TARGET_AFFILIATIONS.map((aff) => {
+                        const currentAffs = sport.targetAffiliations && sport.targetAffiliations.length > 0
+                          ? sport.targetAffiliations
+                          : ['non_club', 'espoir_non_club', 'sports_tracks', 'espoir_club'];
+                        const isChecked = currentAffs.includes(aff.id);
+                        return (
+                          <label
+                            key={aff.id}
+                            className={`flex items-center gap-2.5 p-2.5 rounded-xl border cursor-pointer text-xs font-bold transition-all ${
+                              isChecked
+                                ? 'bg-blue-50/90 border-blue-300 text-blue-950 shadow-2xs'
+                                : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={() => {
+                                const updated = isChecked
+                                  ? currentAffs.filter(id => id !== aff.id)
+                                  : [...currentAffs, aff.id];
+                                setSportsList(prev => prev.map(s => s.id === sport.id ? { ...s, targetAffiliations: updated } : s));
+                              }}
+                              className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 w-4 h-4 cursor-pointer accent-blue-600"
+                            />
+                            <span className="text-base">{aff.icon}</span>
+                            <span className="leading-tight">{aff.label}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Per-Category Quotas per Institution (تخصيص عدد المشاركين في كل فئة بالنسبة للمؤسسة) */}
+                  <div className="pt-3 border-t border-slate-100 space-y-2.5 bg-slate-50/70 p-3.5 rounded-xl border border-slate-100">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <Users className="h-4 w-4 text-emerald-600 shrink-0" />
+                        <label className="text-xs font-bold text-slate-800">
+                          تخصيص سقف عدد المشاركين في كل فئة بالنسبة للمؤسسة:
+                        </label>
+                      </div>
+                      <span className="text-[10px] text-emerald-700 font-bold bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200 self-start sm:self-auto">
+                        سقف مخصص لكل فئة عمرية
                       </span>
+                    </div>
+                    <p className="text-[11px] text-slate-500 font-medium">
+                      حدد عدد التلاميذ المسموح بمشاركتهم من كل مؤسسة في كل فئة على حدة (اتركه فارغاً أو 0 ليكون بدون سقف):
+                    </p>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 pt-1">
+                      {['U12', 'U15', 'U18', 'U20'].map((catId) => {
+                        const catLabel = catId === 'U12' ? 'فئة البراعم والبرعمات (U12)'
+                          : catId === 'U15' ? 'فئة الصغار والصغيرات (U15)'
+                          : catId === 'U18' ? 'فئة الفتيان والفتيات (U18)'
+                          : 'فئة الشبان والشابات (U20)';
+                        const currentLimit = sport.categoryStudentLimits?.[catId] ?? '';
+                        return (
+                          <div key={catId} className="p-2.5 bg-white rounded-xl border border-slate-200 space-y-1 shadow-3xs">
+                            <label className="block text-[11px] font-black text-slate-700 truncate">
+                              {catLabel}
+                            </label>
+                            <div className="flex items-center gap-1.5">
+                              <input
+                                type="number"
+                                min="0"
+                                placeholder="بدون سقف"
+                                value={currentLimit}
+                                onChange={(e) => {
+                                  const val = e.target.value === '' ? undefined : parseInt(e.target.value, 10);
+                                  const nextLimits = { ...(sport.categoryStudentLimits || {}) };
+                                  if (val === undefined || isNaN(val)) {
+                                    delete nextLimits[catId];
+                                  } else {
+                                    nextLimits[catId] = val;
+                                  }
+                                  const total = Object.values(nextLimits).reduce<number>((acc, curr) => acc + (Number(curr) || 0), 0);
+                                  setSportsList(prev => prev.map(s => s.id === sport.id ? {
+                                    ...s,
+                                    categoryStudentLimits: nextLimits,
+                                    studentLimit: total > 0 ? total : s.studentLimit
+                                  } : s));
+                                }}
+                                className="w-full px-2.5 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 font-black text-emerald-800 text-center"
+                              />
+                              <span className="text-[10px] font-bold text-slate-400 shrink-0">تلميذ</span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    {/* Overall institution total */}
+                    <div className="flex items-center justify-between pt-2 border-t border-slate-200/60 text-xs">
+                      <span className="text-slate-600 font-bold">
+                        العدد الإجمالي التراكمي المسموح به للمؤسسة (اختياري):
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="number"
+                          min="0"
+                          placeholder="غير محدود"
+                          value={sport.studentLimit ?? ''}
+                          onChange={(e) => {
+                            const val = e.target.value === '' ? undefined : parseInt(e.target.value, 10);
+                            setSportsList(prev => prev.map(s => s.id === sport.id ? { ...s, studentLimit: val } : s));
+                          }}
+                          className="w-24 px-2 py-1 text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-bold text-slate-700 text-center"
+                        />
+                        <span className="text-[11px] text-slate-400 font-medium">تلميذ(ة)</span>
+                      </div>
                     </div>
                   </div>
 
@@ -1775,7 +1978,18 @@ export const SportsConfig: React.FC = () => {
                     )}
 
                     <button
-                      onClick={() => handleSaveSportConfig(sport.id, activeCategories, sport.studentLimit, sport.athleticsSpecialties, isProgrammed, sport.name, sport.icon, sport.customAgeCategories)}
+                      onClick={() => handleSaveSportConfig(
+                        sport.id,
+                        activeCategories,
+                        sport.studentLimit,
+                        sport.athleticsSpecialties,
+                        isProgrammed,
+                        sport.name,
+                        sport.icon,
+                        sport.customAgeCategories,
+                        sport.categoryStudentLimits,
+                        sport.targetAffiliations
+                      )}
                       disabled={savingId !== null}
                       className="w-full sm:w-auto inline-flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs px-5 py-2.5 rounded-xl shadow-xs transition-all cursor-pointer disabled:opacity-50"
                     >
@@ -1953,10 +2167,83 @@ export const SportsConfig: React.FC = () => {
                 }}
               />
 
+              {/* Target Classifications Checkboxes (الأصناف المستهدفة) */}
+              <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="block text-xs font-bold text-slate-800">
+                    الأصناف المستهدفة المتاحة للتسجيل (الفئات المستهدفة)
+                  </label>
+                  <span className="text-[10px] text-blue-600 font-bold bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
+                    اختيار الأصناف
+                  </span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                  {TARGET_AFFILIATIONS.map(aff => {
+                    const isChecked = newSportTargetAffiliations.includes(aff.id);
+                    return (
+                      <label
+                        key={aff.id}
+                        className={`flex items-center gap-2 p-2 rounded-xl border text-xs font-bold cursor-pointer transition-all ${
+                          isChecked
+                            ? 'bg-blue-50 border-blue-300 text-blue-900 shadow-2xs'
+                            : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={() => {
+                            setNewSportTargetAffiliations(prev => 
+                              isChecked ? prev.filter(x => x !== aff.id) : [...prev, aff.id]
+                            );
+                          }}
+                          className="rounded text-blue-600 focus:ring-blue-500 w-4 h-4 cursor-pointer"
+                        />
+                        <span>{aff.icon}</span>
+                        <span>{aff.label}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Per-Category Quotas (سقف المشاركين لكل فئة) */}
+              <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-2">
+                <label className="block text-xs font-bold text-slate-800">
+                  تخصيص سقف عدد المشاركين في كل فئة بالنسبة للمؤسسة
+                </label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                  {newSportCustomCategories.map(cat => (
+                    <div key={cat.id} className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+                      <span className="text-xs font-bold text-slate-700 truncate">{cat.name}</span>
+                      <div className="flex items-center gap-1">
+                        <input
+                          type="number"
+                          min="0"
+                          placeholder="بدون سقف"
+                          value={newSportCategoryStudentLimits[cat.id] ?? ''}
+                          onChange={(e) => {
+                            const val = e.target.value === '' ? undefined : parseInt(e.target.value, 10);
+                            setNewSportCategoryStudentLimits(prev => {
+                              const next = { ...prev };
+                              if (val === undefined || isNaN(val)) delete next[cat.id];
+                              else next[cat.id] = val;
+                              return next;
+                            });
+                          }}
+                          className="w-20 px-2 py-1 text-xs border border-slate-200 rounded-lg text-center font-bold"
+                        />
+                        <span className="text-[10px] text-slate-400">تلميذ</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
               {/* Student Limit (سقف المشاركين لكل مؤسسة) */}
               <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-1.5">
                 <label className="block text-xs font-bold text-slate-800">
-                  سقف عدد المشاركين (التلاميذ) المسموح بهم لكل مؤسسة
+                  السقف الإجمالي التراكمي لعدد المشاركين (اختياري)
                 </label>
                 <div className="flex items-center gap-2.5">
                   <input
@@ -1968,12 +2255,9 @@ export const SportsConfig: React.FC = () => {
                     className="w-32 px-3 py-2 text-xs bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 font-bold text-slate-700 text-center"
                   />
                   <span className="text-xs text-slate-500">
-                    تلميذ(ة) لكل مؤسسة (اتركه فارغاً أو 0 ليكون العدد مفتوحاً)
+                    تلميذ(ة) لكل مؤسسة (اتركه فارغاً ليكون مفتوحاً)
                   </span>
                 </div>
-                <p className="text-[10px] text-slate-400 leading-relaxed">
-                  * مثال: 8 لاعبين لكرة السلة المصغرة، أو 12 لاعباً، إلخ. لن يتمكن الأستاذ من تجاوز هذا العدد عند تعبئة لائحة الفريق.
-                </p>
               </div>
 
               {/* Modal Footer Actions */}

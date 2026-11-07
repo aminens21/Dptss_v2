@@ -73,6 +73,64 @@ export interface CustomAgeCategory {
   yearsExpression: string; // e.g. "2015 وما بعد" or "2012/2013/2014"
 }
 
+export interface TargetAffiliationConfig {
+  id: string; // 'non_club' | 'espoir_non_club' | 'sports_tracks' | 'espoir_club' | 'club_affiliated'
+  label: string; // Official Arabic label
+  shortLabel: string;
+  badgeBg: string;
+  badgeText: string;
+  badgeBorder: string;
+  icon: string;
+}
+
+export const TARGET_AFFILIATIONS: TargetAffiliationConfig[] = [
+  {
+    id: 'non_club',
+    label: 'غير المنتمين للأندية',
+    shortLabel: 'غير منتمين',
+    badgeBg: 'bg-slate-100',
+    badgeText: 'text-slate-800',
+    badgeBorder: 'border-slate-300',
+    icon: '⚪'
+  },
+  {
+    id: 'espoir_non_club',
+    label: 'الأمل الرياضي: لغير المنتمين',
+    shortLabel: 'أمل رياضي (غير منتمين)',
+    badgeBg: 'bg-sky-50',
+    badgeText: 'text-sky-800',
+    badgeBorder: 'border-sky-300',
+    icon: '🌟'
+  },
+  {
+    id: 'sports_tracks',
+    label: 'مسالك رياضة',
+    shortLabel: 'مسالك رياضة',
+    badgeBg: 'bg-indigo-50',
+    badgeText: 'text-indigo-800',
+    badgeBorder: 'border-indigo-300',
+    icon: '🎯'
+  },
+  {
+    id: 'espoir_club',
+    label: 'الأمل الرياضي: للمنتمين',
+    shortLabel: 'أمل رياضي (منتمين)',
+    badgeBg: 'bg-purple-50',
+    badgeText: 'text-purple-800',
+    badgeBorder: 'border-purple-300',
+    icon: '⭐'
+  },
+  {
+    id: 'club_affiliated',
+    label: 'المنتمين للأندية',
+    shortLabel: 'منتمين لأندية',
+    badgeBg: 'bg-amber-50',
+    badgeText: 'text-amber-800',
+    badgeBorder: 'border-amber-300',
+    icon: '⚽'
+  }
+];
+
 export interface Sport {
   id: string;
   name: string;
@@ -81,7 +139,9 @@ export interface Sport {
   managerId?: string;
   ageCategories?: string[]; // الفئات المعنية بالتخصص الرياضي التي حددها المسير الرئيسي
   customAgeCategories?: CustomAgeCategory[]; // الفئات العمرية المخصصة ديناميكياً مع مسمياتها وسنواتها
-  studentLimit?: number; // السقف الأقصى لعدد التلاميذ المسموح بمشاركتهم من كل مؤسسة في هذا التخصص
+  studentLimit?: number; // السقف الإجمالي لعدد التلاميذ (إن وجد)
+  categoryStudentLimits?: Record<string, number>; // تخصيص سقف عدد المشاركين في كل فئة بالنسبة للمؤسسة
+  targetAffiliations?: string[]; // الأصناف المستهدفة المتاحة للتسجيل (المحددة من طرف المسير المركزي)
   athleticsSpecialties?: string[]; // تخصصات ألعاب القوى المتاحة (القفز الطولي، القفز العلوي، جري 80 متر...)
   isCustom?: boolean; // رياضة مضافة من طرف المسير المركزي
   isProgrammed?: boolean; // وضع البطولة: مبرمجة (true) أو في طور الإعداد (false)
@@ -98,7 +158,7 @@ export interface RoleSidebarPermissions {
   REFEREE: string[];
 }
 
-export type AffiliationType = 'non_club' | 'club_affiliated' | 'open';
+export type AffiliationType = 'non_club' | 'club_affiliated' | 'open' | 'espoir_non_club' | 'sports_tracks' | 'espoir_club' | string;
 
 export interface Tournament {
   id: string;
@@ -112,7 +172,9 @@ export interface Tournament {
   gender: 'Male' | 'Female' | 'Mixed';
   level: 'Primary' | 'Middle' | 'High' | string;
   scope: 'Provincial' | 'Regional' | 'National' | string;
-  affiliationType?: 'non_club' | 'club_affiliated' | 'open' | string; // فئة: غير منتمين للأندية (أبيض) أو منتمين للأندية (أصفر فاتح)
+  affiliationType?: AffiliationType; // فئة الانتماء والتصنيف المستهدف
+  targetAffiliations?: string[];
+  categoryStudentLimits?: Record<string, number>;
   startDate: any;
   endDate: any;
   registrationDeadline?: any; // آخر أجل للتسجيل في البطولة
@@ -146,6 +208,25 @@ export interface School {
   directorateId?: string;
   accessCode?: string; // القن السري لولوج وإدارة المؤسسة من طرف الأستاذ المنسق
   studentLimit?: number; // سقف أقصى عدد من التلاميذ المسموح بمشاركتهم من هذه المؤسسة في البطولات
+}
+
+export interface SchoolTournamentConfirmation {
+  id: string; // e.g. `${sportId}_${schoolId}`
+  sportId: string;
+  sportName?: string;
+  tournamentId?: string;
+  schoolId: string;
+  schoolName: string;
+  teacherId: string;
+  teacherName: string;
+  teacherPhone?: string;
+  teacherLeaseNumber?: string;
+  confirmedAt: string; // ISO string
+  registrationDeadline?: string;
+  status: 'confirmed' | 'withdrawn';
+  notes?: string;
+  directorateId?: string;
+  seasonId?: string;
 }
 
 export interface Team {

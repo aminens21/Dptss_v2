@@ -699,13 +699,27 @@ export const TeacherTeams: React.FC = () => {
       return;
     }
 
-    // 1. General Limit Checked
+    // 1. General Overall Limit Checked
     if (activeSportConfig?.studentLimit && activeSportConfig.studentLimit > 0) {
       const activeCount = editingStudentId 
         ? activeSportStudents.filter(s => s.id !== editingStudentId).length
         : activeSportStudents.length;
       if (activeCount >= activeSportConfig.studentLimit) {
         toast.error(`خطأ في التسجيل: تم بلوغ السقف الأقصى المسموح به للتسجيل في هذا التخصص وهو ${activeSportConfig.studentLimit} تلاميذ.`);
+        return;
+      }
+    }
+
+    // 1.5 Per-Category Custom Limit Checked (تخصيص سقف عدد المشاركين في كل فئة بالنسبة للمؤسسة)
+    const categoryLimit = activeSportConfig?.categoryStudentLimits?.[category] ?? 
+                          activeSportConfig?.categoryStudentLimits?.[normalizeCategoryKey(category)];
+    if (categoryLimit !== undefined && categoryLimit > 0) {
+      const sameCategoryCount = editingStudentId
+        ? activeSportStudents.filter(s => s.id !== editingStudentId && (s.category === category || normalizeCategoryKey(s.category) === normalizeCategoryKey(category))).length
+        : activeSportStudents.filter(s => s.category === category || normalizeCategoryKey(s.category) === normalizeCategoryKey(category)).length;
+
+      if (sameCategoryCount >= categoryLimit) {
+        toast.error(`خطأ في التسجيل: تم بلوغ السقف الأقصى المسموح به لمؤسستك في فئة (${getCategoryLabel(category)}) وهو ${categoryLimit} مشارك(ين).`);
         return;
       }
     }
@@ -1083,6 +1097,24 @@ export const TeacherTeams: React.FC = () => {
         count: sameGroupStudents.length,
         limitVal,
         isReached: sameGroupStudents.length >= limitVal
+      };
+    }
+    return null;
+  })();
+
+  // Real-time custom per-category quota calculation
+  const categoryLimitDetails = (() => {
+    if (!category || !activeSportConfig?.categoryStudentLimits) return null;
+    const catLimit = activeSportConfig.categoryStudentLimits[category] ?? 
+                     activeSportConfig.categoryStudentLimits[normalizeCategoryKey(category)];
+    if (catLimit !== undefined && catLimit > 0) {
+      const sameCategoryCount = editingStudentId
+        ? activeSportStudents.filter(s => s.id !== editingStudentId && (s.category === category || normalizeCategoryKey(s.category) === normalizeCategoryKey(category))).length
+        : activeSportStudents.filter(s => s.category === category || normalizeCategoryKey(s.category) === normalizeCategoryKey(category)).length;
+      return {
+        limit: catLimit,
+        current: sameCategoryCount,
+        isReached: sameCategoryCount >= catLimit
       };
     }
     return null;
@@ -1519,6 +1551,18 @@ export const TeacherTeams: React.FC = () => {
                       <p className="font-bold">تنبيه بالوصول للحد الأقصى للتسجيل!</p>
                       <p className="mt-0.5 opacity-90 font-medium">
                         لقد تم بلوغ الحد الأقصى المسموح به للتسجيل في هذا التخصص وهو <span className="font-bold underline">{activeSportConfig?.studentLimit}</span> تلاميذ. لا يمكن تسجيل تلاميذ إضافيين حتى تقوم بحذف أو تعديل أحد المشاركين الحاليين.
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {categoryLimitDetails?.isReached && !editingStudentId && (
+                  <div className="p-4 bg-red-50 border border-red-200 text-red-950 rounded-xl flex gap-3 text-xs leading-relaxed animate-pulse">
+                    <AlertCircle className="h-5 w-5 shrink-0 text-red-600" />
+                    <div>
+                      <p className="font-bold">تنبيه بالوصول للسقف المخصص لمؤسستك في هذه الفئة!</p>
+                      <p className="mt-0.5 opacity-90 font-medium">
+                        لقد تم بلوغ السقف الأقصى المخصص لمؤسستك في فئة ({getCategoryLabel(category)}) وهو <span className="font-bold underline">{categoryLimitDetails.limit}</span> مشارك(ين). لا يمكن تسجيل تلاميذ إضافيين في هذه الفئة حتى يتم حذف أو تعديل أحد المشاركين المسجلين حالياً.
                       </p>
                     </div>
                   </div>
@@ -1983,8 +2027,8 @@ export const TeacherTeams: React.FC = () => {
                   </button>
                   <button
                     type="submit"
-                    disabled={uploading}
-                    className="bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs px-5 py-2.5 rounded-xl shadow-xs transition-all flex items-center gap-1.5"
+                    disabled={uploading || (!editingStudentId && (isGeneralLimitReached || !!categoryLimitDetails?.isReached))}
+                    className="bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs px-5 py-2.5 rounded-xl shadow-xs transition-all flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     <UserPlus className="h-4 w-4" />
                     <span>{uploading ? 'جاري رفع الملف...' : (editingStudentId ? 'تعديل وحفظ بيانات التلميذ' : 'حفظ وتسجيل التلميذ')}</span>

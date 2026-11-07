@@ -2,7 +2,6 @@ import React, { useEffect, useState, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { DataService, SPORTS_MAP } from '../lib/dataService';
 import { User, Student, School } from '../types';
-import * as XLSX from 'xlsx';
 import { TeacherDetailModal } from '../components/TeacherDetailModal';
 import { EditTeacherRoleModal } from '../components/EditTeacherRoleModal';
 import { ConfirmDeleteModal } from '../components/ConfirmDeleteModal';
@@ -10,6 +9,7 @@ import { TeacherBadgesModal } from '../components/TeacherBadgesModal';
 import { useAuth } from '../contexts/AuthContext';
 import { Directorate } from '../types';
 import { OfficialLogos } from '../lib/dataService';
+import * as XLSX from 'xlsx';
 import {
   GraduationCap,
   Search,
@@ -30,6 +30,8 @@ import {
   Trash2,
   AlertTriangle,
   ChevronDown,
+  UserPlus,
+  Download,
   Upload,
   FileSpreadsheet
 } from 'lucide-react';
@@ -131,6 +133,206 @@ export const Teachers: React.FC = () => {
   const [showDeleteAllModal, setShowDeleteAllModal] = useState(false);
   const [isDeletingAll, setIsDeletingAll] = useState(false);
 
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleDownloadExcelTemplate = () => {
+    try {
+      const templateData = [
+        {
+          'رقم': 1,
+          'الاسم الكامل للأستاذ': 'محمد العلوي',
+          'البريد الإلكتروني (Gmail)': 'm.alaoui@gmail.com',
+          'رقم التأجير (SOM)': '1234567',
+          'مقر العمل (المؤسسة)': 'ثانوية ابن تاشفين التأهيلية',
+          'رقم الهاتف': '0661234567',
+          'السلك التعليمي (تأهيلي / إعدادي / ابتدائي)': 'تأهيلي'
+        },
+        {
+          'رقم': 2,
+          'الاسم الكامل للأستاذ': 'فاطمة الزهراء الإدريسي',
+          'البريد الإلكتروني (Gmail)': 'fatima.idrissi@gmail.com',
+          'رقم التأجير (SOM)': '7654321',
+          'مقر العمل (المؤسسة)': 'إعدادية علال بن عبد الله',
+          'رقم الهاتف': '0667654321',
+          'السلك التعليمي (تأهيلي / إعدادي / ابتدائي)': 'إعدادي'
+        }
+      ];
+      const ws = XLSX.utils.json_to_sheet(templateData);
+      ws['!cols'] = [
+        { wch: 8 },
+        { wch: 25 },
+        { wch: 30 },
+        { wch: 18 },
+        { wch: 30 },
+        { wch: 18 },
+        { wch: 25 }
+      ];
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'الأطر التربوية');
+      XLSX.writeFile(wb, 'نموذج_تعبئة_لائحة_الأساتذة_مديرية_تاوريرت.xlsx');
+      toast.success('تم تحميل نموذج Excel بنجاح.');
+    } catch (err) {
+      console.error('Error downloading template:', err);
+      toast.error('حدث خطأ أثناء تنزيل نموذج الإكسيل');
+    }
+  };
+
+  const handleImportExcel = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const toastId = toast.loading('جاري قراءة ملف Excel واستيراد لائحة الأساتذة...');
+    try {
+      const buffer = await file.arrayBuffer();
+      const wb = XLSX.read(buffer, { type: 'array' });
+      const firstSheetName = wb.SheetNames[0];
+      const ws = wb.Sheets[firstSheetName];
+      
+      const jsonData: any[] = XLSX.utils.sheet_to_json(ws, { defval: '' });
+      const rawRows: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+
+      let importedCount = 0;
+      const activeDirId = DataService.getActiveDirectorateId() || 'taourirt';
+
+      // 1. Process via row arrays (Columns B, C, D, E, F, G -> indices 1, 2, 3, 4, 5, 6)
+      for (let i = 0; i < rawRows.length; i++) {
+        const row = rawRows[i];
+        if (!row || row.length === 0) continue;
+
+        const rowText = row.join(' ').toLowerCase();
+        if (rowText.includes('الاسم') || rowText.includes('البريد') || rowText.includes('تأجير') || (i === 0 && (rowText.includes('b') || rowText.includes('c')))) {
+          continue;
+        }
+
+        const fullName = String(row[1] || row[0] || '').trim();
+        const email = String(row[2] || row[1] || '').trim().toLowerCase();
+        const leaseNumber = String(row[3] || row[2] || '').trim();
+        const workLocation = String(row[4] || row[3] || '').trim();
+        const phone = String(row[5] || row[4] || '').trim();
+        const rawCadre = String(row[6] || row[5] || '').trim();
+
+        if (!fullName || (!email && !leaseNumber)) continue;
+
+        let teachingCadre = 'HIGH';
+        if (rawCadre.includes('ابتدائ') || rawCadre.toLowerCase() === 'primary') teachingCadre = 'PRIMARY';
+        else if (rawCadre.includes('إعداد') || rawCadre.includes('اعداد') || rawCadre.toLowerCase() === 'middle') teachingCadre = 'MIDDLE';
+        else teachingCadre = 'HIGH';
+
+        const teacherId = `teacher_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+        const teacherData: User = {
+          id: teacherId,
+          fullName,
+          email: email || `${teacherId}@taourirt-sports.ma`,
+          leaseNumber,
+          workLocation,
+          phone,
+          teachingCadre,
+          role: 'TEACHER',
+          directorateId: activeDirId,
+          isActive: true,
+          createdAt: new Date(),
+          updatedAt: new Date()
+        };
+
+        await DataService.updateUserProfile(teacherId, teacherData);
+        importedCount++;
+      }
+
+      // 2. Fallback to JSON object keys mapping if rawRows didn't catch
+      if (importedCount === 0 && jsonData.length > 0) {
+        for (const row of jsonData) {
+          const fullName = String(
+            row['الاسم الكامل للأستاذ'] || row['الاسم الكامل'] || row['الاسم'] || row['name'] || row['fullName'] || ''
+          ).trim();
+          const email = String(
+            row['البريد الإلكتروني (Gmail)'] || row['البريد الإلكتروني'] || row['البريد'] || row['email'] || ''
+          ).trim().toLowerCase();
+          const leaseNumber = String(
+            row['رقم التأجير (SOM)'] || row['رقم التأجير'] || row['التأجير'] || row['leaseNumber'] || row['som'] || ''
+          ).trim();
+          const workLocation = String(
+            row['مقر العمل (المؤسسة)'] || row['مقر العمل'] || row['المؤسسة'] || row['workLocation'] || row['school'] || ''
+          ).trim();
+          const phone = String(
+            row['رقم الهاتف'] || row['الهاتف'] || row['phone'] || ''
+          ).trim();
+          const rawCadre = String(
+            row['السلك التعليمي (تأهيلي / إعدادي / ابتدائي)'] || row['السلك التعليمي'] || row['السلك'] || row['teachingCadre'] || row['cadre'] || 'تأهيلي'
+          ).trim();
+
+          if (!fullName || (!email && !leaseNumber)) continue;
+
+          let teachingCadre = 'HIGH';
+          if (rawCadre.includes('ابتدائ') || rawCadre.toLowerCase() === 'primary') teachingCadre = 'PRIMARY';
+          else if (rawCadre.includes('إعداد') || rawCadre.includes('اعداد') || rawCadre.toLowerCase() === 'middle') teachingCadre = 'MIDDLE';
+          else teachingCadre = 'HIGH';
+
+          const teacherId = `teacher_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+          const teacherData: User = {
+            id: teacherId,
+            fullName,
+            email: email || `${teacherId}@taourirt-sports.ma`,
+            leaseNumber,
+            workLocation,
+            phone,
+            teachingCadre,
+            role: 'TEACHER',
+            directorateId: activeDirId,
+            isActive: true,
+            createdAt: new Date(),
+            updatedAt: new Date()
+          };
+
+          await DataService.updateUserProfile(teacherId, teacherData);
+          importedCount++;
+        }
+      }
+
+      if (importedCount > 0) {
+        toast.success(`تم بنجاح استيراد وتفعيل ${importedCount} أستاذ(ة) جديد في المنظومة!`, { id: toastId });
+        await loadTeachersAndStudents();
+      } else {
+        toast.error('لم يتم العثور على بيانات صالحة مطابقة للأعمدة المطلوبة (B, C, D, E, F, G).', { id: toastId });
+      }
+    } catch (err) {
+      console.error('Error importing teachers Excel:', err);
+      toast.error('حدث خطأ أثناء قراءة واستيراد ملف الإكسيل', { id: toastId });
+    } finally {
+      if (e.target) e.target.value = '';
+    }
+  };
+
+  const handleExportCurrentTeachers = () => {
+    try {
+      const exportData = filteredTeachers.map((t, idx) => ({
+        'رقم': idx + 1,
+        'الاسم الكامل للأستاذ': t.fullName,
+        'البريد الإلكتروني (Gmail)': t.email || '',
+        'رقم التأجير (SOM)': t.leaseNumber || '',
+        'مقر العمل (المؤسسة)': t.workLocation || '',
+        'رقم الهاتف': t.phone || '',
+        'السلك التعليمي': t.teachingCadre === 'PRIMARY' ? 'ابتدائي' : t.teachingCadre === 'MIDDLE' ? 'إعدادي' : 'تأهيلي'
+      }));
+      const ws = XLSX.utils.json_to_sheet(exportData);
+      ws['!cols'] = [
+        { wch: 8 },
+        { wch: 25 },
+        { wch: 30 },
+        { wch: 18 },
+        { wch: 30 },
+        { wch: 18 },
+        { wch: 25 }
+      ];
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'لائحة الأساتذة');
+      XLSX.writeFile(wb, `لائحة_الأطر_التربوية_${activeDirObj?.name || 'تاوريرت'}.xlsx`);
+      toast.success('تم تصدير لائحة الأساتذة إلى ملف Excel بنجاح.');
+    } catch (err) {
+      console.error('Error exporting teachers:', err);
+      toast.error('حدث خطأ أثناء تصدير البيانات');
+    }
+  };
+
   useEffect(() => {
     setSelectedCadre(cadreQuery || '');
   }, [cadreQuery]);
@@ -183,119 +385,6 @@ export const Teachers: React.FC = () => {
     }
   };
 
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
-  const handleDownloadTeacherExcelTemplate = () => {
-    try {
-      const headers = [
-        'الاسم والنسب',
-        'المؤسسة',
-        'الإطار (ابتدائي / إعدادي / تأهيلي)',
-        'البريد الإلكتروني (gmail)',
-        'رقم التأشير',
-        'رقم الهاتف'
-      ];
-
-      const sampleRows = [
-        [
-          'ذ. محمد بلخوت',
-          'المدرسة التأهيلية التأهيلية',
-          'تأهيلي',
-          'mohammed.balkhout@taourirt-sports.ma',
-          '1723138',
-          '0660215450'
-        ],
-        [
-          'ذ. محمد عيد السعيد',
-          'المدرسة التأهيلية المرينيين',
-          'تأهيلي',
-          'mohammed.aid@taourirt-sports.ma',
-          '2274507',
-          '0707442776'
-        ]
-      ];
-
-      const wsData = [headers, ...sampleRows];
-      const ws = XLSX.utils.aoa_to_sheet(wsData);
-
-      ws['!cols'] = [
-        { wch: 30 },
-        { wch: 35 },
-        { wch: 25 },
-        { wch: 35 },
-        { wch: 18 },
-        { wch: 18 }
-      ];
-
-      const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, 'الأطر التربوية');
-      XLSX.writeFile(wb, 'نمودج_ cargamento_الأطر_التربوية_مديرية_تاوريرت.xlsx');
-      toast.success('تم تحميل نموذج Excel بنجاح. يرجى تعبئته ثم استيراده.');
-    } catch (err) {
-      console.error('Error downloading template:', err);
-      toast.error('حدث خطأ أثناء تنزيل نموذج الإكسيل');
-    }
-  };
-
-  const handleImportTeacherExcel = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    const toastId = toast.loading('جاري قراءة الملف واستيراد الأطر التربوية...');
-    try {
-      const buffer = await file.arrayBuffer();
-      const wb = XLSX.read(buffer, { type: 'array' });
-      const firstSheetName = wb.SheetNames[0];
-      const ws = wb.Sheets[firstSheetName];
-
-      // Read with cell-by-cell mapping: B=1, C=2, D=3, E=4, F=5, G=6
-      const range = XLSX.utils.decode_range(ws['!ref'] || 'A1:G10');
-      const parsedTeachers: Omit<User, 'id' | 'createdAt' | 'updatedAt'>[] = [];
-
-      for (let r = range.s.r + 1; r <= range.e.r; r++) {
-        const fullName = ws[XLSX.utils.encode_cell({ r, c: 1 })]?.v; // B
-        const school = ws[XLSX.utils.encode_cell({ r, c: 2 })]?.v; // C
-        const cadre = ws[XLSX.utils.encode_cell({ r, c: 3 })]?.v; // D
-        const email = ws[XLSX.utils.encode_cell({ r, c: 4 })]?.v; // E
-        const leaseNumber = ws[XLSX.utils.encode_cell({ r, c: 5 })]?.v; // F
-        const phone = ws[XLSX.utils.encode_cell({ r, c: 6 })]?.v; // G
-
-        if (!fullName || String(fullName).trim() === '') continue;
-
-        let cadreValue: 'PRIMARY' | 'MIDDLE' | 'HIGH' = 'HIGH';
-        const cadreStr = String(cadre || '').trim().toLowerCase();
-        if (cadreStr.includes('ابتدائي') || cadreStr.includes('primary')) cadreValue = 'PRIMARY';
-        else if (cadreStr.includes('عدادي') || cadreStr.includes('عدادية') || cadreStr.includes('middle')) cadreValue = 'MIDDLE';
-        else if (cadreStr.includes('تأهيلي') || cadreStr.includes('high')) cadreValue = 'HIGH';
-
-        parsedTeachers.push({
-          fullName: String(fullName).trim(),
-          workLocation: String(school || '').trim(),
-          teachingCadre: cadreValue,
-          email: String(email || '').trim(),
-          leaseNumber: String(leaseNumber || '').trim(),
-          phone: String(phone || '').trim(),
-          role: 'TEACHER',
-          isActive: true
-        });
-      }
-
-      if (parsedTeachers.length === 0) {
-        toast.error('لم يتم العثور على بيانات صحيحة في الملف', { id: toastId });
-        return;
-      }
-
-      await DataService.addTeacherBulk(parsedTeachers);
-      toast.success(`تم استيراد ${parsedTeachers.length} من الأطر التربوية بنجاح!`, { id: toastId });
-      await loadTeachersAndStudents();
-    } catch (err) {
-      console.error('Error importing Excel:', err);
-      toast.error('حدث خطأ أثناء استيراد الملف', { id: toastId });
-    } finally {
-      if (fileInputRef.current) fileInputRef.current.value = '';
-    }
-  };
-
   const handleCopy = (e: React.MouseEvent, text: string, id: string) => {
     e.stopPropagation();
     navigator.clipboard.writeText(text);
@@ -315,7 +404,13 @@ export const Teachers: React.FC = () => {
   };
 
   const handleTeacherUpdated = (updatedTeacher: User) => {
-    setTeachers(prev => prev.map(t => t.id === updatedTeacher.id ? updatedTeacher : t));
+    setTeachers(prev => {
+      const exists = prev.some(t => t.id === updatedTeacher.id);
+      if (exists) {
+        return prev.map(t => t.id === updatedTeacher.id ? updatedTeacher : t);
+      }
+      return [updatedTeacher, ...prev];
+    });
     if (selectedTeacherModal && selectedTeacherModal.id === updatedTeacher.id) {
       setSelectedTeacherModal(updatedTeacher);
     }
@@ -411,6 +506,15 @@ export const Teachers: React.FC = () => {
 
   return (
     <div className="space-y-6" dir="rtl">
+      {/* Hidden file input for Excel upload */}
+      <input
+        type="file"
+        ref={fileInputRef}
+        onChange={handleImportExcel}
+        accept=".xlsx, .xls, .csv"
+        className="hidden"
+      />
+
       {/* Header and Quick Stats */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
@@ -423,6 +527,53 @@ export const Teachers: React.FC = () => {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          {/* Download Blank Template Button */}
+          <button
+            onClick={handleDownloadExcelTemplate}
+            className="flex items-center gap-1.5 px-3.5 py-2 bg-emerald-50 border border-emerald-300 hover:bg-emerald-100 text-emerald-800 rounded-xl text-xs font-black transition-all shadow-3xs cursor-pointer"
+            title="تحميل نموذج إكسيل فارغ لتعبئة بيانات الأطر التربوية"
+          >
+            <Download className="h-3.5 w-3.5" />
+            <span>تحميل نموذج Excel فارغ</span>
+          </button>
+
+          {/* Import from Excel Button */}
+          {(userProfile?.role === 'CENTRAL_ADMIN' || userProfile?.role === 'SPORT_MANAGER') && (
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              className="flex items-center gap-1.5 px-3.5 py-2 bg-indigo-50 border border-indigo-300 hover:bg-indigo-100 text-indigo-800 rounded-xl text-xs font-black transition-all shadow-3xs cursor-pointer"
+              title="استيراد وتعبئة لائحة الأساتذة من ملف إكسيل (الأعمدة B إلى G)"
+            >
+              <Upload className="h-3.5 w-3.5" />
+              <span>استيراد من Excel</span>
+            </button>
+          )}
+
+          {/* Export to Excel Button */}
+          <button
+            onClick={handleExportCurrentTeachers}
+            className="flex items-center gap-1.5 px-3.5 py-2 bg-slate-50 border border-slate-300 hover:bg-slate-100 text-slate-700 rounded-xl text-xs font-black transition-all shadow-3xs cursor-pointer"
+            title="تصدير اللائحة الحالية للأساتذة إلى ملف إكسيل"
+          >
+            <FileSpreadsheet className="h-3.5 w-3.5" />
+            <span>تصدير إلى Excel</span>
+          </button>
+
+          {/* Add New Teacher / Authorize Email Button */}
+          {(userProfile?.role === 'CENTRAL_ADMIN' || userProfile?.role === 'SPORT_MANAGER') && (
+            <button
+              onClick={() => {
+                setSelectedTeacherForEdit(null);
+                setIsEditRoleModalOpen(true);
+              }}
+              className="flex items-center gap-1.5 px-3.5 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white rounded-xl text-xs font-black transition-all shadow-sm hover:shadow-md cursor-pointer"
+              title="إضافة أستاذ جديد واعتماد بريده الإلكتروني للدخول عبر Google"
+            >
+              <UserPlus className="h-4 w-4" />
+              <span>إضافة أستاذ جديد (اعتماد بريد)</span>
+            </button>
+          )}
+
           {/* Print Badges Button */}
           <button
             onClick={() => {
@@ -435,29 +586,6 @@ export const Teachers: React.FC = () => {
             <span className="text-sm">🪪</span>
             <span>إنشاء شارات وبادجات الأساتذة (A4)</span>
           </button>
-
-          <button
-            onClick={handleDownloadTeacherExcelTemplate}
-            className="flex items-center gap-1.5 px-3 py-2 bg-blue-50 border border-blue-200 hover:bg-blue-100 rounded-xl text-xs font-bold text-blue-700 transition-all shadow-3xs cursor-pointer"
-            title="تحميل نموذج تعبئة الأطر التربوية"
-          >
-            <FileSpreadsheet className="h-3.5 w-3.5" />
-            <span>تحميل النموذج</span>
-          </button>
-
-          <label
-            className="flex items-center gap-1.5 px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-all shadow-3xs cursor-pointer"
-            title="استيراد الأطر التربوية من Excel"
-          >
-            <Upload className="h-3.5 w-3.5" />
-            <span>استيراد من Excel</span>
-            <input
-              type="file"
-              accept=".xlsx, .xls"
-              className="hidden"
-              onChange={handleImportTeacherExcel}
-            />
-          </label>
 
           <button
             onClick={loadTeachersAndStudents}

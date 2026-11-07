@@ -39,6 +39,8 @@ import { EditTournamentScheduleModal } from '../components/EditTournamentSchedul
 import { ProgramExportModal } from '../components/ProgramExportModal';
 import { ElectronicDrawModal, TEAM_SPORTS_IDS } from '../components/ElectronicDrawModal';
 import { DemoDataModal } from '../components/DemoDataModal';
+import { ConfirmParticipationModal } from '../components/ConfirmParticipationModal';
+import { useSchoolConfirmations } from '../hooks/useSchoolConfirmations';
 import { TeacherTeams } from './TeacherTeams';
 import { OfficialLogos } from '../lib/dataService';
 import toast from 'react-hot-toast';
@@ -92,6 +94,11 @@ export const Tournaments: React.FC = () => {
   const [selectedSportForModal, setSelectedSportForModal] = useState<Sport | null>(null);
   const [isSportModalOpen, setIsSportModalOpen] = useState(false);
   const [preselectedSportId, setPreselectedSportId] = useState<string | undefined>(undefined);
+
+  // School Participation Confirmation State
+  const [confirmParticipationSport, setConfirmParticipationSport] = useState<Sport | null>(null);
+  const { isSchoolConfirmed, getConfirmation, getConfirmedSchoolsForSport, refreshConfirmations } = useSchoolConfirmations(activeDirObj?.id);
+  const teacherSchoolName = userProfile?.schoolName || userProfile?.workLocation || '';
 
   // Schedule and Dates Modal State
   const [selectedSportForSchedule, setSelectedSportForSchedule] = useState<Sport | null>(null);
@@ -218,6 +225,9 @@ export const Tournaments: React.FC = () => {
         label,
         years: `مواليد ${startYear - 17} وما بعد`
       };
+    }
+    if (/^CAT_/i.test(catId) || /^cat_/i.test(catId)) {
+      return { label: 'الصغار والصغيرات', years: `مواليد ${startYear - 14}/${startYear - 13}/${startYear - 12}` };
     }
     return { label: catId, years: '' };
   };
@@ -778,11 +788,15 @@ export const Tournaments: React.FC = () => {
       );
 
       // Categories list configured: prefer actual active tournament categories if present
-      const tournCats = Array.from(new Set(sportTournaments.map(t => normalizeCategoryKey(t.ageCategory)).filter(Boolean)));
+      const tournCats = Array.from(new Set(
+        sportTournaments
+          .map(t => normalizeCategoryKey(t.ageCategory))
+          .filter(c => c && !/^CAT_/i.test(c) && !/^cat_/i.test(c))
+      ));
       let categoriesList = (sportTournaments.length > 0 && tournCats.length > 0)
         ? tournCats
         : ((sport.ageCategories && sport.ageCategories.length > 0)
-          ? sport.ageCategories.map(normalizeCategoryKey)
+          ? sport.ageCategories.map(normalizeCategoryKey).filter(c => !/^CAT_/i.test(c) && !/^cat_/i.test(c))
           : seasonalCats.map(c => c.id));
 
       if (isTeacherRole && !isManagerOfSport && teacherCadre) {
@@ -1305,17 +1319,71 @@ export const Tournaments: React.FC = () => {
                     </div>
 
                     <div className="p-3 bg-white/10 border-t border-white/10 flex items-center justify-between gap-2">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setIsCcModalOpen(true);
-                        }}
-                        title="دخول البطولة واستعراض الفئات الـ8"
-                        className="flex-1 py-2 px-3 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs rounded-xl flex items-center justify-center gap-2 transition-all shadow-xs cursor-pointer"
-                      >
-                        <Layers className="h-4 w-4" />
-                        <span>دخول البطولة</span>
-                      </button>
+                      {isTeacherRole ? (
+                        isSchoolConfirmed('cross_country', teacherSchoolName) ? (
+                          <div className="flex items-center gap-1.5 flex-1">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setConfirmParticipationSport({ id: 'cross_country', name: 'العدو الريفي', icon: '🏃‍♂️' });
+                              }}
+                              className="py-2 px-2.5 bg-emerald-500/25 hover:bg-emerald-500/35 text-emerald-200 border border-emerald-400/40 text-[11px] font-bold rounded-xl flex items-center justify-center gap-1 shrink-0 cursor-pointer"
+                              title="مشاركة مؤسستك مؤكدة في العدو الريفي"
+                            >
+                              <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
+                              <span>مؤكدة ✓</span>
+                            </button>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setIsCcModalOpen(true);
+                              }}
+                              className="flex-1 py-2 px-3 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs rounded-xl flex items-center justify-center gap-2 transition-all shadow-xs cursor-pointer"
+                            >
+                              <Users className="h-4 w-4" />
+                              <span>المشاركون (م2)</span>
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-1.5 flex-1">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setConfirmParticipationSport({ id: 'cross_country', name: 'العدو الريفي', icon: '🏃‍♂️' });
+                              }}
+                              className="flex-1 py-2 px-3 bg-gradient-to-r from-emerald-600 to-emerald-700 hover:from-emerald-500 hover:to-emerald-600 text-white font-black text-xs rounded-xl flex items-center justify-center gap-1.5 transition-all shadow-md shadow-emerald-700/30 cursor-pointer animate-pulse"
+                              title="تأكيد رغبة المؤسسة في خوض بطولة العدو الريفي"
+                            >
+                              <CheckCircle2 className="h-4 w-4" />
+                              <span>تأكيد مشاركة المؤسسة 📋</span>
+                            </button>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setIsCcModalOpen(true);
+                              }}
+                              className="py-2 px-2.5 bg-white/10 hover:bg-white/20 text-white text-xs font-bold rounded-xl flex items-center justify-center transition-colors cursor-pointer shrink-0"
+                              title="دخول البطولة"
+                            >
+                              <Layers className="h-4 w-4" />
+                            </button>
+                          </div>
+                        )
+                      ) : (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setIsCcModalOpen(true);
+                          }}
+                          title="دخول البطولة واستعراض الفئات الـ8"
+                          className="flex-1 py-2 px-3 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs rounded-xl flex items-center justify-center gap-2 transition-all shadow-xs cursor-pointer"
+                        >
+                          <Layers className="h-4 w-4" />
+                          <span>دخول البطولة</span>
+                        </button>
+                      )}
 
                       {canManageThis && (
                         <div className="flex items-center gap-1.5">
@@ -1539,13 +1607,25 @@ export const Tournaments: React.FC = () => {
                         البطولة الإقليمية المدرسية لـ {sport.name}
                       </h3>
                       {userProfile?.role === 'TEACHER' && (
-                        <span className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-md border shrink-0 ${
-                          hasParticipations
-                            ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
-                            : 'bg-amber-50 text-amber-800 border-amber-200'
-                        }`}>
-                          {hasParticipations ? `🏫 مسجل: ${schoolRegisteredCount}` : '🏫 غير مسجل بعد'}
-                        </span>
+                        <div className="flex items-center gap-1">
+                          {isSchoolConfirmed(sport.id, teacherSchoolName) ? (
+                            <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-800 border border-emerald-200 shrink-0">
+                              <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                              <span>المشاركة مؤكدة</span>
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-md bg-amber-50 text-amber-800 border border-amber-200 shrink-0">
+                              <span>لم تؤكد بعد</span>
+                            </span>
+                          )}
+                          <span className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-md border shrink-0 ${
+                            hasParticipations
+                              ? 'bg-blue-50 text-blue-800 border-blue-200'
+                              : 'bg-slate-50 text-slate-600 border-slate-200'
+                          }`}>
+                            {hasParticipations ? `مسجل: ${schoolRegisteredCount}` : 'بدون تلاميذ'}
+                          </span>
+                        </div>
                       )}
                     </div>
 
@@ -1593,13 +1673,61 @@ export const Tournaments: React.FC = () => {
                   </div>
 
                   <div className="p-3 bg-slate-50 border-t border-slate-100 flex items-center justify-between gap-2">
-                    <button
-                      onClick={() => handleOpenSportModal(sport)}
-                      className="flex-1 py-2.5 px-3 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl flex items-center justify-center gap-1.5 transition-all shadow-3xs cursor-pointer"
-                    >
-                      <Layers className="h-4 w-4" />
-                      <span>تسجيل الفرق والمشاركين</span>
-                    </button>
+                    {userProfile?.role === 'TEACHER' ? (
+                      isSchoolConfirmed(sport.id, teacherSchoolName) ? (
+                        <div className="flex items-center gap-1.5 flex-1">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setConfirmParticipationSport(sport);
+                            }}
+                            title="تفاصيل / إلغاء تأكيد المشاركة"
+                            className="py-2.5 px-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 font-black text-[11px] rounded-xl flex items-center justify-center gap-1 shrink-0 transition-colors cursor-pointer"
+                          >
+                            <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
+                            <span>مؤكدة ✓</span>
+                          </button>
+                          <button
+                            onClick={() => handleOpenSportModal(sport)}
+                            className="flex-1 py-2.5 px-3 bg-blue-600 hover:bg-blue-700 text-white font-black text-xs rounded-xl flex items-center justify-center gap-1.5 transition-all shadow-3xs cursor-pointer"
+                          >
+                            <Users className="h-4 w-4" />
+                            <span>المشاركون (م2)</span>
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-1.5 flex-1">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setConfirmParticipationSport(sport);
+                            }}
+                            className="flex-1 py-2.5 px-3 bg-gradient-to-r from-emerald-600 to-emerald-700 hover:from-emerald-500 hover:to-emerald-600 text-white font-black text-xs rounded-xl flex items-center justify-center gap-1.5 transition-all shadow-md shadow-emerald-700/20 cursor-pointer animate-pulse"
+                            title="تأكيد رغبة المؤسسة في خوض البطولة أولاً قبل إضافة أسماء التلاميذ"
+                          >
+                            <CheckCircle2 className="h-4 w-4" />
+                            <span>تأكيد مشاركة المؤسسة 📋</span>
+                          </button>
+                          <button
+                            onClick={() => handleOpenSportModal(sport)}
+                            className="py-2.5 px-2.5 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold text-xs rounded-xl flex items-center justify-center gap-1 transition-colors cursor-pointer shrink-0"
+                            title="استعراض تفاصيل البطولة"
+                          >
+                            <Layers className="h-4 w-4" />
+                          </button>
+                        </div>
+                      )
+                    ) : (
+                      <button
+                        onClick={() => handleOpenSportModal(sport)}
+                        className="flex-1 py-2.5 px-3 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl flex items-center justify-center gap-1.5 transition-all shadow-3xs cursor-pointer"
+                      >
+                        <Layers className="h-4 w-4" />
+                        <span>تسجيل الفرق والمشاركين</span>
+                      </button>
+                    )}
 
                     {canManageThis && (
                       <div className="flex items-center gap-1.5">
@@ -1798,6 +1926,40 @@ export const Tournaments: React.FC = () => {
         activeSeason={activeSeason}
         onDataLoaded={loadData}
       />
+
+      {/* School Participation Confirmation Modal */}
+      {confirmParticipationSport && (
+        <ConfirmParticipationModal
+          isOpen={true}
+          onClose={() => setConfirmParticipationSport(null)}
+          sport={confirmParticipationSport}
+          schoolName={teacherSchoolName}
+          schoolId={userProfile?.schoolId || teacherSchoolName}
+          teacherId={userProfile?.id}
+          teacherName={userProfile?.fullName}
+          teacherPhone={userProfile?.phone}
+          teacherLeaseNumber={userProfile?.leaseNumber}
+          registrationDeadline={
+            tournaments.find(t => t.sportId === confirmParticipationSport.id && t.registrationDeadline)?.registrationDeadline
+          }
+          confirmedRecord={getConfirmation(confirmParticipationSport.id, teacherSchoolName)}
+          onConfirmSuccess={() => {
+            refreshConfirmations();
+            loadData();
+          }}
+          onCancelSuccess={() => {
+            refreshConfirmations();
+            loadData();
+          }}
+          onProceedToRegister={() => {
+            if (confirmParticipationSport.id === 'cross_country') {
+              setIsCcModalOpen(true);
+            } else {
+              handleOpenSportModal(confirmParticipationSport);
+            }
+          }}
+        />
+      )}
 
     </div>
   );

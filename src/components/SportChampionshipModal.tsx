@@ -9,6 +9,8 @@ import { SportBulkRegisterModal } from './SportBulkRegisterModal';
 import { EditDeadlineModal } from './EditDeadlineModal';
 import { ParticipationFormPdfModal } from './ParticipationFormPdfModal';
 import { ElectronicDrawModal } from './ElectronicDrawModal';
+import { ConfirmParticipationModal } from './ConfirmParticipationModal';
+import { useSchoolConfirmations } from '../hooks/useSchoolConfirmations';
 import * as XLSX from 'xlsx';
 import {
   X,
@@ -140,6 +142,13 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
   const [isBulkRegisterOpen, setIsBulkRegisterOpen] = useState(false);
   const [preselectedSchoolForRegister, setPreselectedSchoolForRegister] = useState<string | undefined>(undefined);
   const [isEditDeadlineOpen, setIsEditDeadlineOpen] = useState(false);
+
+  // School Confirmation State
+  const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
+  const { isSchoolConfirmed, getConfirmation, getConfirmedSchoolsForSport, refreshConfirmations } = useSchoolConfirmations();
+  const effectiveSchoolName = teacherSchoolName || userProfile?.schoolName || userProfile?.workLocation || '';
+  const isSchoolCurrentlyConfirmed = sport ? isSchoolConfirmed(sport.id, effectiveSchoolName) : false;
+  const currentConfirmationRecord = sport ? getConfirmation(sport.id, effectiveSchoolName) : undefined;
   const [isHeaderCollapsed, setIsHeaderCollapsed] = useState(false);
   const [isFullScreen, setIsFullScreen] = useState(false);
   const [isPdfModalOpen, setIsPdfModalOpen] = useState(false);
@@ -1193,8 +1202,6 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
 
                   {canManage && (
                     <div className="flex flex-wrap items-center justify-end gap-2.5 shrink-0">
-
-
                       <button
                         onClick={() => setIsEditDeadlineOpen(true)}
                         className="px-3 py-2 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-400/40 rounded-xl text-xs font-bold transition-colors cursor-pointer flex items-center gap-1.5"
@@ -1204,6 +1211,80 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
                       </button>
                     </div>
                   )}
+                </div>
+              )}
+
+              {/* Teacher School Participation Confirmation Banner */}
+              {isTeacherRole && effectiveSchoolName && sport && (
+                <div className={`p-4 rounded-2xl border transition-all ${
+                  isSchoolCurrentlyConfirmed
+                    ? 'bg-gradient-to-r from-emerald-50 via-teal-50 to-emerald-50 border-emerald-300 text-emerald-950 shadow-xs'
+                    : 'bg-gradient-to-r from-amber-50 via-orange-50 to-amber-50 border-amber-300 text-amber-950 shadow-sm ring-2 ring-amber-500/20'
+                }`}>
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div className="flex items-center gap-3">
+                      <div className={`w-11 h-11 rounded-2xl flex items-center justify-center text-xl shrink-0 border ${
+                        isSchoolCurrentlyConfirmed
+                          ? 'bg-emerald-600 text-white border-emerald-500 shadow-3xs'
+                          : 'bg-amber-500 text-white border-amber-400 shadow-3xs animate-bounce'
+                      }`}>
+                        {isSchoolCurrentlyConfirmed ? '✓' : '📋'}
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h4 className="text-xs sm:text-sm font-black text-slate-900">
+                            {isSchoolCurrentlyConfirmed
+                              ? `مشاركة مؤسسة «${effectiveSchoolName}» مؤكدة رسمياً (المرحلة 1 مكتملة)`
+                              : `تأكيد مشاركة مؤسسة «${effectiveSchoolName}» في البطولة (المرحلة 1)`}
+                          </h4>
+                          <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${
+                            isSchoolCurrentlyConfirmed ? 'bg-emerald-200 text-emerald-900' : 'bg-amber-200 text-amber-900 animate-pulse'
+                          }`}>
+                            {isSchoolCurrentlyConfirmed ? 'مؤكدة رسمياً ✓' : 'مطلوب التأكيد أولاً'}
+                          </span>
+                        </div>
+                        <p className="text-[11px] mt-0.5 leading-relaxed text-slate-600">
+                          {isSchoolCurrentlyConfirmed
+                            ? 'يمكنك الآن في (المرحلة 2) إضافة وتعديل أسماء التلاميذ الممثلين للمؤسسة أدناه في أي وقت قبل حلول آخر أجل للتسجيل.'
+                            : 'يمكنك تأكيد رغبة المؤسسة في خوض البطولة لحجز مقعدها رسمياً، ثم استكمال إضافة أسماء التلاميذ لاحقاً قبل حلول آخر أجل للتسجيل.'}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 shrink-0 justify-end">
+                      {isSchoolCurrentlyConfirmed ? (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => setIsConfirmModalOpen(true)}
+                            className="px-3.5 py-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 rounded-xl text-xs font-bold transition-colors cursor-pointer"
+                          >
+                            تفاصيل / إلغاء
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (isProgrammed) {
+                                setIsBulkRegisterOpen(true);
+                              }
+                            }}
+                            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black shadow-3xs transition-all cursor-pointer flex items-center gap-1.5"
+                          >
+                            <span>تسجيل المشاركين (المرحلة 2) 👥</span>
+                          </button>
+                        </>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setIsConfirmModalOpen(true)}
+                          className="px-5 py-2.5 bg-gradient-to-r from-emerald-600 to-emerald-700 hover:from-emerald-500 hover:to-emerald-600 text-white rounded-xl text-xs font-black shadow-md shadow-emerald-700/20 transition-all cursor-pointer flex items-center gap-2 active:scale-98 animate-pulse"
+                        >
+                          <CheckCircle2 className="w-4 h-4" />
+                          <span>تأكيد مشاركة المؤسسة أولاً 📋</span>
+                        </button>
+                      )}
+                    </div>
+                  </div>
                 </div>
               )}
 
@@ -2527,6 +2608,36 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
           initialSportId={sport.id}
           onMatchesCreated={() => {
             if (onRefreshData) onRefreshData();
+          }}
+        />
+      )}
+
+      {/* School Participation Confirmation Modal */}
+      {isConfirmModalOpen && sport && (
+        <ConfirmParticipationModal
+          isOpen={isConfirmModalOpen}
+          onClose={() => setIsConfirmModalOpen(false)}
+          sport={sport}
+          schoolName={effectiveSchoolName}
+          schoolId={userProfile?.schoolId || effectiveSchoolName}
+          teacherId={userProfile?.id}
+          teacherName={userProfile?.fullName}
+          teacherPhone={userProfile?.phone}
+          teacherLeaseNumber={userProfile?.leaseNumber}
+          registrationDeadline={currentDeadline}
+          confirmedRecord={currentConfirmationRecord}
+          onConfirmSuccess={() => {
+            refreshConfirmations();
+            if (onRefreshData) onRefreshData();
+          }}
+          onCancelSuccess={() => {
+            refreshConfirmations();
+            if (onRefreshData) onRefreshData();
+          }}
+          onProceedToRegister={() => {
+            if (isProgrammed) {
+              setIsBulkRegisterOpen(true);
+            }
           }}
         />
       )}

@@ -108,10 +108,29 @@ export const EditTeacherRoleModal: React.FC<EditTeacherRoleModalProps> = ({
       setSchoolSearch('');
       setSchoolTypeFilter('ALL');
       setShowDeleteConfirm(false);
+    } else if (isOpen) {
+      // Adding a new teacher
+      setCadre('HIGH');
+      setRole('TEACHER');
+      setFullName('');
+      setEmail('');
+      setPhone('');
+      setIsTechCommitteeHead(false);
+      setTechCommitteeSports([]);
+      setIsTechCommitteeMember(false);
+      setTechCommitteeMemberSports([]);
+      setRefereeSpecialty([]);
+      setWorkLocation('');
+      setLeaseNumber('');
+      setSchoolSearch('');
+      setSchoolTypeFilter('ALL');
+      setShowDeleteConfirm(false);
     }
   }, [teacher, isOpen]);
 
-  if (!isOpen || !teacher) return null;
+  if (!isOpen) return null;
+
+  const isNewTeacher = !teacher;
 
   const handleToggleSportHead = (sportId: string) => {
     setTechCommitteeSports(prev => 
@@ -132,13 +151,26 @@ export const EditTeacherRoleModal: React.FC<EditTeacherRoleModalProps> = ({
   };
 
   const saveTeacherData = async (): Promise<User | null> => {
-    if (!teacher) return null;
+    const cleanName = fullName.trim();
+    const cleanEmail = email.trim().toLowerCase();
+    const cleanLease = leaseNumber.trim();
 
-    const primarySport = isTechCommitteeHead && techCommitteeSports.length > 0 ? techCommitteeSports[0] : (teacher.sportId || undefined);
+    if (!cleanName) {
+      toast.error('يرجى إدخال الاسم الكامل للأستاذ');
+      return null;
+    }
+
+    if (!cleanEmail) {
+      toast.error('يرجى إدخال البريد الإلكتروني (Gmail) لاعتماده للدخول إلى المنظومة');
+      return null;
+    }
+
+    const teacherId = teacher?.id || `teacher_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const primarySport = isTechCommitteeHead && techCommitteeSports.length > 0 ? techCommitteeSports[0] : (teacher?.sportId || undefined);
 
     const updateData: Partial<User> = {
-      fullName: fullName.trim(),
-      email: email.trim(),
+      fullName: cleanName,
+      email: cleanEmail,
       phone: phone.trim(),
       teachingCadre: cadre,
       role: role,
@@ -149,19 +181,23 @@ export const EditTeacherRoleModal: React.FC<EditTeacherRoleModalProps> = ({
       techCommitteeSportsMemberOf: isTechCommitteeMember ? techCommitteeMemberSports : [],
       refereeSpecialty: refereeSpecialty,
       workLocation: workLocation.trim(),
-      leaseNumber: leaseNumber.trim(),
+      leaseNumber: cleanLease,
       updatedAt: new Date()
     };
 
-    await DataService.updateUserProfile(teacher.id, updateData);
+    await DataService.updateUserProfile(teacherId, updateData);
 
     const updatedUser: User = {
+      id: teacherId,
+      fullName: cleanName,
+      email: cleanEmail,
+      role: role,
       ...teacher,
       ...updateData
     };
 
     // Reactively update current AuthContext profile if this teacher is currently active
-    const isCurrentActiveUser = userProfile && (
+    const isCurrentActiveUser = userProfile && teacher && (
       userProfile.id === teacher.id ||
       (userProfile.email && teacher.email && userProfile.email.toLowerCase() === teacher.email.toLowerCase()) ||
       (userProfile.leaseNumber && teacher.leaseNumber && userProfile.leaseNumber === teacher.leaseNumber)
@@ -182,14 +218,17 @@ export const EditTeacherRoleModal: React.FC<EditTeacherRoleModalProps> = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!teacher) return;
 
     setSaving(true);
     try {
       const updatedUser = await saveTeacherData();
       if (!updatedUser) return;
 
-      toast.success(`تم تحديث صفة وإطار الأستاذ ${teacher.fullName} بنجاح!`);
+      toast.success(
+        isNewTeacher
+          ? `تمت إضافة الأستاذ ${updatedUser.fullName} واعتماد بريده الإلكتروني بنجاح! يمكنه الآن الولوج بحساب Google.`
+          : `تم تحديث صفة وإطار الأستاذ ${updatedUser.fullName} بنجاح!`
+      );
       if (onSuccess) {
         onSuccess(updatedUser);
       }
@@ -203,24 +242,23 @@ export const EditTeacherRoleModal: React.FC<EditTeacherRoleModalProps> = ({
   };
 
   const handleSaveAndTestLogin = async () => {
-    if (!teacher) return;
     setSaving(true);
     try {
       const updatedUser = await saveTeacherData();
       if (!updatedUser) return;
 
-      toast.success(`تم حفظ صفة الأستاذ ${teacher.fullName} وتفعيل الحساب للتجربة!`);
+      toast.success(`تم حفظ صفة الأستاذ ${updatedUser.fullName} وتفعيل الحساب للتجربة!`);
       if (onSuccess) {
         onSuccess(updatedUser);
       }
       onClose();
 
       // Switch active demo login to this teacher
-      const assignedSport = isTechCommitteeHead && techCommitteeSports.length > 0 ? techCommitteeSports[0] : teacher.sportId;
+      const assignedSport = isTechCommitteeHead && techCommitteeSports.length > 0 ? techCommitteeSports[0] : (updatedUser.sportId || undefined);
       loginAsDemo(
         role,
-        teacher.fullName,
-        teacher.email || `prof.${teacher.id}@taourirt-sports.ma`,
+        updatedUser.fullName,
+        updatedUser.email || `prof.${updatedUser.id}@taourirt-sports.ma`,
         assignedSport,
         undefined,
         updatedUser
@@ -263,24 +301,26 @@ export const EditTeacherRoleModal: React.FC<EditTeacherRoleModalProps> = ({
         <div className="bg-gradient-to-r from-emerald-800 via-teal-900 to-slate-900 text-white p-5 flex items-start justify-between gap-4">
           <div className="flex items-center gap-3.5">
             <div className="w-12 h-12 rounded-2xl bg-white/10 border border-white/20 text-white flex items-center justify-center text-xl font-black shrink-0 overflow-hidden shadow-inner">
-              {teacher.photoUrl ? (
+              {teacher?.photoUrl ? (
                 <img src={teacher.photoUrl} alt={teacher.fullName} className="w-full h-full object-cover" />
               ) : (
-                <span>{teacher.fullName[0]?.toUpperCase()}</span>
+                <span>{fullName ? fullName[0]?.toUpperCase() : (isNewTeacher ? '➕' : '🎓')}</span>
               )}
             </div>
             <div>
               <div className="flex items-center gap-2">
                 <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-emerald-500/30 text-emerald-200 border border-emerald-400/30">
-                  تعديل الصفة والمهام
+                  {isNewTeacher ? 'إضافة أستاذ جديد واعتماد بريده' : 'تعديل الصفة والمهام'}
                 </span>
                 <span className="text-[10px] font-bold text-emerald-100 font-mono">
-                  {teacher.leaseNumber || 'بدون تأجير'}
+                  {leaseNumber || 'بدون تأجير'}
                 </span>
               </div>
-              <h3 className="text-base font-black text-white mt-1">{teacher.fullName}</h3>
+              <h3 className="text-base font-black text-white mt-1">
+                {fullName || (isNewTeacher ? 'إضافة أستاذ جديد إلى المنظومة' : teacher?.fullName)}
+              </h3>
               <p className="text-xs text-emerald-100/90 font-medium truncate max-w-xs">
-                {teacher.workLocation ? `مقر العمل: ${teacher.workLocation}` : 'المديرية الإقليمية تاوريرت'}
+                {workLocation ? `مقر العمل: ${workLocation}` : (isNewTeacher ? 'سيتم اعتماد البريد للولوج عبر Google' : 'المديرية الإقليمية')}
               </p>
             </div>
           </div>
@@ -737,7 +777,7 @@ export const EditTeacherRoleModal: React.FC<EditTeacherRoleModalProps> = ({
                 <span>حفظ وتجربة الدخول 🚀</span>
               </button>
 
-              {(userProfile?.role === 'CENTRAL_ADMIN' || userProfile?.role === 'SPORT_MANAGER') && !showDeleteConfirm && (
+              {(userProfile?.role === 'CENTRAL_ADMIN' || userProfile?.role === 'SPORT_MANAGER') && teacher && !showDeleteConfirm && (
                 <button
                   type="button"
                   onClick={() => setShowDeleteConfirm(true)}

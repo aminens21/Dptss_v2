@@ -51,8 +51,11 @@ import {
   XCircle,
   Volume2,
   Camera,
-  QrCode
+  QrCode,
+  Upload,
+  ImageIcon
 } from 'lucide-react';
+import { compressImageToBase64 } from '../lib/imageUtils';
 import { useTheme } from '../contexts/ThemeContext';
 import {
   AthleticsCommitteeDef,
@@ -72,6 +75,8 @@ import { User, School, Student } from '../types';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
 import { AthleticsBibGeneratorModal } from './AthleticsBibGeneratorModal';
 import { AthleticsTrackQrScannerModal } from './AthleticsTrackQrScannerModal';
+import { ConfirmParticipationModal } from './ConfirmParticipationModal';
+import { useSchoolConfirmations } from '../hooks/useSchoolConfirmations';
 import toast from 'react-hot-toast';
 
 interface AthleticsChampionshipModalProps {
@@ -173,6 +178,8 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
   const [newStudentName, setNewStudentName] = useState('');
   const [newSchoolName, setNewSchoolName] = useState('');
   const [newBirthYear, setNewBirthYear] = useState('2008');
+  const [newParticipantPhoto, setNewParticipantPhoto] = useState('');
+  const [isCompressingNewPhoto, setIsCompressingNewPhoto] = useState(false);
 
   // Deletion Confirmation State
   const [disciplineToDelete, setDisciplineToDelete] = useState<AthleticsDisciplineDef | null>(null);
@@ -188,6 +195,10 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
   const [isPrintRosterModalOpen, setIsPrintRosterModalOpen] = useState(false);
   const [isAthleticsBibModalOpen, setIsAthleticsBibOpen] = useState(false);
 
+  // School Participation Confirmation State
+  const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
+  const { isSchoolConfirmed, getConfirmation, refreshConfirmations } = useSchoolConfirmations();
+
   // School Participant Add/Edit Form State
   const [isSchoolRegModalOpen, setIsSchoolRegModalOpen] = useState(false);
   const [editingParticipant, setEditingParticipant] = useState<AthleticsParticipantRecord | null>(null);
@@ -202,6 +213,8 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
   const [regBibNumber, setRegBibNumber] = useState('');
   const [regCoachName, setRegCoachName] = useState('');
   const [regCoachPhone, setRegCoachPhone] = useState('');
+  const [regPhoto, setRegPhoto] = useState('');
+  const [isCompressingRegPhoto, setIsCompressingRegPhoto] = useState(false);
 
   // --- SMART STOPWATCH STATE ---
   const [isTimerRunning, setIsTimerRunning] = useState(false);
@@ -720,6 +733,10 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
     if (schools.length > 0) return schools[0].name;
     return 'المؤسسة التعليمية';
   }, [currentUser, schools]);
+
+  const effectiveAthleticsSchool = detectedTeacherSchool || currentUser?.schoolName || currentUser?.workLocation || 'مؤسستي';
+  const isAthleticsConfirmed = isSchoolConfirmed('athletics', effectiveAthleticsSchool);
+  const athleticsConfirmationRecord = getConfirmation('athletics', effectiveAthleticsSchool);
 
   useEffect(() => {
     if (!selectedSchoolForView && detectedTeacherSchool) {
@@ -1542,12 +1559,53 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
     toast.success(`تم حفظ إعدادات وأعضاء ${editingCommittee.titleAr} وتحديد مهامهم بنجاح`);
   };
 
+  // --- PHOTO UPLOAD HANDLERS FOR ATHLETICS ---
+  const handleRegPhotoFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setIsCompressingRegPhoto(true);
+    try {
+      const base64 = await compressImageToBase64(file, { maxWidth: 300, maxHeight: 300, quality: 0.8 });
+      setRegPhoto(base64);
+      toast.success('تم تحميل وتجهيز صورة التلميذ(ة) بنجاح');
+    } catch (err) {
+      console.error('Error compressing image:', err);
+      toast.error('حدث خطأ أثناء معالجة الصورة، يرجى المحاولة مرة أخرى');
+    } finally {
+      setIsCompressingRegPhoto(false);
+      e.target.value = '';
+    }
+  };
+
+  const handleNewParticipantPhotoFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setIsCompressingNewPhoto(true);
+    try {
+      const base64 = await compressImageToBase64(file, { maxWidth: 300, maxHeight: 300, quality: 0.8 });
+      setNewParticipantPhoto(base64);
+      toast.success('تم تحميل وتجهيز صورة المتسابق بنجاح');
+    } catch (err) {
+      console.error('Error compressing image:', err);
+      toast.error('حدث خطأ أثناء معالجة الصورة');
+    } finally {
+      setIsCompressingNewPhoto(false);
+      e.target.value = '';
+    }
+  };
+
   // --- ADD MANUAL PARTICIPANT ---
   const handleCreateParticipant = (e: React.FormEvent) => {
     e.preventDefault();
     if (!activeDiscipline) return;
     if (!newStudentName.trim() || !newSchoolName.trim() || !newBib.trim()) {
       toast.error('يرجى ملء جميع الحقول المطلوبة للعداء');
+      return;
+    }
+
+    // Strict validation: photo is mandatory for teachers
+    if (isTeacher && (!newParticipantPhoto || !newParticipantPhoto.trim())) {
+      toast.error('الصورة الشخصية للتلميذ(ة) إجبارية قبل الحفظ بالنسبة للأستاذ');
       return;
     }
 
@@ -1574,12 +1632,14 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
       bibNumber: newBib.trim(),
       studentName: newStudentName.trim(),
       schoolName: newSchoolName.trim(),
-      birthYear: newBirthYear
+      birthYear: newBirthYear,
+      photo: newParticipantPhoto.trim() || undefined
     });
 
     setParticipants(AthleticsService.getParticipants());
     setNewBib('');
     setNewStudentName('');
+    setNewParticipantPhoto('');
     setIsAddParticipantOpen(false);
     toast.success(`تمت إضافة التلميذ(ة) ${newStudentName} للمسابقة بنجاح (ضمن الحد الأقصى المسموح: مسابقتين)`);
   };
@@ -1595,6 +1655,7 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
     setRegAffiliation('non_club');
     setRegDiscipline1(availableRegDisciplines[0]?.id || disciplines[0]?.id || '');
     setRegDiscipline2('');
+    setRegPhoto('');
     const nextBib = String(participants.length + 101);
     setRegBibNumber(nextBib);
     setRegCoachName(currentUser?.fullName || '');
@@ -1615,6 +1676,7 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
     setRegBibNumber(p.bibNumber);
     setRegCoachName(p.coachName || currentUser?.fullName || '');
     setRegCoachPhone(p.coachPhone || currentUser?.phone || '');
+    setRegPhoto(p.photo || '');
     setIsSchoolRegModalOpen(true);
   };
 
@@ -1624,6 +1686,13 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
       toast.error('يرجى كتابة الاسم والنسب الكامل للتلميذ(ة)');
       return;
     }
+
+    // Strict validation: photo is mandatory for teachers
+    if (isTeacher && (!regPhoto || !regPhoto.trim())) {
+      toast.error('الصورة الشخصية للتلميذ(ة) إجبارية قبل الحفظ بالنسبة للأستاذ');
+      return;
+    }
+
     if (!regDiscipline1) {
       toast.error('يرجى تحديد المسابقة الأولى');
       return;
@@ -1649,6 +1718,7 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
         secondDisciplineId: regDiscipline2 || undefined,
         bibNumber: regBibNumber.trim() || editingParticipant.bibNumber,
         schoolName: targetSchool,
+        photo: regPhoto.trim() || undefined,
         coachName: regCoachName.trim(),
         coachPhone: regCoachPhone.trim()
       });
@@ -1666,6 +1736,7 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
         secondDisciplineId: regDiscipline2 || undefined,
         bibNumber: regBibNumber.trim() || `${100 + participants.length + 1}`,
         schoolName: targetSchool,
+        photo: regPhoto.trim() || undefined,
         coachName: regCoachName.trim(),
         coachPhone: regCoachPhone.trim(),
         addedByTeacherId: currentUser?.id
@@ -2371,6 +2442,21 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
 
                     {/* Action Buttons: Add, Print, Excel, MockData */}
                   <div className="flex items-center gap-1.5 sm:gap-2.5 flex-wrap w-full lg:w-auto">
+                    {isTeacher && effectiveAthleticsSchool && (
+                      <button
+                        type="button"
+                        onClick={() => setIsConfirmModalOpen(true)}
+                        className={`p-2 sm:px-4 sm:py-2.5 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-1.5 shadow-md cursor-pointer active:scale-95 ${
+                          isAthleticsConfirmed
+                            ? 'bg-emerald-700 hover:bg-emerald-600 text-white shadow-emerald-700/30'
+                            : 'bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white shadow-emerald-600/30 animate-pulse'
+                        }`}
+                        title="تأكيد مشاركة المؤسسة في بطولة ألعاب القوى (المرحلة 1)"
+                      >
+                        <CheckCircle2 className="w-4 h-4" />
+                        <span>{isAthleticsConfirmed ? 'مشاركة المؤسسة مؤكدة ✓' : 'تأكيد مشاركة المؤسسة (م1) 📋'}</span>
+                      </button>
+                    )}
                     <button
                       type="button"
                       onClick={() => setIsDemoRosterModalOpen(true)}
@@ -2551,12 +2637,27 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                               </td>
 
                               <td className="py-3 px-3.5">
-                                <div className="font-black text-white">{p.studentName}</div>
-                                {p.birthDate && (
-                                  <div className="text-[10px] text-slate-500 font-mono mt-0.5">
-                                    تاريخ الازدياد: {p.birthDate}
+                                <div className="flex items-center gap-2.5">
+                                  {p.photo ? (
+                                    <img
+                                      src={p.photo}
+                                      alt={p.studentName}
+                                      className="w-8 h-8 rounded-lg object-cover shrink-0 border border-slate-700 shadow-2xs"
+                                    />
+                                  ) : (
+                                    <div className="w-8 h-8 rounded-lg bg-slate-800 text-slate-400 flex items-center justify-center shrink-0 border border-slate-700 text-xs">
+                                      👤
+                                    </div>
+                                  )}
+                                  <div>
+                                    <div className="font-black text-white">{p.studentName}</div>
+                                    {p.birthDate && (
+                                      <div className="text-[10px] text-slate-500 font-mono mt-0.5">
+                                        تاريخ الازدياد: {p.birthDate}
+                                      </div>
+                                    )}
                                   </div>
-                                )}
+                                </div>
                               </td>
 
                               <td className="py-3 px-3.5 font-mono text-slate-300 font-bold">
@@ -5006,6 +5107,78 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                   </select>
                 </div>
 
+                {/* Participant Photo */}
+                <div className={`p-3 rounded-2xl border transition-all ${
+                  isTeacher && !newParticipantPhoto
+                    ? 'bg-red-950/20 border-red-500/50 ring-1 ring-red-500/30'
+                    : 'bg-slate-800/80 border-slate-700'
+                }`}>
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2.5">
+                      <div className={`w-11 h-11 rounded-xl overflow-hidden shrink-0 flex items-center justify-center border ${
+                        isTeacher && !newParticipantPhoto ? 'border-red-500 bg-red-900/30' : 'border-slate-600 bg-slate-700'
+                      }`}>
+                        {newParticipantPhoto ? (
+                          <img src={newParticipantPhoto} alt="صورة المشارك" className="w-full h-full object-cover" />
+                        ) : (
+                          <span className="text-xl">👤</span>
+                        )}
+                      </div>
+                      <div>
+                        <label className="text-xs font-bold text-white flex items-center gap-1.5">
+                          <span>صورة المتسابق</span>
+                          {isTeacher ? (
+                            <strong className="text-red-400 font-black text-[10px]">(إجبارية للأستاذ *)</strong>
+                          ) : (
+                            <span className="text-slate-400 text-[10px]">(اختياري)</span>
+                          )}
+                        </label>
+                        <p className={`text-[9.5px] mt-0.5 ${isTeacher && !newParticipantPhoto ? 'text-red-400 font-bold' : 'text-slate-400'}`}>
+                          {newParticipantPhoto ? '✅ تم إرفاق الصورة' : isTeacher ? '⚠️ إجبارية قبل الحفظ' : 'صورة أو كاميرا'}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-1.5">
+                      {newParticipantPhoto ? (
+                        <button
+                          type="button"
+                          onClick={() => setNewParticipantPhoto('')}
+                          className="px-2.5 py-1 bg-red-900/40 hover:bg-red-900/70 text-red-300 text-xs font-bold rounded-lg border border-red-700"
+                        >
+                          حذف
+                        </button>
+                      ) : (
+                        <>
+                          <label className="px-2.5 py-1.5 bg-slate-700 hover:bg-slate-600 text-white rounded-lg text-xs font-bold cursor-pointer flex items-center gap-1">
+                            <Upload className="w-3 h-3" />
+                            <span>ملف</span>
+                            <input
+                              type="file"
+                              accept="image/*"
+                              onChange={handleNewParticipantPhotoFileChange}
+                              disabled={isCompressingNewPhoto}
+                              className="hidden"
+                            />
+                          </label>
+                          <label className="px-2.5 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-bold cursor-pointer flex items-center gap-1">
+                            <Camera className="w-3 h-3" />
+                            <span>كاميرا</span>
+                            <input
+                              type="file"
+                              accept="image/*"
+                              capture="environment"
+                              onChange={handleNewParticipantPhotoFileChange}
+                              disabled={isCompressingNewPhoto}
+                              className="hidden"
+                            />
+                          </label>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
                 <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-800">
                   <button
                     type="button"
@@ -5089,6 +5262,101 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
 
             <form onSubmit={handleSaveSchoolParticipant} className="space-y-4">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                {/* Photo Upload & Preview Card */}
+                <div className={`sm:col-span-2 p-3.5 rounded-2xl border transition-all ${
+                  isTeacher && !regPhoto
+                    ? 'bg-red-950/30 border-red-500/60 ring-1 ring-red-500/30'
+                    : 'bg-slate-800/80 border-slate-700'
+                }`}>
+                  <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
+                    <div className="flex items-center gap-3 w-full sm:w-auto">
+                      <div className={`relative w-14 h-14 rounded-2xl overflow-hidden shrink-0 flex items-center justify-center border-2 shadow-xs transition-all ${
+                        isTeacher && !regPhoto
+                          ? 'bg-red-900/30 border-red-500 ring-2 ring-red-500/20'
+                          : 'bg-slate-700/80 border-slate-600'
+                      }`}>
+                        {regPhoto ? (
+                          <img
+                            src={regPhoto}
+                            alt="صورة التلميذ"
+                            className="w-full h-full object-cover"
+                          />
+                        ) : (
+                          <span className="text-2xl">👤</span>
+                        )}
+                        {isCompressingRegPhoto && (
+                          <div className="absolute inset-0 bg-black/70 flex items-center justify-center">
+                            <RefreshCw className="w-4 h-4 text-emerald-400 animate-spin" />
+                          </div>
+                        )}
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <label className="block text-xs font-bold text-white">
+                            صورة التلميذ(ة) المشارك(ة)
+                          </label>
+                          {isTeacher ? (
+                            <span className="text-[10px] font-black text-red-400 bg-red-950/80 border border-red-700/80 px-2 py-0.5 rounded-full animate-pulse">
+                              إجبارية للأستاذ *
+                            </span>
+                          ) : (
+                            <span className="text-[10px] text-slate-400">
+                              (اختياري)
+                            </span>
+                          )}
+                        </div>
+                        <p className={`text-[10px] mt-0.5 ${
+                          isTeacher && !regPhoto ? 'text-red-400 font-bold' : 'text-slate-400'
+                        }`}>
+                          {regPhoto
+                            ? '✅ تم إرفاق الصورة الشخصية بنجاح'
+                            : isTeacher
+                            ? '⚠️ إدخال الصورة إجباري قبل الحفظ بالنسبة للأستاذ'
+                            : 'يمكن التقاط صورة بالكاميرا أو اختيار ملف'}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+                      {regPhoto ? (
+                        <button
+                          type="button"
+                          onClick={() => setRegPhoto('')}
+                          className="px-3 py-1.5 bg-red-900/30 hover:bg-red-900/60 text-red-300 border border-red-700/60 rounded-xl text-xs font-bold transition-colors cursor-pointer"
+                        >
+                          حذف 🗑️
+                        </button>
+                      ) : (
+                        <>
+                          <label className="flex-1 sm:flex-initial px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-slate-200 border border-slate-600 rounded-xl text-xs font-bold transition-colors cursor-pointer flex items-center justify-center gap-1.5">
+                            <Upload className="w-3.5 h-3.5" />
+                            <span>ملف</span>
+                            <input
+                              type="file"
+                              accept="image/*"
+                              onChange={handleRegPhotoFileChange}
+                              disabled={isCompressingRegPhoto}
+                              className="hidden"
+                            />
+                          </label>
+                          <label className="flex-1 sm:flex-initial px-3 py-1.5 bg-emerald-700 hover:bg-emerald-600 text-white border border-emerald-600 rounded-xl text-xs font-bold transition-colors cursor-pointer flex items-center justify-center gap-1.5 shadow-xs">
+                            <Camera className="w-3.5 h-3.5" />
+                            <span>كاميرا</span>
+                            <input
+                              type="file"
+                              accept="image/*"
+                              capture="environment"
+                              onChange={handleRegPhotoFileChange}
+                              disabled={isCompressingRegPhoto}
+                              className="hidden"
+                            />
+                          </label>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
                 {/* Full Name */}
                 <div className="sm:col-span-2">
                   <label className="block text-xs font-bold text-slate-300 mb-1">الاسم والنسب الكامل للتلميذ(ة) *:</label>
@@ -6840,15 +7108,32 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
       )}
 
       {/* ========================================================================= */}
-      {/* 🎽 MODAL: ATHLETICS BIBS GENERATOR (تطبيق إعداد صدريات ألعاب القوى) 🎽 */}
+      {/* 📋 SCHOOL PARTICIPATION CONFIRMATION MODAL */}
       {/* ========================================================================= */}
-      {isAthleticsBibModalOpen && (
-        <AthleticsBibGeneratorModal
-          isOpen={isAthleticsBibModalOpen}
-          onClose={() => setIsAthleticsBibOpen(false)}
-          initialDisciplineId={activeDiscipline?.id}
-          initialCategory={selectedCategory}
-          initialGender={selectedGender}
+      {isConfirmModalOpen && (
+        <ConfirmParticipationModal
+          isOpen={isConfirmModalOpen}
+          onClose={() => setIsConfirmModalOpen(false)}
+          sport={{ id: 'athletics', name: 'ألعاب القوى', icon: '🏅' }}
+          schoolName={effectiveAthleticsSchool}
+          schoolId={currentUser?.schoolName || effectiveAthleticsSchool}
+          teacherId={currentUser?.id}
+          teacherName={currentUser?.fullName}
+          teacherPhone={currentUser?.phone}
+          teacherLeaseNumber={currentUser?.leaseNumber}
+          registrationDeadline={null}
+          confirmedRecord={athleticsConfirmationRecord}
+          onConfirmSuccess={() => {
+            refreshConfirmations();
+            loadAllAthleticsData();
+          }}
+          onCancelSuccess={() => {
+            refreshConfirmations();
+            loadAllAthleticsData();
+          }}
+          onProceedToRegister={() => {
+            handleOpenAddSchoolParticipant();
+          }}
         />
       )}
     </div>

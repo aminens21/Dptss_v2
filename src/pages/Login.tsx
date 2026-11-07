@@ -55,7 +55,7 @@ import {
 } from 'firebase/auth';
 import { doc, setDoc, getDoc, serverTimestamp } from 'firebase/firestore';
 import { auth, db } from '../firebase/config';
-import { Role, Directorate, School, Tournament, Match, Student, CrossCountryCategoryResult, AthleticsCategoryResult, AthleticsWinner, Sport } from '../types';
+import { User, Role, Directorate, School, Tournament, Match, Student, CrossCountryCategoryResult, AthleticsCategoryResult, AthleticsWinner, Sport } from '../types';
 import { DataService, SPORTS_MAP, getAgeCategoriesForSeason, getCategoryYearsLabel } from '../lib/dataService';
 import { calculateTeamRankings, resolveRunnerParticipationType } from '../lib/crossCountryConfig';
 import { AppLogo } from '../components/AppLogo';
@@ -78,8 +78,24 @@ export const Login: React.FC = () => {
   // Data states for Public View
   const [activeDirectorate, setActiveDirectorate] = useState<Directorate | null>(null);
   const [isAboutModalOpen, setIsAboutModalOpen] = useState(false);
-  const [isIntroOpen, setIsIntroOpen] = useState(true);
-  const [isIntroEnabled, setIsIntroEnabled] = useState(true);
+  const [isIntroOpen, setIsIntroOpen] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem('app_intro_enabled');
+      return saved !== null ? saved === 'true' : true;
+    } catch {
+      return true;
+    }
+  });
+
+  useEffect(() => {
+    const handleIntroToggled = (e: any) => {
+      if (typeof e.detail === 'boolean') {
+        setIsIntroOpen(e.detail);
+      }
+    };
+    window.addEventListener('introToggled', handleIntroToggled);
+    return () => window.removeEventListener('introToggled', handleIntroToggled);
+  }, []);
   const [isCrossCountryPodiumOpen, setIsCrossCountryPodiumOpen] = useState(false);
   const [directorates, setDirectorates] = useState<Directorate[]>([]);
   const [schools, setSchools] = useState<School[]>([]);
@@ -560,45 +576,12 @@ export const Login: React.FC = () => {
     )
   );
 
-  // Check if user email is registered in the system
-  const isEmailRegistered = useMemo(() => {
-    if (!userProfile?.email) return false;
-    const registeredEmails = new Set([
-      // Check against known admin emails from types
-      ...SUPER_ADMIN_EMAILS,
-      // We'll check Firestore users on first load
-    ]);
-    // Initialize with checking on first use
-    return registeredEmails.has(userProfile.email.toLowerCase());
-  }, [userProfile?.email]);
-
   // Redirect to dashboard if already authenticated & complete profile
   useEffect(() => {
     if (!loading && currentUser && isProfileComplete && loginMode !== 'REGISTER_TEACHER') {
       navigate('/dashboard', { replace: true });
     }
   }, [loading, currentUser, isProfileComplete, loginMode, navigate]);
-
-  // Restrict access: only allow teachers with registered emails or admins
-  const canAccessPlatform = useMemo(() => {
-    if (isSuperAdminEmail(userProfile?.email)) return true;
-    if (userProfile?.role === 'SUPER_ADMIN') return true;
-    if (userProfile?.role === 'CENTRAL_ADMIN') return true;
-    if (userProfile?.role === 'SPORT_MANAGER') return true;
-    // For teachers, check if they have complete profile (directorateId + workLocation or leaseNumber)
-    if (userProfile?.role === 'TEACHER') {
-      return userProfile.directorateId && (userProfile.workLocation || userProfile.leaseNumber);
-    }
-    return false;
-  }, [userProfile]);
-
-  // Block navigation if not authorized
-  useEffect(() => {
-    if (!loading && currentUser && !canAccessPlatform && loginMode !== 'REGISTER_TEACHER') {
-      toast.error('يجب إكمال ملف الأستاذ لتتمكن من الدخول للمنصة', { id: 'access-restricted-toast' });
-      navigate('/login', { replace: true });
-    }
-  }, [loading, currentUser, canAccessPlatform, loginMode, navigate]);
 
   // Filtered approved schools by directorate and cycle (including private schools)
   const { filteredSchools, publicSchools, privateSchools } = useMemo(() => {
@@ -715,26 +698,64 @@ export const Login: React.FC = () => {
         return;
       }
 
+      // 3. Check if user is pre-registered/added in users collection or local list
+      let matchedTeacher: User | null = null;
+      try {
+        const allUsers = await DataService.getUsers();
+        const found = allUsers.find(u => u.email && u.email.trim().toLowerCase() === cleanEmail);
+        if (found) {
+          matchedTeacher = found;
+        }
+      } catch (checkErr) {
+        console.warn("Error checking users list:", checkErr);
+      }
+
+      // Check Firestore user doc by UID
       try {
         const userDoc = await getDoc(doc(db, 'users', googleUser.uid));
         if (userDoc.exists()) {
-          const data = userDoc.data();
-          if (data.directorateId && (data.leaseNumber || data.workLocation)) {
-            DataService.setActiveDirectorateId(data.directorateId);
-            toast.success(`مرحباً بك ذ. ${data.fullName || googleUser.displayName || ''}! تم تسجيل الدخول بنجاح`);
-            navigate('/dashboard', { replace: true });
-            return;
-          }
+          const data = userDoc.data() as User;
+          matchedTeacher = { ...(matchedTeacher || {}), ...data, id: googleUser.uid } as User;
         }
       } catch (checkErr) {
         console.warn("Error checking user doc in Firestore:", checkErr);
       }
 
-      setRegFullName('');
-      setRegEmail(cleanEmail);
-      setRegPhoto(googleUser.photoURL || '');
-      setLoginMode('REGISTER_TEACHER');
-      toast('يرجى استكمال بيانات التسجيل وكتابة الإسم الكامل بالعربية', { icon: 'ℹ️' });
+      // If matched, allow login and update UID link
+      if (matchedTeacher) {
+        const effectiveDirId = matchedTeacher.directorateId || 'taourirt';
+        DataService.setActiveDirectorateId(effectiveDirId);
+
+        try {
+          await setDoc(doc(db, 'users', googleUser.uid), {
+            ...matchedTeacher,
+            id: googleUser.uid,
+            email: cleanEmail,
+            photoUrl: googleUser.photoURL || matchedTeacher.photoUrl || '',
+            lastLoginAt: serverTimestamp()
+          }, { merge: true });
+        } catch (linkErr) {
+          console.warn("Error linking user uid:", linkErr);
+        }
+
+        updateProfileState({
+          ...matchedTeacher,
+          id: googleUser.uid,
+          email: cleanEmail,
+          photoUrl: googleUser.photoURL || matchedTeacher.photoUrl || ''
+        });
+
+        toast.success(`مرحباً بك ذ. ${matchedTeacher.fullName || googleUser.displayName || 'الأستاذ'}! تم تسجيل الدخول بنجاح`);
+        navigate('/dashboard', { replace: true });
+        return;
+      }
+
+      // If email is NOT added/whitelisted in the system: STRICT ACCESS REJECTION
+      await signOut(auth);
+      toast.error(
+        `عذراً، البريد الإلكتروني (${cleanEmail}) غير مسجل في المنظومة. الدخول متاح حصرياً للأساتذة والأطر الذين تمت إضافة بريدهم مسبقاً من طرف الإدارة.`,
+        { duration: 7000 }
+      );
 
     } catch (error: any) {
       console.error("Google sign in error:", error);
@@ -877,167 +898,30 @@ export const Login: React.FC = () => {
         </p>
       </div>
 
-      {/* MODE 1: LOGIN (GOOGLE SIGN IN) */}
-      {loginMode === 'PUBLIC' && (
-        <div className="space-y-4">
-          <button
-            type="button"
-            onClick={handleGoogleSignIn}
-            disabled={isSubmitting}
-            className="w-full py-3.5 px-4 bg-white hover:bg-slate-50 dark:bg-slate-800 dark:hover:bg-slate-700/80 border-2 border-slate-200 dark:border-slate-700 text-slate-800 dark:text-white font-black rounded-2xl shadow-sm hover:shadow-md transition-all text-xs flex items-center justify-center gap-2.5 cursor-pointer group disabled:opacity-50"
-          >
-            <svg className="w-5 h-5 shrink-0" viewBox="0 0 24 24">
-              <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
-              <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
-              <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
-              <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
-            </svg>
-            <span>{isSubmitting ? 'جاري التحقق عبر Google...' : 'المتابعة بحساب Google (Gmail)'}</span>
-          </button>
+      {/* LOGIN (GOOGLE SIGN IN FOR PRE-ADDED EMAILS ONLY) */}
+      <div className="space-y-4">
+        <button
+          type="button"
+          onClick={handleGoogleSignIn}
+          disabled={isSubmitting}
+          className="w-full py-3.5 px-4 bg-white hover:bg-slate-50 dark:bg-slate-800 dark:hover:bg-slate-700/80 border-2 border-slate-200 dark:border-slate-700 text-slate-800 dark:text-white font-black rounded-2xl shadow-sm hover:shadow-md transition-all text-xs flex items-center justify-center gap-2.5 cursor-pointer group disabled:opacity-50"
+        >
+          <svg className="w-5 h-5 shrink-0" viewBox="0 0 24 24">
+            <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+            <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+            <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
+            <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
+          </svg>
+          <span>{isSubmitting ? 'جاري التحقق عبر Google...' : 'المتابعة بحساب Google (Gmail)'}</span>
+        </button>
 
-          <div className="p-3 bg-blue-50/80 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800 rounded-2xl text-[11px] text-blue-900 dark:text-blue-300 font-bold leading-relaxed flex items-start gap-2">
-            <Info className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
-            <div>
-              <span>يتطلب التسجيل لأول مرة إدخال القن السري للمديرية الإقليمية الخاص بمؤسستك التعليمية.</span>
-            </div>
+        <div className="p-3 bg-emerald-50/90 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 rounded-2xl text-[11px] text-emerald-900 dark:text-emerald-300 font-bold leading-relaxed flex items-start gap-2">
+          <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+          <div>
+            <span>الدخول مخصص حصرياً للأساتذة والأطر المضافة حساباتهم مسبقاً من طرف الإدارة أو المديرية الإقليمية. فتح الحسابات الذاتية غير متاح.</span>
           </div>
         </div>
-      )}
-
-      {/* MODE 2: TEACHER REGISTRATION MODAL */}
-      {loginMode === 'REGISTER_TEACHER' && (
-        <form className="space-y-4" onSubmit={handleCompleteRegistration}>
-          <div className="p-2.5 bg-blue-50 dark:bg-blue-950/60 border border-blue-200 dark:border-slate-800 rounded-2xl flex items-center justify-between">
-            <span className="text-xs font-bold text-blue-950 dark:text-blue-200 truncate">{regEmail}</span>
-            <button type="button" onClick={handleCancelRegistration} className="text-[10px] text-red-600 dark:text-red-400 font-bold">تغيير</button>
-          </div>
-
-          <div>
-            <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">الإسم الكامل بالعربية *</label>
-            <input
-              type="text"
-              required
-              value={regFullName}
-              onChange={(e) => setRegFullName(e.target.value)}
-              placeholder="ذ. محمد المرابط"
-              className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-800 dark:text-slate-100 focus:ring-2 focus:ring-emerald-500"
-            />
-          </div>
-
-          <div className="grid grid-cols-2 gap-2">
-            <div>
-              <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">رقم التأجير (SOM) *</label>
-              <input
-                type="text"
-                required
-                value={regLeaseNumber}
-                onChange={(e) => setRegLeaseNumber(e.target.value)}
-                placeholder="123456"
-                className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-800 dark:text-slate-100"
-              />
-            </div>
-
-            <div>
-              <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">القن السري للمديرية *</label>
-              <input
-                type="password"
-                required
-                value={regDirectorateCode}
-                onChange={(e) => setRegDirectorateCode(e.target.value)}
-                placeholder="القن السري"
-                className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-800 dark:text-slate-100"
-              />
-            </div>
-          </div>
-
-          {/* Cycle Selector Buttons: تأهيلي / إعدادي / ابتدائي */}
-          <div>
-            <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5 flex items-center justify-between">
-              <span className="flex items-center gap-1.5">
-                <Award className="h-3.5 w-3.5 text-slate-400" />
-                <span>السلك التعليمي للأستاذ(ة) *</span>
-              </span>
-              <span className="text-[10px] text-slate-500 font-normal">
-                اختر السلك لتصفية المؤسسات
-              </span>
-            </label>
-            <div className="grid grid-cols-3 gap-2">
-              {[
-                { id: 'HIGH', label: 'تأهيلي', fullLabel: 'الثانوي التأهيلي', icon: '🎓' },
-                { id: 'MIDDLE', label: 'إعدادي', fullLabel: 'الثانوي الإعدادي', icon: '📘' },
-                { id: 'PRIMARY', label: 'ابتدائي', fullLabel: 'التعليم الابتدائي', icon: '🏫' }
-              ].map(cycle => (
-                <button
-                  key={cycle.id}
-                  type="button"
-                  onClick={() => {
-                    setRegTeachingCadre(cycle.id as any);
-                    setRegWorkLocation('');
-                  }}
-                  className={`flex flex-col items-center justify-center p-2 rounded-xl border text-xs font-bold transition-all cursor-pointer ${
-                    regTeachingCadre === cycle.id
-                      ? 'bg-emerald-50 dark:bg-emerald-950/60 border-emerald-500 text-emerald-900 dark:text-emerald-300 ring-2 ring-emerald-500/20 shadow-xs'
-                      : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700'
-                  }`}
-                >
-                  <span className="text-sm mb-0.5">{cycle.icon}</span>
-                  <span className="text-center text-[11px]">{cycle.label}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* School Select Dropdown filtered by cycle and showing private schools */}
-          <div>
-            <div className="flex items-center justify-between mb-1">
-              <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300">المؤسسة التعليمية *</label>
-              <span className="text-[10px] font-bold text-blue-700 bg-blue-50 dark:bg-blue-950/60 px-2 py-0.5 rounded border border-blue-200 dark:border-blue-800">
-                {filteredSchools.length} مؤسسة مسجلة بالسلك (عمومي وخاص)
-              </span>
-            </div>
-            <select
-              value={regWorkLocation}
-              onChange={(e) => setRegWorkLocation(e.target.value)}
-              className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-800 dark:text-slate-100 cursor-pointer"
-            >
-              <option value="">-- اختر مؤسستك ({regTeachingCadre === 'PRIMARY' ? 'التعليم الابتدائي' : regTeachingCadre === 'MIDDLE' ? 'الثانوي الإعدادي' : 'الثانوي التأهيلي'}) --</option>
-              {publicSchools.length > 0 && (
-                <optgroup label={regTeachingCadre === 'PRIMARY' ? '🏛️ مؤسسات التعليم الابتدائي العمومي' : regTeachingCadre === 'MIDDLE' ? '🏛️ الثانويات الإعدادية العمومية' : '🏛️ الثانويات التأهيلية العمومية'}>
-                  {publicSchools.map(sch => (
-                    <option key={sch.id} value={sch.name}>
-                      {sch.name} {sch.commune ? `(${sch.commune})` : ''}
-                    </option>
-                  ))}
-                </optgroup>
-              )}
-              {privateSchools.length > 0 && (
-                <optgroup label={regTeachingCadre === 'PRIMARY' ? '⭐ مؤسسات التعليم المدرسي الخصوصي (ابتدائي)' : regTeachingCadre === 'MIDDLE' ? '⭐ مؤسسات التعليم المدرسي الخصوصي (إعدادي)' : '⭐ مؤسسات التعليم المدرسي الخصوصي (تأهيلي)'}>
-                  {privateSchools.map(sch => (
-                    <option key={sch.id} value={sch.name}>
-                      {sch.name} [خصوصي] {sch.commune ? `(${sch.commune})` : ''}
-                    </option>
-                  ))}
-                </optgroup>
-              )}
-              {publicSchools.length === 0 && privateSchools.length === 0 && (
-                filteredSchools.map(sch => (
-                  <option key={sch.id} value={sch.name}>
-                    {sch.name} {sch.commune ? `(${sch.commune})` : ''}
-                  </option>
-                ))
-              )}
-            </select>
-          </div>
-
-          <button
-            type="submit"
-            disabled={isSubmitting || !regWorkLocation}
-            className="w-full py-3 bg-emerald-600 text-white font-bold rounded-2xl text-xs cursor-pointer hover:bg-emerald-700 disabled:opacity-50"
-          >
-            تأكيد التسجيل والدخول
-          </button>
-        </form>
-      )}
+      </div>
     </div>
   );
 

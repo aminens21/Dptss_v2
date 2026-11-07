@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Tournament, Sport, Directorate } from '../types';
+import { Tournament, Sport, Directorate, TARGET_AFFILIATIONS, TargetAffiliationConfig } from '../types';
 import { AGE_CATEGORIES, DataService, getAgeCategoriesForSeason, SPORTS_MAP, getCategoryGenderLabel, normalizeCategoryKey } from '../lib/dataService';
 import { X, Trophy, Calendar, Users, Target, Award, Sparkles, ShieldCheck, RefreshCw, Check, Clock, GraduationCap } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -26,7 +26,7 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
   // Custom states for multi-select categories and gender combinations
   const [selectedCategories, setSelectedCategories] = useState<string[]>(['U15']);
   const [genderSelection, setGenderSelection] = useState<'Male' | 'Female' | 'Both' | 'Mixed'>('Both');
-  const [affiliationSelection, setAffiliationSelection] = useState<'both' | 'non_club' | 'club_affiliated' | 'open'>('both');
+  const [selectedAffiliations, setSelectedAffiliations] = useState<string[]>(['non_club']);
 
   // Sports Configuration for custom/dynamic categories
   const [sportsConfig, setSportsConfig] = useState<Sport[]>([]);
@@ -79,6 +79,22 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
 
   const seasonalCategories = getAgeCategoriesForSeason(currentSeason, undefined, sportId);
   const activeSportConfig = sportsConfig.find(s => s.id === sportId);
+
+  // Available target classifications configured in SportsConfig for this sport
+  const availableAffiliations = useMemo(() => {
+    const allowed = activeSportConfig?.targetAffiliations;
+    if (allowed && allowed.length > 0) {
+      return TARGET_AFFILIATIONS.filter(a => allowed.includes(a.id));
+    }
+    return TARGET_AFFILIATIONS.filter(a => ['non_club', 'espoir_non_club', 'sports_tracks', 'espoir_club'].includes(a.id));
+  }, [activeSportConfig]);
+
+  // Sync selected affiliations whenever available affiliations change
+  useEffect(() => {
+    if (availableAffiliations.length > 0) {
+      setSelectedAffiliations(availableAffiliations.map(a => a.id));
+    }
+  }, [availableAffiliations]);
 
   // Offer the 4 official age categories so user can add, remove, or switch categories freely
   const categoriesToRender = seasonalCategories
@@ -150,11 +166,23 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
             if (lvls.length > 0) setSelectedLevels(lvls);
           }
 
-          const existingCats = Array.from(new Set(sportTourns.map(t => normalizeCategoryKey(t.ageCategory)).filter(Boolean)));
-          if (existingCats.length > 0) {
-            setSelectedCategories(existingCats);
-          } else if (sportId === 'cross_country') {
-            setSelectedCategories(['U12', 'U15', 'U18', 'U20']);
+          const activeSportConfig = sportsConfig.find(s => s.id === sportId);
+          if (activeSportConfig?.ageCategories && activeSportConfig.ageCategories.length > 0) {
+            const cleanCats = activeSportConfig.ageCategories
+              .map(normalizeCategoryKey)
+              .filter(c => ['U12', 'U15', 'U18', 'U20'].includes(c));
+            setSelectedCategories(cleanCats.length > 0 ? cleanCats : ['U15']);
+          } else {
+            const existingCats = Array.from(new Set(
+              sportTourns
+                .map(t => normalizeCategoryKey(t.ageCategory))
+                .filter(c => ['U12', 'U15', 'U18', 'U20'].includes(c))
+            ));
+            if (existingCats.length > 0) {
+              setSelectedCategories(existingCats);
+            } else {
+              setSelectedCategories(['U12', 'U15', 'U18', 'U20']);
+            }
           }
 
           const genders = new Set(sportTourns.map(t => t.gender));
@@ -164,11 +192,12 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
           else if (genders.has('Female')) setGenderSelection('Female');
           else if (sportId === 'cross_country') setGenderSelection('Both');
 
-          const affs = new Set(sportTourns.map(t => t.affiliationType || 'non_club'));
-          if (affs.has('non_club') && affs.has('club_affiliated')) setAffiliationSelection('both');
-          else if (affs.has('club_affiliated')) setAffiliationSelection('club_affiliated');
-          else if (affs.has('open')) setAffiliationSelection('open');
-          else setAffiliationSelection('non_club');
+          const affs = new Set(sportTourns.map(t => t.affiliationType || 'non_club').filter(Boolean) as string[]);
+          if (affs.size > 0) {
+            setSelectedAffiliations(Array.from(affs));
+          } else {
+            setSelectedAffiliations(availableAffiliations.map(a => a.id));
+          }
         } else {
           setIsEditing(false);
           const activeSportConfig = sportsConfig.find(s => s.id === sportId);
@@ -176,12 +205,15 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
           setName(`البطولة الإقليمية المدرسية لـ ${sportName}`);
 
           if (activeSportConfig?.ageCategories && activeSportConfig.ageCategories.length > 0) {
-            setSelectedCategories(activeSportConfig.ageCategories.map(normalizeCategoryKey));
+            const cleanCats = activeSportConfig.ageCategories
+              .map(normalizeCategoryKey)
+              .filter(c => ['U12', 'U15', 'U18', 'U20'].includes(c));
+            setSelectedCategories(cleanCats.length > 0 ? cleanCats : ['U12', 'U15', 'U18', 'U20']);
           } else {
             setSelectedCategories(['U12', 'U15', 'U18', 'U20']);
           }
           setGenderSelection('Both');
-          setAffiliationSelection('both');
+          setSelectedAffiliations(availableAffiliations.map(a => a.id));
         }
       });
     } else if (!isOpen) {
@@ -230,19 +262,13 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
         gendersToGenerate.push('Mixed');
       }
 
-      // Determine affiliation types to generate: non_club, club_affiliated, open, or both
-      const affiliationsToGenerate: ('non_club' | 'club_affiliated' | 'open')[] = [];
-      if (affiliationSelection === 'both') {
-        affiliationsToGenerate.push('non_club', 'club_affiliated');
-      } else if (affiliationSelection === 'non_club') {
-        affiliationsToGenerate.push('non_club');
-      } else if (affiliationSelection === 'club_affiliated') {
-        affiliationsToGenerate.push('club_affiliated');
-      } else {
-        affiliationsToGenerate.push('open');
+      if (selectedAffiliations.length === 0) {
+        toast.error('يرجى تحديد صنف مشاركة مستهدف واحد على الأقل');
+        setIsSubmitting(false);
+        return;
       }
 
-      // Generate combinations: categories x genders x affiliations
+      // Generate combinations: categories x genders x target affiliations
       const tournamentsBatch: Omit<Tournament, 'id'>[] = [];
       const activeDirId = activeDirObj?.id || DataService.getActiveDirectorateId();
 
@@ -250,9 +276,10 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
         for (const gen of gendersToGenerate) {
           const genderCatName = getCategoryGenderLabel(catId, gen);
 
-          for (const aff of affiliationsToGenerate) {
-            const affSuffix = aff === 'non_club' ? ' - لا منتمين' : aff === 'open' ? ' - مفتوحة' : ' - للمنتمين للأندية';
-            const affLabel = aff === 'non_club' ? 'لا منتمين' : aff === 'open' ? 'مفتوحة' : 'للمنتمين للأندية';
+          for (const affId of selectedAffiliations) {
+            const affConfig = TARGET_AFFILIATIONS.find(a => a.id === affId);
+            const affLabel = affConfig?.label || (affId === 'non_club' ? 'غير المنتمين للأندية' : affId);
+            const affSuffix = ` - ${affLabel}`;
             
             // Formulate distinct tournament name with affiliation
             const finalTournamentName = `${name.trim()} - ${genderCatName}${affSuffix}`;
@@ -265,7 +292,9 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
               gender: gen,
               level: selectedLevels && selectedLevels.length > 0 ? selectedLevels.join(',') : (catId === 'U12' ? 'Primary' : catId === 'U15' ? 'Middle' : (catId === 'U18' || catId === 'U20') ? 'High' : 'Primary,Middle,High'),
               scope,
-              affiliationType: aff,
+              affiliationType: affId,
+              targetAffiliations: [affId],
+              categoryStudentLimits: activeSportConfig?.categoryStudentLimits || {},
               startDate: new Date(startDate),
               endDate: new Date(endDate),
               registrationDeadline: registrationDeadline ? new Date(registrationDeadline) : new Date(endDate),
@@ -300,7 +329,7 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
       setSelectedCategories(['U15']);
       setSelectedLevels(['High']);
       setGenderSelection('Both');
-      setAffiliationSelection('both');
+      setSelectedAffiliations(availableAffiliations.map(a => a.id));
       onClose();
     } catch (err) {
       console.error(err);
@@ -541,103 +570,104 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
             </div>
           </div>
 
-          {/* Affiliation / Participation Category (Non-Club vs Club Affiliated) */}
-          <div className="space-y-2 p-3.5 bg-amber-50/50 border border-amber-200/80 rounded-xl">
-            <div className="flex items-center justify-between">
-              <label className="block text-xs font-bold text-amber-950">
-                نوع المشاركة والانتماء الرياضي (Club vs Non-Club) <span className="text-red-500">*</span>
-              </label>
-              <span className="text-[10px] bg-amber-100 text-amber-900 font-bold px-2 py-0.5 rounded border border-amber-300">
-                تصنيف رسمي
-              </span>
+          {/* Affiliation / Target Classification Selector */}
+          <div className="space-y-2.5 p-3.5 bg-amber-50/60 border border-amber-200/80 rounded-2xl">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <Target className="h-4 w-4 text-amber-700 shrink-0" />
+                <label className="text-xs font-black text-amber-950">
+                  الأصناف المستهدفة المتاحة للتسجيل في البطولة <span className="text-red-500">*</span>
+                </label>
+              </div>
+              <div className="flex items-center gap-1.5 self-start sm:self-auto">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const allIds = availableAffiliations.map(a => a.id);
+                    setSelectedAffiliations(allIds);
+                  }}
+                  className="text-[10px] text-amber-800 hover:underline font-bold px-2 py-0.5 rounded bg-amber-100 border border-amber-300 cursor-pointer"
+                >
+                  تحديد جميع الأصناف
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (availableAffiliations.length > 0) {
+                      setSelectedAffiliations([availableAffiliations[0].id]);
+                    }
+                  }}
+                  className="text-[10px] text-slate-500 hover:underline font-bold px-2 py-0.5 rounded bg-white border border-slate-200 cursor-pointer"
+                >
+                  صنف واحد
+                </button>
+              </div>
             </div>
-            <p className="text-[11px] text-amber-800 leading-relaxed">
-              يمكنك برمجة بطولة مخصصة للمدرسيين غير المنتمين للأندية (بطاقة بيضاء)، أو للمنتمين للأندية (بطاقة صفراء فاتحة)، أو كلاهما معاً ليقوم النظام بإنشاء بطولتين مستقلتين.
-            </p>
             
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
-              {/* Option 1: Both */}
-              <button
-                type="button"
-                onClick={() => setAffiliationSelection('both')}
-                className={`p-2.5 rounded-xl text-right border transition-all cursor-pointer flex flex-col justify-between ${
-                  affiliationSelection === 'both'
-                    ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs ring-2 ring-emerald-400/40'
-                    : 'bg-white border-slate-200 hover:border-slate-300 text-slate-800'
-                }`}
-              >
-                <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="font-extrabold text-[10px]">⚡ كلاهما</span>
-                    <span className={`text-[8px] px-1.5 py-0.5 rounded font-bold ${
-                      affiliationSelection === 'both' ? 'bg-white/20 text-white' : 'bg-emerald-50 text-emerald-800 border border-emerald-200'
-                    }`}>
-                      2 بطولتين
-                    </span>
-                  </div>
-                </div>
-              </button>
+            <p className="text-[11px] text-amber-800 leading-relaxed font-medium">
+              يتم إنشاء بطولة مستقلة لكل صنف يتم اختياره من الأصناف المحددة في ضوابط وإعدادات هذا التخصص الرياضي:
+            </p>
 
-              {/* Option 2: Non-Club Only (White Card) */}
-              <button
-                type="button"
-                onClick={() => setAffiliationSelection('non_club')}
-                className={`p-2.5 rounded-xl text-right border transition-all cursor-pointer flex flex-col justify-between ${
-                  affiliationSelection === 'non_club'
-                    ? 'bg-slate-900 text-white border-slate-900 shadow-xs ring-2 ring-slate-400/40'
-                    : 'bg-white border-slate-200 hover:border-slate-300 text-slate-800'
-                }`}
-              >
-                <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="font-extrabold text-[10px]">⚪ غير منتمين</span>
-                    <span className={`text-[8px] px-1.5 py-0.5 rounded font-bold ${
-                      affiliationSelection === 'non_club' ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-700 border border-slate-200'
-                    }`}>
-                      مدرسي
-                    </span>
-                  </div>
+            {/* Checkbox list */}
+            <div className="space-y-2 pt-1">
+              {/* Check All Toggle Banner */}
+              <label className="flex items-center justify-between p-2.5 bg-amber-100/70 border border-amber-300/80 rounded-xl cursor-pointer hover:bg-amber-100 transition-colors">
+                <div className="flex items-center gap-2.5">
+                  <input
+                    type="checkbox"
+                    checked={availableAffiliations.length > 0 && selectedAffiliations.length === availableAffiliations.length}
+                    onChange={(e) => {
+                      if (e.target.checked) {
+                        setSelectedAffiliations(availableAffiliations.map(a => a.id));
+                      } else if (availableAffiliations.length > 0) {
+                        setSelectedAffiliations([availableAffiliations[0].id]);
+                      }
+                    }}
+                    className="rounded border-amber-400 text-amber-600 focus:ring-amber-500 w-4.5 h-4.5 cursor-pointer accent-amber-600"
+                  />
+                  <span className="flex items-center gap-1.5">
+                    <span className="text-sm">🎯</span>
+                    <span className="font-black text-amber-950 text-xs">المشاركة وبرمجة جميع الأصناف المتاحة</span>
+                  </span>
                 </div>
-              </button>
+                <span className="text-[10px] font-bold text-amber-800 bg-white px-2 py-0.5 rounded-md border border-amber-200 shrink-0">
+                  Check box الكل ({selectedAffiliations.length} من {availableAffiliations.length})
+                </span>
+              </label>
 
-              {/* Option 3: Club Affiliated Only (Light Yellow Card) */}
-              <button
-                type="button"
-                onClick={() => setAffiliationSelection('club_affiliated')}
-                className={`p-2.5 rounded-xl text-right border transition-all cursor-pointer flex flex-col justify-between ${
-                  affiliationSelection === 'club_affiliated'
-                    ? 'bg-amber-400 text-amber-950 border-amber-500 shadow-xs ring-2 ring-amber-400/60 font-bold'
-                    : 'bg-amber-50/80 border-amber-200 hover:border-amber-300 text-amber-900'
-                }`}
-              >
-                <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="font-extrabold text-[10px]">⚽ منتمين لأندية</span>
-                  </div>
-                </div>
-              </button>
-
-              {/* Option 4: Open Tournament Only (Green Card) */}
-              <button
-                type="button"
-                onClick={() => setAffiliationSelection('open')}
-                className={`p-2.5 rounded-xl text-right border transition-all cursor-pointer flex flex-col justify-between ${
-                  affiliationSelection === 'open'
-                    ? 'bg-emerald-600 text-white border-emerald-700 shadow-xs ring-2 ring-emerald-400/40 font-bold'
-                    : 'bg-emerald-50/80 border-emerald-200 hover:border-emerald-300 text-emerald-900'
-                }`}
-              >
-                <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="font-extrabold text-[10px]">🟢 دوري مفتوح</span>
-                    <span className={`text-[8px] px-1.5 py-0.5 rounded font-bold ${
-                      affiliationSelection === 'open' ? 'bg-white/20 text-white' : 'bg-emerald-100 text-emerald-700 border border-emerald-200'
-                    }`}>
-                      للجميع
-                    </span>
-                  </div>
-                </div>
-              </button>
+              {/* Grid of Available Target Classifications */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {availableAffiliations.map((aff) => {
+                  const isChecked = selectedAffiliations.includes(aff.id);
+                  return (
+                    <label
+                      key={aff.id}
+                      className={`flex items-center gap-2.5 px-3 py-2.5 rounded-xl border cursor-pointer text-xs font-bold transition-all ${
+                        isChecked
+                          ? 'bg-white border-amber-400 text-amber-950 shadow-xs ring-1 ring-amber-400/50'
+                          : 'bg-white/60 border-slate-200 text-slate-600 hover:bg-white'
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={isChecked}
+                        onChange={() => {
+                          setSelectedAffiliations(prev =>
+                            isChecked
+                              ? (prev.length > 1 ? prev.filter(id => id !== aff.id) : prev)
+                              : [...prev, aff.id]
+                          );
+                        }}
+                        className="rounded border-slate-300 text-amber-600 focus:ring-amber-500 w-4 h-4 cursor-pointer accent-amber-600"
+                      />
+                      <span className="text-base">{aff.icon}</span>
+                      <div className="flex-1 min-w-0">
+                        <span className="block truncate">{aff.label}</span>
+                      </div>
+                    </label>
+                  );
+                })}
+              </div>
             </div>
           </div>
 
@@ -803,7 +833,8 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
               إلغاء
             </button>
             {(() => {
-              const count = (sportId === 'cross_country' ? 1 : selectedCategories.length * (genderSelection === 'Both' ? 2 : 1)) * (affiliationSelection === 'both' ? 2 : 1);
+              const affMultiplier = selectedAffiliations.length > 0 ? selectedAffiliations.length : 1;
+              const count = (sportId === 'cross_country' ? 1 : selectedCategories.length * (genderSelection === 'Both' ? 2 : 1)) * affMultiplier;
               return (
                 <button
                   type="submit"

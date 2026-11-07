@@ -834,6 +834,12 @@ export const CrossCountryBulkRegisterModal: React.FC<CrossCountryBulkRegisterMod
         toast.error(`تاريخ ازدياد التلميذ (${slot.fullName}): ${birthVal.errorMessage}`);
         return;
       }
+
+      // Mandatory Photo Validation for Teachers
+      if (isTeacher && (!slot.photoUrl || !slot.photoUrl.trim())) {
+        toast.error(`⚠️ الصورة الشخصية للتلميذ(ة) «${slot.fullName}» (${slotLabel}) إجبارية قبل الحفظ بالنسبة للأستاذ`);
+        return;
+      }
     }
 
     setIsSubmitting(true);
@@ -966,7 +972,7 @@ export const CrossCountryBulkRegisterModal: React.FC<CrossCountryBulkRegisterMod
                   </span>
                 </div>
                 <p className="text-xs text-slate-300 mt-1 leading-relaxed">
-                  تعبئة لائحة العدائين الثمانية لمؤسسة <span className="font-bold text-amber-300">{resolvedSchoolName}</span> في السباق المحدد، مع إمكانية استخراج اللائحة Excel أو الاستيراد المباشر.
+                  تعبئة لائحة العدائين الثمانية لمؤسسة <span className="font-bold text-amber-300">{resolvedSchoolName}</span> في السباق المحدد (3 فردي + 5 فريق المؤسسة).
                 </p>
               </div>
             </div>
@@ -981,7 +987,7 @@ export const CrossCountryBulkRegisterModal: React.FC<CrossCountryBulkRegisterMod
             </button>
           </div>
 
-          {/* Quick Action Toolbar inside Header */}
+          {/* Quick Action Summary Bar inside Header */}
           <div className="mt-4 pt-3 border-t border-white/10 flex flex-wrap items-center justify-between gap-2.5">
             <div className="flex flex-wrap items-center gap-2 text-xs">
               <span className="font-bold text-slate-300">المجموع الحالي:</span>
@@ -996,53 +1002,12 @@ export const CrossCountryBulkRegisterModal: React.FC<CrossCountryBulkRegisterMod
               </span>
             </div>
 
-            <div className="flex flex-wrap items-center gap-2">
-              {/* Excel Export Button */}
-              <button
-                type="button"
-                onClick={handleExportToExcel}
-                className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl shadow-xs transition-all flex items-center gap-1.5 cursor-pointer"
-                title="تصدير هذه اللائحة إلى ملف Excel منسق"
-              >
-                <FileSpreadsheet className="w-3.5 h-3.5" />
-                <span>استخراج اللائحة Excel 📊</span>
-              </button>
-
-              {/* Quick Paste Button */}
-              <button
-                type="button"
-                onClick={() => setIsPasteModalOpen(true)}
-                className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-xl shadow-xs transition-all flex items-center gap-1.5 cursor-pointer"
-                title="لصق سريع من Excel أو منظومة مسار"
-              >
-                <ClipboardPaste className="w-3.5 h-3.5" />
-                <span>لصق سريع من مسار / Excel</span>
-              </button>
-
-              {/* Template Download */}
-              <button
-                type="button"
-                onClick={handleDownloadTemplate}
-                className="px-2.5 py-1.5 bg-white/10 hover:bg-white/20 text-slate-200 text-xs font-medium rounded-xl transition-colors flex items-center gap-1 cursor-pointer"
-                title="تحميل نموذج تعبئة فارغ بصيغة Excel"
-              >
-                <Download className="w-3.5 h-3.5" />
-                <span>نموذج فارغ</span>
-              </button>
-
-              {/* Excel Upload Trigger */}
-              <label className="px-2.5 py-1.5 bg-white/10 hover:bg-white/20 text-slate-200 text-xs font-medium rounded-xl transition-colors flex items-center gap-1 cursor-pointer">
-                <Upload className="w-3.5 h-3.5" />
-                <span>استيراد ملف</span>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept=".xlsx, .xls"
-                  className="hidden"
-                  onChange={handleFileUpload}
-                />
-              </label>
-            </div>
+            {isTeacher && (
+              <div className="flex items-center gap-1.5 text-xs text-amber-200 bg-amber-500/20 px-3 py-1 rounded-xl border border-amber-400/30">
+                <span>📸</span>
+                <span className="font-bold">تنبيه للأستاذ: إدخال الصورة الشخصية إجباري لكل عداء قبل الحفظ</span>
+              </div>
+            )}
           </div>
         </div>
 
@@ -1206,7 +1171,7 @@ export const CrossCountryBulkRegisterModal: React.FC<CrossCountryBulkRegisterMod
             <Info className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
             <div>
               <span className="font-black">قواعد التوزيع المعتمدة في العدو الريفي:</span>{' '}
-              تخصص الخانات الثلاث الأولى (1، 2، 3) للمشاركين بصفة <strong className="text-amber-800 underline">فردية</strong>، بينما تخصص الخانات الخمس المتبقية (4، 5، 6، 7، 8) لـ <strong className="text-emerald-800 underline">فريق المؤسسة</strong> لاحتساب النقط الجماعية. يمكنك ملء الخانات كلياً أو جزئياً واستخراج اللائحة في أي وقت.
+              تخصص الخانات الثلاث الأولى (1، 2، 3) للمشاركين بصفة <strong className="text-amber-800 underline">فردية</strong>، بينما تخصص الخانات الخمس المتبقية (4، 5، 6، 7، 8) لـ <strong className="text-emerald-800 underline">فريق المؤسسة</strong> لاحتساب النقط الجماعية. يمكنك ملء الخانات كلياً أو جزئياً وحفظ المشاركين.
             </div>
           </div>
 
@@ -1318,12 +1283,23 @@ export const CrossCountryBulkRegisterModal: React.FC<CrossCountryBulkRegisterMod
 
                     {/* Participant Photo */}
                     <div className="space-y-1">
-                      <label className="block text-[10px] font-bold text-slate-600">
-                        صورة المشارك (اختياري)
+                      <label className="block text-[10px] font-bold text-slate-700 flex items-center justify-between">
+                        <span>
+                          صورة المشارك {isTeacher ? <strong className="text-red-600 font-black">(إجبارية للأستاذ *)</strong> : <span className="text-slate-400 font-normal">(اختياري)</span>}
+                        </span>
+                        {isTeacher && !slot.photoUrl && slot.fullName && (
+                          <span className="text-[9px] text-red-600 bg-red-50 border border-red-200 px-1 py-0.2 rounded font-bold animate-pulse">
+                            مطلوبة *
+                          </span>
+                        )}
                       </label>
                       <div className="flex items-center gap-2">
                         {/* Photo Preview Thumbnail */}
-                        <div className="w-10 h-10 rounded-lg bg-slate-100 border border-slate-200 flex items-center justify-center shrink-0 overflow-hidden relative shadow-3xs">
+                        <div className={`w-10 h-10 rounded-lg flex items-center justify-center shrink-0 overflow-hidden relative shadow-3xs border ${
+                          isTeacher && !slot.photoUrl && slot.fullName
+                            ? 'border-red-400 bg-red-50/50 ring-2 ring-red-400/20'
+                            : 'bg-slate-100 border-slate-200'
+                        }`}>
                           {slot.photoUrl ? (
                             <img src={slot.photoUrl} alt="صورة المشارك" className="w-full h-full object-cover" />
                           ) : (
@@ -1496,12 +1472,28 @@ export const CrossCountryBulkRegisterModal: React.FC<CrossCountryBulkRegisterMod
 
                     {/* Participant Photo */}
                     <div className="space-y-1">
-                      <label className="block text-[9.5px] font-bold text-slate-600">
-                        صورة المشارك (اختياري)
+                      <label className="flex items-center justify-between text-[9.5px] font-bold text-slate-600">
+                        <span>
+                          صورة المشارك{' '}
+                          {isTeacher ? (
+                            <strong className="text-red-600 font-black">(إجبارية للأستاذ *)</strong>
+                          ) : (
+                            <span className="text-slate-400 font-normal">(اختياري)</span>
+                          )}
+                        </span>
+                        {isTeacher && !slot.photoUrl && slot.fullName && (
+                          <span className="text-[8.5px] text-red-600 bg-red-50 border border-red-200 px-1 py-0.2 rounded font-bold animate-pulse">
+                            مطلوبة *
+                          </span>
+                        )}
                       </label>
                       <div className="flex items-center gap-1.5">
                         {/* Photo Preview Thumbnail */}
-                        <div className="w-8 h-8 rounded-lg bg-slate-100 border border-slate-200 flex items-center justify-center shrink-0 overflow-hidden relative shadow-3xs">
+                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 overflow-hidden relative shadow-3xs border ${
+                          isTeacher && !slot.photoUrl && slot.fullName
+                            ? 'border-red-400 bg-red-50/50 ring-2 ring-red-400/20'
+                            : 'bg-slate-100 border-slate-200'
+                        }`}>
                           {slot.photoUrl ? (
                             <img src={slot.photoUrl} alt="صورة المشارك" className="w-full h-full object-cover" />
                           ) : (
@@ -1579,15 +1571,6 @@ export const CrossCountryBulkRegisterModal: React.FC<CrossCountryBulkRegisterMod
                 className="px-4 py-2.5 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition-all cursor-pointer"
               >
                 إلغاء
-              </button>
-
-              <button
-                type="button"
-                onClick={handleExportToExcel}
-                className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-xs transition-all flex items-center gap-1.5 cursor-pointer"
-              >
-                <FileSpreadsheet className="w-4 h-4" />
-                <span>تصدير Excel 📊</span>
               </button>
 
               <button

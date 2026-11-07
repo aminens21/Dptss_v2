@@ -1,4 +1,4 @@
-import { Tournament, Match, School, Venue, User, Referee, Student, Sport, AppNotification, RoleSidebarPermissions, Directorate, DirectorateTransferRequest, SUPER_ADMIN_EMAILS, CrossCountryCategoryResult, PodiumWinner, CustomAgeCategory, AthleticsCategoryResult, AthleticsWinner } from '../types';
+import { Tournament, Match, School, Venue, User, Referee, Student, Sport, AppNotification, RoleSidebarPermissions, Directorate, DirectorateTransferRequest, SUPER_ADMIN_EMAILS, CrossCountryCategoryResult, PodiumWinner, CustomAgeCategory, AthleticsCategoryResult, AthleticsWinner, SchoolTournamentConfirmation } from '../types';
 import { INITIAL_TOURNAMENTS, INITIAL_MATCHES, INITIAL_SCHOOLS, INITIAL_VENUES, INITIAL_DIRECTORATES } from './initialData';
 import { INITIAL_CROSS_COUNTRY_RESULTS } from './crossCountryConfig';
 import { db } from '../firebase/config';
@@ -9,7 +9,8 @@ const STORAGE_KEYS = {
   MATCHES: 'taourirt_matches_data',
   SCHOOLS: 'taourirt_schools_data',
   VENUES: 'taourirt_venues_data',
-  DIRECTORATES: 'app_directorates_data'
+  DIRECTORATES: 'app_directorates_data',
+  CONFIRMATIONS: 'app_school_confirmations'
 };
 
 // Helper to deduplicate any array of objects by id
@@ -179,15 +180,21 @@ export const getAgeCategoriesForSeason = (season: string, gender?: 'Male' | 'Fem
       const localSports = JSON.parse(localStorage.getItem('taourirt_sports_config') || '[]');
       const foundSport = localSports.find((s: any) => s.id === sportIdOrIsCc);
       if (foundSport && foundSport.customAgeCategories && foundSport.customAgeCategories.length > 0) {
-        return foundSport.customAgeCategories.map((cat: any) => {
-          const years = parseYearsExpression(cat.yearsExpression);
-          return {
-            id: cat.id,
-            name: `${cat.name} - ${cat.yearsExpression}`,
-            shortName: cat.name,
-            years
-          };
-        });
+        return foundSport.customAgeCategories
+          .filter((cat: any) => cat && cat.name && !/^CAT_/i.test(cat.name))
+          .map((cat: any) => {
+            const cleanId = normalizeCategoryKey(cat.id || cat.name);
+            const cleanName = (/^CAT_/i.test(cat.name) || /^cat_/i.test(cat.name))
+              ? (cleanId === 'U12' ? 'البراعم' : cleanId === 'U18' ? 'الفتيان' : cleanId === 'U20' ? 'الشبان' : 'الصغار')
+              : cat.name;
+            const years = parseYearsExpression(cat.yearsExpression);
+            return {
+              id: cleanId,
+              name: `${cleanName}${cat.yearsExpression ? ` - ${cat.yearsExpression}` : ''}`,
+              shortName: cleanName,
+              years
+            };
+          });
       }
     } catch (e) {
       console.warn("Error loading custom age categories in getAgeCategoriesForSeason:", e);
@@ -268,55 +275,26 @@ export const getAgeCategoriesForSeason = (season: string, gender?: 'Male' | 'Fem
 
 export function normalizeCategoryKey(catStr: any): string {
   if (!catStr) return 'U15';
-
+  
   // Convert to string safely to avoid .trim() errors if catStr is not a string primitive
-  const s = String(catStr).trim().toUpperCase();
-
-  if (s.includes('U12') || s.includes('براعم') || s.includes('برعمات')) return 'U12';
-  if (s.includes('U15') || s.includes('صغار') || s.includes('صغيرات')) return 'U15';
-  if (s.includes('U18') || s.includes('فتيان') || s.includes('فتيات')) return 'U18';
-  if (s.includes('U20') || s.includes('شبان') || s.includes('شابات')) return 'U20';
-  if (s === 'U12' || s === 'U15' || s === 'U18' || s === 'U20') return s;
-
+  const s = String(catStr).trim();
+  const upper = s.toUpperCase();
+  
+  if (upper.includes('U12') || upper.includes('براعم') || upper.includes('برعمات')) return 'U12';
+  if (upper.includes('U15') || upper.includes('صغار') || upper.includes('صغيرات')) return 'U15';
+  if (upper.includes('U18') || upper.includes('فتيان') || upper.includes('فتيات')) return 'U18';
+  if (upper.includes('U20') || upper.includes('شبان') || upper.includes('شابات')) return 'U20';
+  if (upper === 'U12' || upper === 'U15' || upper === 'U18' || upper === 'U20') return upper;
+  
+  // Purge any technical auto-generated category hash (e.g. CAT_1793910455460_TEFB or cat_...)
+  if (/^CAT_/i.test(s) || /^cat_/i.test(s) || s.length > 8) {
+    if (s.includes('12')) return 'U12';
+    if (s.includes('18')) return 'U18';
+    if (s.includes('20')) return 'U20';
+    return 'U15';
+  }
+  
   return s;
-}
-
-/**
- * Resolve a human-readable Arabic label for a category ID.
- * Falls back to the raw ID (e.g. 'CAT_1793910455460_TEFB') when no
- * custom category definition is found for it, so the UI never shows
- * a raw internal identifier to users.
- */
-export function getCustomCategoryName(catId: any, sportId?: string): string {
-  if (!catId) return '';
-  const raw = String(catId).trim();
-  if (!raw) return '';
-
-  // Standard age categories are handled by callers via normalizeCategoryKey
-  if (['U12', 'U15', 'U18', 'U20'].includes(normalizeCategoryKey(raw))) {
-    return '';
-  }
-
-  // Look up the custom category definition in the sport configuration
-  if (sportId) {
-    try {
-      const localSports = JSON.parse(localStorage.getItem('taourirt_sports_config') || '[]');
-      const foundSport = localSports.find((s: any) => s.id === sportId);
-      if (foundSport && Array.isArray(foundSport.customAgeCategories)) {
-        const custom = foundSport.customAgeCategories.find((c: any) => c.id === raw);
-        if (custom && custom.name) return custom.name;
-      }
-    } catch (e) {
-      console.warn('Error loading custom age categories in getCustomCategoryName:', e);
-    }
-  }
-
-  // Fallback: strip the internal prefix and format the remainder readably
-  const stripped = raw.replace(/^cat_/i, '').replace(/^CAT_/i, '');
-  if (stripped && stripped !== raw) {
-    return stripped;
-  }
-  return raw;
 }
 
 export function getCategoryYearsLabel(catId: any, season: string = '2026/2027', sportIdOrIsCc?: string | boolean): string {
@@ -354,6 +332,9 @@ export function getCategoryShortName(category: any, gender?: string): string {
     if (gender === 'Female' || gender === 'إناث') return 'الشابات';
     if (gender === 'Male' || gender === 'ذكور') return 'الشبان';
     return 'الشبان والشابات';
+  }
+  if (/^CAT_/i.test(category) || /^cat_/i.test(category)) {
+    return 'الصغار والصغيرات';
   }
   return category;
 }
@@ -474,6 +455,9 @@ export function getCategoryGenderLabel(category: any, gender?: string, season: s
     if (gender === 'Female' || gender === 'إناث') return `الشابات (إناث)${u20Years}`;
     if (gender === 'Male' || gender === 'ذكور') return `الشبان (ذكور)${u20Years}`;
     return `الشبان والشابات${u20Years}`;
+  }
+  if (/^CAT_/i.test(category) || /^cat_/i.test(category)) {
+    return `الصغار والصغيرات${u15Years}`;
   }
   return category;
 }
@@ -697,8 +681,28 @@ export const DataService = {
     });
 
     const mergedList = Array.from(tournsMap.values());
-    setLocal(STORAGE_KEYS.TOURNAMENTS, mergedList);
-    const deduped = deduplicateById(mergedList);
+    const sanitizedList = mergedList.map(t => {
+      let cleanCat = normalizeCategoryKey(t.ageCategory);
+      if (/^CAT_/i.test(cleanCat) || /^cat_/i.test(cleanCat)) {
+        cleanCat = 'U15';
+      }
+      let cleanName = t.name || '';
+      if (/CAT_[0-9A-Za-z_]+/i.test(cleanName) || /cat_[0-9A-Za-z_]+/i.test(cleanName)) {
+        cleanName = cleanName
+          .replace(/CAT_[0-9A-Za-z_]+/gi, 'الصغار والصغيرات')
+          .replace(/cat_[0-9A-Za-z_]+/gi, 'الصغار والصغيرات')
+          .replace(/\s+-\s+-\s+/g, ' - ')
+          .trim();
+      }
+      return {
+        ...t,
+        ageCategory: cleanCat,
+        name: cleanName
+      };
+    });
+
+    setLocal(STORAGE_KEYS.TOURNAMENTS, sanitizedList);
+    const deduped = deduplicateById(sanitizedList);
 
     if (all === true || !activeDirId || activeDirId === 'all') {
       return deduped;
@@ -2076,63 +2080,6 @@ export const DataService = {
     return deduplicateById(mergedUsers);
   },
 
-  async addTeacherBulk(teachersList: Omit<User, 'id' | 'createdAt' | 'updatedAt'>[]): Promise<void> {
-    const activeDirId = this.getActiveDirectorateId();
-    const batch = writeBatch(db);
-    let count = 0;
-
-    let users: User[] = [];
-    try {
-      const localUsersRaw = localStorage.getItem('local_registered_users');
-      users = localUsersRaw ? JSON.parse(localUsersRaw) : [];
-    } catch {}
-
-    for (const t of teachersList) {
-      const id = `teacher_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
-      const cleanEmail = (t.email || `prof_${Math.random().toString(36).substring(2, 8)}@taourirt-sports.ma`).trim().toLowerCase();
-
-      const userRecord: User = {
-        id,
-        fullName: t.fullName || 'أستاذ',
-        email: cleanEmail,
-        phone: t.phone || '',
-        role: 'TEACHER',
-        directorateId: t.directorateId || activeDirId,
-        workLocation: t.workLocation || '',
-        leaseNumber: t.leaseNumber || '',
-        teachingCadre: t.teachingCadre || 'HIGH',
-        isActive: true,
-        createdAt: new Date(),
-        updatedAt: new Date()
-      };
-
-      users.push(userRecord);
-
-      const docRef = doc(collection(db, 'users'), id);
-      batch.set(docRef, {
-        ...userRecord,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp()
-      }, { merge: true });
-      count++;
-
-      if (count >= 450) {
-        await batch.commit();
-        count = 0;
-      }
-    }
-
-    if (count > 0) {
-      try {
-        await batch.commit();
-      } catch (e) {
-        console.warn("Batch commit teachers error:", e);
-      }
-    }
-
-    localStorage.setItem('local_registered_users', JSON.stringify(users));
-  },
-
   async getTeachers(): Promise<User[]> {
     try {
       const allUsers = await this.getUsers();
@@ -2758,18 +2705,39 @@ export const DataService = {
     const allSports: Sport[] = deduplicateById<Sport>([...mergedBase, ...customSports]).map(s => {
       const rawCats = (Array.isArray(s.ageCategories) ? s.ageCategories : allCategoryIds) as string[];
       
-      if (s.customAgeCategories && s.customAgeCategories.length > 0) {
-        return {
-          ...s,
-          ageCategories: rawCats
-        };
+      // Clean raw categories from any technical strings like CAT_1793910455460_TEFB or cat_...
+      const normalizedCats = Array.from(new Set(
+        rawCats
+          .map(c => normalizeCategoryKey(c))
+          .filter(c => !/^CAT_/i.test(c) && !/^cat_/i.test(c) && ['U12', 'U15', 'U18', 'U20'].includes(c))
+      ));
+      const validCats = normalizedCats.length > 0 ? normalizedCats : ['U12', 'U15', 'U18', 'U20'];
+
+      const cleanedCustom = (s.customAgeCategories || [])
+        .filter(cat => cat && !/^CAT_/i.test(cat.id) && !/^CAT_/i.test(cat.name) && !/^cat_/i.test(cat.id))
+        .map(cat => ({
+          ...cat,
+          id: normalizeCategoryKey(cat.id || cat.name)
+        }));
+
+      // Clean category student limits keys
+      const cleanCategoryLimits: Record<string, number> = {};
+      if (s.categoryStudentLimits) {
+        Object.entries(s.categoryStudentLimits).forEach(([k, v]) => {
+          if (!/^CAT_/i.test(k) && !/^cat_/i.test(k)) {
+            const cleanKey = normalizeCategoryKey(k);
+            if (['U12', 'U15', 'U18', 'U20'].includes(cleanKey)) {
+              cleanCategoryLimits[cleanKey] = v;
+            }
+          }
+        });
       }
 
-      const normalizedCats = Array.from(new Set(rawCats.map(c => normalizeCategoryKey(c)))).filter(c => c !== 'OPEN');
-      const validCats = normalizedCats.filter(c => ['U12', 'U15', 'U18', 'U20'].includes(c));
       return {
         ...s,
-        ageCategories: validCats
+        ageCategories: validCats,
+        customAgeCategories: cleanedCustom.length > 0 ? cleanedCustom : undefined,
+        categoryStudentLimits: Object.keys(cleanCategoryLimits).length > 0 ? cleanCategoryLimits : undefined
       };
     });
 
@@ -2797,6 +2765,8 @@ export const DataService = {
     studentLimit?: number;
     athleticsSpecialties?: string[];
     customAgeCategories?: CustomAgeCategory[];
+    categoryStudentLimits?: Record<string, number>;
+    targetAffiliations?: string[];
   }): Promise<Sport> {
     const cleanName = sport.name.trim();
     // Unique ID from latin characters or sport_timestamp
@@ -2813,6 +2783,8 @@ export const DataService = {
       ageCategories: sport.ageCategories,
       customAgeCategories: sport.customAgeCategories || [],
       studentLimit: sport.studentLimit !== undefined ? sport.studentLimit : 0,
+      categoryStudentLimits: sport.categoryStudentLimits || {},
+      targetAffiliations: sport.targetAffiliations || ['non_club', 'espoir_non_club', 'sports_tracks', 'espoir_club'],
       athleticsSpecialties: sport.athleticsSpecialties || [],
       isCustom: true,
       createdAt: new Date().toISOString()
@@ -2868,7 +2840,9 @@ export const DataService = {
     name?: string,
     icon?: string,
     isProgrammed?: boolean,
-    customAgeCategories?: CustomAgeCategory[]
+    customAgeCategories?: CustomAgeCategory[],
+    categoryStudentLimits?: Record<string, number>,
+    targetAffiliations?: string[]
   ): Promise<void> {
     const list = await this.getSportsConfig();
     const existingSport = list.find(s => s.id === sportId);
@@ -2888,6 +2862,8 @@ export const DataService = {
         ageCategories,
         customAgeCategories: customAgeCategories !== undefined ? customAgeCategories : s.customAgeCategories,
         studentLimit: studentLimit !== undefined ? studentLimit : s.studentLimit,
+        categoryStudentLimits: categoryStudentLimits !== undefined ? categoryStudentLimits : s.categoryStudentLimits,
+        targetAffiliations: targetAffiliations !== undefined ? targetAffiliations : (s.targetAffiliations || ['non_club', 'espoir_non_club', 'sports_tracks', 'espoir_club']),
         athleticsSpecialties: athleticsSpecialties !== undefined ? athleticsSpecialties : s.athleticsSpecialties,
         name: validSportName || s.name,
         icon: icon || s.icon,
@@ -2908,6 +2884,8 @@ export const DataService = {
         ageCategories,
         customAgeCategories: customAgeCategories !== undefined ? customAgeCategories : (existingSport?.customAgeCategories || null),
         studentLimit: studentLimit !== undefined ? studentLimit : (existingSport?.studentLimit || null),
+        categoryStudentLimits: categoryStudentLimits !== undefined ? categoryStudentLimits : (existingSport?.categoryStudentLimits || null),
+        targetAffiliations: targetAffiliations !== undefined ? targetAffiliations : (existingSport?.targetAffiliations || ['non_club', 'espoir_non_club', 'sports_tracks', 'espoir_club']),
         athleticsSpecialties: athleticsSpecialties !== undefined ? athleticsSpecialties : (existingSport?.athleticsSpecialties || null),
         ...(isProgrammed !== undefined ? { isProgrammed } : {}),
         ...(validSportName ? { name: validSportName } : {}),
@@ -2974,18 +2952,6 @@ export const DataService = {
       ...student,
       directorateId: (student as any).directorateId || activeDirId
     };
-
-    // Check school student limit before adding
-    const schools = await this.getSchools();
-    const studentSchool = schools.find(s => s.id === (student.schoolId || ''));
-    if (studentSchool && studentSchool.studentLimit) {
-      const currentStudents = await this.getStudents();
-      const studentsFromThisSchool = currentStudents.filter(s => s.schoolId === studentSchool.id);
-      if (studentsFromThisSchool.length >= studentSchool.studentLimit) {
-        throw new Error(`تم الوصول إلى السقف الأقصى لعدد التلاميذ (${studentSchool.studentLimit}) لهذه المؤسسة. لا يمكن إضافة تلاميذ جدد.`);
-      }
-    }
-
     const newStudent: Student = {
       ...studentWithDir,
       id: `stud-${Date.now()}`,
@@ -3024,32 +2990,12 @@ export const DataService = {
     const createdStudents: Student[] = [];
     const nowTime = Date.now();
 
-    // Get schools with student limits
-    const schools = await this.getSchools();
-    const schoolLimits = new Map<string, number>();
-    schools.forEach(s => {
-      if (s.studentLimit && s.studentLimit > 0) {
-        schoolLimits.set(s.id, s.studentLimit);
-      }
-    });
-
     for (let i = 0; i < studentsList.length; i++) {
       const s = studentsList[i];
       const studentWithDir = {
         ...s,
         directorateId: (s as any).directorateId || activeDirId
       };
-
-      // Check school student limit
-      const schoolLimit = schoolLimits.get(s.schoolId || '');
-      if (schoolLimit) {
-        const currentStudents = await this.getStudents();
-        const studentsFromThisSchool = currentStudents.filter(st => st.schoolId === s.schoolId);
-        if (studentsFromThisSchool.length >= schoolLimit) {
-          throw new Error(`تم الوصول إلى السقف الأقصى لعدد التلاميذ (${schoolLimit}) للمؤسسة ${s.schoolName || 'unknown'}. لا يمكن إضافة تلاميذ جدد.`);
-        }
-      }
-
       const newStudent: Student = {
         ...studentWithDir,
         id: `stud-${nowTime}-${i}-${Math.random().toString(36).substring(2, 6)}`,
@@ -3066,7 +3012,7 @@ export const DataService = {
       const batch = writeBatch(db);
       for (const newStudent of createdStudents) {
         const studentRef = doc(db, 'students', newStudent.id);
-
+        
         // Clean undefined properties
         const cleanPayload: any = {};
         Object.keys(newStudent).forEach(key => {
@@ -4394,6 +4340,121 @@ export const DataService = {
         refereesCount: 0,
         directoratesCount: 0,
         timestamp: Date.now()
+      };
+    }
+  },
+
+  // --- SCHOOL TOURNAMENT PARTICIPATION CONFIRMATIONS ---
+  async getSchoolConfirmations(targetDirectorateId?: string): Promise<SchoolTournamentConfirmation[]> {
+    try {
+      const activeDirId = targetDirectorateId || (localStorage.getItem('user_directorate_id') || 'taourirt');
+      const snap = await getDocs(collection(db, 'school_confirmations'));
+      let list: SchoolTournamentConfirmation[] = [];
+      snap.forEach(docSnap => {
+        list.push({ id: docSnap.id, ...docSnap.data() } as SchoolTournamentConfirmation);
+      });
+      list = deduplicateById(list);
+      setLocal(STORAGE_KEYS.CONFIRMATIONS, list);
+      return list.filter(c => !activeDirId || !c.directorateId || c.directorateId === activeDirId);
+    } catch (e) {
+      console.warn('Error fetching school confirmations from Firestore, using local storage:', e);
+      const local = getLocal<SchoolTournamentConfirmation>(STORAGE_KEYS.CONFIRMATIONS, []);
+      return local;
+    }
+  },
+
+  async confirmSchoolParticipation(data: {
+    sportId: string;
+    sportName?: string;
+    tournamentId?: string;
+    schoolId: string;
+    schoolName: string;
+    teacherId: string;
+    teacherName: string;
+    teacherPhone?: string;
+    teacherLeaseNumber?: string;
+    registrationDeadline?: string;
+    notes?: string;
+    directorateId?: string;
+    seasonId?: string;
+  }): Promise<SchoolTournamentConfirmation> {
+    const confirmationId = `${data.sportId}_${data.schoolId}`;
+    const payload: SchoolTournamentConfirmation = {
+      ...data,
+      id: confirmationId,
+      status: 'confirmed',
+      confirmedAt: new Date().toISOString(),
+      directorateId: data.directorateId || (localStorage.getItem('user_directorate_id') || 'taourirt'),
+      seasonId: data.seasonId || '2026/2027'
+    };
+
+    // Update local storage immediately
+    const current = getLocal<SchoolTournamentConfirmation>(STORAGE_KEYS.CONFIRMATIONS, []);
+    const updated = deduplicateById([payload, ...current.filter(c => c.id !== confirmationId)]);
+    setLocal(STORAGE_KEYS.CONFIRMATIONS, updated);
+
+    // Save to Firestore
+    try {
+      const cleanPayload = sanitizeFirestorePayload(payload);
+      await setDoc(doc(db, 'school_confirmations', confirmationId), cleanPayload, { merge: true });
+    } catch (err) {
+      console.error('Error writing school confirmation to Firestore:', err);
+    }
+
+    // Trigger local update event
+    window.dispatchEvent(new CustomEvent('schoolConfirmationsUpdated', { detail: payload }));
+    return payload;
+  },
+
+  async cancelSchoolConfirmation(sportId: string, schoolId: string): Promise<void> {
+    const confirmationId = `${sportId}_${schoolId}`;
+    // Update local storage
+    const current = getLocal<SchoolTournamentConfirmation>(STORAGE_KEYS.CONFIRMATIONS, []);
+    const updated = current.filter(c => c.id !== confirmationId && !(c.sportId === sportId && c.schoolId === schoolId));
+    setLocal(STORAGE_KEYS.CONFIRMATIONS, updated);
+
+    // Remove from Firestore
+    try {
+      await deleteDoc(doc(db, 'school_confirmations', confirmationId));
+    } catch (err) {
+      console.error('Error deleting school confirmation from Firestore:', err);
+    }
+
+    window.dispatchEvent(new CustomEvent('schoolConfirmationsUpdated'));
+  },
+
+  subscribeToSchoolConfirmations(callback: (confirmations: SchoolTournamentConfirmation[]) => void): () => void {
+    const activeDirId = localStorage.getItem('user_directorate_id') || 'taourirt';
+    
+    // Initial emit from local
+    callback(getLocal<SchoolTournamentConfirmation>(STORAGE_KEYS.CONFIRMATIONS, []));
+
+    const handleCustomEvent = () => {
+      callback(getLocal<SchoolTournamentConfirmation>(STORAGE_KEYS.CONFIRMATIONS, []));
+    };
+    window.addEventListener('schoolConfirmationsUpdated', handleCustomEvent);
+
+    try {
+      const q = query(collection(db, 'school_confirmations'));
+      const unsubscribe = onSnapshot(q, (snapshot) => {
+        const list: SchoolTournamentConfirmation[] = [];
+        snapshot.forEach(docSnap => {
+          list.push({ id: docSnap.id, ...docSnap.data() } as SchoolTournamentConfirmation);
+        });
+        const clean = deduplicateById(list);
+        setLocal(STORAGE_KEYS.CONFIRMATIONS, clean);
+        callback(clean.filter(c => !activeDirId || !c.directorateId || c.directorateId === activeDirId));
+      }, (err) => {
+        console.warn('school_confirmations onSnapshot error, keeping local:', err);
+      });
+
+      return () => {
+        unsubscribe();
+        window.removeEventListener('schoolConfirmationsUpdated', handleCustomEvent);
+      };
+    } catch (err) {
+      return () => {
+        window.removeEventListener('schoolConfirmationsUpdated', handleCustomEvent);
       };
     }
   }
