@@ -582,6 +582,7 @@ export const GENDER_MAP: Record<string, { name: string; icon: string; badgeClass
 };
 
 export const DataService = {
+  getCustomCategoryName,
   // OFFICIAL LOGOS FOR PARTICIPATION LISTS
   async getOfficialLogos(): Promise<OfficialLogos> {
     try {
