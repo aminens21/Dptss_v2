@@ -339,6 +339,24 @@ export function getCategoryShortName(category: any, gender?: string): string {
   return category;
 }
 
+export function getCustomCategoryName(catId: string, sportId?: string): string {
+  if (!catId) return '';
+  if (['U12', 'U15', 'U18', 'U20'].includes(normalizeCategoryKey(catId))) {
+    return getCategoryShortName(catId);
+  }
+  if (sportId) {
+    try {
+      const localSports = JSON.parse(localStorage.getItem('taourirt_sports_config') || '[]');
+      const foundSport = localSports.find((s: any) => s.id === sportId);
+      if (foundSport && foundSport.customAgeCategories) {
+        const matched = foundSport.customAgeCategories.find((c: any) => c.id === catId || c.name === catId);
+        if (matched) return matched.name;
+      }
+    } catch {}
+  }
+  return catId;
+}
+
 export function isSchoolLevelAllowedForTournament(schoolType: string, tournamentLevel?: string): boolean {
   if (!tournamentLevel) return true; // if no level specified, default to allowed
   
