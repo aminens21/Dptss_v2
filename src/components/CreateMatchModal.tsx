@@ -836,11 +836,11 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
                   <span className="bg-blue-100 text-blue-700 px-1.5 py-0.2 rounded font-extrabold">{specializedReferees.length}</span>
                 </p>
                 <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto">
-                  {specializedReferees.map((ref) => {
+                  {specializedReferees.map((ref, rIdx) => {
                     const isAlreadyAssigned = referees.includes(ref.fullName);
                     return (
                       <button
-                        key={ref.id}
+                        key={`quick-ref-${ref.id}-${rIdx}`}
                         type="button"
                         onClick={() => handleAddRefereeQuick(ref.fullName)}
                         className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-bold transition-all cursor-pointer ${
@@ -861,7 +861,7 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
             {/* Referee Slots Inputs with Dropdown & Manual Input Option */}
             <div className="space-y-2">
               {referees.map((ref, idx) => (
-                <div key={idx} className="flex items-center gap-2">
+                <div key={`ref-slot-${idx}`} className="flex items-center gap-2">
                   <div className="w-6 h-6 rounded-full bg-slate-200 text-slate-700 text-[10px] font-bold flex items-center justify-center shrink-0">
                     {idx + 1}
                   </div>
@@ -880,8 +880,8 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
                       <option value="">-- اختيار من لائحة الحكام --</option>
                       {specializedReferees.length > 0 && (
                         <optgroup label={`حكام تخصص ${sportInfo.name} (${specializedReferees.length})`}>
-                          {specializedReferees.map(r => (
-                            <option key={r.id} value={r.fullName}>
+                          {specializedReferees.map((r, sIdx) => (
+                            <option key={`opt-spec-${r.id}-${sIdx}`} value={r.fullName}>
                               ⭐ {r.fullName} ({r.phone})
                             </option>
                           ))}
@@ -889,8 +889,8 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
                       )}
                       {otherReferees.length > 0 && (
                         <optgroup label="باقي الحكام والأساتذة المسجلين">
-                          {otherReferees.map(r => (
-                            <option key={r.id} value={r.fullName}>
+                          {otherReferees.map((r, oIdx) => (
+                            <option key={`opt-oth-${r.id}-${oIdx}`} value={r.fullName}>
                               👤 {r.fullName}
                             </option>
                           ))}

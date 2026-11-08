@@ -27,7 +27,8 @@ import {
   CheckSquare,
   Square,
   ShieldAlert,
-  Volleyball
+  Volleyball,
+  Award
 } from 'lucide-react';
 import { Tournament, School, Team, Match, User, Venue, Sport, Referee, SchoolTournamentConfirmation } from '../types';
 import { DataService, SPORTS_MAP, deduplicateById, normalizeCategoryKey, getCustomCategoryName } from '../lib/dataService';
@@ -52,6 +53,79 @@ export interface GeneratedDrawMatch {
   refereeName?: string;
   referee2Id?: string;
   referee2Name?: string;
+  refereeIds?: string[];
+  refereeNames?: string[];
+}
+
+// Helper to check if a teacher or referee has declared specialization in a given sport
+export function isSpecializedInSport(
+  specialties: string[] | undefined,
+  targetSportId?: string,
+  targetSportName?: string
+): boolean {
+  if (!specialties || !Array.isArray(specialties) || specialties.length === 0) return false;
+  if (!targetSportId && !targetSportName) return false;
+
+  const normalizeStr = (s: string) =>
+    (s || '')
+      .toLowerCase()
+      .trim()
+      .replace(/[أإآ]/g, 'ا')
+      .replace(/ة/g, 'ه')
+      .replace(/ى/g, 'ي')
+      .replace(/[\s\-_]+/g, '');
+
+  const normTargetId = normalizeStr(targetSportId || '');
+  const normTargetName = normalizeStr(targetSportName || '');
+
+  // Determine target family keywords
+  const isVolleyball = normTargetId.includes('volleyball') || normTargetName.includes('طايره');
+  const isFootball = (normTargetId === 'football' || normTargetId.includes('futsal')) || normTargetName.includes('قدم') || normTargetName.includes('فوتسال');
+  const isBasketball = normTargetId.includes('basketball') || normTargetName.includes('سله');
+  const isHandball = normTargetId.includes('handball') || normTargetName.includes('يد');
+  const isAthletics = normTargetId.includes('athletic') || normTargetId.includes('cross') || normTargetName.includes('قوي') || normTargetName.includes('عدو');
+  const isTableTennis = normTargetId.includes('tabletennis') || normTargetName.includes('طاوله');
+  const isBadminton = normTargetId.includes('badminton') || normTargetName.includes('بادمنتون');
+  const isChess = normTargetId.includes('chess') || normTargetName.includes('شطرنج');
+  const isGymnastics = normTargetId.includes('gymnastic') || normTargetName.includes('جمباز');
+  const isJudo = normTargetId.includes('judo') || normTargetName.includes('جيدو');
+  const isKarate = normTargetId.includes('karate') || normTargetName.includes('كراطي') || normTargetName.includes('كاراتيه');
+
+  return specialties.some(rawSpec => {
+    if (!rawSpec || typeof rawSpec !== 'string') return false;
+    const normSpec = normalizeStr(rawSpec);
+
+    // 1. Direct match on ID or sport name
+    if (normTargetId && normSpec === normTargetId) return true;
+    if (normTargetName && normSpec === normTargetName) return true;
+
+    // 2. Check if rawSpec is in SPORTS_MAP
+    const mapped = SPORTS_MAP[rawSpec.trim().toLowerCase()];
+    if (mapped) {
+      const normMappedName = normalizeStr(mapped.name);
+      if (normTargetName && normMappedName === normTargetName) return true;
+      if (normTargetId && normalizeStr(rawSpec) === normTargetId) return true;
+    }
+
+    // 3. Sport family match (e.g. Volleyball matches volleyball, beach_volleyball, mixed_volleyball, الكرة الطائرة, كرة طائرة)
+    if (isVolleyball && (normSpec.includes('volleyball') || normSpec.includes('طايره'))) return true;
+    if (isFootball && (normSpec === 'football' || normSpec.includes('futsal') || normSpec.includes('قدم') || normSpec.includes('فوتسال'))) return true;
+    if (isBasketball && (normSpec.includes('basketball') || normSpec.includes('سله'))) return true;
+    if (isHandball && (normSpec.includes('handball') || normSpec.includes('يد'))) return true;
+    if (isAthletics && (normSpec.includes('athletic') || normSpec.includes('cross') || normSpec.includes('قوي') || normSpec.includes('عدو'))) return true;
+    if (isTableTennis && (normSpec.includes('tabletennis') || normSpec.includes('طاوله'))) return true;
+    if (isBadminton && (normSpec.includes('badminton') || normSpec.includes('بادمنتون'))) return true;
+    if (isChess && (normSpec.includes('chess') || normSpec.includes('شطرنج'))) return true;
+    if (isGymnastics && (normSpec.includes('gymnastic') || normSpec.includes('جمباز'))) return true;
+    if (isJudo && (normSpec.includes('judo') || normSpec.includes('جيدو'))) return true;
+    if (isKarate && (normSpec.includes('karate') || normSpec.includes('كراطي') || normSpec.includes('كاراتيه'))) return true;
+
+    // 4. Substring inclusion if length >= 4
+    if (normTargetId.length >= 4 && normSpec.includes(normTargetId)) return true;
+    if (normTargetName.length >= 4 && normSpec.includes(normTargetName)) return true;
+
+    return false;
+  });
 }
 
 interface ElectronicDrawModalProps {
@@ -96,6 +170,7 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
   // Step 2: Draw Configuration & Participating Schools
   const [schoolFilterMode, setSchoolFilterMode] = useState<'CONFIRMED_ONLY' | 'ALL'>('CONFIRMED_ONLY');
   const [participatingSchoolIds, setParticipatingSchoolIds] = useState<string[]>([]);
+  const [groupAssignments, setGroupAssignments] = useState<Record<string, number | 'AUTO'>>({});
   const [customTeamNames, setCustomTeamNames] = useState<string[]>([]);
   const [newTeamInput, setNewTeamInput] = useState<string>('');
   const [drawSystem, setDrawSystem] = useState<'groups' | 'knockout'>('groups');
@@ -113,6 +188,8 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
   const [bulkTime, setBulkTime] = useState<string>('10:00');
   const [bulkVenueName, setBulkVenueName] = useState<string>('');
   const [bulkRefereeId, setBulkRefereeId] = useState<string>('');
+  const [bulkRefereeIds, setBulkRefereeIds] = useState<string[]>([]);
+  const [showAllRefereesFallback, setShowAllRefereesFallback] = useState<boolean>(false);
 
   // Load Tournaments, Referees, Teachers & Data
   useEffect(() => {
@@ -212,32 +289,65 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
     loadData();
   }, [isOpen, initialTournamentId, initialSportId, currentUser]);
 
-  // Combined Referees List (Official Referees + Qualified Teachers)
+  // Combined Referees List (Official Referees + Qualified Teachers, strictly deduplicated by ID)
   const combinedRefereesList = useMemo(() => {
-    const list: { id: string; name: string; phone?: string; specialty?: string; type: 'referee' | 'teacher' }[] = [];
+    const list: {
+      id: string;
+      name: string;
+      fullName: string;
+      phone?: string;
+      specialty?: string;
+      specialtiesList: string[];
+      type: 'referee' | 'teacher';
+    }[] = [];
+    const seenIds = new Set<string>();
 
     referees.forEach(r => {
+      if (!r || !r.id || seenIds.has(r.id)) return;
+      seenIds.add(r.id);
+      const specs = r.specialty || [];
+      const specLabels = specs.map(s => SPORTS_MAP[s]?.name || s).join('، ');
       list.push({
         id: r.id,
-        name: `حكم: ${r.fullName}`,
+        name: `حكم رسمي: ${r.fullName}`,
+        fullName: r.fullName,
         phone: r.phone,
-        specialty: r.specialty?.join('، '),
+        specialty: specLabels,
+        specialtiesList: specs,
         type: 'referee'
       });
     });
 
     teachers.forEach(t => {
+      if (!t || !t.id) return;
+      const specs = t.refereeSpecialty || [];
+      if (seenIds.has(t.id)) {
+        // If already added via referees, merge any missing specialties
+        const existing = list.find(item => item.id === t.id);
+        if (existing) {
+          const merged = Array.from(new Set([...existing.specialtiesList, ...specs]));
+          existing.specialtiesList = merged;
+          existing.specialty = merged.map(s => SPORTS_MAP[s]?.name || s).join('، ');
+        }
+        return;
+      }
+      seenIds.add(t.id);
+      const specLabels = specs.map(s => SPORTS_MAP[s]?.name || s).join('، ');
       list.push({
         id: t.id,
         name: `أستاذ(ة): ${t.fullName} (${t.workLocation || 'مؤسسة'})`,
+        fullName: t.fullName,
         phone: t.phone,
-        specialty: t.refereeSpecialty?.join('، '),
+        specialty: specLabels,
+        specialtiesList: specs,
         type: 'teacher'
       });
     });
 
     return list;
   }, [referees, teachers]);
+
+
 
   // Check if current user has restricted sport permissions
   const userSportRestriction = useMemo(() => {
@@ -255,6 +365,81 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
 
     return null;
   }, [currentUser]);
+
+  // Dynamically compute participating age categories programmed in tournament/sport settings
+  const availableAgeCategories = useMemo(() => {
+    if (selectedSportFilter !== 'ALL') {
+      const sp = sportsConfig.find(s => s.id === selectedSportFilter);
+      if (sp?.customAgeCategories && sp.customAgeCategories.length > 0) {
+        return sp.customAgeCategories.map(c => ({
+          id: c.id,
+          label: `${c.name}${c.yearsExpression ? ` (${c.yearsExpression})` : ''}`
+        }));
+      }
+      if (sp?.ageCategories && sp.ageCategories.length > 0) {
+        return sp.ageCategories.map(cat => ({
+          id: cat,
+          label: getCustomCategoryName(cat, sp.id) || cat
+        }));
+      }
+      // Or from tournaments programmed for this sport
+      const sportTourns = tournaments.filter(t => t.sportId === selectedSportFilter && t.ageCategory);
+      const cats = Array.from(new Set(sportTourns.map(t => t.ageCategory).filter(Boolean))) as string[];
+      if (cats.length > 0) {
+        return cats.map(cat => ({
+          id: cat,
+          label: getCustomCategoryName(cat, selectedSportFilter) || cat
+        }));
+      }
+    }
+
+    // When ALL sports selected: collect categories actually programmed in team sports config or tournaments
+    const allProgrammedCats = new Map<string, string>();
+    sportsConfig.forEach(sp => {
+      const isTeam = TEAM_SPORTS_IDS.includes(sp.id) || (sp.name && (
+        sp.name.includes('قدم') || sp.name.includes('سلة') || sp.name.includes('يد') || sp.name.includes('طائرة') || sp.name.includes('ريكبي')
+      ));
+      if (!isTeam) return;
+
+      if (sp.customAgeCategories && sp.customAgeCategories.length > 0) {
+        sp.customAgeCategories.forEach(c => allProgrammedCats.set(c.id, c.name));
+      } else if (sp.ageCategories && sp.ageCategories.length > 0) {
+        sp.ageCategories.forEach(cat => allProgrammedCats.set(cat, getCustomCategoryName(cat, sp.id) || cat));
+      }
+    });
+
+    tournaments.forEach(t => {
+      const isTeam = TEAM_SPORTS_IDS.includes(t.sportId) || (t.name && (
+        t.name.includes('قدم') || t.name.includes('سلة') || t.name.includes('يد') || t.name.includes('طائرة') || t.name.includes('ريكبي')
+      ));
+      if (isTeam && t.ageCategory && !allProgrammedCats.has(t.ageCategory)) {
+        allProgrammedCats.set(t.ageCategory, getCustomCategoryName(t.ageCategory, t.sportId) || t.ageCategory);
+      }
+    });
+
+    if (allProgrammedCats.size > 0) {
+      return Array.from(allProgrammedCats.entries()).map(([id, label]) => ({ id, label }));
+    }
+
+    return [
+      { id: 'U12', label: 'براعم (U12)' },
+      { id: 'U15', label: 'صغار (U15)' },
+      { id: 'U18', label: 'فتيان (U18)' },
+      { id: 'U20', label: 'شبان (U20)' }
+    ];
+  }, [selectedSportFilter, sportsConfig, tournaments]);
+
+  // Keep selectedAgeCategoryFilter synced
+  useEffect(() => {
+    if (selectedAgeCategoryFilter !== 'ALL') {
+      const exists = availableAgeCategories.some(c => 
+        c.id === selectedAgeCategoryFilter || normalizeCategoryKey(c.id) === normalizeCategoryKey(selectedAgeCategoryFilter)
+      );
+      if (!exists) {
+        setSelectedAgeCategoryFilter('ALL');
+      }
+    }
+  }, [availableAgeCategories, selectedAgeCategoryFilter]);
 
   // Filter Tournaments based on User Role, Team Sports, Sport, Category & Gender
   const filteredTournaments = useMemo(() => {
@@ -281,10 +466,12 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
         return false;
       }
 
-      // 4. Age Category Filter
+      // 4. Age Category Filter (مطابقة الفئات المبرمجة)
       if (selectedAgeCategoryFilter !== 'ALL') {
-        const tCat = (t.ageCategory || '').toUpperCase();
-        if (!tCat.includes(selectedAgeCategoryFilter.toUpperCase())) {
+        const tournNormCat = normalizeCategoryKey(t.ageCategory || '');
+        const filterNormCat = normalizeCategoryKey(selectedAgeCategoryFilter);
+        const matches = tournNormCat === filterNormCat || (t.ageCategory && t.ageCategory.includes(selectedAgeCategoryFilter));
+        if (!matches) {
           return false;
         }
       }
@@ -320,6 +507,30 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
   const selectedTournament = useMemo(() => {
     return tournaments.find(t => t.id === selectedTournamentId);
   }, [tournaments, selectedTournamentId]);
+
+  // Referees and teachers specialized in this tournament's sport (expressed in their profile)
+  const sportSpecializedReferees = useMemo(() => {
+    if (!selectedTournament) return [];
+    const sportId = selectedTournament.sportId;
+    const sportName = selectedTournament.sportName || SPORTS_MAP[sportId]?.name;
+    return combinedRefereesList.filter(item =>
+      isSpecializedInSport(item.specialtiesList, sportId, sportName)
+    );
+  }, [combinedRefereesList, selectedTournament]);
+
+  // Active referees list for assignment: strictly specialized by default
+  const activeRefereesList = useMemo(() => {
+    if (showAllRefereesFallback || sportSpecializedReferees.length === 0) {
+      return combinedRefereesList;
+    }
+    return sportSpecializedReferees;
+  }, [showAllRefereesFallback, sportSpecializedReferees, combinedRefereesList]);
+
+  // Current tournament sport name helper
+  const currentSportName = useMemo(() => {
+    if (!selectedTournament) return '';
+    return selectedTournament.sportName || SPORTS_MAP[selectedTournament.sportId]?.name || selectedTournament.sportId;
+  }, [selectedTournament]);
 
   // Compute schools that confirmed participation for this specific tournament
   const confirmedSchoolsForTournament = useMemo(() => {
@@ -485,6 +696,40 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
     return list;
   }, [participatingSchoolIds, customTeamNames, schools]);
 
+  // Group counts calculation
+  const groupCounts = useMemo(() => {
+    const counts = Array.from({ length: groupsCount }, () => 0);
+    let unassignedCount = 0;
+
+    allDrawTeams.forEach(team => {
+      const val = groupAssignments[team.id];
+      if (typeof val === 'number' && val >= 0 && val < groupsCount) {
+        counts[val]++;
+      } else {
+        unassignedCount++;
+      }
+    });
+
+    return { counts, unassignedCount };
+  }, [allDrawTeams, groupAssignments, groupsCount]);
+
+  // Helper: auto distribute all teams evenly across groups
+  const handleAutoDistributeGroups = () => {
+    const shuffled = [...allDrawTeams].sort(() => Math.random() - 0.5);
+    const next: Record<string, number> = {};
+    shuffled.forEach((team, idx) => {
+      next[team.id] = idx % groupsCount;
+    });
+    setGroupAssignments(next);
+    toast.success('تم توزيع المؤسسات المشاركة عشوائياً بالتساوي على المجموعات');
+  };
+
+  // Helper: reset group assignments
+  const handleResetGroupAssignments = () => {
+    setGroupAssignments({});
+    toast.success('تمت إعادة الضبط: سيتم توزيع الفرق المتبقية وسحب القرعة آلياً');
+  };
+
   // Execute Electronic Draw (سحب القرعة آلياً)
   const handleExecuteDraw = () => {
     if (allDrawTeams.length < 2) {
@@ -500,9 +745,9 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
 
       if (drawSystem === 'groups') {
         const alphabet = ['المجموعة أ (Groupe A)', 'المجموعة ب (Groupe B)', 'المجموعة ج (Groupe C)', 'المجموعة د (Groupe D)'];
+        const numGroups = Math.min(groupsCount, allDrawTeams.length);
         const groups: { groupName: string; teams: { id: string; name: string }[] }[] = [];
 
-        const numGroups = Math.min(groupsCount, shuffled.length);
         for (let i = 0; i < numGroups; i++) {
           groups.push({
             groupName: alphabet[i] || `المجموعة ${i + 1}`,
@@ -510,9 +755,33 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
           });
         }
 
-        shuffled.forEach((team, index) => {
-          const groupIdx = index % numGroups;
-          groups[groupIdx].teams.push(team);
+        // 1. Place teams explicitly assigned to specific groups
+        const unassignedTeams: typeof allDrawTeams = [];
+        allDrawTeams.forEach(team => {
+          const assignedIdx = groupAssignments[team.id];
+          if (typeof assignedIdx === 'number' && assignedIdx >= 0 && assignedIdx < numGroups) {
+            groups[assignedIdx].teams.push(team);
+          } else {
+            unassignedTeams.push(team);
+          }
+        });
+
+        // 2. Distribute unassigned teams randomly to balance group sizes
+        const shuffledUnassigned = [...unassignedTeams].sort(() => Math.random() - 0.5);
+        shuffledUnassigned.forEach(team => {
+          let minGroupIdx = 0;
+          for (let i = 1; i < numGroups; i++) {
+            if (groups[i].teams.length < groups[minGroupIdx].teams.length) {
+              minGroupIdx = i;
+            }
+          }
+          groups[minGroupIdx].teams.push(team);
+        });
+
+        // 3. 🌟 CRITICAL: "على أن تتم القرعة داخل كل مجموعة"
+        // Perform the electronic draw / random shuffle WITHIN EACH GROUP
+        groups.forEach(grp => {
+          grp.teams = [...grp.teams].sort(() => Math.random() - 0.5);
         });
 
         setDrawnGroups(groups);
@@ -522,7 +791,9 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
         let matchCounter = 1;
         const defaultVenue = venues[0]?.name || 'القاعة المغطاة';
         const defaultDate = new Date().toISOString().slice(0, 10);
-        const defaultRef = combinedRefereesList[0];
+        const defaultRef = sportSpecializedReferees[0] || (combinedRefereesList[0] || null);
+        const initialRefIds = defaultRef ? [defaultRef.id] : [];
+        const initialRefNames = defaultRef ? [defaultRef.fullName || defaultRef.name] : [];
 
         groups.forEach(grp => {
           const grpTeams = grp.teams;
@@ -530,7 +801,7 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
             for (let j = i + 1; j < grpTeams.length; j++) {
               matchesList.push({
                 id: `gen-match-${matchCounter++}`,
-                stage: `${grp.groupName} - الجولة ${i + 1}`,
+                stage: `${grp.groupName} - مواجهة الجولة ${i + 1}`,
                 groupName: grp.groupName,
                 team1Id: grpTeams[i].id,
                 team1Name: grpTeams[i].name,
@@ -541,7 +812,9 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
                 venueId: venues[0]?.id || 'v1',
                 venueName: defaultVenue,
                 refereeId: defaultRef?.id,
-                refereeName: defaultRef?.name
+                refereeName: defaultRef?.name,
+                refereeIds: initialRefIds,
+                refereeNames: initialRefNames
               });
             }
           }
@@ -554,7 +827,9 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
         let matchCounter = 1;
         const defaultVenue = venues[0]?.name || 'القاعة المغطاة';
         const defaultDate = new Date().toISOString().slice(0, 10);
-        const defaultRef = combinedRefereesList[0];
+        const defaultRef = sportSpecializedReferees[0] || (combinedRefereesList[0] || null);
+        const initialRefIds = defaultRef ? [defaultRef.id] : [];
+        const initialRefNames = defaultRef ? [defaultRef.fullName || defaultRef.name] : [];
 
         const totalMatches = Math.floor(shuffled.length / 2);
         for (let i = 0; i < totalMatches; i++) {
@@ -572,7 +847,9 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
             venueId: venues[0]?.id || 'v1',
             venueName: defaultVenue,
             refereeId: defaultRef?.id,
-            refereeName: defaultRef?.name
+            refereeName: defaultRef?.name,
+            refereeIds: initialRefIds,
+            refereeNames: initialRefNames
           });
         }
 
@@ -591,44 +868,127 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
     }, 700);
   };
 
-  // Update match details (date, time, venue, referee)
+  // Update match details (date, time, venue)
   const handleUpdateMatchField = (matchId: string, field: keyof GeneratedDrawMatch, value: string) => {
     setGeneratedMatches(prev => 
       prev.map(m => {
         if (m.id !== matchId) return m;
-        if (field === 'refereeId') {
-          const ref = combinedRefereesList.find(r => r.id === value);
-          return {
-            ...m,
-            refereeId: value,
-            refereeName: ref?.name || value
-          };
-        }
         return { ...m, [field]: value };
       })
     );
   };
 
-  // Apply batch date, venue & referee to all matches
+  // Add a referee to a specific match (supports multiple referees per match)
+  const handleAddRefereeToMatch = (matchId: string, refereeId: string) => {
+    if (!refereeId) return;
+    const ref = combinedRefereesList.find(r => r.id === refereeId);
+    if (!ref) return;
+
+    setGeneratedMatches(prev =>
+      prev.map(m => {
+        if (m.id !== matchId) return m;
+        const currentIds = m.refereeIds && m.refereeIds.length > 0
+          ? [...m.refereeIds]
+          : (m.refereeId ? [m.refereeId] : []);
+        const currentNames = m.refereeNames && m.refereeNames.length > 0
+          ? [...m.refereeNames]
+          : (m.refereeName ? [m.refereeName] : []);
+
+        if (currentIds.includes(refereeId)) return m;
+
+        const updatedIds = [...currentIds, refereeId];
+        const updatedNames = [...currentNames, ref.fullName || ref.name];
+
+        return {
+          ...m,
+          refereeIds: updatedIds,
+          refereeNames: updatedNames,
+          refereeId: updatedIds[0] || undefined,
+          refereeName: updatedNames[0] || undefined,
+          referee2Id: updatedIds[1] || undefined,
+          referee2Name: updatedNames[1] || undefined
+        };
+      })
+    );
+  };
+
+  // Remove a referee from a specific match
+  const handleRemoveRefereeFromMatch = (matchId: string, refereeIdToRemove: string) => {
+    setGeneratedMatches(prev =>
+      prev.map(m => {
+        if (m.id !== matchId) return m;
+        const currentIds = m.refereeIds && m.refereeIds.length > 0
+          ? [...m.refereeIds]
+          : (m.refereeId ? [m.refereeId] : []);
+        const currentNames = m.refereeNames && m.refereeNames.length > 0
+          ? [...m.refereeNames]
+          : (m.refereeName ? [m.refereeName] : []);
+
+        const newIds: string[] = [];
+        const newNames: string[] = [];
+
+        currentIds.forEach((id, idx) => {
+          if (id !== refereeIdToRemove) {
+            newIds.push(id);
+            newNames.push(currentNames[idx] || '');
+          }
+        });
+
+        return {
+          ...m,
+          refereeIds: newIds,
+          refereeNames: newNames,
+          refereeId: newIds[0] || undefined,
+          refereeName: newNames[0] || undefined,
+          referee2Id: newIds[1] || undefined,
+          referee2Name: newNames[1] || undefined
+        };
+      })
+    );
+  };
+
+  // Apply batch date, venue & multi-referee to all matches
   const handleApplyBatchSchedule = () => {
-    if (!bulkDate && !bulkVenueName && !bulkRefereeId) {
-      toast.error('يرجى تحديد التاريخ، المكان أو الحكم لتعميمه');
+    if (!bulkDate && !bulkVenueName && bulkRefereeIds.length === 0 && !bulkRefereeId) {
+      toast.error('يرجى تحديد التاريخ، المكان أو اختيار حكم واحد على الأقل لتعميمه');
       return;
     }
 
-    const ref = combinedRefereesList.find(r => r.id === bulkRefereeId);
+    const effectiveBulkIds = bulkRefereeIds.length > 0 
+      ? bulkRefereeIds 
+      : (bulkRefereeId ? [bulkRefereeId] : []);
+
+    const bulkRefNames = effectiveBulkIds
+      .map(id => {
+        const r = combinedRefereesList.find(ref => ref.id === id);
+        return r?.fullName || r?.name;
+      })
+      .filter(Boolean) as string[];
 
     setGeneratedMatches(prev => 
-      prev.map(m => ({
-        ...m,
-        date: bulkDate || m.date,
-        time: bulkTime || m.time,
-        venueName: bulkVenueName || m.venueName,
-        refereeId: bulkRefereeId || m.refereeId,
-        refereeName: ref ? ref.name : m.refereeName
-      }))
+      prev.map(m => {
+        const updatedRefIds = effectiveBulkIds.length > 0 
+          ? effectiveBulkIds 
+          : (m.refereeIds || (m.refereeId ? [m.refereeId] : []));
+        const updatedRefNames = effectiveBulkIds.length > 0 
+          ? bulkRefNames 
+          : (m.refereeNames || (m.refereeName ? [m.refereeName] : []));
+
+        return {
+          ...m,
+          date: bulkDate || m.date,
+          time: bulkTime || m.time,
+          venueName: bulkVenueName || m.venueName,
+          refereeIds: updatedRefIds,
+          refereeNames: updatedRefNames,
+          refereeId: updatedRefIds[0] || undefined,
+          refereeName: updatedRefNames[0] || undefined,
+          referee2Id: updatedRefIds[1] || undefined,
+          referee2Name: updatedRefNames[1] || undefined
+        };
+      })
     );
-    toast.success('تم تعميم التوقيت والمكان والحكام على جميع المباريات');
+    toast.success('تم تعميم التوقيت والمكان والحكام المتخصصين على جميع المباريات');
   };
 
   // Save all matches to database
@@ -647,10 +1007,15 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
 
     try {
       for (const gm of generatedMatches) {
+        const allRefs = gm.refereeIds && gm.refereeIds.length > 0
+          ? gm.refereeIds
+          : (gm.refereeId ? [gm.refereeId] : []);
+
         await DataService.addMatch({
           tournamentId: selectedTournament.id,
           sportId: selectedTournament.sportId,
           stage: gm.stage,
+          groupName: gm.groupName,
           team1Id: gm.team1Id,
           team2Id: gm.team2Id,
           ageCategory: selectedTournament.ageCategory,
@@ -659,7 +1024,9 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
           startTime: gm.time || '10:00',
           venueId: gm.venueId || 'default-venue',
           venueName: gm.venueName,
-          referee1Id: gm.refereeId,
+          referee1Id: allRefs[0] || undefined,
+          referee2Id: allRefs[1] || undefined,
+          referees: allRefs,
           status: 'Scheduled',
           updatedAt: new Date()
         });
@@ -691,7 +1058,9 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
       'تاريخ الإجراء': m.date,
       'توقيت الانطلاق': m.time,
       'مكان الإجراء': m.venueName,
-      'حكم المقابلة': m.refereeName || 'غير محدد'
+      'حكام المقابلة': (m.refereeNames && m.refereeNames.length > 0)
+        ? m.refereeNames.join(' + ')
+        : (m.refereeName || 'غير محدد')
     }));
 
     const ws = XLSX.utils.json_to_sheet(data);
@@ -866,17 +1235,18 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
 
                   {/* Age Category Filter */}
                   <div>
-                    <label className="block text-[11px] font-bold text-slate-600 mb-1">الفئة العمرية المشاركة:</label>
+                    <label className="block text-[11px] font-bold text-slate-600 mb-1">الفئة العمرية المشاركة (المبرمجة):</label>
                     <select
                       value={selectedAgeCategoryFilter}
                       onChange={(e) => setSelectedAgeCategoryFilter(e.target.value)}
                       className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 cursor-pointer"
                     >
-                      <option value="ALL">-- جميع الفئات --</option>
-                      <option value="U12">براعم (U12) - مواليد 2015 فما فوق</option>
-                      <option value="U15">صغار (U15) - مواليد 2012/2013/2014</option>
-                      <option value="U18">فتيان (U18) - مواليد 2009/2010/2011</option>
-                      <option value="U20">شبان (U20) - مواليد 2009 وما بعد</option>
+                      <option value="ALL">-- جميع الفئات المبرمجة ({availableAgeCategories.length}) --</option>
+                      {availableAgeCategories.map(cat => (
+                        <option key={cat.id} value={cat.id}>
+                          {cat.label}
+                        </option>
+                      ))}
                     </select>
                   </div>
 
@@ -1052,23 +1422,77 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
                 </div>
 
                 {drawSystem === 'groups' && (
-                  <div className="flex items-center gap-3 pt-2 border-t border-slate-100">
-                    <span className="text-xs font-bold text-slate-700">عدد المجموعات المراد تكوينها:</span>
-                    <div className="flex items-center gap-2">
-                      {[2, 3, 4].map(num => (
-                        <button
-                          key={num}
-                          type="button"
-                          onClick={() => setGroupsCount(num)}
-                          className={`w-9 h-9 rounded-xl font-black text-xs transition-all cursor-pointer ${
-                            groupsCount === num
-                              ? 'bg-emerald-600 text-white shadow-xs'
-                              : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-                          }`}
-                        >
-                          {num}
-                        </button>
-                      ))}
+                  <div className="space-y-3 pt-2 border-t border-slate-100">
+                    <div className="flex items-center gap-3">
+                      <span className="text-xs font-bold text-slate-700">عدد المجموعات المراد تكوينها:</span>
+                      <div className="flex items-center gap-2">
+                        {[2, 3, 4].map(num => (
+                          <button
+                            key={num}
+                            type="button"
+                            onClick={() => setGroupsCount(num)}
+                            className={`w-9 h-9 rounded-xl font-black text-xs transition-all cursor-pointer ${
+                              groupsCount === num
+                                ? 'bg-emerald-600 text-white shadow-xs'
+                                : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                            }`}
+                          >
+                            {num}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Pre-assignment Controls & Group Summary Badges */}
+                    <div className="bg-slate-50/90 p-3.5 rounded-2xl border border-slate-200/90 space-y-2.5">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                        <div className="flex items-center gap-1.5">
+                          <Users className="w-3.5 h-3.5 text-emerald-600" />
+                          <span className="text-xs font-black text-slate-800">
+                            تحديد مؤسسات معينة في كل مجموعة (على أن تجرى القرعة داخل كل مجموعة):
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={handleAutoDistributeGroups}
+                            className="text-[10px] font-black text-emerald-700 hover:text-emerald-800 bg-white border border-emerald-300 px-2.5 py-1 rounded-lg cursor-pointer shadow-3xs"
+                          >
+                            توزيع الفرق عشوائياً بالتساوي
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleResetGroupAssignments}
+                            className="text-[10px] font-bold text-slate-500 hover:text-slate-700 bg-white border border-slate-200 px-2 py-1 rounded-lg cursor-pointer"
+                          >
+                            إلغاء التخصيص اليدوي
+                          </button>
+                        </div>
+                      </div>
+
+                      <p className="text-[10.5px] text-slate-500 font-medium">
+                        يمكنك تحديد المجموعة لكل مؤسسة بالضغط على أزرار [أ، ب، ج، د] في بطاقتها أدناه. الفرق المتبقية ستوزع تلقائياً لتوازن المجموعات، والقرعة وسحب المباريات والمواعيد تجرى إلكترونياً داخل كل مجموعة.
+                      </p>
+
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
+                        {Array.from({ length: groupsCount }).map((_, gIdx) => {
+                          const colors = [
+                            'bg-blue-50/90 border-blue-200 text-blue-950',
+                            'bg-emerald-50/90 border-emerald-200 text-emerald-950',
+                            'bg-purple-50/90 border-purple-200 text-purple-950',
+                            'bg-amber-50/90 border-amber-200 text-amber-950'
+                          ][gIdx];
+                          const letter = ['أ', 'ب', 'ج', 'د'][gIdx];
+                          return (
+                            <div key={gIdx} className={`p-2 rounded-xl border flex items-center justify-between text-xs ${colors}`}>
+                              <span className="font-black text-[11px]">المجموعة {letter}</span>
+                              <span className="font-mono font-black text-xs bg-white/90 px-2 py-0.5 rounded-md border border-black/5">
+                                {groupCounts.counts[gIdx] || 0} فرق
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
                     </div>
                   </div>
                 )}
@@ -1216,6 +1640,70 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
                               <span className="text-slate-400 truncate max-w-[80px]">{school.commune}</span>
                             )}
                           </div>
+
+                          {/* Group Assignment Buttons for Group Draw System */}
+                          {isSelected && drawSystem === 'groups' && (
+                            <div
+                              className="mt-1.5 pt-1.5 border-t border-slate-200/80 flex items-center justify-between text-[10px]"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <span className="font-bold text-slate-600 flex items-center gap-1">
+                                <span>المجموعة:</span>
+                                {typeof groupAssignments[school.id] === 'number' && (
+                                  <span className={`px-1.5 py-0.5 rounded font-black text-[9px] ${
+                                    [
+                                      'bg-blue-100 text-blue-900',
+                                      'bg-emerald-100 text-emerald-900',
+                                      'bg-purple-100 text-purple-900',
+                                      'bg-amber-100 text-amber-900'
+                                    ][groupAssignments[school.id] as number]
+                                  }`}>
+                                    المجموعة {['أ', 'ب', 'ج', 'د'][groupAssignments[school.id] as number]}
+                                  </span>
+                                )}
+                              </span>
+                              <div className="flex items-center gap-1">
+                                {Array.from({ length: groupsCount }).map((_, gIdx) => {
+                                  const isCurrent = groupAssignments[school.id] === gIdx;
+                                  const letter = ['أ', 'ب', 'ج', 'د'][gIdx];
+                                  const activeColor = [
+                                    'bg-blue-600 text-white shadow-xs',
+                                    'bg-emerald-600 text-white shadow-xs',
+                                    'bg-purple-600 text-white shadow-xs',
+                                    'bg-amber-600 text-white shadow-xs'
+                                  ][gIdx];
+                                  return (
+                                    <button
+                                      key={gIdx}
+                                      type="button"
+                                      onClick={() => setGroupAssignments(prev => ({
+                                        ...prev,
+                                        [school.id]: isCurrent ? 'AUTO' : gIdx
+                                      }))}
+                                      className={`w-6 h-5 rounded text-[10px] font-black transition-all cursor-pointer ${
+                                        isCurrent ? activeColor : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-100'
+                                      }`}
+                                      title={`تحديد لمجموعة ${letter}`}
+                                    >
+                                      {letter}
+                                    </button>
+                                  );
+                                })}
+                                <button
+                                  type="button"
+                                  onClick={() => setGroupAssignments(prev => {
+                                    const next = { ...prev };
+                                    delete next[school.id];
+                                    return next;
+                                  })}
+                                  className="px-1.5 h-5 rounded text-[9px] font-bold bg-white border border-slate-200 text-slate-400 hover:text-slate-700 hover:bg-slate-100 cursor-pointer"
+                                  title="توزيع عشوائي آلي"
+                                >
+                                  آلي
+                                </button>
+                              </div>
+                            </div>
+                          )}
                         </div>
                       );
                     })}
@@ -1241,19 +1729,46 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
 
                 {/* Custom teams pills */}
                 {customTeamNames.length > 0 && (
-                  <div className="flex flex-wrap gap-1.5 pt-1">
-                    {customTeamNames.map((cName, idx) => (
-                      <span
-                        key={idx}
-                        className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-amber-50 border border-amber-200 text-amber-900 rounded-lg text-xs font-bold"
-                      >
-                        <span>{cName}</span>
-                        <X
-                          onClick={() => handleRemoveCustomTeam(cName)}
-                          className="w-3 h-3 hover:text-rose-600 cursor-pointer"
-                        />
-                      </span>
-                    ))}
+                  <div className="flex flex-wrap gap-2 pt-1">
+                    {customTeamNames.map((cName, idx) => {
+                      const cId = `custom-team-${idx}`;
+                      return (
+                        <div
+                          key={idx}
+                          className="inline-flex items-center gap-2 px-3 py-1.5 bg-amber-50 border border-amber-200 text-amber-900 rounded-xl text-xs font-bold"
+                        >
+                          <span>{cName}</span>
+                          {drawSystem === 'groups' && (
+                            <div className="flex items-center gap-1 border-r border-amber-200 pr-1.5 mr-1">
+                              {Array.from({ length: groupsCount }).map((_, gIdx) => {
+                                const isCurrent = groupAssignments[cId] === gIdx;
+                                const letter = ['أ', 'ب', 'ج', 'د'][gIdx];
+                                return (
+                                  <button
+                                    key={gIdx}
+                                    type="button"
+                                    onClick={() => setGroupAssignments(prev => ({
+                                      ...prev,
+                                      [cId]: isCurrent ? 'AUTO' : gIdx
+                                    }))}
+                                    className={`w-5 h-4 rounded text-[9px] font-black cursor-pointer ${
+                                      isCurrent ? 'bg-amber-700 text-white' : 'bg-white/80 text-amber-900 border border-amber-300'
+                                    }`}
+                                    title={`تحديد لمجموعة ${letter}`}
+                                  >
+                                    {letter}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          )}
+                          <X
+                            onClick={() => handleRemoveCustomTeam(cName)}
+                            className="w-3.5 h-3.5 hover:text-rose-600 cursor-pointer"
+                          />
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -1323,11 +1838,56 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
                 </div>
               </div>
 
-              {/* BATCH SCHEDULING & REFEREE TOOLBAR */}
+              {/* SPORT SPECIALIZATION STATUS BANNER */}
+              <div className={`p-4 rounded-3xl border flex flex-col sm:flex-row items-center justify-between gap-3 text-xs shadow-xs ${
+                sportSpecializedReferees.length > 0
+                  ? 'bg-emerald-50/80 border-emerald-200 text-emerald-950'
+                  : 'bg-amber-50/80 border-amber-200 text-amber-950'
+              }`}>
+                <div className="flex items-center gap-2.5">
+                  <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ${
+                    sportSpecializedReferees.length > 0 ? 'bg-emerald-600 text-white' : 'bg-amber-500 text-white'
+                  }`}>
+                    <Award className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <div className="font-black text-xs sm:text-sm flex items-center gap-2">
+                      <span>حكام رياضة {currentSportName} المتخصصون:</span>
+                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-black ${
+                        sportSpecializedReferees.length > 0 ? 'bg-emerald-200 text-emerald-900' : 'bg-amber-200 text-amber-900'
+                      }`}>
+                        {sportSpecializedReferees.length} حكم / أستاذ متخصص
+                      </span>
+                    </div>
+                    <p className="text-[11px] opacity-80 mt-0.5">
+                      {sportSpecializedReferees.length > 0
+                        ? `تقتصر خيارات التعيين حصراً على الحكام والأساتذة الذين صرحوا بتخصصهم في تحكيم (${currentSportName}) في ملفاتهم الشخصية، مع إمكانية تعيين أكثر من حكم لكل مقابلة.`
+                        : `لم يصرّح أي أستاذ أو حكم رسمي بتخصصه في تحكيم (${currentSportName}) في ملفه الشخصي بعد. يتم إتاحة جميع الأطر التعليمية لتفادي تعطيل البرمجة.`}
+                    </p>
+                  </div>
+                </div>
+
+                {sportSpecializedReferees.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setShowAllRefereesFallback(prev => !prev)}
+                    className="shrink-0 px-3 py-1.5 rounded-xl border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 font-bold text-[11px] transition-colors cursor-pointer"
+                  >
+                    {showAllRefereesFallback ? 'العودة للمتخصصين فقط' : 'عرض كافة الأطر التعليمية (استثنائياً)'}
+                  </button>
+                )}
+              </div>
+
+              {/* BATCH SCHEDULING & MULTI-REFEREE TOOLBAR */}
               <div className="bg-gradient-to-r from-emerald-50 via-teal-50 to-blue-50 p-4 rounded-3xl border border-emerald-200 shadow-xs space-y-3">
-                <div className="flex items-center gap-2 text-xs font-black text-emerald-950">
-                  <Sparkles className="w-4 h-4 text-emerald-600" />
-                  <span>تعميم التاريخ، الملعب، وتعيين الحكم على جميع المباريات دفعة واحدة:</span>
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 text-xs font-black text-emerald-950">
+                    <Sparkles className="w-4 h-4 text-emerald-600" />
+                    <span>تعميم التاريخ، الملعب، وتعيين الحكام على جميع المباريات دفعة واحدة:</span>
+                  </div>
+                  <span className="text-[11px] font-bold text-emerald-800 bg-white/80 px-2.5 py-0.5 rounded-full border border-emerald-200">
+                    حكام {currentSportName} ({activeRefereesList.length})
+                  </span>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 text-xs">
@@ -1363,25 +1923,67 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
                   </div>
 
                   <div>
-                    <label className="block text-[10px] font-bold text-slate-600 mb-1">تعيين الحكم لجميع المباريات:</label>
+                    <label className="block text-[10px] font-bold text-slate-600 mb-1">إضافة حكام لتعميمهم:</label>
                     <select
-                      value={bulkRefereeId}
-                      onChange={(e) => setBulkRefereeId(e.target.value)}
+                      value=""
+                      onChange={(e) => {
+                        if (e.target.value && !bulkRefereeIds.includes(e.target.value)) {
+                          setBulkRefereeIds(prev => [...prev, e.target.value]);
+                        }
+                      }}
                       className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-xl font-bold text-slate-800 cursor-pointer"
                     >
-                      <option value="">-- اختر حكماً لتعميمه --</option>
-                      {combinedRefereesList.map(ref => (
-                        <option key={ref.id} value={ref.id}>{ref.name}</option>
-                      ))}
+                      <option value="">+ إضافة حكم متخصص للتعميم...</option>
+                      {activeRefereesList
+                        .filter(ref => !bulkRefereeIds.includes(ref.id))
+                        .map((ref, rIdx) => (
+                          <option key={`bulk-ref-opt-${ref.id}-${rIdx}`} value={ref.id}>
+                            {ref.name} {ref.specialty ? `[${ref.specialty}]` : ''}
+                          </option>
+                        ))}
                     </select>
                   </div>
                 </div>
+
+                {/* Display selected bulk referee chips */}
+                {bulkRefereeIds.length > 0 && (
+                  <div className="flex flex-wrap items-center gap-1.5 pt-1 border-t border-emerald-200/60">
+                    <span className="text-[10px] font-bold text-slate-600">الحكام المختارون للتعميم:</span>
+                    {bulkRefereeIds.map((refId, idx) => {
+                      const refObj = combinedRefereesList.find(r => r.id === refId);
+                      return (
+                        <span
+                          key={`bulk-chip-${refId}-${idx}`}
+                          className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-amber-100 border border-amber-300 text-amber-950 rounded-xl text-xs font-bold shadow-2xs"
+                        >
+                          <UserCheck className="w-3.5 h-3.5 text-amber-700" />
+                          <span>الحكم {idx + 1}: {refObj?.fullName || refObj?.name}</span>
+                          <button
+                            type="button"
+                            onClick={() => setBulkRefereeIds(prev => prev.filter(id => id !== refId))}
+                            className="hover:text-red-700 hover:bg-amber-200 rounded-full p-0.5 transition-colors cursor-pointer"
+                            title="إزالة"
+                          >
+                            <X className="w-3 h-3 text-red-600" />
+                          </button>
+                        </span>
+                      );
+                    })}
+                    <button
+                      type="button"
+                      onClick={() => setBulkRefereeIds([])}
+                      className="text-[10px] font-bold text-red-600 hover:text-red-800 underline mr-1 cursor-pointer"
+                    >
+                      مسح التحديد
+                    </button>
+                  </div>
+                )}
 
                 <div className="flex justify-end pt-1">
                   <button
                     type="button"
                     onClick={handleApplyBatchSchedule}
-                    className="px-4 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold cursor-pointer"
+                    className="px-4 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold cursor-pointer shadow-xs transition-colors"
                   >
                     تطبيق على كل المباريات
                   </button>
@@ -1393,7 +1995,7 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                   <h4 className="text-sm font-black text-slate-900 flex items-center gap-2">
                     <Calendar className="w-4 h-4 text-emerald-600" />
-                    <span>جدول المباريات المبرمجة وتعيين الحكام ({generatedMatches.length} مباراة):</span>
+                    <span>جدول المباريات وتعيين الحكام المتخصصين ({generatedMatches.length} مباراة):</span>
                   </h4>
 
                   <div className="flex items-center gap-2">
@@ -1408,78 +2010,146 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
                 </div>
 
                 {/* Match Cards */}
-                <div className="space-y-3 max-h-[380px] overflow-y-auto pr-1">
-                  {generatedMatches.map((match, mIdx) => (
-                    <div
-                      key={match.id}
-                      className="p-4 bg-slate-50 border border-slate-200 rounded-2xl flex flex-col lg:flex-row lg:items-center justify-between gap-3 text-xs"
-                    >
-                      {/* Match Teams & Stage */}
-                      <div className="space-y-1.5 min-w-[240px]">
-                        <span className="px-2 py-0.5 bg-slate-200 text-slate-700 rounded-md font-bold text-[10px]">
-                          {match.stage} • مقابلة #{mIdx + 1}
-                        </span>
-                        <div className="font-black text-sm text-slate-900 flex items-center gap-2">
-                          <span className="text-emerald-700">{match.team1Name}</span>
-                          <span className="text-slate-400 font-mono">VS</span>
-                          <span className="text-blue-700">{match.team2Name}</span>
+                <div className="space-y-3.5 max-h-[460px] overflow-y-auto pr-1">
+                  {generatedMatches.map((match, mIdx) => {
+                    const assignedRefIds = match.refereeIds && match.refereeIds.length > 0
+                      ? match.refereeIds
+                      : (match.refereeId ? [match.refereeId] : []);
+
+                    return (
+                      <div
+                        key={match.id}
+                        className="p-4 bg-slate-50 border border-slate-200 rounded-2xl flex flex-col gap-3 text-xs shadow-2xs hover:border-slate-300 transition-colors"
+                      >
+                        {/* Match Header: Teams & Stage */}
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200/70 pb-2.5">
+                          <div className="space-y-1">
+                            <span className="px-2 py-0.5 bg-slate-200 text-slate-700 rounded-md font-bold text-[10px]">
+                              {match.stage} • مقابلة #{mIdx + 1}
+                            </span>
+                            <div className="font-black text-sm text-slate-900 flex items-center gap-2">
+                              <span className="text-emerald-700">{match.team1Name}</span>
+                              <span className="text-slate-400 font-mono text-xs">ضد</span>
+                              <span className="text-blue-700">{match.team2Name}</span>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-1.5 text-[10px] font-bold">
+                            <span className={`px-2 py-0.5 rounded-full ${
+                              assignedRefIds.length > 0 
+                                ? 'bg-amber-100 text-amber-900 border border-amber-300' 
+                                : 'bg-slate-200 text-slate-600'
+                            }`}>
+                              {assignedRefIds.length > 0 ? `${assignedRefIds.length} حكام معيّنون` : 'لم يعيّن حكام بعد'}
+                            </span>
+                          </div>
                         </div>
+
+                        {/* Match Inputs: Date, Time, Venue & Multi-Referee */}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
+                          <div>
+                            <label className="block text-[10px] font-bold text-slate-500 mb-0.5">التاريخ:</label>
+                            <input
+                              type="date"
+                              value={match.date}
+                              onChange={(e) => handleUpdateMatchField(match.id, 'date', e.target.value)}
+                              className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-xl font-bold text-slate-800"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="block text-[10px] font-bold text-slate-500 mb-0.5">التوقيت:</label>
+                            <input
+                              type="time"
+                              value={match.time}
+                              onChange={(e) => handleUpdateMatchField(match.id, 'time', e.target.value)}
+                              className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-xl font-bold text-slate-800"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="block text-[10px] font-bold text-slate-500 mb-0.5">الملعب / المكان:</label>
+                            <input
+                              type="text"
+                              value={match.venueName}
+                              onChange={(e) => handleUpdateMatchField(match.id, 'venueName', e.target.value)}
+                              placeholder="اسم القاعة / الملعب"
+                              className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-xl font-bold text-slate-800"
+                            />
+                          </div>
+
+                          {/* ⭐ MULTI-REFEREE ASSIGNMENT FIELD ⭐ */}
+                          <div className="bg-amber-50/60 p-2.5 rounded-xl border border-amber-300/80 space-y-1.5">
+                            <div className="flex items-center justify-between text-[10px] font-black text-amber-950">
+                              <span className="flex items-center gap-1">
+                                <UserCheck className="w-3.5 h-3.5 text-amber-700" />
+                                <span>حكام المقابلة ({currentSportName}):</span>
+                              </span>
+                              <span className="text-[9px] text-amber-700 font-bold">
+                                (متعدد)
+                              </span>
+                            </div>
+
+                            {/* Assigned Referee Chips */}
+                            {assignedRefIds.length > 0 && (
+                              <div className="flex flex-wrap gap-1">
+                                {assignedRefIds.map((refId, idx) => {
+                                  const refObj = combinedRefereesList.find(r => r.id === refId);
+                                  const displayName = refObj?.fullName || match.refereeNames?.[idx] || 'حكم';
+                                  return (
+                                    <span
+                                      key={`match-${match.id}-chip-${refId}-${idx}`}
+                                      className="inline-flex items-center gap-1 px-2 py-0.5 bg-white border border-amber-300 text-amber-950 rounded-lg text-[10px] font-bold shadow-2xs"
+                                    >
+                                      <span className="w-3.5 h-3.5 rounded-full bg-amber-500 text-white flex items-center justify-center text-[8px] font-black shrink-0">
+                                        {idx + 1}
+                                      </span>
+                                      <span className="truncate max-w-[110px]" title={displayName}>
+                                        {displayName}
+                                      </span>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleRemoveRefereeFromMatch(match.id, refId)}
+                                        className="text-slate-400 hover:text-red-600 rounded-full p-0.5 transition-colors cursor-pointer"
+                                        title="إزالة الحكم"
+                                      >
+                                        <X className="w-3 h-3" />
+                                      </button>
+                                    </span>
+                                  );
+                                })}
+                              </div>
+                            )}
+
+                            {/* Dropdown to add another specialized referee */}
+                            <select
+                              value=""
+                              onChange={(e) => {
+                                if (e.target.value) {
+                                  handleAddRefereeToMatch(match.id, e.target.value);
+                                }
+                              }}
+                              className="w-full px-2 py-1 bg-white border border-amber-300 rounded-lg font-bold text-amber-950 cursor-pointer text-[10px] focus:ring-1 focus:ring-amber-500"
+                            >
+                              <option value="">
+                                {assignedRefIds.length > 0
+                                  ? `+ إضافة حكم آخر متخصص في ${currentSportName}...`
+                                  : `-- تعيين حكم متخصص في ${currentSportName} --`}
+                              </option>
+                              {activeRefereesList
+                                .filter(ref => !assignedRefIds.includes(ref.id))
+                                .map((ref, rIdx) => (
+                                  <option key={`match-${match.id}-ref-opt-${ref.id}-${rIdx}`} value={ref.id}>
+                                    {ref.name} {ref.specialty ? `[${ref.specialty}]` : ''}
+                                  </option>
+                                ))}
+                            </select>
+                          </div>
+                        </div>
+
                       </div>
-
-                      {/* Inputs: Date, Time, Venue & Referee */}
-                      <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 flex-1">
-                        <div>
-                          <label className="block text-[10px] font-bold text-slate-500 mb-0.5">التاريخ:</label>
-                          <input
-                            type="date"
-                            value={match.date}
-                            onChange={(e) => handleUpdateMatchField(match.id, 'date', e.target.value)}
-                            className="w-full px-2 py-1.5 bg-white border border-slate-200 rounded-xl font-bold text-slate-800"
-                          />
-                        </div>
-
-                        <div>
-                          <label className="block text-[10px] font-bold text-slate-500 mb-0.5">التوقيت:</label>
-                          <input
-                            type="time"
-                            value={match.time}
-                            onChange={(e) => handleUpdateMatchField(match.id, 'time', e.target.value)}
-                            className="w-full px-2 py-1.5 bg-white border border-slate-200 rounded-xl font-bold text-slate-800"
-                          />
-                        </div>
-
-                        <div>
-                          <label className="block text-[10px] font-bold text-slate-500 mb-0.5">الملعب / المكان:</label>
-                          <input
-                            type="text"
-                            value={match.venueName}
-                            onChange={(e) => handleUpdateMatchField(match.id, 'venueName', e.target.value)}
-                            placeholder="اسم القاعة / الملعب"
-                            className="w-full px-2 py-1.5 bg-white border border-slate-200 rounded-xl font-bold text-slate-800"
-                          />
-                        </div>
-
-                        {/* ⭐ REFEREE ASSIGNMENT FIELD ⭐ */}
-                        <div>
-                          <label className="block text-[10px] font-bold text-amber-700 mb-0.5 flex items-center gap-1">
-                            <UserCheck className="w-3 h-3" />
-                            <span>حكم المقابلة:</span>
-                          </label>
-                          <select
-                            value={match.refereeId || ''}
-                            onChange={(e) => handleUpdateMatchField(match.id, 'refereeId', e.target.value)}
-                            className="w-full px-2 py-1.5 bg-amber-50/60 border border-amber-300 rounded-xl font-bold text-amber-950 cursor-pointer text-[11px]"
-                          >
-                            <option value="">-- تعيين الحكم --</option>
-                            {combinedRefereesList.map(ref => (
-                              <option key={ref.id} value={ref.id}>{ref.name}</option>
-                            ))}
-                          </select>
-                        </div>
-                      </div>
-
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
 

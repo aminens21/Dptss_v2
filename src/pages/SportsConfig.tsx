@@ -826,12 +826,6 @@ export const SportsConfig: React.FC = () => {
       return;
     }
 
-    const limitVal = newSportStudentLimit.trim() === '' ? undefined : parseInt(newSportStudentLimit, 10);
-    if (limitVal !== undefined && (isNaN(limitVal) || limitVal < 0)) {
-      toast.error('يرجى إدخال عدد صحيح موجب لسقف عدد المشاركين');
-      return;
-    }
-
     const catIds = newSportCustomCategories.map(c => c.id);
 
     setIsSubmittingSport(true);
@@ -842,9 +836,7 @@ export const SportsConfig: React.FC = () => {
         icon: newSportIcon.trim() || '🏆',
         description: newSportDescription.trim() || undefined,
         ageCategories: catIds,
-        studentLimit: limitVal,
         customAgeCategories: newSportCustomCategories,
-        categoryStudentLimits: newSportCategoryStudentLimits,
         targetAffiliations: newSportTargetAffiliations
       });
 
@@ -852,17 +844,17 @@ export const SportsConfig: React.FC = () => {
       await DataService.updateSportCategories(
         addedSport.id,
         catIds,
-        limitVal,
+        undefined,
         [],
         undefined,
         undefined,
         newSportIsProgrammed,
         newSportCustomCategories,
-        newSportCategoryStudentLimits,
+        undefined,
         newSportTargetAffiliations
       );
 
-      toast.success(`تمت إضافة الرياضة الجديدة "${cleanName}" بنجاح وتحديد حالتها وسقف مشاركيها.`);
+      toast.success(`تمت إضافة الرياضة الجديدة "${cleanName}" بنجاح وتحديد حالتها وفئاتها.`);
       
       // Reset form
       setNewSportName('');
@@ -892,7 +884,7 @@ export const SportsConfig: React.FC = () => {
         </div>
         <h2 className="text-lg font-bold text-slate-800">صلاحية الدخول غير متوفرة</h2>
         <p className="text-xs text-slate-500 leading-relaxed max-w-md mx-auto">
-          صفحة الإعدادات والضوابط مخصصة حصرياً للمسير المركزي ورؤساء اللجن التقنية الإقليمية لضبط الفئات، وسقف المشاركة، ووضع الرياضات (مبرمجة أو في طور الإعداد).
+          صفحة الإعدادات والضوابط مخصصة حصرياً للمسير المركزي ورؤساء اللجن التقنية الإقليمية لضبط الفئات ووضع الرياضات (مبرمجة أو في طور الإعداد).
         </p>
         <button
           onClick={() => navigate('/dashboard')}
@@ -925,8 +917,8 @@ export const SportsConfig: React.FC = () => {
           </div>
           <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
             {isCentralAdmin 
-              ? 'تفعيل الرياضات والتحكم في وضعيتها (مبرمجة ومفتوحة للتسجيل أو في طور الإعداد)، وتحديد الفئات العمرية وسقف المشاركين لكل بطولة.'
-              : 'مراجعة وتعديل وضعية البطولات وضوابط الفئات العمرية وسقف المشاركين للتخصصات الرياضية الواقعة تحت إشرافك المباشر.'}
+              ? 'تفعيل الرياضات والتحكم في وضعيتها (مبرمجة ومفتوحة للتسجيل أو في طور الإعداد)، وتحديد الفئات العمرية لكل بطولة.'
+              : 'مراجعة وتعديل وضعية البطولات وضوابط الفئات العمرية للتخصصات الرياضية الواقعة تحت إشرافك المباشر.'}
           </p>
         </div>
 
@@ -1802,86 +1794,6 @@ export const SportsConfig: React.FC = () => {
                     </div>
                   </div>
 
-                  {/* Per-Category Quotas per Institution (تخصيص عدد المشاركين في كل فئة بالنسبة للمؤسسة) */}
-                  <div className="pt-3 border-t border-slate-100 space-y-2.5 bg-slate-50/70 p-3.5 rounded-xl border border-slate-100">
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                      <div className="flex items-center gap-2">
-                        <Users className="h-4 w-4 text-emerald-600 shrink-0" />
-                        <label className="text-xs font-bold text-slate-800">
-                          تخصيص سقف عدد المشاركين في كل فئة بالنسبة للمؤسسة:
-                        </label>
-                      </div>
-                      <span className="text-[10px] text-emerald-700 font-bold bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200 self-start sm:self-auto">
-                        سقف مخصص لكل فئة عمرية
-                      </span>
-                    </div>
-                    <p className="text-[11px] text-slate-500 font-medium">
-                      حدد عدد التلاميذ المسموح بمشاركتهم من كل مؤسسة في كل فئة على حدة (اتركه فارغاً أو 0 ليكون بدون سقف):
-                    </p>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 pt-1">
-                      {['U12', 'U15', 'U18', 'U20'].map((catId) => {
-                        const catLabel = catId === 'U12' ? 'فئة البراعم والبرعمات (U12)'
-                          : catId === 'U15' ? 'فئة الصغار والصغيرات (U15)'
-                          : catId === 'U18' ? 'فئة الفتيان والفتيات (U18)'
-                          : 'فئة الشبان والشابات (U20)';
-                        const currentLimit = sport.categoryStudentLimits?.[catId] ?? '';
-                        return (
-                          <div key={catId} className="p-2.5 bg-white rounded-xl border border-slate-200 space-y-1 shadow-3xs">
-                            <label className="block text-[11px] font-black text-slate-700 truncate">
-                              {catLabel}
-                            </label>
-                            <div className="flex items-center gap-1.5">
-                              <input
-                                type="number"
-                                min="0"
-                                placeholder="بدون سقف"
-                                value={currentLimit}
-                                onChange={(e) => {
-                                  const val = e.target.value === '' ? undefined : parseInt(e.target.value, 10);
-                                  const nextLimits = { ...(sport.categoryStudentLimits || {}) };
-                                  if (val === undefined || isNaN(val)) {
-                                    delete nextLimits[catId];
-                                  } else {
-                                    nextLimits[catId] = val;
-                                  }
-                                  const total = Object.values(nextLimits).reduce<number>((acc, curr) => acc + (Number(curr) || 0), 0);
-                                  setSportsList(prev => prev.map(s => s.id === sport.id ? {
-                                    ...s,
-                                    categoryStudentLimits: nextLimits,
-                                    studentLimit: total > 0 ? total : s.studentLimit
-                                  } : s));
-                                }}
-                                className="w-full px-2.5 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 font-black text-emerald-800 text-center"
-                              />
-                              <span className="text-[10px] font-bold text-slate-400 shrink-0">تلميذ</span>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-
-                    {/* Overall institution total */}
-                    <div className="flex items-center justify-between pt-2 border-t border-slate-200/60 text-xs">
-                      <span className="text-slate-600 font-bold">
-                        العدد الإجمالي التراكمي المسموح به للمؤسسة (اختياري):
-                      </span>
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="number"
-                          min="0"
-                          placeholder="غير محدود"
-                          value={sport.studentLimit ?? ''}
-                          onChange={(e) => {
-                            const val = e.target.value === '' ? undefined : parseInt(e.target.value, 10);
-                            setSportsList(prev => prev.map(s => s.id === sport.id ? { ...s, studentLimit: val } : s));
-                          }}
-                          className="w-24 px-2 py-1 text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-bold text-slate-700 text-center"
-                        />
-                        <span className="text-[11px] text-slate-400 font-medium">تلميذ(ة)</span>
-                      </div>
-                    </div>
-                  </div>
 
                   {/* Athletics Specialties Setup */}
                   {sport.id === 'athletics' && (
@@ -2022,7 +1934,7 @@ export const SportsConfig: React.FC = () => {
                 </div>
                 <div>
                   <h3 className="text-sm font-bold text-slate-800">إضافة نوع رياضي جديد إلى المنظومة</h3>
-                  <p className="text-[11px] text-slate-500 font-medium">خاص بالمسير المركزي - تحديد الفئات العمرية وسقف المشاركين والحالة</p>
+                  <p className="text-[11px] text-slate-500 font-medium">خاص بالمسير المركزي - تحديد الفئات العمرية المستهدفة والأصناف والحالة</p>
                 </div>
               </div>
               <button
@@ -2207,58 +2119,7 @@ export const SportsConfig: React.FC = () => {
                 </div>
               </div>
 
-              {/* Per-Category Quotas (سقف المشاركين لكل فئة) */}
-              <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-2">
-                <label className="block text-xs font-bold text-slate-800">
-                  تخصيص سقف عدد المشاركين في كل فئة بالنسبة للمؤسسة
-                </label>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
-                  {newSportCustomCategories.map(cat => (
-                    <div key={cat.id} className="p-2 bg-white rounded-xl border border-slate-200 flex items-center justify-between gap-2">
-                      <span className="text-xs font-bold text-slate-700 truncate">{cat.name}</span>
-                      <div className="flex items-center gap-1">
-                        <input
-                          type="number"
-                          min="0"
-                          placeholder="بدون سقف"
-                          value={newSportCategoryStudentLimits[cat.id] ?? ''}
-                          onChange={(e) => {
-                            const val = e.target.value === '' ? undefined : parseInt(e.target.value, 10);
-                            setNewSportCategoryStudentLimits(prev => {
-                              const next = { ...prev };
-                              if (val === undefined || isNaN(val)) delete next[cat.id];
-                              else next[cat.id] = val;
-                              return next;
-                            });
-                          }}
-                          className="w-20 px-2 py-1 text-xs border border-slate-200 rounded-lg text-center font-bold"
-                        />
-                        <span className="text-[10px] text-slate-400">تلميذ</span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
 
-              {/* Student Limit (سقف المشاركين لكل مؤسسة) */}
-              <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-1.5">
-                <label className="block text-xs font-bold text-slate-800">
-                  السقف الإجمالي التراكمي لعدد المشاركين (اختياري)
-                </label>
-                <div className="flex items-center gap-2.5">
-                  <input
-                    type="number"
-                    min="0"
-                    placeholder="غير محدود"
-                    value={newSportStudentLimit}
-                    onChange={(e) => setNewSportStudentLimit(e.target.value)}
-                    className="w-32 px-3 py-2 text-xs bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 font-bold text-slate-700 text-center"
-                  />
-                  <span className="text-xs text-slate-500">
-                    تلميذ(ة) لكل مؤسسة (اتركه فارغاً ليكون مفتوحاً)
-                  </span>
-                </div>
-              </div>
 
               {/* Modal Footer Actions */}
               <div className="pt-3 border-t border-slate-100 flex items-center justify-end gap-2.5">

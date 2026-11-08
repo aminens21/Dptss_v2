@@ -1898,17 +1898,37 @@ export const DataService = {
         photoUrl: t.photoUrl
       }));
 
-    // Deduplicate by ID and normalized name
-    const combined = [...explicitReferees, ...teacherReferees];
+    // Deduplicate by ID first, then by normalized name, guaranteeing unique keys
+    const idMap = new Map<string, Referee>();
+    [...explicitReferees, ...teacherReferees].forEach(r => {
+      if (!r || !r.id) return;
+      if (!idMap.has(r.id)) {
+        idMap.set(r.id, r);
+      } else {
+        const existing = idMap.get(r.id)!;
+        const mergedSpecialties = Array.from(new Set([
+          ...(Array.isArray(existing.specialty) ? existing.specialty : (existing.specialty ? [existing.specialty] : [])),
+          ...(Array.isArray(r.specialty) ? r.specialty : (r.specialty ? [r.specialty] : []))
+        ]));
+        idMap.set(r.id, {
+          ...existing,
+          ...r,
+          specialty: mergedSpecialties,
+          phone: (r.phone && r.phone !== 'غير محدد') ? r.phone : existing.phone,
+          fullName: existing.fullName || r.fullName
+        });
+      }
+    });
+
     const uniqueMap = new Map<string, Referee>();
-    combined.forEach(r => {
+    idMap.forEach(r => {
       const key = norm(r.fullName.replace(/\s*\(أستاذ\)\s*/g, ''));
       if (!uniqueMap.has(key) || (r.phone && r.phone !== 'غير محدد' && !uniqueMap.get(key)?.phone)) {
         uniqueMap.set(key, r);
       }
     });
 
-    return Array.from(uniqueMap.values());
+    return deduplicateById(Array.from(uniqueMap.values()));
   },
 
   async addReferee(referee: Omit<Referee, 'id'>): Promise<Referee> {

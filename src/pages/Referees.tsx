@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { DataService, SPORTS_MAP } from '../lib/dataService';
+import { DataService, SPORTS_MAP, deduplicateById } from '../lib/dataService';
 import { Referee } from '../types';
 import {
   ShieldCheck,
@@ -81,7 +81,7 @@ export const Referees: React.FC = () => {
     try {
       const activeDirId = DataService.getActiveDirectorateId();
       const data = await DataService.getReferees();
-      const dirReferees = data.filter(r => (r.directorateId || 'taourirt') === activeDirId);
+      const dirReferees = deduplicateById(data.filter(r => (r.directorateId || 'taourirt') === activeDirId));
       setReferees(dirReferees);
     } catch (error) {
       console.error('Error loading referees:', error);
@@ -285,7 +285,7 @@ export const Referees: React.FC = () => {
                 {filteredReferees.map((ref, idx) => {
                   const specialties = Array.isArray(ref.specialty) ? ref.specialty : (ref.specialty ? [ref.specialty] : []);
                   return (
-                    <tr key={ref.id} className="hover:bg-blue-50/30 transition-colors">
+                    <tr key={`ref-row-${ref.id}-${idx}`} className="hover:bg-blue-50/30 transition-colors">
                       <td className="p-3.5 text-center font-bold text-slate-400">{idx + 1}</td>
                       <td className="p-3.5 font-bold text-slate-900">
                         <div className="flex items-center gap-2.5">
@@ -369,10 +369,10 @@ export const Referees: React.FC = () => {
       ) : (
         /* CARDS VIEW */
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {filteredReferees.map((ref) => {
+          {filteredReferees.map((ref, idx) => {
             const specialties = Array.isArray(ref.specialty) ? ref.specialty : (ref.specialty ? [ref.specialty] : []);
             return (
-              <div key={ref.id} className="bg-white rounded-xl border border-slate-200 p-4 shadow-xs hover:shadow-sm transition-shadow flex flex-col justify-between h-full">
+              <div key={`ref-card-${ref.id}-${idx}`} className="bg-white rounded-xl border border-slate-200 p-4 shadow-xs hover:shadow-sm transition-shadow flex flex-col justify-between h-full">
                 <div className="flex items-start justify-between mb-3">
                   <div className="flex items-center gap-3">
                     <div className="w-10 h-10 rounded-full bg-blue-50 border border-blue-100 text-blue-700 flex items-center justify-center font-bold text-sm shrink-0">
