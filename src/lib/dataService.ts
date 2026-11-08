@@ -4396,6 +4396,14 @@ export const DataService = {
     notes?: string;
     directorateId?: string;
     seasonId?: string;
+    categories?: string[];
+    genders?: ('Male' | 'Female')[];
+    affiliationTypes?: string[];
+    selectedBranches?: Array<{
+      category: string;
+      gender: 'Male' | 'Female';
+      affiliationType: string;
+    }>;
   }): Promise<SchoolTournamentConfirmation> {
     const confirmationId = `${data.sportId}_${data.schoolId}`;
     const payload: SchoolTournamentConfirmation = {

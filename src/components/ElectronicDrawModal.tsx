@@ -29,8 +29,8 @@ import {
   ShieldAlert,
   Volleyball
 } from 'lucide-react';
-import { Tournament, School, Team, Match, User, Venue, Sport, Referee } from '../types';
-import { DataService, SPORTS_MAP, deduplicateById } from '../lib/dataService';
+import { Tournament, School, Team, Match, User, Venue, Sport, Referee, SchoolTournamentConfirmation } from '../types';
+import { DataService, SPORTS_MAP, deduplicateById, normalizeCategoryKey, getCustomCategoryName } from '../lib/dataService';
 import * as XLSX from 'xlsx';
 import toast from 'react-hot-toast';
 
@@ -79,6 +79,7 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
   const [venues, setVenues] = useState<Venue[]>([]);
   const [referees, setReferees] = useState<Referee[]>([]);
   const [teachers, setTeachers] = useState<User[]>([]);
+  const [confirmations, setConfirmations] = useState<SchoolTournamentConfirmation[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
 
   // Workflow State: 1 = Choose Tournament & Filter, 2 = Review Teams & Draw Config, 3 = Draw & Schedule Matches with Referees
@@ -93,6 +94,7 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
   const [tournamentSearchQuery, setTournamentSearchQuery] = useState<string>('');
 
   // Step 2: Draw Configuration & Participating Schools
+  const [schoolFilterMode, setSchoolFilterMode] = useState<'CONFIRMED_ONLY' | 'ALL'>('CONFIRMED_ONLY');
   const [participatingSchoolIds, setParticipatingSchoolIds] = useState<string[]>([]);
   const [customTeamNames, setCustomTeamNames] = useState<string[]>([]);
   const [newTeamInput, setNewTeamInput] = useState<string>('');
@@ -126,7 +128,8 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
           loadedStudents,
           loadedVenues,
           loadedReferees,
-          loadedTeachers
+          loadedTeachers,
+          loadedConfirmations
         ] = await Promise.all([
           DataService.getTournaments(),
           DataService.getSportsConfig(),
@@ -134,7 +137,8 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
           DataService.getStudents(),
           DataService.getVenues(),
           DataService.getReferees(),
-          DataService.getTeachers()
+          DataService.getTeachers(),
+          DataService.getSchoolConfirmations()
         ]);
 
         setTournaments(loadedTournaments);
@@ -143,6 +147,7 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
         setVenues(loadedVenues);
         setReferees(loadedReferees);
         setTeachers(loadedTeachers);
+        setConfirmations(loadedConfirmations);
 
         // Derive team records from students
         const derivedTeams: Team[] = [];
@@ -316,6 +321,49 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
     return tournaments.find(t => t.id === selectedTournamentId);
   }, [tournaments, selectedTournamentId]);
 
+  // Compute schools that confirmed participation for this specific tournament
+  const confirmedSchoolsForTournament = useMemo(() => {
+    if (!selectedTournament) return [];
+    return confirmations.filter(c => {
+      if (c.status !== 'confirmed') return false;
+
+      // 1. Sport check
+      const matchesSport = c.sportId === selectedTournament.sportId || (c.tournamentId && c.tournamentId === selectedTournament.id);
+      if (!matchesSport) return false;
+
+      // 2. Age Category check (if specified in confirmation)
+      if (c.categories && c.categories.length > 0 && selectedTournament.ageCategory) {
+        const tournCatNorm = normalizeCategoryKey(selectedTournament.ageCategory);
+        const matchesCat = c.categories.some(cat => 
+          normalizeCategoryKey(cat) === tournCatNorm || cat === selectedTournament.ageCategory
+        );
+        if (!matchesCat) return false;
+      }
+
+      // 3. Gender check (if specified in confirmation)
+      if (c.genders && c.genders.length > 0 && selectedTournament.gender && selectedTournament.gender !== 'Mixed') {
+        if (!c.genders.includes(selectedTournament.gender as any)) return false;
+      }
+
+      // 4. Affiliation check (if specified in confirmation and tournament)
+      if (selectedTournament.affiliationType && c.affiliationTypes && c.affiliationTypes.length > 0) {
+        if (!c.affiliationTypes.includes(selectedTournament.affiliationType)) return false;
+      }
+
+      return true;
+    });
+  }, [confirmations, selectedTournament]);
+
+  // Map of confirmed schools for quick lookup
+  const confirmedSchoolsMap = useMemo(() => {
+    const map = new Map<string, SchoolTournamentConfirmation>();
+    confirmedSchoolsForTournament.forEach(c => {
+      map.set(c.schoolId, c);
+      if (c.schoolName) map.set(c.schoolName, c);
+    });
+    return map;
+  }, [confirmedSchoolsForTournament]);
+
   // When Tournament is selected, automatically detect participating schools/teams
   useEffect(() => {
     if (!selectedTournament) {
@@ -324,26 +372,35 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
       return;
     }
 
-    // Find teams matching this tournament or sport
-    const matchedTeams = teams.filter(t => {
-      if (t.tournamentId && t.tournamentId === selectedTournament.id) return true;
-      if (t.sportId === selectedTournament.sportId) {
-        const catMatch = !selectedTournament.ageCategory || t.category === selectedTournament.ageCategory;
-        const genMatch = !selectedTournament.gender || t.gender === selectedTournament.gender;
-        return catMatch && genMatch;
+    // Prioritize institutions that explicitly confirmed participation
+    const confirmedIds = confirmedSchoolsForTournament.map(c => {
+      const matchSchool = schools.find(s => s.id === c.schoolId || s.name === c.schoolName || s.name === c.schoolId);
+      return matchSchool ? matchSchool.id : c.schoolId;
+    }).filter(Boolean);
+
+    if (confirmedIds.length > 0) {
+      setParticipatingSchoolIds(Array.from(new Set(confirmedIds)));
+      setSchoolFilterMode('CONFIRMED_ONLY');
+    } else {
+      // If no school confirmed yet, find teams or default
+      const matchedTeams = teams.filter(t => {
+        if (t.tournamentId && t.tournamentId === selectedTournament.id) return true;
+        if (t.sportId === selectedTournament.sportId) {
+          const catMatch = !selectedTournament.ageCategory || t.category === selectedTournament.ageCategory;
+          const genMatch = !selectedTournament.gender || t.gender === selectedTournament.gender;
+          return catMatch && genMatch;
+        }
+        return false;
+      });
+
+      let autoSchoolIds = matchedTeams.map(t => t.schoolId).filter(Boolean);
+      if (autoSchoolIds.length === 0) {
+        autoSchoolIds = schools.slice(0, 8).map(s => s.id);
       }
-      return false;
-    });
-
-    let autoSchoolIds = matchedTeams.map(t => t.schoolId).filter(Boolean);
-
-    // If no teams found explicitly, pre-populate with directorate schools
-    if (autoSchoolIds.length === 0) {
-      autoSchoolIds = schools.slice(0, 8).map(s => s.id);
+      setParticipatingSchoolIds(Array.from(new Set(autoSchoolIds)));
+      setSchoolFilterMode('ALL');
     }
-
-    setParticipatingSchoolIds(Array.from(new Set(autoSchoolIds)));
-  }, [selectedTournament, teams, schools]);
+  }, [selectedTournament, confirmedSchoolsForTournament, teams, schools]);
 
   // Toggle school participation
   const toggleSchoolParticipation = (schoolId: string) => {
@@ -352,12 +409,32 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
     );
   };
 
+  // Filtered Schools for step 2: by mode ('CONFIRMED_ONLY' vs 'ALL') and search
+  const filteredSchoolsList = useMemo(() => {
+    let baseList = schools;
+
+    if (schoolFilterMode === 'CONFIRMED_ONLY') {
+      // Show ONLY institutions that confirmed participation
+      baseList = schools.filter(s => confirmedSchoolsMap.has(s.id) || confirmedSchoolsMap.has(s.name));
+    }
+
+    if (!schoolSearchQuery.trim()) return baseList;
+    const q = schoolSearchQuery.toLowerCase();
+    return baseList.filter(s => 
+      (s.name || '').toLowerCase().includes(q) || 
+      (s.commune || '').toLowerCase().includes(q) ||
+      (s.type || '').toLowerCase().includes(q)
+    );
+  }, [schools, schoolFilterMode, confirmedSchoolsMap, schoolSearchQuery]);
+
   const handleSelectAllSchools = () => {
-    setParticipatingSchoolIds(schools.map(s => s.id));
+    const idsToAdd = filteredSchoolsList.map(s => s.id);
+    setParticipatingSchoolIds(prev => Array.from(new Set([...prev, ...idsToAdd])));
   };
 
   const handleDeselectAllSchools = () => {
-    setParticipatingSchoolIds([]);
+    const idsToRemove = new Set(filteredSchoolsList.map(s => s.id));
+    setParticipatingSchoolIds(prev => prev.filter(id => !idsToRemove.has(id)));
   };
 
   // Add custom manual team name
@@ -388,6 +465,12 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
           name: school.name,
           schoolName: school.name
         });
+      } else {
+        list.push({
+          id: sId,
+          name: sId,
+          schoolName: sId
+        });
       }
     });
 
@@ -401,17 +484,6 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
 
     return list;
   }, [participatingSchoolIds, customTeamNames, schools]);
-
-  // Filtered Schools for step 2 search
-  const filteredSchoolsList = useMemo(() => {
-    if (!schoolSearchQuery.trim()) return schools;
-    const q = schoolSearchQuery.toLowerCase();
-    return schools.filter(s => 
-      (s.name || '').toLowerCase().includes(q) || 
-      (s.commune || '').toLowerCase().includes(q) ||
-      (s.type || '').toLowerCase().includes(q)
-    );
-  }, [schools, schoolSearchQuery]);
 
   // Execute Electronic Draw (سحب القرعة آلياً)
   const handleExecuteDraw = () => {
@@ -1004,72 +1076,151 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
 
               {/* Participating Schools Selection Box */}
               <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-xs space-y-4">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                   <div>
                     <h4 className="text-sm font-black text-slate-900 flex items-center gap-2">
                       <Building2 className="w-4 h-4 text-emerald-600" />
                       <span>تحديد المؤسسات المشاركة في القرعة ({allDrawTeams.length} فريق محدد):</span>
                     </h4>
                     <p className="text-xs text-slate-500 font-medium mt-0.5">
-                      حدد المؤسسات التعليمية التي ستدخل في وعاء السحب الإلكتروني للقرعة
+                      {schoolFilterMode === 'CONFIRMED_ONLY'
+                        ? 'تظهر حصرياً المؤسسات التي أكد أساتذتها المشاركة في هذه البطولة رسمياً.'
+                        : 'عرض جميع مؤسسات الإقليم مع إمكانية انتقاء أي مؤسسة إضافية.'}
                     </p>
                   </div>
 
-                  <div className="flex items-center gap-2">
+                  {/* Mode Selector Tabs (المؤسسات المؤكدة فقط vs جميع المؤسسات) */}
+                  <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-2xl border border-slate-200 self-start sm:self-auto">
                     <button
-                      onClick={handleSelectAllSchools}
-                      className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-[11px] font-bold cursor-pointer"
+                      type="button"
+                      onClick={() => setSchoolFilterMode('CONFIRMED_ONLY')}
+                      className={`px-3 py-1.5 rounded-xl text-xs transition-all cursor-pointer flex items-center gap-1.5 ${
+                        schoolFilterMode === 'CONFIRMED_ONLY'
+                          ? 'bg-emerald-600 text-white shadow-xs font-black'
+                          : 'text-slate-600 hover:text-slate-900 font-bold'
+                      }`}
                     >
-                      تحديد الكل
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                      <span>المؤسسات المشاركة فقط ({confirmedSchoolsForTournament.length})</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setSchoolFilterMode('ALL')}
+                      className={`px-3 py-1.5 rounded-xl text-xs transition-all cursor-pointer flex items-center gap-1.5 ${
+                        schoolFilterMode === 'ALL'
+                          ? 'bg-slate-800 text-white shadow-xs font-black'
+                          : 'text-slate-600 hover:text-slate-900 font-bold'
+                      }`}
+                    >
+                      <Building2 className="w-3.5 h-3.5" />
+                      <span>جميع المؤسسات ({schools.length})</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Filter and Action bar */}
+                <div className="flex flex-col sm:flex-row items-center justify-between gap-2 pt-1">
+                  {/* School Search */}
+                  <div className="relative w-full sm:flex-1">
+                    <Search className="w-3.5 h-3.5 text-slate-400 absolute right-3 top-3" />
+                    <input
+                      type="text"
+                      value={schoolSearchQuery}
+                      onChange={(e) => setSchoolSearchQuery(e.target.value)}
+                      placeholder={schoolFilterMode === 'CONFIRMED_ONLY' ? 'ابحث في المؤسسات المشاركة...' : 'ابحث باسم المؤسسة أو الجماعة...'}
+                      className="w-full pr-8 pl-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-xl"
+                    />
+                  </div>
+
+                  <div className="flex items-center gap-2 shrink-0 self-end sm:self-auto">
+                    <button
+                      type="button"
+                      onClick={handleSelectAllSchools}
+                      className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-[11px] font-bold cursor-pointer"
+                    >
+                      تحديد المعروض ({filteredSchoolsList.length})
                     </button>
                     <button
+                      type="button"
                       onClick={handleDeselectAllSchools}
-                      className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-[11px] font-bold cursor-pointer"
+                      className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-[11px] font-bold cursor-pointer"
                     >
                       إلغاء التحديد
                     </button>
                   </div>
                 </div>
 
-                {/* School Search */}
-                <div className="relative">
-                  <Search className="w-3.5 h-3.5 text-slate-400 absolute right-3 top-3" />
-                  <input
-                    type="text"
-                    value={schoolSearchQuery}
-                    onChange={(e) => setSchoolSearchQuery(e.target.value)}
-                    placeholder="ابحث باسم المؤسسة أو الجماعة..."
-                    className="w-full pr-8 pl-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-xl"
-                  />
-                </div>
+                {/* Empty State when in CONFIRMED_ONLY and 0 confirmed */}
+                {schoolFilterMode === 'CONFIRMED_ONLY' && confirmedSchoolsForTournament.length === 0 ? (
+                  <div className="p-6 bg-amber-50/70 border border-amber-200 rounded-2xl text-center space-y-2.5">
+                    <div className="text-3xl">📋</div>
+                    <h5 className="font-black text-amber-950 text-xs">لا توجد مؤسسات قامت بتأكيد مشاركتها بعد في هذه البطولة</h5>
+                    <p className="text-[11px] text-amber-800 leading-relaxed max-w-md mx-auto">
+                      لم يتم تسجيل أي تأكيد لمشاركة المؤسسات من طرف الأساتذة حتى الآن. يمكنك التبديل لعرض جميع مؤسسات الإقليم لاختيار المؤسسات المشاركة في القرعة يدوياً.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => setSchoolFilterMode('ALL')}
+                      className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black shadow-xs cursor-pointer inline-flex items-center gap-1.5"
+                    >
+                      <Building2 className="w-3.5 h-3.5" />
+                      <span>عرض واختيار من جميع مؤسسات الإقليم ({schools.length})</span>
+                    </button>
+                  </div>
+                ) : (
+                  /* Schools Grid */
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 max-h-72 overflow-y-auto pr-1">
+                    {filteredSchoolsList.map(school => {
+                      const isSelected = participatingSchoolIds.includes(school.id);
+                      const confirmation = confirmedSchoolsMap.get(school.id) || confirmedSchoolsMap.get(school.name);
+                      const isConfirmed = !!confirmation;
 
-                {/* Schools Grid */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 max-h-64 overflow-y-auto pr-1">
-                  {filteredSchoolsList.map(school => {
-                    const isSelected = participatingSchoolIds.includes(school.id);
-                    return (
-                      <div
-                        key={school.id}
-                        onClick={() => toggleSchoolParticipation(school.id)}
-                        className={`p-2.5 rounded-2xl border transition-all cursor-pointer flex items-center justify-between text-xs ${
-                          isSelected
-                            ? 'bg-emerald-50 border-emerald-500 text-emerald-950 font-bold'
-                            : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
-                        }`}
-                      >
-                        <div className="flex items-center gap-2 truncate">
-                          <span className="text-sm">🏫</span>
-                          <span className="truncate">{school.name}</span>
+                      return (
+                        <div
+                          key={school.id}
+                          onClick={() => toggleSchoolParticipation(school.id)}
+                          className={`p-2.5 rounded-2xl border transition-all cursor-pointer flex flex-col justify-between gap-1 text-xs ${
+                            isSelected
+                              ? 'bg-emerald-50/90 border-emerald-500 text-emerald-950 shadow-xs ring-1 ring-emerald-400/30'
+                              : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-1.5">
+                            <div className="flex items-center gap-2 truncate font-bold">
+                              <span className="text-base shrink-0">🏫</span>
+                              <span className="truncate">{school.name}</span>
+                            </div>
+                            {isSelected ? (
+                              <CheckSquare className="w-4 h-4 text-emerald-600 shrink-0" />
+                            ) : (
+                              <Square className="w-4 h-4 text-slate-400 shrink-0" />
+                            )}
+                          </div>
+
+                          {/* Confirmation Status Tag */}
+                          <div className="flex items-center justify-between text-[10px] pt-1 border-t border-slate-200/60 mt-1">
+                            {isConfirmed ? (
+                              <span className="text-emerald-700 font-black flex items-center gap-1">
+                                <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                                <span>مشاركة مؤكدة</span>
+                                {confirmation.teacherName && (
+                                  <span className="text-slate-500 font-medium truncate max-w-[90px]">({confirmation.teacherName})</span>
+                                )}
+                              </span>
+                            ) : (
+                              <span className="text-slate-400 font-medium">غير مؤكدة</span>
+                            )}
+
+                            {school.commune && (
+                              <span className="text-slate-400 truncate max-w-[80px]">{school.commune}</span>
+                            )}
+                          </div>
                         </div>
-                        {isSelected ? (
-                          <CheckSquare className="w-4 h-4 text-emerald-600 shrink-0" />
-                        ) : (
-                          <Square className="w-4 h-4 text-slate-400 shrink-0" />
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
+                      );
+                    })}
+                  </div>
+                )}
 
                 {/* Add Custom Manual Team */}
                 <div className="pt-3 border-t border-slate-100 flex items-center gap-2">

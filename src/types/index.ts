@@ -227,6 +227,14 @@ export interface SchoolTournamentConfirmation {
   notes?: string;
   directorateId?: string;
   seasonId?: string;
+  categories?: string[]; // الفئات العمرية المحددة: e.g. ['U12', 'U15', 'U18', 'U20']
+  genders?: ('Male' | 'Female')[]; // الجنس المحدد: ['Male', 'Female']
+  affiliationTypes?: string[]; // صنف المشاركين: ['non_club', 'espoir_non_club', 'sports_tracks', 'espoir_club', 'club_affiliated']
+  selectedBranches?: Array<{
+    category: string;
+    gender: 'Male' | 'Female';
+    affiliationType: string;
+  }>;
 }
 
 export interface Team {
