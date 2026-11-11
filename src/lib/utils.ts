@@ -115,6 +115,50 @@ export function isFlexibleEmailMatch(email1?: string, email2?: string): boolean 
   return false;
 }
 
+export function formatMoroccanPhone(val: any): string {
+  if (val === undefined || val === null || val === '') return '';
+  let str = String(val).replace(/[\s\-\.\(\)]/g, '').trim();
+  if (!str || str.includes('@')) return '';
+
+  // If starts with 212 or +212 e.g. +212697590490 -> 0697590490
+  if (/^\+?212/.test(str)) {
+    str = '0' + str.replace(/^\+?212/, '');
+  }
+
+  // If 9 digits starting with 5, 6, 7, 8 (Excel stripped leading 0 when stored as numeric)
+  if (/^[5678]\d{8}$/.test(str)) {
+    return '0' + str;
+  }
+
+  // If 10 digits starting with 05, 06, 07, 08
+  if (/^0[5678]\d{8}$/.test(str)) {
+    return str;
+  }
+
+  if (/^\d{9,10}$/.test(str)) {
+    return str.startsWith('0') ? str : '0' + str;
+  }
+
+  return str;
+}
+
+export function isPhoneLike(val: any): boolean {
+  if (val === undefined || val === null || val === '') return false;
+  const str = String(val).replace(/[\s\-\.\(\)]/g, '').trim();
+  if (!str || str.includes('@')) return false;
+
+  // 9 digits starting with 5,6,7,8 (Excel stripped zero)
+  if (/^[5678]\d{8}$/.test(str)) return true;
+  // 10 digits starting with 05, 06, 07, 08
+  if (/^0[5678]\d{8}$/.test(str)) return true;
+  // Starts with +212 or 212
+  if (/^\+?212[5678]\d{8}$/.test(str)) return true;
+  // General 10 digits starting with 0
+  if (str.length === 10 && str.startsWith('0') && !str.startsWith('00')) return true;
+
+  return false;
+}
+
 /**
  * Auto-detects and repairs jumbled teacher profile fields (e.g. if school was saved as email or lease number as phone).
  */
@@ -125,20 +169,13 @@ export function fixTeacherFieldJumble(user: any): any {
   let email = String(user.email || '').trim().toLowerCase();
   let workLocation = String(user.workLocation || '').trim();
   let leaseNumber = String(user.leaseNumber || '').trim();
-  let phone = String(user.phone || '').trim();
+  let rawPhone = user.phone;
   let rawCadre = String(user.teachingCadre || user.cadre || '').trim();
-
-  // Helper to check if string looks like a Moroccan phone number (e.g. 0697590490, 0666742835, +2126...)
-  function isPhoneLike(v: string) {
-    if (!v) return false;
-    const clean = v.replace(/[\s\-\.\(\)]/g, '');
-    return /^(06|07|05|08|\+212|212)\d{8,10}$/.test(clean) || (clean.length === 10 && clean.startsWith('0') && !clean.startsWith('00'));
-  }
 
   // Helper to check if string looks like a SOM/PPR lease number (e.g. 1280856, 1176420, FB93905)
   function isLeaseLike(v: string) {
     if (!v) return false;
-    const clean = v.trim();
+    const clean = String(v).trim();
     if (clean.includes('@')) return false;
     if (isPhoneLike(clean)) return false;
     // SOM / PPR: numeric (5-8 digits) or alpha+numeric code (e.g. FB93905, Fb65233)
@@ -146,19 +183,22 @@ export function fixTeacherFieldJumble(user: any): any {
   }
 
   // Gather all available values
-  const values = [email, workLocation, leaseNumber, phone, rawCadre].map(f => String(f || '').trim()).filter(Boolean);
+  const values = [email, workLocation, leaseNumber, rawPhone, rawCadre]
+    .map(f => (f !== undefined && f !== null ? String(f).trim() : ''))
+    .filter(Boolean);
 
   // 1. Detect Real Email
   const realEmail = values.find(v => v.includes('@') || v.includes('gmail') || v.includes('hotmail') || v.includes('yahoo') || v.endsWith('.com') || v.endsWith('.fr') || v.endsWith('.ma'));
 
   // 2. Detect Real Phone
-  const realPhone = values.find(v => v !== realEmail && isPhoneLike(v));
+  const rawPhoneFound = values.find(v => v !== realEmail && isPhoneLike(v));
+  const realPhone = rawPhoneFound ? formatMoroccanPhone(rawPhoneFound) : '';
 
   // 3. Detect Real Lease Number
-  const realLease = values.find(v => v !== realEmail && v !== realPhone && isLeaseLike(v));
+  const realLease = values.find(v => v !== realEmail && v !== rawPhoneFound && isLeaseLike(v));
 
   // 4. Detect Real School Location: text containing school terms or Arabic text
-  const realSchool = values.find(v => v !== realEmail && v !== realPhone && v !== realLease && (
+  const realSchool = values.find(v => v !== realEmail && v !== rawPhoneFound && v !== realLease && (
     v.includes('اع') || v.includes('ث') || v.includes('مدرسة') || v.includes('إعداد') || v.includes('تأهيل') || v.includes('ابتدائ') || v.includes('مؤسس') || v.includes('ثانوية') || /[\u0600-\u06FF]/.test(v)
   ));
 
@@ -169,9 +209,8 @@ export function fixTeacherFieldJumble(user: any): any {
   else if (cadreText.includes('إعداد') || cadreText.includes('اعداد') || cadreText.includes('middle')) teachingCadre = 'MIDDLE';
 
   // Strict field assignment:
-  // - If phone is not phone-like and realPhone exists, use realPhone; if not, clear it so lease number won't pollute phone field
-  const finalPhone = realPhone || (isPhoneLike(phone) ? phone : '');
-  // - If leaseNumber is not lease-like and realLease exists, use realLease; if not, clear it
+  const formattedOrigPhone = formatMoroccanPhone(rawPhone);
+  const finalPhone = realPhone || (isPhoneLike(formattedOrigPhone) ? formattedOrigPhone : '');
   const finalLease = realLease || (isLeaseLike(leaseNumber) ? leaseNumber : '');
 
   return {

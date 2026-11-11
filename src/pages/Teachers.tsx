@@ -2,7 +2,7 @@ import React, { useEffect, useState, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { DataService, SPORTS_MAP } from '../lib/dataService';
 import { User, Student, School } from '../types';
-import { fixTeacherFieldJumble } from '../lib/utils';
+import { fixTeacherFieldJumble, formatMoroccanPhone } from '../lib/utils';
 import { TeacherDetailModal } from '../components/TeacherDetailModal';
 import { EditTeacherRoleModal } from '../components/EditTeacherRoleModal';
 import { ConfirmDeleteModal } from '../components/ConfirmDeleteModal';
@@ -826,14 +826,15 @@ export const Teachers: React.FC = () => {
               <thead>
                 <tr className="bg-slate-50 border-b border-slate-200 text-[11px] font-bold text-slate-500 uppercase tracking-wider">
                   <th className="px-6 py-4">الأستاذ المؤطر</th>
+                  <th className="px-6 py-4">رقم التأجير (SOM)</th>
                   <th className="px-6 py-4">مقر العمل (المؤسسة)</th>
-                  <th className="px-6 py-4">معلومات الاتصال</th>
+                  <th className="px-6 py-4">رقم الهاتف والتواصل</th>
                   <th className="px-6 py-4 text-center">الإجراءات</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 text-xs">
                 {filteredTeachers.map((teacher) => {
-                  const hasDetails = teacher.workLocation && teacher.leaseNumber;
+                  const formattedPhone = formatMoroccanPhone(teacher.phone);
                   const specialties = Array.isArray(teacher.refereeSpecialty) ? teacher.refereeSpecialty : (teacher.refereeSpecialty ? [teacher.refereeSpecialty] : []);
 
                   return (
@@ -842,7 +843,7 @@ export const Teachers: React.FC = () => {
                       onClick={() => handleOpenTeacherDetail(teacher)}
                       className="hover:bg-blue-50/40 transition-colors cursor-pointer group"
                     >
-                      {/* Name & Role */}
+                      {/* Name & Cadre */}
                       <td className="px-6 py-4">
                         <div className="flex items-center gap-3">
                           <div className="w-10 h-10 rounded-full bg-slate-100 border border-slate-200 text-slate-700 flex items-center justify-center font-bold text-xs shrink-0 overflow-hidden shadow-3xs group-hover:border-blue-400 transition-colors">
@@ -874,34 +875,49 @@ export const Teachers: React.FC = () => {
                         </div>
                       </td>
 
+                      {/* Lease Number */}
+                      <td className="px-6 py-4">
+                        {teacher.leaseNumber ? (
+                          <div className="flex items-center gap-1.5 font-bold text-slate-700">
+                            <CreditCard className="h-3.5 w-3.5 text-blue-600 shrink-0" />
+                            <span className="font-mono text-xs">{teacher.leaseNumber}</span>
+                          </div>
+                        ) : (
+                          <span className="text-slate-400 italic text-[11px]">غير متوفر</span>
+                        )}
+                      </td>
+
                       {/* Work Location */}
                       <td className="px-6 py-4 text-slate-600 font-medium">
                         {teacher.workLocation ? (
                           <div className="flex items-center gap-1.5">
                             <MapPin className="h-3.5 w-3.5 text-slate-400 shrink-0" />
-                            <span>{teacher.workLocation}</span>
+                            <span className="font-bold text-slate-700">{teacher.workLocation}</span>
                           </div>
                         ) : (
                           <span className="text-slate-400 italic">لم يدخل بعد</span>
                         )}
                       </td>
 
-                      {/* Contact & ID Info */}
+                      {/* Phone & Contact */}
                       <td className="px-6 py-4">
                         <div className="space-y-1 text-[11px] text-slate-600">
-                          {teacher.leaseNumber && (
-                            <div className="flex items-center gap-1.5 font-bold text-slate-700">
-                              <CreditCard className="h-3 w-3 text-blue-600 shrink-0" />
-                              <span>تأجير: <span className="font-mono">{teacher.leaseNumber}</span></span>
+                          {formattedPhone ? (
+                            <div className="flex items-center gap-1.5">
+                              <a
+                                href={`tel:${formattedPhone}`}
+                                onClick={(e) => e.stopPropagation()}
+                                className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-lg font-mono font-bold text-xs transition-colors"
+                                title="اتصال بالهاتف"
+                              >
+                                <Phone className="h-3 w-3 text-emerald-600 shrink-0" />
+                                <span dir="ltr">{formattedPhone}</span>
+                              </a>
                             </div>
+                          ) : (
+                            <span className="text-slate-400 italic text-[11px]">غير مسجل</span>
                           )}
-                          {teacher.phone && (
-                            <div className="flex items-center gap-1.5 font-medium">
-                              <Phone className="h-3 w-3 text-slate-400 shrink-0" />
-                              <span dir="ltr">{teacher.phone}</span>
-                            </div>
-                          )}
-                          <div className="flex items-center gap-1.5">
+                          <div className="flex items-center gap-1.5 text-slate-500">
                             <Mail className="h-3 w-3 text-slate-400 shrink-0" />
                             <span className="truncate max-w-[150px]">{teacher.email}</span>
                           </div>

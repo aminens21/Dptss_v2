@@ -814,36 +814,18 @@ export const Login: React.FC = () => {
         return;
       }
 
-      // 5. Fallback: If email is not pre-registered in cache, bootstrap profile and allow immediate entry as TEACHER
-      const defaultTeacherProfile: User = {
-        id: googleUser.uid,
-        fullName: googleUser.displayName || 'أستاذ(ة)',
-        email: cleanEmail,
-        role: 'TEACHER',
-        directorateId: 'taourirt',
-        directorateName: 'المديرية الإقليمية بتاوريرت',
-        workLocation: '',
-        leaseNumber: '',
-        isActive: true,
-        createdAt: new Date(),
-        updatedAt: new Date()
-      };
-
+      // 5. If email is NOT registered in the platform: DENY ENTRY COMPLETELY
       try {
-        await setDoc(doc(db, 'users', googleUser.uid), {
-          ...defaultTeacherProfile,
-          lastLoginAt: serverTimestamp(),
-          updatedAt: serverTimestamp()
-        }, { merge: true });
-      } catch (linkErr) {
-        console.warn("Error saving default teacher profile:", linkErr);
+        await signOut(auth);
+      } catch (soErr) {
+        console.warn("Sign out error:", soErr);
       }
 
-      DataService.setActiveDirectorateId('taourirt');
-      updateProfileState(defaultTeacherProfile);
-
-      toast.success(`مرحباً بك ذ. ${defaultTeacherProfile.fullName}! تم تسجيل الدخول بنجاح. يمكنك اختيار وتعديل اسم مؤسستك وبياناتك الآن.`);
-      navigate('/dashboard', { replace: true });
+      toast.error(
+        `عذراً، البريد الإلكتروني (${cleanEmail}) غير مسجل في المنظومة. الدخول حصرياً للأساتذة والأطر الذين تم تسجيل بريدهم مسبقاً في التطبيق.`,
+        { duration: 8000 }
+      );
+      setIsSubmitting(false);
       return;
 
     } catch (error: any) {
