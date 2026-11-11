@@ -2,7 +2,7 @@ import React, { useEffect, useState, useMemo } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import clsx from 'clsx';
 import { useAuth } from '../contexts/AuthContext';
-import { DataService, SPORTS_MAP, deduplicateById, AGE_CATEGORIES, isClubTournament, getAgeCategoriesForSeason, normalizeCategoryKey } from '../lib/dataService';
+import { DataService, SPORTS_MAP, deduplicateById, AGE_CATEGORIES, isClubTournament, getAgeCategoriesForSeason, normalizeCategoryKey, getCustomCategoryName, getCustomCategoryDetails } from '../lib/dataService';
 import { Match, School, Venue, Tournament, Sport, Student, User } from '../types';
 import { CountdownTimer } from '../components/CountdownTimer';
 import {
@@ -440,13 +440,21 @@ export const Matches: React.FC = () => {
   };
 
   // Helper to format category for badges elegantly in Arabic
-  const formatCategoryBadge = (catId: string, sportTournaments: Tournament[] = []) => {
+  const formatCategoryBadge = (catId: string, sportTournaments: Tournament[] = [], sportId?: string) => {
+    const customDetails = getCustomCategoryDetails(catId, sportId, sportsConfig);
+    if (customDetails && customDetails.name) {
+      return {
+        label: customDetails.name,
+        years: customDetails.yearsExpression ? `مواليد ${customDetails.yearsExpression}` : ''
+      };
+    }
+
     const norm = normalizeCategoryKey(catId);
     const match = activeSeason.match(/(\d{4})/);
     const startYear = match ? parseInt(match[1], 10) : 2026;
 
     // Determine which genders are present
-    const catTournaments = sportTournaments.filter(t => normalizeCategoryKey(t.ageCategory) === norm);
+    const catTournaments = sportTournaments.filter(t => t.ageCategory === catId || normalizeCategoryKey(t.ageCategory) === norm);
     const hasMale = catTournaments.some(t => t.gender === 'Male' || t.gender === 'Mixed');
     const hasFemale = catTournaments.some(t => t.gender === 'Female' || t.gender === 'Mixed');
     
@@ -618,13 +626,18 @@ export const Matches: React.FC = () => {
         (tch.techCommitteeSports?.includes(sport.id) || tch.sportId === sport.id)
       );
 
-      // Categories list configured: prefer actual active tournament categories if present
-      const tournCats = Array.from(new Set(sportTournaments.map(t => normalizeCategoryKey(t.ageCategory)).filter(Boolean)));
-      const categoriesList = (sportTournaments.length > 0 && tournCats.length > 0)
-        ? tournCats
-        : ((sport.ageCategories && sport.ageCategories.length > 0)
-          ? sport.ageCategories.map(normalizeCategoryKey)
-          : seasonalCats.map(c => c.id));
+      // Categories list configured: prefer custom age categories from settings if configured
+      let categoriesList: string[] = [];
+      if (sport.customAgeCategories && sport.customAgeCategories.length > 0) {
+        categoriesList = sport.customAgeCategories.filter(c => c && c.name).map(c => c.id || c.name);
+      } else {
+        const tournCats = Array.from(new Set(sportTournaments.map(t => t.ageCategory).filter(Boolean)));
+        categoriesList = (sportTournaments.length > 0 && tournCats.length > 0)
+          ? tournCats
+          : ((sport.ageCategories && sport.ageCategories.length > 0)
+            ? sport.ageCategories
+            : seasonalCats.map(c => c.id));
+      }
 
       const registeredCount = students.filter(s => s.sportId === sport.id).length;
 
@@ -725,31 +738,31 @@ export const Matches: React.FC = () => {
   return (
     <div className="space-y-6 dir-rtl">
       {/* Top Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-5 rounded-3xl border border-slate-200 shadow-xs">
-        <div>
-          <div className="flex items-center gap-2">
-            <h2 className="text-base md:text-lg font-black text-slate-800">
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-white dark:bg-slate-900 p-4 sm:p-5 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-xs transition-colors">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 className="text-sm sm:text-base md:text-lg font-black text-slate-800 dark:text-slate-100 leading-tight">
               نتائج ومباريات البطولات الإقليمية المدرسية
             </h2>
-            <span className="text-[10px] bg-blue-50 text-blue-700 font-extrabold px-2.5 py-0.5 rounded-full border border-blue-200">
+            <span className="text-[9px] sm:text-[10px] bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 font-extrabold px-2 py-0.5 rounded-full border border-blue-200 dark:border-blue-800 whitespace-nowrap">
               الموسم {activeSeason}
             </span>
           </div>
-          <p className="text-xs text-slate-500 font-medium mt-1">
-            استعراض النتائج والبرمجة حسب الرياضة، صنف البطولة (⚪ لا منتمين / 🟡 منتمين للأندية)، والفئات العمرية
+          <p className="text-[10px] sm:text-xs text-slate-500 dark:text-slate-400 font-medium mt-1 leading-relaxed">
+            استعراض النتائج والبرمجة حسب الرياضة، صنف البطولة (⚪ غير منتمين للأندية / 🟡 منتمين للأندية)، والفئات العمرية
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
-          {/* Main Tab Toggle: Sports List vs Calendar */}
-          <div className="flex items-center bg-slate-100 p-1 rounded-2xl border border-slate-200">
+        <div className="flex flex-col md:flex-row items-stretch md:items-center gap-3 shrink-0">
+          {/* Main Tab Toggle: Sports List vs Calendar - Scrollable on very small devices */}
+          <div className="flex items-center bg-slate-100 dark:bg-slate-800 p-1 rounded-2xl border border-slate-200 dark:border-slate-700 overflow-x-auto no-scrollbar">
             <button
               onClick={() => handleTabChange('list')}
               className={cn(
-                "px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5",
+                "px-3 py-1.5 rounded-xl text-[11px] sm:text-xs font-black transition-all cursor-pointer flex items-center gap-1.5 shrink-0 whitespace-nowrap",
                 activeTab === 'list'
-                  ? "bg-slate-900 text-white shadow-xs"
-                  : "text-slate-600 hover:text-slate-900"
+                  ? "bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 shadow-xs"
+                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200"
               )}
             >
               <Trophy className="w-3.5 h-3.5" />
@@ -758,10 +771,10 @@ export const Matches: React.FC = () => {
             <button
               onClick={() => handleTabChange('calendar')}
               className={cn(
-                "px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5",
+                "px-3 py-1.5 rounded-xl text-[11px] sm:text-xs font-black transition-all cursor-pointer flex items-center gap-1.5 shrink-0 whitespace-nowrap",
                 activeTab === 'calendar'
-                  ? "bg-slate-900 text-white shadow-xs"
-                  : "text-slate-600 hover:text-slate-900"
+                  ? "bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 shadow-xs"
+                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200"
               )}
             >
               <CalendarIcon className="w-3.5 h-3.5" />
@@ -771,10 +784,10 @@ export const Matches: React.FC = () => {
               <button
                 onClick={() => handleTabChange('referee')}
                 className={cn(
-                  "px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5",
+                  "px-3 py-1.5 rounded-xl text-[11px] sm:text-xs font-black transition-all cursor-pointer flex items-center gap-1.5 shrink-0 whitespace-nowrap",
                   activeTab === 'referee'
-                    ? "bg-slate-900 text-white shadow-xs"
-                    : "text-slate-600 hover:text-slate-900"
+                    ? "bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 shadow-xs"
+                    : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200"
                 )}
               >
                 <Users className="w-3.5 h-3.5" />
@@ -784,14 +797,14 @@ export const Matches: React.FC = () => {
           </div>
 
           {/* Actions */}
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             {canCreate && (
               <button
                 onClick={() => {
                   setSelectedSportForDraw(undefined);
                   setIsDrawModalOpen(true);
                 }}
-                className="inline-flex items-center justify-center gap-1.5 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 px-3.5 py-2 text-xs font-black text-white shadow-xs transition-colors cursor-pointer"
+                className="flex-1 sm:flex-none inline-flex items-center justify-center gap-1.5 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 px-3.5 py-2 text-[11px] sm:text-xs font-black text-white shadow-xs transition-colors cursor-pointer whitespace-nowrap"
                 title="إجراء القرعة الإلكترونية وبرمجة المباريات وتعيين الحكام"
               >
                 <Shuffle className="h-3.5 w-3.5" />
@@ -802,11 +815,12 @@ export const Matches: React.FC = () => {
             {!isTeacher && userProfile?.role !== 'TEACHER' && (
               <button
                 onClick={() => setIsDemoDataModalOpen(true)}
-                className="inline-flex items-center justify-center gap-1.5 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 px-3.5 py-2 text-xs font-black text-white shadow-xs transition-colors cursor-pointer"
+                className="flex-1 sm:flex-none inline-flex items-center justify-center gap-1.5 rounded-2xl bg-gradient-to-r from-slate-800 to-slate-900 dark:from-slate-700 dark:to-slate-800 px-3.5 py-2 text-[11px] sm:text-xs font-black text-white shadow-xs transition-colors cursor-pointer whitespace-nowrap"
                 title="توليد وتعبئة نتائج ومباريات افتراضية لكافة الرياضات الجماعية"
               >
-                <Sparkles className="h-3.5 w-3.5 text-emerald-200" />
-                <span>توليد نتائج وبيانات افتراضية</span>
+                <Sparkles className="h-3.5 w-3.5 text-emerald-300" />
+                <span className="hidden xs:inline">بيانات افتراضية</span>
+                <span className="inline xs:hidden">بيانات ⚡</span>
               </button>
             )}
 
@@ -817,7 +831,7 @@ export const Matches: React.FC = () => {
                   setCreateMatchInitialSportId(undefined);
                   setIsCreateMatchOpen(true);
                 }}
-                className="inline-flex items-center justify-center gap-1.5 rounded-2xl bg-blue-600 px-3.5 py-2 text-xs font-black text-white shadow-xs hover:bg-blue-700 transition-colors cursor-pointer"
+                className="flex-1 sm:flex-none inline-flex items-center justify-center gap-1.5 rounded-2xl bg-blue-600 dark:bg-blue-700 px-3.5 py-2 text-[11px] sm:text-xs font-black text-white shadow-xs hover:bg-blue-700 dark:hover:bg-blue-600 transition-colors cursor-pointer whitespace-nowrap"
               >
                 <Plus className="h-4 w-4" />
                 <span>برمجة مباراة جديد</span>
@@ -923,7 +937,7 @@ export const Matches: React.FC = () => {
                 className="px-3 py-2 text-xs font-bold bg-slate-50 border border-slate-200 rounded-xl text-slate-700 focus:outline-none focus:ring-1 focus:ring-blue-400"
               >
                 <option value="ALL">جميع أنواع البطولات</option>
-                <option value="non_club">⚪ بطولات غير المنتمين</option>
+                <option value="non_club">⚪ بطولات غير المنتمين للأندية</option>
                 <option value="club_affiliated">🟡 بطولات المنتمين للأندية</option>
                 <option value="open">🟢 البطولات المفتوحة</option>
               </select>
@@ -1425,7 +1439,7 @@ export const Matches: React.FC = () => {
                                     🟡 للمنتمين للأندية
                                   </span>
                                   <span className="text-[9px] font-extrabold bg-slate-100 text-slate-800 px-1.5 py-0.2 rounded border border-slate-300 shadow-3xs">
-                                    ⚪ لا منتمين
+                                    ⚪ غير منتمين للأندية
                                   </span>
                                 </div>
                               ) : isClub ? (
@@ -1434,7 +1448,7 @@ export const Matches: React.FC = () => {
                                 </span>
                               ) : (
                                 <span className="text-[9px] font-extrabold bg-slate-100 text-slate-800 px-1.5 py-0.2 rounded border border-slate-300 shadow-3xs">
-                                  ⚪ لا منتمين
+                                  ⚪ غير منتمين للأندية
                                 </span>
                               )}
                               {isManagerSpecialty && (
@@ -1478,8 +1492,8 @@ export const Matches: React.FC = () => {
                         <div className="flex items-start justify-between gap-2">
                           <span className="text-slate-500 mt-1 shrink-0">الفئات المدمجة:</span>
                           <div className="flex flex-col gap-1 items-end max-w-[75%]">
-                            {categoriesList.slice(0, 3).map(c => {
-                              const badge = formatCategoryBadge(c, sportTournaments);
+                            {categoriesList.slice(0, 4).map(c => {
+                              const badge = formatCategoryBadge(c, sportTournaments, sport.id);
                               return (
                                 <span
                                   key={c}
@@ -1501,7 +1515,7 @@ export const Matches: React.FC = () => {
                         {/* Branch summary */}
                         <div className="grid grid-cols-2 gap-1 text-[10px] font-bold pt-1 border-t border-slate-200/60">
                           <div className="bg-slate-100/70 text-slate-700 p-1 rounded-lg border border-slate-200 flex items-center justify-between px-1.5">
-                            <span>⚪ غير المنتمين:</span>
+                            <span>⚪ غير منتمين للأندية:</span>
                             <span className="font-black text-blue-700">{item.nonClubCount}</span>
                           </div>
                           <div className="bg-amber-100/70 text-amber-900 p-1 rounded-lg border border-amber-200 flex items-center justify-between px-1.5">
@@ -1549,7 +1563,8 @@ export const Matches: React.FC = () => {
                         className="flex-1 py-2.5 px-3 bg-slate-900 hover:bg-blue-700 text-white font-black text-xs rounded-xl flex items-center justify-center gap-1.5 transition-all shadow-3xs cursor-pointer group-hover:bg-blue-600"
                       >
                         <Layers className="h-4 w-4" />
-                        <span>دخول واستعراض نتائج ومباريات البطولة</span>
+                        <span className="hidden xs:inline">دخول واستعراض نتائج ومباريات البطولة</span>
+                        <span className="inline xs:hidden">استعراض النتائج</span>
                       </button>
 
                       {canManageThisSport && (

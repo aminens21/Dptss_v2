@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { School, Student, Tournament, Sport } from '../types';
-import { DataService, SPORTS_MAP, AGE_CATEGORIES, getCategoryGenderLabel } from '../lib/dataService';
+import { School, Student, Tournament, Sport, SchoolTournamentConfirmation } from '../types';
+import { DataService, SPORTS_MAP, AGE_CATEGORIES, getCategoryGenderLabel, deduplicateById } from '../lib/dataService';
 import { useNavigate } from 'react-router-dom';
 import * as XLSX from 'xlsx';
+import { cn } from '../lib/utils';
 import {
   X,
   Users,
@@ -53,6 +54,9 @@ export const SchoolParticipantsModal: React.FC<SchoolParticipantsModalProps> = (
   const [selectedSportFilter, setSelectedSportFilter] = useState<string>(sportId || 'ALL');
   const [activeCategoryFilter, setActiveCategoryFilter] = useState<string>('ALL');
   const [tournaments, setTournaments] = useState<Tournament[]>([]);
+  const [confirmations, setConfirmations] = useState<SchoolTournamentConfirmation[]>([]);
+  const [sportsConfig, setSportsConfig] = useState<Sport[]>([]);
+  const [activeSeason, setActiveSeason] = useState<string>('2026/2027');
   const [loadingTournaments, setLoadingTournaments] = useState(false);
 
   const { userProfile } = useAuth();
@@ -208,12 +212,15 @@ export const SchoolParticipantsModal: React.FC<SchoolParticipantsModalProps> = (
   // Filter students belonging to this school
   const schoolStudents = useMemo(() => {
     if (!school) return [];
+    const targetName = (school.name || '').trim();
     return localStudents.filter(
-      s => s.schoolId === school.id || s.schoolName === school.name
+      s => (s.schoolId && s.schoolId === school.id) || 
+           (s.schoolName && s.schoolName.trim() === targetName)
     );
   }, [localStudents, school?.id, school?.name]);
 
   // Group school students by Sport (One Card per Sport)
+  // Include sports that the school confirmed participation in, even if no students are registered yet
   const participatingGroups = useMemo(() => {
     if (!school) return [];
     const groups: {
@@ -223,11 +230,21 @@ export const SchoolParticipantsModal: React.FC<SchoolParticipantsModalProps> = (
       students: Student[];
       hasClubAffiliated: boolean;
       hasNonClub: boolean;
+      isConfirmedOnly?: boolean;
     }[] = [];
 
+    // 1. Add sports from actual student registrations
     schoolStudents.forEach(st => {
       if (!st.category || !st.sportId) return;
       if (selectedSportFilter !== 'ALL' && st.sportId !== selectedSportFilter) return;
+
+      // STRICT CHECK: Sport MUST have an active (Scheduled or Ongoing) tournament
+      const activeTournament = tournaments.find(t => t.sportId === st.sportId && (t.status === 'Scheduled' || t.status === 'Ongoing'));
+      if (!activeTournament) return;
+      
+      // Also ensure the sport itself is programmed
+      const sportDef = sportsConfig.find(s => s.id === st.sportId);
+      if (sportDef && !sportDef.isProgrammed) return;
 
       const sId = st.sportId;
       const cat = st.category;
@@ -254,6 +271,44 @@ export const SchoolParticipantsModal: React.FC<SchoolParticipantsModalProps> = (
       g.students.push(st);
     });
 
+    // 2. Add sports from confirmations (expressed interest) if not already present
+    // ONLY include confirmations for the active season and ACTIVE programmed tournaments
+    const schoolConfirmations = confirmations.filter(c => {
+      const isForSchool = (c.schoolId && c.schoolId === school.id) || 
+                         (c.schoolName && c.schoolName.trim() === (school.name || '').trim());
+      const isForActiveSeason = !c.seasonId || c.seasonId === activeSeason;
+      
+      // MUST be part of an active (Scheduled or Ongoing) tournament
+      const isPartOfActiveTournament = tournaments.some(t => t.sportId === c.sportId && (t.status === 'Scheduled' || t.status === 'Ongoing'));
+
+      return isForSchool && isForActiveSeason && isPartOfActiveTournament;
+    });
+
+    schoolConfirmations.forEach(conf => {
+      if (selectedSportFilter !== 'ALL' && conf.sportId !== selectedSportFilter) return;
+      
+      let g = groups.find(x => x.sportId === conf.sportId);
+      if (!g) {
+        g = {
+          id: conf.sportId,
+          sportId: conf.sportId,
+          categories: conf.categories || [],
+          students: [],
+          hasClubAffiliated: (conf.affiliationTypes || []).includes('club_affiliated'),
+          hasNonClub: (conf.affiliationTypes || []).includes('non_club'),
+          isConfirmedOnly: true
+        };
+        groups.push(g);
+      } else {
+        // If already present via students, just ensure categories from confirmation are merged if missing
+        if (conf.categories) {
+          conf.categories.forEach(c => {
+            if (!g!.categories.includes(c)) g!.categories.push(c);
+          });
+        }
+      }
+    });
+
     // Sort categories in each group according to AGE_CATEGORIES order
     groups.forEach(g => {
       g.categories.sort((a, b) => {
@@ -269,17 +324,36 @@ export const SchoolParticipantsModal: React.FC<SchoolParticipantsModalProps> = (
       const sportB = SPORTS_MAP[b.sportId]?.name || b.sportId;
       return sportA.localeCompare(sportB, 'ar');
     });
-  }, [school, schoolStudents, selectedSportFilter]);
+  }, [school, schoolStudents, selectedSportFilter, confirmations]);
 
   useEffect(() => {
     if (isOpen) {
       setSelectedSportFilter(sportId || 'ALL');
       setSelectedGroupId(null);
       setLoadingTournaments(true);
-      DataService.getTournaments()
-        .then(tList => setTournaments(tList || []))
-        .catch(err => console.error(err))
-        .finally(() => setLoadingTournaments(false));
+      
+      const unsubscribeTournaments = DataService.subscribeToTournaments((tList) => {
+        setTournaments(deduplicateById(tList || []));
+        setLoadingTournaments(false);
+      });
+
+      const unsubscribeConfirmations = DataService.subscribeToSchoolConfirmations((cList) => {
+        setConfirmations(cList || []);
+      });
+
+      const unsubscribeSports = DataService.subscribeToSportsConfig((sList) => {
+        setSportsConfig(sList || []);
+      });
+
+      DataService.getActiveSeason().then(season => {
+        if (season) setActiveSeason(season);
+      });
+
+      return () => {
+        unsubscribeTournaments();
+        unsubscribeConfirmations();
+        unsubscribeSports();
+      };
     }
   }, [isOpen, sportId]);
 
@@ -613,7 +687,12 @@ export const SchoolParticipantsModal: React.FC<SchoolParticipantsModalProps> = (
                                   setSelectedGroupId(group.id);
                                   setDetailCatFilter('ALL');
                                 }}
-                                className="group relative rounded-2xl border p-4 transition-all duration-200 cursor-pointer shadow-xs hover:shadow-md hover:-translate-y-0.5 flex flex-col justify-between bg-white border-slate-200/90 hover:border-blue-400 hover:bg-blue-50/20"
+                                className={cn(
+                                  "group relative rounded-2xl border p-4 transition-all duration-200 cursor-pointer shadow-xs hover:shadow-md hover:-translate-y-0.5 flex flex-col justify-between",
+                                  group.hasClubAffiliated 
+                                    ? "bg-amber-50 border-amber-200 hover:border-amber-400 hover:bg-amber-100/50" 
+                                    : "bg-white border-slate-200/90 hover:border-blue-400 hover:bg-blue-50/20"
+                                )}
                               >
                                 {/* Card Header */}
                                 <div>
@@ -662,20 +741,24 @@ export const SchoolParticipantsModal: React.FC<SchoolParticipantsModalProps> = (
                                     </div>
                                   </div>
 
-                                  {/* Stats Summary */}
+                                      {/* Stats Summary */}
                                   <div className="my-3 grid grid-cols-3 gap-2 text-center">
                                     <div className="bg-slate-50/80 rounded-xl p-2 border border-slate-100">
                                       <span className="text-[10px] text-slate-400 font-bold block mb-0.5">المشاركون</span>
                                       <span className="text-xs font-black text-slate-900">{group.students.length}</span>
                                     </div>
-                                    <div className="bg-blue-50/60 rounded-xl p-2 border border-blue-100">
-                                      <span className="text-[10px] text-blue-600 font-bold block mb-0.5">ذكور 👦</span>
-                                      <span className="text-xs font-black text-blue-700">{groupMaleCount}</span>
-                                    </div>
-                                    <div className="bg-rose-50/60 rounded-xl p-2 border border-rose-100">
-                                      <span className="text-[10px] text-rose-600 font-bold block mb-0.5">إناث 👧</span>
-                                      <span className="text-xs font-black text-rose-700">{groupFemaleCount}</span>
-                                    </div>
+                                    { (tournaments.find(t => t.sportId === group.sportId && t.status !== 'Archived')?.gender !== 'Female') && (
+                                      <div className="bg-blue-50/60 rounded-xl p-2 border border-blue-100">
+                                        <span className="text-[10px] text-blue-600 font-bold block mb-0.5">ذكور 👦</span>
+                                        <span className="text-xs font-black text-blue-700">{groupMaleCount}</span>
+                                      </div>
+                                    )}
+                                    { (tournaments.find(t => t.sportId === group.sportId && t.status !== 'Archived')?.gender !== 'Male') && (
+                                      <div className="bg-rose-50/60 rounded-xl p-2 border border-rose-100">
+                                        <span className="text-[10px] text-rose-600 font-bold block mb-0.5">إناث 👧</span>
+                                        <span className="text-xs font-black text-rose-700">{groupFemaleCount}</span>
+                                      </div>
+                                    )}
                                   </div>
                                 </div>
 

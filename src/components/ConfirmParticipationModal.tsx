@@ -217,6 +217,8 @@ export const ConfirmParticipationModal: React.FC<ConfirmParticipationModalProps>
         affiliationTypes: selectedAffiliations
       });
 
+      await DataService.cancelSchoolWithdrawal(sport.id, schoolId || schoolName);
+
       toast.dismiss(toastId);
       toast.success(`تم تأكيد مشاركة «${schoolName}» في بطولة ${sport.name} بنجاح! 🎉\nيمكنك الآن تسجيل أسماء وتفاصيل المشاركين قبل نهاية الأجل.`, { duration: 5000 });
       setIsEditingExisting(false);
@@ -651,9 +653,14 @@ export const ConfirmParticipationModal: React.FC<ConfirmParticipationModalProps>
 
           {/* Deadline expired warning */}
           {isDeadlinePassed && (
-            <div className="p-3 bg-red-50 border border-red-200 rounded-2xl text-red-700 flex items-center gap-2 font-bold text-xs">
-              <AlertCircle className="w-4 h-4 shrink-0" />
-              <span>انتهى آخر أجل مخصص للتسجيل في هذه البطولة.</span>
+            <div className="p-3.5 bg-red-50 border-2 border-red-200 rounded-2xl text-red-800 font-bold text-xs flex items-center gap-2.5 shadow-xs">
+              <AlertCircle className="w-5 h-5 text-red-600 shrink-0" />
+              <div>
+                <div className="font-black text-xs text-red-950">انتهى أجل التسجيل وتأكيد المشاركة (مغلق 🔒)</div>
+                <div className="text-[11px] text-red-700 mt-0.5">
+                  لقد انقضى الوقت المحدد للتسجيل وتأكيد المشاركة في هذه البطولة من طرف اللجنة المنظمة. لا يمكن تقديم تأكيدات أو تسجيلات جديدة.
+                </div>
+              </div>
             </div>
           )}
         </div>

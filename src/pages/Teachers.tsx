@@ -2,6 +2,7 @@ import React, { useEffect, useState, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { DataService, SPORTS_MAP } from '../lib/dataService';
 import { User, Student, School } from '../types';
+import { fixTeacherFieldJumble } from '../lib/utils';
 import { TeacherDetailModal } from '../components/TeacherDetailModal';
 import { EditTeacherRoleModal } from '../components/EditTeacherRoleModal';
 import { ConfirmDeleteModal } from '../components/ConfirmDeleteModal';
@@ -194,24 +195,55 @@ export const Teachers: React.FC = () => {
       let importedCount = 0;
       const activeDirId = DataService.getActiveDirectorateId() || 'taourirt';
 
-      // 1. Process via row arrays (Columns B, C, D, E, F, G -> indices 1, 2, 3, 4, 5, 6)
+      // 1. Process via raw rows with accurate column index matching
+      // Column B (idx 1): Full Name
+      // Column C (idx 2): School / Work Location
+      // Column D (idx 3): Teaching Cadre
+      // Column E (idx 4): Email
+      // Column F (idx 5): Lease Number (SOM/PPR)
+      // Column G (idx 6): Phone Number
       for (let i = 0; i < rawRows.length; i++) {
         const row = rawRows[i];
         if (!row || row.length === 0) continue;
 
         const rowText = row.join(' ').toLowerCase();
-        if (rowText.includes('الاسم') || rowText.includes('البريد') || rowText.includes('تأجير') || (i === 0 && (rowText.includes('b') || rowText.includes('c')))) {
+        // Skip header row if it contains header keywords
+        if (
+          rowText.includes('الاسم والنسب') ||
+          rowText.includes('الاسم الكامل') ||
+          (rowText.includes('البريد') && rowText.includes('التأجير')) ||
+          (i === 0 && (rowText.includes('الاسم') || rowText.includes('المؤسسة')))
+        ) {
           continue;
         }
 
-        const fullName = String(row[1] || row[0] || '').trim();
-        const email = String(row[2] || row[1] || '').trim().toLowerCase();
-        const leaseNumber = String(row[3] || row[2] || '').trim();
-        const workLocation = String(row[4] || row[3] || '').trim();
-        const phone = String(row[5] || row[4] || '').trim();
-        const rawCadre = String(row[6] || row[5] || '').trim();
+        // Try header row detection if available
+        const col1 = String(row[1] || '').trim();
+        const col2 = String(row[2] || '').trim();
+        const col3 = String(row[3] || '').trim();
+        const col4 = String(row[4] || '').trim();
+        const col5 = String(row[5] || '').trim();
+        const col6 = String(row[6] || '').trim();
 
-        if (!fullName || (!email && !leaseNumber)) continue;
+        // If row is empty, skip
+        if (!col1 && !col2 && !col3 && !col4 && !col5 && !col6) continue;
+
+        let fullName = col1;
+        let workLocation = col2;
+        let rawCadre = col3;
+        let email = col4.toLowerCase();
+        let leaseNumber = col5;
+        let phone = col6;
+
+        // If fullName was in col 0 (no empty col A)
+        if (!fullName && String(row[0] || '').trim()) {
+          fullName = String(row[0] || '').trim();
+          workLocation = String(row[1] || '').trim();
+          rawCadre = String(row[2] || '').trim();
+          email = String(row[3] || '').trim().toLowerCase();
+          leaseNumber = String(row[4] || '').trim();
+          phone = String(row[5] || '').trim();
+        }
 
         let teachingCadre = 'HIGH';
         if (rawCadre.includes('ابتدائ') || rawCadre.toLowerCase() === 'primary') teachingCadre = 'PRIMARY';
@@ -219,14 +251,14 @@ export const Teachers: React.FC = () => {
         else teachingCadre = 'HIGH';
 
         const teacherId = `teacher_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-        const teacherData: User = {
+        let teacherData: User = {
           id: teacherId,
-          fullName,
-          email: email || `${teacherId}@taourirt-sports.ma`,
-          leaseNumber,
-          workLocation,
-          phone,
-          teachingCadre,
+          fullName: fullName || 'أستاذ(ة)',
+          email: email,
+          leaseNumber: leaseNumber,
+          workLocation: workLocation,
+          phone: phone,
+          teachingCadre: teachingCadre,
           role: 'TEACHER',
           directorateId: activeDirId,
           isActive: true,
@@ -234,7 +266,16 @@ export const Teachers: React.FC = () => {
           updatedAt: new Date()
         };
 
-        await DataService.updateUserProfile(teacherId, teacherData);
+        // Un-jumble any field mix-ups automatically
+        teacherData = fixTeacherFieldJumble(teacherData);
+
+        if (!teacherData.email) {
+          teacherData.email = `${teacherId}@taourirt-sports.ma`;
+        }
+
+        if (!teacherData.fullName || teacherData.fullName === 'أستاذ(ة)') continue;
+
+        await DataService.updateUserProfile(teacherData.id, teacherData);
         importedCount++;
       }
 
@@ -242,25 +283,25 @@ export const Teachers: React.FC = () => {
       if (importedCount === 0 && jsonData.length > 0) {
         for (const row of jsonData) {
           const fullName = String(
-            row['الاسم الكامل للأستاذ'] || row['الاسم الكامل'] || row['الاسم'] || row['name'] || row['fullName'] || ''
-          ).trim();
-          const email = String(
-            row['البريد الإلكتروني (Gmail)'] || row['البريد الإلكتروني'] || row['البريد'] || row['email'] || ''
-          ).trim().toLowerCase();
-          const leaseNumber = String(
-            row['رقم التأجير (SOM)'] || row['رقم التأجير'] || row['التأجير'] || row['leaseNumber'] || row['som'] || ''
+            row['الاسم والنسب'] || row['الاسم الكامل للأستاذ'] || row['الاسم الكامل'] || row['الاسم'] || row['name'] || row['fullName'] || ''
           ).trim();
           const workLocation = String(
-            row['مقر العمل (المؤسسة)'] || row['مقر العمل'] || row['المؤسسة'] || row['workLocation'] || row['school'] || ''
+            row['المؤسسة'] || row['مقر العمل (المؤسسة)'] || row['مقر العمل'] || row['workLocation'] || row['school'] || ''
+          ).trim();
+          const rawCadre = String(
+            row['الإطار'] || row['السلك التعليمي (تأهيلي / إعدادي / ابتدائي)'] || row['السلك التعليمي'] || row['السلك'] || row['teachingCadre'] || row['cadre'] || ''
+          ).trim();
+          const email = String(
+            row['البريد الإلكتروني (gmail)'] || row['البريد الإلكتروني (Gmail)'] || row['البريد الإلكتروني'] || row['البريد'] || row['email'] || ''
+          ).trim().toLowerCase();
+          const leaseNumber = String(
+            row['رقم التأجير'] || row['رقم التأجير (SOM)'] || row['التأجير'] || row['leaseNumber'] || row['som'] || ''
           ).trim();
           const phone = String(
             row['رقم الهاتف'] || row['الهاتف'] || row['phone'] || ''
           ).trim();
-          const rawCadre = String(
-            row['السلك التعليمي (تأهيلي / إعدادي / ابتدائي)'] || row['السلك التعليمي'] || row['السلك'] || row['teachingCadre'] || row['cadre'] || 'تأهيلي'
-          ).trim();
 
-          if (!fullName || (!email && !leaseNumber)) continue;
+          if (!fullName && !email && !leaseNumber) continue;
 
           let teachingCadre = 'HIGH';
           if (rawCadre.includes('ابتدائ') || rawCadre.toLowerCase() === 'primary') teachingCadre = 'PRIMARY';
@@ -268,14 +309,14 @@ export const Teachers: React.FC = () => {
           else teachingCadre = 'HIGH';
 
           const teacherId = `teacher_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-          const teacherData: User = {
+          let teacherData: User = {
             id: teacherId,
-            fullName,
-            email: email || `${teacherId}@taourirt-sports.ma`,
-            leaseNumber,
-            workLocation,
-            phone,
-            teachingCadre,
+            fullName: fullName || 'أستاذ(ة)',
+            email: email,
+            leaseNumber: leaseNumber,
+            workLocation: workLocation,
+            phone: phone,
+            teachingCadre: teachingCadre,
             role: 'TEACHER',
             directorateId: activeDirId,
             isActive: true,
@@ -283,7 +324,15 @@ export const Teachers: React.FC = () => {
             updatedAt: new Date()
           };
 
-          await DataService.updateUserProfile(teacherId, teacherData);
+          teacherData = fixTeacherFieldJumble(teacherData);
+
+          if (!teacherData.email) {
+            teacherData.email = `${teacherId}@taourirt-sports.ma`;
+          }
+
+          if (!teacherData.fullName || teacherData.fullName === 'أستاذ(ة)') continue;
+
+          await DataService.updateUserProfile(teacherData.id, teacherData);
           importedCount++;
         }
       }
@@ -292,7 +341,7 @@ export const Teachers: React.FC = () => {
         toast.success(`تم بنجاح استيراد وتفعيل ${importedCount} أستاذ(ة) جديد في المنظومة!`, { id: toastId });
         await loadTeachersAndStudents();
       } else {
-        toast.error('لم يتم العثور على بيانات صالحة مطابقة للأعمدة المطلوبة (B, C, D, E, F, G).', { id: toastId });
+        toast.error('لم يتم العثور على بيانات صالحة مطابقة للأعمدة المطلوبة (B:الاسم، C:المؤسسة، D:الإطار، E:البريد، F:التأجير، G:الهاتف).', { id: toastId });
       }
     } catch (err) {
       console.error('Error importing teachers Excel:', err);
@@ -837,18 +886,24 @@ export const Teachers: React.FC = () => {
                         )}
                       </td>
 
-                      {/* Contact Info */}
+                      {/* Contact & ID Info */}
                       <td className="px-6 py-4">
                         <div className="space-y-1 text-[11px] text-slate-600">
+                          {teacher.leaseNumber && (
+                            <div className="flex items-center gap-1.5 font-bold text-slate-700">
+                              <CreditCard className="h-3 w-3 text-blue-600 shrink-0" />
+                              <span>تأجير: <span className="font-mono">{teacher.leaseNumber}</span></span>
+                            </div>
+                          )}
                           {teacher.phone && (
                             <div className="flex items-center gap-1.5 font-medium">
-                              <Phone className="h-3 w-3 text-slate-400" />
+                              <Phone className="h-3 w-3 text-slate-400 shrink-0" />
                               <span dir="ltr">{teacher.phone}</span>
                             </div>
                           )}
                           <div className="flex items-center gap-1.5">
-                            <Mail className="h-3 w-3 text-slate-400" />
-                            <span className="truncate max-w-[140px]">{teacher.email}</span>
+                            <Mail className="h-3 w-3 text-slate-400 shrink-0" />
+                            <span className="truncate max-w-[150px]">{teacher.email}</span>
                           </div>
                         </div>
                       </td>
@@ -1003,18 +1058,26 @@ export const Teachers: React.FC = () => {
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-3 text-xs bg-slate-50 p-3 rounded-xl border border-slate-100">
+                  <div className="grid grid-cols-3 gap-2 text-xs bg-slate-50 p-2.5 rounded-xl border border-slate-100">
                     <div>
-                      <p className="text-slate-400 font-bold mb-1 text-[10px] uppercase">رقم التأجير</p>
+                      <p className="text-slate-400 font-bold mb-0.5 text-[9px] uppercase">رقم التأجير</p>
                       {teacher.leaseNumber ? (
-                        <span className="font-mono font-bold text-slate-700">{teacher.leaseNumber}</span>
+                        <span className="font-mono font-bold text-slate-800 text-[11px] block">{teacher.leaseNumber}</span>
                       ) : (
-                        <span className="text-slate-400 italic">غير متوفر</span>
+                        <span className="text-slate-400 italic text-[11px]">غير متوفر</span>
                       )}
                     </div>
                     <div>
-                      <p className="text-slate-400 font-bold mb-1 text-[10px] uppercase">المؤسسة</p>
-                      <span className="font-bold text-slate-700 truncate block">
+                      <p className="text-slate-400 font-bold mb-0.5 text-[9px] uppercase">رقم الهاتف</p>
+                      {teacher.phone ? (
+                        <span className="font-mono font-bold text-slate-800 text-[11px] block" dir="ltr">{teacher.phone}</span>
+                      ) : (
+                        <span className="text-slate-400 italic text-[11px]">غير مسجل</span>
+                      )}
+                    </div>
+                    <div>
+                      <p className="text-slate-400 font-bold mb-0.5 text-[9px] uppercase">المؤسسة</p>
+                      <span className="font-bold text-slate-800 truncate block text-[11px]">
                         {teacher.workLocation || 'غير محددة'}
                       </span>
                     </div>

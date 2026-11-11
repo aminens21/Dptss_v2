@@ -1342,49 +1342,56 @@ export const TeacherTeams: React.FC = () => {
                 <FileSpreadsheet className="h-4 w-4" />
                 <span>استخراج اللائحة Excel 📊</span>
               </button>
-              <button
-                type="button"
-                onClick={() => setIsPdfModalOpen(true)}
-                disabled={activeSportStudents.length === 0}
-                title={activeSportStudents.length === 0 ? 'يرجى تسجيل تلاميذ أولاً لعرض المطبوع' : 'معاينة وعرض لائحة المشاركة الرسمية للطباعة والتحميل'}
-                className="bg-sky-700 hover:bg-sky-600 text-white font-bold text-xs px-3.5 py-2 rounded-xl shadow-xs flex items-center gap-1.5 transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
-              >
-                <FileText className="h-4 w-4" />
-                <span>عرض لائحة المشاركة</span>
-              </button>
-              {selectedSportId === 'cross_country' ? (
-                <button
-                  type="button"
-                  onClick={() => handleOpenCrossCountryBulk(selectedCategoryKey)}
-                  disabled={!activeSportCategories || activeSportCategories.length === 0 || !activeSportConfig || !isSportProgrammed(activeSportConfig)}
-                  title="تسجيل 8 مشاركين في آن واحد (3 فردي + 5 فريق المؤسسة)"
-                  className="bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 text-slate-950 font-black text-xs px-4 py-2 rounded-xl shadow-xs flex items-center gap-1.5 transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer hover:scale-102 active:scale-98"
-                >
-                  <Sparkles className="h-4 w-4 text-slate-950" />
-                  <span>تسجيل 8 مشاركين (3 فردي + 5 فريق) ⚡</span>
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => setIsSportBulkOpen(true)}
-                  disabled={!activeSportCategories || activeSportCategories.length === 0 || !activeSportConfig || !isSportProgrammed(activeSportConfig)}
-                  title="تسجيل عدة مشاركين دفعة واحدة لتوفير الوقت"
-                  className="bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 text-slate-950 font-black text-xs px-4 py-2 rounded-xl shadow-xs flex items-center gap-1.5 transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer hover:scale-102 active:scale-98"
-                >
-                  <Sparkles className="h-4 w-4 text-slate-950" />
-                  <span>تسجيل جماعي دفعة واحدة ⚡</span>
-                </button>
+              {selectedCategoryKey && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setIsPdfModalOpen(true)}
+                    disabled={displayedSportStudents.length === 0}
+                    title={displayedSportStudents.length === 0 ? 'يرجى تسجيل تلاميذ أولاً لعرض المطبوع' : 'معاينة وعرض لائحة المشاركة الرسمية لهذه الفئة'}
+                    className="bg-sky-700 hover:bg-sky-600 text-white font-bold text-xs px-3.5 py-2 rounded-xl shadow-xs flex items-center gap-1.5 transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                  >
+                    <FileText className="h-4 w-4" />
+                    <span>عرض لائحة المشاركة</span>
+                  </button>
+                  {selectedSportId === 'cross_country' ? (
+                    <button
+                      type="button"
+                      onClick={() => handleOpenCrossCountryBulk(selectedCategoryKey)}
+                      disabled={!activeSportCategories || activeSportCategories.length === 0 || !activeSportConfig || !isSportProgrammed(activeSportConfig)}
+                      title="تسجيل 8 مشاركين في آن واحد (3 فردي + 5 فريق المؤسسة)"
+                      className="bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 text-slate-950 font-black text-xs px-4 py-2 rounded-xl shadow-xs flex items-center gap-1.5 transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer hover:scale-102 active:scale-98"
+                    >
+                      <Sparkles className="h-4 w-4 text-slate-950" />
+                      <span>تسجيل دفعة واحدة ⚡</span>
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setIsSportBulkOpen(true)}
+                      disabled={!activeSportCategories || activeSportCategories.length === 0 || !activeSportConfig || !isSportProgrammed(activeSportConfig)}
+                      title="تسجيل عدة مشاركين دفعة واحدة لتوفير الوقت"
+                      className="bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 text-slate-950 font-black text-xs px-4 py-2 rounded-xl shadow-xs flex items-center gap-1.5 transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer hover:scale-102 active:scale-98"
+                    >
+                      <Sparkles className="h-4 w-4 text-slate-950" />
+                      <span>تسجيل دفعة واحدة ⚡</span>
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const parts = selectedCategoryKey.split('_');
+                      handleOpenNewStudentForm(parts[0], parts[1] as 'Male' | 'Female', parts[2] as 'non_club' | 'club_affiliated');
+                    }}
+                    disabled={!activeSportCategories || activeSportCategories.length === 0 || !activeSportConfig || !isSportProgrammed(activeSportConfig)}
+                    title={activeSportConfig && !isSportProgrammed(activeSportConfig) ? 'هذه البطولة في طور الإعداد وغير مفتوحة للتسجيل' : 'إضافة تلميذ جديد'}
+                    className="bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs px-4 py-2 rounded-xl shadow-xs flex items-center gap-1.5 transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                  >
+                    <Plus className="h-4 w-4" />
+                    <span>تسجيل واحد تلو الآخر</span>
+                  </button>
+                </>
               )}
-              <button
-                type="button"
-                onClick={() => handleOpenNewStudentForm()}
-                disabled={!activeSportCategories || activeSportCategories.length === 0 || !activeSportConfig || !isSportProgrammed(activeSportConfig)}
-                title={activeSportConfig && !isSportProgrammed(activeSportConfig) ? 'هذه البطولة في طور الإعداد وغير مفتوحة للتسجيل' : 'إضافة تلميذ جديد'}
-                className="bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs px-4 py-2 rounded-xl shadow-xs flex items-center gap-1.5 transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
-              >
-                <Plus className="h-4 w-4" />
-                <span>إضافة تلميذ جديد</span>
-              </button>
             </div>
           </div>
 
@@ -2068,10 +2075,10 @@ export const TeacherTeams: React.FC = () => {
                   
                   activeSportCategories.forEach(catId => {
                     if (selectedSportId === 'cross_country') {
-                      allItems.push({ catId, gender: 'Male', affiliationType: 'non_club', label: `${getCategoryLabel(catId, 'Male')} (اللامنتمين)` });
-                      allItems.push({ catId, gender: 'Male', affiliationType: 'club_affiliated', label: `${getCategoryLabel(catId, 'Male')} (المنتمين)` });
-                      allItems.push({ catId, gender: 'Female', affiliationType: 'non_club', label: `${getCategoryLabel(catId, 'Female')} (اللامنتميات)` });
-                      allItems.push({ catId, gender: 'Female', affiliationType: 'club_affiliated', label: `${getCategoryLabel(catId, 'Female')} (المنتميات)` });
+                      allItems.push({ catId, gender: 'Male', affiliationType: 'non_club', label: `${getCategoryLabel(catId, 'Male')} (غير المنتمين للأندية)` });
+                      allItems.push({ catId, gender: 'Male', affiliationType: 'club_affiliated', label: `${getCategoryLabel(catId, 'Male')} (المنتمين للأندية)` });
+                      allItems.push({ catId, gender: 'Female', affiliationType: 'non_club', label: `${getCategoryLabel(catId, 'Female')} (غير المنتميات للأندية)` });
+                      allItems.push({ catId, gender: 'Female', affiliationType: 'club_affiliated', label: `${getCategoryLabel(catId, 'Female')} (المنتميات للأندية)` });
                     } else {
                       allItems.push({ catId, gender: 'Male', label: getCategoryLabel(catId, 'Male') });
                       allItems.push({ catId, gender: 'Female', label: getCategoryLabel(catId, 'Female') });

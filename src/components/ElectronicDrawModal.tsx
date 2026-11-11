@@ -32,6 +32,7 @@ import {
 } from 'lucide-react';
 import { Tournament, School, Team, Match, User, Venue, Sport, Referee, SchoolTournamentConfirmation } from '../types';
 import { DataService, SPORTS_MAP, deduplicateById, normalizeCategoryKey, getCustomCategoryName } from '../lib/dataService';
+import { cn } from '../lib/utils';
 import * as XLSX from 'xlsx';
 import toast from 'react-hot-toast';
 
@@ -161,7 +162,6 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
   const [selectedTournamentId, setSelectedTournamentId] = useState<string>(initialTournamentId || '');
 
   // Step 1 Filtering Options
-  const [sportsCategoryFilter, setSportsCategoryFilter] = useState<'TEAM_SPORTS' | 'ALL'>('TEAM_SPORTS');
   const [selectedSportFilter, setSelectedSportFilter] = useState<string>(initialSportId || 'ALL');
   const [selectedAgeCategoryFilter, setSelectedAgeCategoryFilter] = useState<string>('ALL');
   const [selectedGenderFilter, setSelectedGenderFilter] = useState<string>('ALL');
@@ -289,6 +289,19 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
     loadData();
   }, [isOpen, initialTournamentId, initialSportId, currentUser]);
 
+  // Auto switch schoolFilterMode to 'ALL' if 0 confirmed schools so Groups System is immediately accessible
+  useEffect(() => {
+    if (selectedTournamentId) {
+      const tourn = tournaments.find(t => t.id === selectedTournamentId);
+      if (tourn) {
+        const confs = confirmations.filter(c => c.sportId === tourn.sportId);
+        if (confs.length === 0) {
+          setSchoolFilterMode('ALL');
+        }
+      }
+    }
+  }, [selectedTournamentId, confirmations, tournaments]);
+
   // Combined Referees List (Official Referees + Qualified Teachers, strictly deduplicated by ID)
   const combinedRefereesList = useMemo(() => {
     const list: {
@@ -372,25 +385,21 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
       const sp = sportsConfig.find(s => s.id === selectedSportFilter);
       if (sp?.customAgeCategories && sp.customAgeCategories.length > 0) {
         return sp.customAgeCategories.map(c => ({
-          id: c.id,
+          id: normalizeCategoryKey(c.id),
           label: `${c.name}${c.yearsExpression ? ` (${c.yearsExpression})` : ''}`
         }));
       }
       if (sp?.ageCategories && sp.ageCategories.length > 0) {
         return sp.ageCategories.map(cat => ({
-          id: cat,
+          id: normalizeCategoryKey(cat),
           label: getCustomCategoryName(cat, sp.id) || cat
         }));
       }
-      // Or from tournaments programmed for this sport
-      const sportTourns = tournaments.filter(t => t.sportId === selectedSportFilter && t.ageCategory);
-      const cats = Array.from(new Set(sportTourns.map(t => t.ageCategory).filter(Boolean))) as string[];
-      if (cats.length > 0) {
-        return cats.map(cat => ({
-          id: cat,
-          label: getCustomCategoryName(cat, selectedSportFilter) || cat
-        }));
-      }
+      // For team sports default to U15 and U18
+      return [
+        { id: 'U15', label: 'صغار (U15)' },
+        { id: 'U18', label: 'فتيان (U18)' }
+      ];
     }
 
     // When ALL sports selected: collect categories actually programmed in team sports config or tournaments
@@ -402,18 +411,12 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
       if (!isTeam) return;
 
       if (sp.customAgeCategories && sp.customAgeCategories.length > 0) {
-        sp.customAgeCategories.forEach(c => allProgrammedCats.set(c.id, c.name));
+        sp.customAgeCategories.forEach(c => allProgrammedCats.set(normalizeCategoryKey(c.id), c.name));
       } else if (sp.ageCategories && sp.ageCategories.length > 0) {
-        sp.ageCategories.forEach(cat => allProgrammedCats.set(cat, getCustomCategoryName(cat, sp.id) || cat));
-      }
-    });
-
-    tournaments.forEach(t => {
-      const isTeam = TEAM_SPORTS_IDS.includes(t.sportId) || (t.name && (
-        t.name.includes('قدم') || t.name.includes('سلة') || t.name.includes('يد') || t.name.includes('طائرة') || t.name.includes('ريكبي')
-      ));
-      if (isTeam && t.ageCategory && !allProgrammedCats.has(t.ageCategory)) {
-        allProgrammedCats.set(t.ageCategory, getCustomCategoryName(t.ageCategory, t.sportId) || t.ageCategory);
+        sp.ageCategories.forEach(cat => allProgrammedCats.set(normalizeCategoryKey(cat), getCustomCategoryName(cat, sp.id) || cat));
+      } else {
+        allProgrammedCats.set('U15', 'صغار (U15)');
+        allProgrammedCats.set('U18', 'فتيان (U18)');
       }
     });
 
@@ -422,12 +425,10 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
     }
 
     return [
-      { id: 'U12', label: 'براعم (U12)' },
       { id: 'U15', label: 'صغار (U15)' },
-      { id: 'U18', label: 'فتيان (U18)' },
-      { id: 'U20', label: 'شبان (U20)' }
+      { id: 'U18', label: 'فتيان (U18)' }
     ];
-  }, [selectedSportFilter, sportsConfig, tournaments]);
+  }, [selectedSportFilter, sportsConfig]);
 
   // Keep selectedAgeCategoryFilter synced
   useEffect(() => {
@@ -444,29 +445,49 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
   // Filter Tournaments based on User Role, Team Sports, Sport, Category & Gender
   const filteredTournaments = useMemo(() => {
     return tournaments.filter(t => {
-      // 1. Role-Based Permission Filter (بالنسبة لرئيس اللجنة التقنية تظهر له فقط الرياضة الخاصة به)
+      // 1. Role-Based Permission Filter
       if (userSportRestriction && userSportRestriction.length > 0) {
         if (!userSportRestriction.includes(t.sportId)) {
           return false;
         }
       }
 
-      // 2. Electronic Draw is strictly for Team Sports (الألعاب الجماعية فقط)
+      // 2. Electronic Draw is strictly for Team Sports
       if (t.sportId === 'athletics' || t.sportId === 'cross_country' || t.sportId === 'table_tennis') {
         return false;
       }
 
-      const isTeamSport = TEAM_SPORTS_IDS.includes(t.sportId) || (t.name && (
+      const isTeam = TEAM_SPORTS_IDS.includes(t.sportId) || (t.name && (
         t.name.includes('قدم') || t.name.includes('سلة') || t.name.includes('يد') || t.name.includes('طائرة') || t.name.includes('ريكبي')
       ));
-      if (!isTeamSport) return false;
+      if (!isTeam) return false;
 
-      // 3. Sport Type Filter (كل رياضة ترى بطولاتها وقرعتها مستقلة)
+      // Check if tournament category is programmed in sportsConfig
+      const spConfig = sportsConfig.find(s => s.id === t.sportId);
+      const normTournCat = normalizeCategoryKey(t.ageCategory || '');
+      if (spConfig) {
+        let allowedCatKeys: string[] = [];
+        if (spConfig.customAgeCategories && spConfig.customAgeCategories.length > 0) {
+          allowedCatKeys = spConfig.customAgeCategories.map(c => normalizeCategoryKey(c.id));
+        } else if (spConfig.ageCategories && spConfig.ageCategories.length > 0) {
+          allowedCatKeys = spConfig.ageCategories.map(c => normalizeCategoryKey(c));
+        } else {
+          allowedCatKeys = ['U15', 'U18'];
+        }
+
+        if (!allowedCatKeys.includes(normTournCat)) {
+          return false; // Exclude tournaments like U20 (الشبان) if not programmed for this sport
+        }
+      } else if (normTournCat === 'U20' || normTournCat === 'U12') {
+        return false;
+      }
+
+      // 3. Sport Type Filter
       if (selectedSportFilter !== 'ALL' && t.sportId !== selectedSportFilter) {
         return false;
       }
 
-      // 4. Age Category Filter (مطابقة الفئات المبرمجة)
+      // 4. Age Category Filter
       if (selectedAgeCategoryFilter !== 'ALL') {
         const tournNormCat = normalizeCategoryKey(t.ageCategory || '');
         const filterNormCat = normalizeCategoryKey(selectedAgeCategoryFilter);
@@ -495,8 +516,8 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
     });
   }, [
     tournaments,
+    sportsConfig,
     userSportRestriction,
-    sportsCategoryFilter,
     selectedSportFilter,
     selectedAgeCategoryFilter,
     selectedGenderFilter,
@@ -537,6 +558,17 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
     if (!selectedTournament) return [];
     return confirmations.filter(c => {
       if (c.status !== 'confirmed') return false;
+
+      // Check if school has withdrawn from this tournament or branch
+      if (DataService.isSchoolWithdrawn({
+        sportId: selectedTournament.sportId,
+        tournamentId: selectedTournament.id,
+        ageCategory: selectedTournament.ageCategory,
+        gender: selectedTournament.gender,
+        affiliationType: selectedTournament.affiliationType
+      }, c.schoolId, c.schoolName)) {
+        return false;
+      }
 
       // 1. Sport check
       const matchesSport = c.sportId === selectedTournament.sportId || (c.tournamentId && c.tournamentId === selectedTournament.id);
@@ -583,31 +615,47 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
       return;
     }
 
-    // Prioritize institutions that explicitly confirmed participation
-    const confirmedIds = confirmedSchoolsForTournament.map(c => {
-      const matchSchool = schools.find(s => s.id === c.schoolId || s.name === c.schoolName || s.name === c.schoolId);
-      return matchSchool ? matchSchool.id : c.schoolId;
-    }).filter(Boolean);
+    const isWithdrawn = (sId: string, sName?: string) => DataService.isSchoolWithdrawn({
+      sportId: selectedTournament.sportId,
+      tournamentId: selectedTournament.id,
+      ageCategory: selectedTournament.ageCategory,
+      gender: selectedTournament.gender,
+      affiliationType: selectedTournament.affiliationType
+    }, sId, sName);
+
+    // Prioritize institutions that explicitly confirmed participation and have NOT withdrawn
+    const confirmedIds = confirmedSchoolsForTournament
+      .filter(c => !isWithdrawn(c.schoolId, c.schoolName))
+      .map(c => {
+        const matchSchool = schools.find(s => s.id === c.schoolId || s.name === c.schoolName || s.name === c.schoolId);
+        return matchSchool ? matchSchool.id : c.schoolId;
+      })
+      .filter(Boolean);
 
     if (confirmedIds.length > 0) {
       setParticipatingSchoolIds(Array.from(new Set(confirmedIds)));
       setSchoolFilterMode('CONFIRMED_ONLY');
     } else {
-      // If no school confirmed yet, find teams or default
+      // If no school confirmed yet, find teams excluding withdrawn schools
       const matchedTeams = teams.filter(t => {
+        const sc = schools.find(s => s.id === t.schoolId);
+        if (isWithdrawn(t.schoolId, sc?.name || t.name)) return false;
+
         if (t.tournamentId && t.tournamentId === selectedTournament.id) return true;
         if (t.sportId === selectedTournament.sportId) {
-          const catMatch = !selectedTournament.ageCategory || t.category === selectedTournament.ageCategory;
-          const genMatch = !selectedTournament.gender || t.gender === selectedTournament.gender;
+          const catMatch = !selectedTournament.ageCategory || normalizeCategoryKey(t.category) === normalizeCategoryKey(selectedTournament.ageCategory);
+          const genMatch = !selectedTournament.gender || selectedTournament.gender === 'Mixed' || t.gender === selectedTournament.gender;
           return catMatch && genMatch;
         }
         return false;
       });
 
       let autoSchoolIds = matchedTeams.map(t => t.schoolId).filter(Boolean);
-      if (autoSchoolIds.length === 0) {
-        autoSchoolIds = schools.slice(0, 8).map(s => s.id);
-      }
+      autoSchoolIds = autoSchoolIds.filter(sId => {
+        const sc = schools.find(s => s.id === sId);
+        return !isWithdrawn(sId, sc?.name);
+      });
+
       setParticipatingSchoolIds(Array.from(new Set(autoSchoolIds)));
       setSchoolFilterMode('ALL');
     }
@@ -625,8 +673,17 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
     let baseList = schools;
 
     if (schoolFilterMode === 'CONFIRMED_ONLY') {
-      // Show ONLY institutions that confirmed participation
-      baseList = schools.filter(s => confirmedSchoolsMap.has(s.id) || confirmedSchoolsMap.has(s.name));
+      // Show ONLY institutions that confirmed participation and haven't withdrawn
+      baseList = schools.filter(s => 
+        (confirmedSchoolsMap.has(s.id) || confirmedSchoolsMap.has(s.name)) &&
+        (!selectedTournament || !DataService.isSchoolWithdrawn({
+          sportId: selectedTournament.sportId,
+          tournamentId: selectedTournament.id,
+          ageCategory: selectedTournament.ageCategory,
+          gender: selectedTournament.gender,
+          affiliationType: selectedTournament.affiliationType
+        }, s.id, s.name))
+      );
     }
 
     if (!schoolSearchQuery.trim()) return baseList;
@@ -636,7 +693,7 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
       (s.commune || '').toLowerCase().includes(q) ||
       (s.type || '').toLowerCase().includes(q)
     );
-  }, [schools, schoolFilterMode, confirmedSchoolsMap, schoolSearchQuery]);
+  }, [schools, schoolFilterMode, confirmedSchoolsMap, schoolSearchQuery, selectedTournament]);
 
   const handleSelectAllSchools = () => {
     const idsToAdd = filteredSchoolsList.map(s => s.id);
@@ -670,6 +727,19 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
 
     participatingSchoolIds.forEach(sId => {
       const school = schools.find(s => s.id === sId);
+      const schoolName = school?.name || sId;
+
+      // Exclude any school that has withdrawn from this tournament
+      if (selectedTournament && DataService.isSchoolWithdrawn({
+        sportId: selectedTournament.sportId,
+        tournamentId: selectedTournament.id,
+        ageCategory: selectedTournament.ageCategory,
+        gender: selectedTournament.gender,
+        affiliationType: selectedTournament.affiliationType
+      }, sId, schoolName)) {
+        return;
+      }
+
       if (school) {
         list.push({
           id: school.id,
@@ -694,7 +764,7 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
     });
 
     return list;
-  }, [participatingSchoolIds, customTeamNames, schools]);
+  }, [participatingSchoolIds, customTeamNames, schools, selectedTournament]);
 
   // Group counts calculation
   const groupCounts = useMemo(() => {
@@ -1076,8 +1146,13 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-xs p-2 sm:p-4 overflow-y-auto" dir="rtl">
       <div className="bg-white border border-slate-200 rounded-3xl shadow-2xl max-w-5xl w-full max-h-[94vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200">
         
-        {/* Modal Header - Responsive & Centered on Mobile */}
-        <div className="px-3.5 sm:px-5 py-2.5 sm:py-4 bg-gradient-to-r from-emerald-800 via-teal-900 to-slate-900 text-white flex flex-col sm:flex-row items-center sm:justify-between gap-2.5 sm:gap-4 border-b border-slate-800 shrink-0">
+        {/* Modal Header - Responsive & Dynamic Color */}
+        <div className={cn(
+          "px-3.5 sm:px-5 py-2.5 sm:py-4 flex flex-col sm:flex-row items-center sm:justify-between gap-2.5 sm:gap-4 border-b shrink-0 text-white transition-colors duration-300",
+          selectedTournament?.affiliationType === 'club_affiliated'
+            ? "bg-gradient-to-r from-yellow-600 via-yellow-700 to-yellow-800 border-yellow-800/40"
+            : "bg-gradient-to-r from-emerald-800 via-teal-900 to-slate-900 border-slate-800"
+        )}>
           <div className="flex flex-col sm:flex-row items-center gap-2 sm:gap-3 text-center sm:text-right w-full sm:w-auto">
             <div className="flex items-center justify-center gap-2 flex-wrap">
               <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl sm:rounded-2xl bg-amber-400 text-slate-950 flex items-center justify-center text-base sm:text-xl shadow-xs font-black shrink-0">
@@ -1174,56 +1249,25 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
                   </span>
                 </div>
 
-                {/* Filter Row 1: Team Sports vs All */}
-                <div className="flex flex-wrap items-center gap-2 pt-1">
-                  <span className="text-xs font-bold text-slate-600 ml-1">نوع المنافسة:</span>
-                  
-                  <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-2xl">
-                    <button
-                      onClick={() => setSportsCategoryFilter('TEAM_SPORTS')}
-                      className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
-                        sportsCategoryFilter === 'TEAM_SPORTS'
-                          ? 'bg-emerald-600 text-white shadow-xs font-black'
-                          : 'text-slate-700 hover:text-slate-900'
-                      }`}
-                    >
-                      <span>⚽ الرياضات الجماعية (Team Sports)</span>
-                    </button>
-
-                    <button
-                      onClick={() => setSportsCategoryFilter('ALL')}
-                      className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
-                        sportsCategoryFilter === 'ALL'
-                          ? 'bg-slate-900 text-white shadow-xs font-black'
-                          : 'text-slate-700 hover:text-slate-900'
-                      }`}
-                    >
-                      <span>🏆 جميع الرياضات المبرمجة</span>
-                    </button>
-                  </div>
-                </div>
-
                 {/* Filter Row 2: Specific Sport, Age Category & Gender */}
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
                   
                   {/* Specific Sport Select */}
                   <div>
                     <label className="block text-[11px] font-bold text-slate-600 mb-1">
-                      {userSportRestriction && userSportRestriction.length > 0 ? '🔒 رياضتك المصرح بها فقط:' : 'نوع الرياضة:'}
+                      {initialSportId ? '🏆 الرياضة المعنية بالبطولة (مفعلة تلقائياً):' : (userSportRestriction && userSportRestriction.length > 0 ? '🔒 رياضتك المصرح بها فقط:' : 'نوع الرياضة:')}
                     </label>
                     <select
                       value={selectedSportFilter}
                       onChange={(e) => setSelectedSportFilter(e.target.value)}
-                      disabled={Boolean(userSportRestriction && userSportRestriction.length === 1)}
+                      disabled={Boolean(initialSportId || (userSportRestriction && userSportRestriction.length === 1))}
                       className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 cursor-pointer disabled:bg-slate-100 disabled:opacity-80"
                     >
-                      {(!userSportRestriction || userSportRestriction.length > 1) && (
+                      {!initialSportId && (!userSportRestriction || userSportRestriction.length > 1) && (
                         <option value="ALL">-- كل الرياضات --</option>
                       )}
-                      {(sportsCategoryFilter === 'TEAM_SPORTS' 
-                        ? sportsConfig.filter(s => TEAM_SPORTS_IDS.includes(s.id))
-                        : sportsConfig
-                      )
+                      {sportsConfig
+                      .filter(s => !initialSportId || s.id === initialSportId)
                       .filter(s => !userSportRestriction || userSportRestriction.length === 0 || userSportRestriction.includes(s.id))
                       .map(s => (
                         <option key={s.id} value={s.id}>
@@ -1299,14 +1343,20 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
                         onClick={() => setSelectedTournamentId(t.id)}
                         className={`p-4 rounded-3xl border-2 transition-all cursor-pointer flex flex-col justify-between ${
                           isSelected
-                            ? 'bg-emerald-50/80 border-emerald-600 shadow-md ring-2 ring-emerald-400/30'
+                            ? t.affiliationType === 'club_affiliated'
+                              ? 'bg-amber-50 border-amber-600 shadow-md ring-2 ring-amber-400/30'
+                              : 'bg-emerald-50/80 border-emerald-600 shadow-md ring-2 ring-emerald-400/30'
                             : 'bg-white hover:bg-slate-50 border-slate-200 shadow-xs'
                         }`}
                       >
                         <div className="space-y-2.5">
                           <div className="flex items-center justify-between">
-                            <span className="text-2xl p-2 bg-slate-50 rounded-xl border border-slate-100">{sportInfo.icon}</span>
-                            <span className="px-2.5 py-0.5 text-[10px] font-black rounded-full bg-slate-100 text-slate-700 border border-slate-200">
+                            <span className={`text-2xl p-2 rounded-xl border ${
+                              t.affiliationType === 'club_affiliated' ? 'bg-amber-50 border-amber-100' : 'bg-slate-50 border-slate-100'
+                            }`}>{sportInfo.icon}</span>
+                            <span className={`px-2.5 py-0.5 text-[10px] font-black rounded-full border ${
+                              t.affiliationType === 'club_affiliated' ? 'bg-amber-100 text-amber-900 border-amber-200' : 'bg-slate-100 text-slate-700 border-slate-200'
+                            }`}>
                               {t.scope || 'إقليمية'}
                             </span>
                           </div>
@@ -1321,7 +1371,11 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
 
                         <div className="mt-3 pt-3 border-t border-slate-100 flex items-center justify-between text-xs">
                           <span className="text-slate-400 font-medium">{t.seasonId || '2026/2027'}</span>
-                          <span className={`font-black ${isSelected ? 'text-emerald-700' : 'text-slate-600'}`}>
+                          <span className={`font-black ${
+                            isSelected 
+                              ? t.affiliationType === 'club_affiliated' ? 'text-amber-700' : 'text-emerald-700' 
+                              : 'text-slate-600'
+                          }`}>
                             {isSelected ? '✓ محددة للقرعة' : 'اختر البطولة'}
                           </span>
                         </div>
@@ -1357,14 +1411,24 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
             <div className="space-y-5">
               
               {/* Tournament Summary Banner */}
-              <div className="bg-emerald-50 border border-emerald-200 rounded-3xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+              <div className={`${
+                selectedTournament.affiliationType === 'club_affiliated'
+                  ? 'bg-amber-50 border-amber-200'
+                  : 'bg-emerald-50 border-emerald-200'
+              } border rounded-3xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3`}>
                 <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-2xl bg-emerald-600 text-white flex items-center justify-center text-xl shadow-xs">
+                  <div className={`w-10 h-10 rounded-2xl ${
+                    selectedTournament.affiliationType === 'club_affiliated' ? 'bg-yellow-600' : 'bg-emerald-600'
+                  } text-white flex items-center justify-center text-xl shadow-xs`}>
                     {SPORTS_MAP[selectedTournament.sportId]?.icon || '🏆'}
                   </div>
                   <div>
-                    <h4 className="text-sm font-black text-emerald-950">{selectedTournament.name}</h4>
-                    <p className="text-xs text-emerald-800 font-bold">
+                    <h4 className={`text-sm font-black ${
+                      selectedTournament.affiliationType === 'club_affiliated' ? 'text-amber-950' : 'text-emerald-950'
+                    }`}>{selectedTournament.name}</h4>
+                    <p className={`text-xs ${
+                      selectedTournament.affiliationType === 'club_affiliated' ? 'text-amber-800' : 'text-emerald-800'
+                    } font-bold`}>
                       {SPORTS_MAP[selectedTournament.sportId]?.name} • {selectedTournament.ageCategory} • {selectedTournament.gender === 'Female' ? 'إناث' : 'ذكور'}
                     </p>
                   </div>
@@ -1372,7 +1436,9 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
 
                 <button
                   onClick={() => setStep(1)}
-                  className="px-3 py-1.5 bg-white text-emerald-800 hover:bg-emerald-100 rounded-xl text-xs font-bold border border-emerald-200 cursor-pointer"
+                  className={`px-3 py-1.5 bg-white ${
+                    selectedTournament.affiliationType === 'club_affiliated' ? 'text-amber-800 border-amber-200 hover:bg-amber-100' : 'text-emerald-800 border-emerald-200 hover:bg-emerald-100'
+                  } rounded-xl text-xs font-bold border cursor-pointer`}
                 >
                   تغيير البطولة
                 </button>
@@ -1390,7 +1456,9 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
                     onClick={() => setDrawSystem('groups')}
                     className={`p-4 rounded-2xl border-2 transition-all cursor-pointer flex items-start gap-3 ${
                       drawSystem === 'groups'
-                        ? 'bg-emerald-50 border-emerald-600 ring-2 ring-emerald-400/20'
+                        ? selectedTournament.affiliationType === 'club_affiliated'
+                          ? 'bg-amber-50 border-amber-600 ring-2 ring-amber-400/20'
+                          : 'bg-emerald-50 border-emerald-600 ring-2 ring-emerald-400/20'
                         : 'bg-slate-50 border-slate-200 hover:bg-slate-100'
                     }`}
                   >
@@ -1407,7 +1475,9 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
                     onClick={() => setDrawSystem('knockout')}
                     className={`p-4 rounded-2xl border-2 transition-all cursor-pointer flex items-start gap-3 ${
                       drawSystem === 'knockout'
-                        ? 'bg-emerald-50 border-emerald-600 ring-2 ring-emerald-400/20'
+                        ? selectedTournament.affiliationType === 'club_affiliated'
+                          ? 'bg-amber-50 border-amber-600 ring-2 ring-amber-400/20'
+                          : 'bg-emerald-50 border-emerald-600 ring-2 ring-emerald-400/20'
                         : 'bg-slate-50 border-slate-200 hover:bg-slate-100'
                     }`}
                   >
@@ -1815,10 +1885,20 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 pt-1">
                   {drawnGroups.map((grp, idx) => (
-                    <div key={idx} className="bg-slate-50 border border-slate-200 rounded-2xl p-3.5 space-y-2">
-                      <div className="flex items-center justify-between pb-1.5 border-b border-slate-200">
-                        <span className="text-xs font-black text-slate-900">{grp.groupName}</span>
-                        <span className="text-[10px] font-bold bg-slate-200 text-slate-700 px-1.5 py-0.2 rounded">
+                    <div key={idx} className={`border rounded-2xl p-3.5 space-y-2 ${
+                      selectedTournament.affiliationType === 'club_affiliated'
+                        ? 'bg-amber-50/50 border-amber-200'
+                        : 'bg-slate-50 border-slate-200'
+                    }`}>
+                      <div className={`flex items-center justify-between pb-1.5 border-b ${
+                        selectedTournament.affiliationType === 'club_affiliated' ? 'border-amber-200' : 'border-slate-200'
+                      }`}>
+                        <span className={`text-xs font-black ${
+                          selectedTournament.affiliationType === 'club_affiliated' ? 'text-amber-900' : 'text-slate-900'
+                        }`}>{grp.groupName}</span>
+                        <span className={`text-[10px] font-bold px-1.5 py-0.2 rounded ${
+                          selectedTournament.affiliationType === 'club_affiliated' ? 'bg-amber-100 text-amber-700' : 'bg-slate-200 text-slate-700'
+                        }`}>
                           {grp.teams.length} فرق
                         </span>
                       </div>
@@ -1826,7 +1906,9 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
                       <div className="space-y-1">
                         {grp.teams.map((t, tIdx) => (
                           <div key={t.id} className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
-                            <span className="w-4 h-4 rounded-full bg-emerald-600 text-white text-[10px] flex items-center justify-center font-bold">
+                            <span className={`w-4 h-4 rounded-full text-white text-[10px] flex items-center justify-center font-bold ${
+                              selectedTournament.affiliationType === 'club_affiliated' ? 'bg-amber-600' : 'bg-emerald-600'
+                            }`}>
                               {tIdx + 1}
                             </span>
                             <span className="truncate">{t.name}</span>

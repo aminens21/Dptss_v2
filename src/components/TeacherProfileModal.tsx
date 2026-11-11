@@ -235,23 +235,6 @@ export const TeacherProfileModal: React.FC = () => {
       return;
     }
 
-    // School Access Code Validation
-    if (showAccessCodeField) {
-      if (!schoolAccessCodeInput.trim()) {
-        toast.error('الرجاء إدخال رمز الأمان السري للمؤسسة لتأكيد انتمائك إليها');
-        return;
-      }
-      const targetSchool = schools.find(s => s.name === workLocation);
-      if (!targetSchool) {
-        toast.error('المؤسسة التعليمية المحددة غير صالحة');
-        return;
-      }
-      if (!targetSchool.accessCode || targetSchool.accessCode.trim() !== schoolAccessCodeInput.trim()) {
-        toast.error('رمز الأمان السري للمؤسسة غير صحيح! المرجو التأكد من الرمز وإعادة المحاولة.');
-        return;
-      }
-    }
-
     setLoading(true);
     try {
       let updatedPendingTransfer = userProfile.pendingTransfer;
@@ -766,70 +749,40 @@ export const TeacherProfileModal: React.FC = () => {
                 )}
               </label>
 
-              {filteredSchools.length > 0 ? (
-                <div className="space-y-3">
+              <div className="space-y-2">
+                {filteredSchools.length > 0 && (
                   <select
-                    required
-                    value={workLocation}
+                    value={schools.some(s => s.name === workLocation) ? workLocation : ''}
                     onChange={(e) => {
-                      const newLoc = e.target.value;
-                      setWorkLocation(newLoc);
-                      if (newLoc && newLoc.trim() !== (userProfile?.workLocation || '').trim()) {
-                        setShowAccessCodeField(true);
-                      } else {
-                        setShowAccessCodeField(false);
+                      if (e.target.value) {
+                        setWorkLocation(e.target.value);
                       }
                     }}
-                    className="w-full text-xs px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all font-bold cursor-pointer"
+                    className="w-full text-xs px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:bg-white focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-all font-bold cursor-pointer"
                   >
-                    <option value="">-- اختر مؤسستك التعليمية من اللائحة المعتمدة --</option>
+                    <option value="">-- اختر مؤسستك من اللائحة المعتمدة --</option>
                     {filteredSchools.map(sch => (
                       <option key={sch.id} value={sch.name}>
                         {sch.name} {sch.commune ? `(${sch.commune})` : ''}
                       </option>
                     ))}
                   </select>
+                )}
 
-                  {showAccessCodeField && (
-                    <div className="p-3.5 bg-blue-50/70 border border-blue-200 rounded-xl space-y-2 animate-in fade-in slide-in-from-top-1 duration-150">
-                      <div className="flex items-center gap-1.5">
-                        <KeyRound className="h-4 w-4 text-blue-600 shrink-0" />
-                        <span className="text-xs font-bold text-blue-900">رمز الدخول السري للمؤسسة (Access Code) *</span>
-                      </div>
-                      <p className="text-[10px] text-blue-800 leading-relaxed">
-                        لكي نتحقق من هويتك كأستاذ ينتمي لهذه المؤسسة، يرجى إدخال رمز الولوج السري المكون من 6 أحرف وأرقام. (يمكنك الحصول عليه من مدير المؤسسة أو من المسؤول الإقليمي بالمديرية).
-                      </p>
-                      <div className="relative">
-                        <input
-                          type="text"
-                          maxLength={6}
-                          value={schoolAccessCodeInput}
-                          onChange={(e) => setSchoolAccessCodeInput(e.target.value.replace(/[^a-zA-Z0-9]/g, ''))}
-                          placeholder="أدخل الرمز المكون من 6 أحرف وأرقام"
-                          className="w-full text-center tracking-[0.5em] font-mono text-sm px-3 py-2.5 bg-white border border-blue-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-black text-blue-950"
-                        />
-                      </div>
-                    </div>
-                  )}
+                <div className="space-y-1">
+                  <input
+                    type="text"
+                    required
+                    value={workLocation}
+                    onChange={(e) => setWorkLocation(e.target.value)}
+                    placeholder="أو اكتب/عدل اسم المؤسسة التعليمية مباشرة..."
+                    className="w-full text-xs px-3 py-2.5 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 font-bold text-slate-800"
+                  />
+                  <p className="text-[10px] text-slate-500">
+                    يمكنك اختيار مؤسستك من القائمة أعلاه أو تعديل اسمها مباشرة لتجاوز أي اختلاف بسيط في التسمية.
+                  </p>
                 </div>
-              ) : (
-                <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl space-y-1 text-amber-900 text-xs">
-                  <div className="flex items-start gap-2">
-                    <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
-                    <div>
-                      <p className="font-bold">
-                        لم يقم المسؤول الإقليمي أو المركزي بإدراج مؤسسات سلك ({selectedCycleType}) بـ {activeDir?.name || 'المديرية'} بعد.
-                      </p>
-                      <p className="text-[11px] text-amber-800 mt-1 leading-relaxed">
-                        لتفادي تكرار واختلاف أسماء المؤسسات، يجب على المسؤول الإقليمي أو المركزي إضافة المؤسسة التعليمية إلى المنصة أولاً لتتمكن من اختيارها.
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              )}
-              <p className="text-[10px] text-slate-500 mt-1">
-                * يتم اختيار المؤسسة حصراً من اللائحة الرسمية المعتمدة من طرف المسؤول الإقليمي أو المركزي.
-              </p>
+              </div>
             </div>
 
             {/* Sports Specialization in Refereeing */}

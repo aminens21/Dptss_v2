@@ -339,13 +339,25 @@ export const Dashboard: React.FC = () => {
               <span>برمجة مباراة جديدة</span>
             </button>
           ) : (
-            <button
-              onClick={() => navigate('/matches')}
-              className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl text-xs font-black flex items-center gap-2 shadow-md shadow-indigo-500/20 active:scale-98 transition-all cursor-pointer shrink-0"
-            >
-              <CalendarDays className="h-4 w-4" />
-              <span>استعراض جدول المقابلات</span>
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={openProfileModal}
+                className="bg-emerald-600 hover:bg-emerald-700 text-white px-3.5 py-2 rounded-xl text-xs font-black flex items-center gap-1.5 shadow-md shadow-emerald-500/20 active:scale-98 transition-all cursor-pointer shrink-0"
+                title="تعديل البيانات الشخصية والمؤسسة ورقم التأجير"
+              >
+                <span>👤</span>
+                <span>تعديل بياناتي</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => navigate('/matches')}
+                className="bg-indigo-600 hover:bg-indigo-700 text-white px-3.5 py-2 rounded-xl text-xs font-black flex items-center gap-2 shadow-md shadow-indigo-500/20 active:scale-98 transition-all cursor-pointer shrink-0"
+              >
+                <CalendarDays className="h-4 w-4" />
+                <span>استعراض جدول المقابلات</span>
+              </button>
+            </div>
           )}
         </div>
       </div>

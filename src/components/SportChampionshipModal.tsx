@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { Tournament, Student, School, User, Sport, Match } from '../types';
 import { SPORTS_MAP, getAgeCategoriesForSeason, normalizeCategoryKey, DataService, getCategoryYearsLabel, isTeacherLevelAllowedForTournament, getTournamentLevelAr } from '../lib/dataService';
-import { useAuth } from '../contexts/AuthContext';
+import { useAuth, isSuperAdminEmail } from '../contexts/AuthContext';
 import { AppLogo } from './AppLogo';
 import { CountdownTimer } from './CountdownTimer';
 import { RegisterStudentModal } from './RegisterStudentModal';
@@ -83,6 +83,13 @@ export function getDistinctCategoryLabel(category: string, gender?: string): str
   return category;
 }
 
+export function getBranchTournamentTitle(t: Tournament, activeBranchModal?: string | null): string {
+  const affPrefix = (t.affiliationType || activeBranchModal) === 'club_affiliated' ? 'بطولة المنتمين للأندية' : 'بطولة غير المنتمين للأندية';
+  const normCat = normalizeCategoryKey(t.ageCategory || 'U15');
+  const genLabel = t.gender === 'Female' ? 'إناث' : t.gender === 'Male' ? 'ذكور' : 'مختلط';
+  return `${affPrefix} ${normCat} ${genLabel}`;
+}
+
 interface SportChampionshipModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -137,6 +144,7 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
   const [selectedGender, setSelectedGender] = useState<'ALL' | 'Male' | 'Female'>('ALL');
   const [selectedAffiliation, setSelectedAffiliation] = useState<'non_club' | 'club_affiliated'>('non_club');
   const [activeBranchModal, setActiveBranchModal] = useState<'non_club' | 'club_affiliated' | null>(null);
+  const [selectedBranchTournament, setSelectedBranchTournament] = useState<Tournament | null>(null);
   const [search, setSearch] = useState('');
   const [isRegisterModalOpen, setIsRegisterModalOpen] = useState(false);
   const [isBulkRegisterOpen, setIsBulkRegisterOpen] = useState(false);
@@ -223,6 +231,30 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
     }
   };
 
+  // School participation withdrawal state
+  const [schoolToWithdraw, setSchoolToWithdraw] = useState<{ schoolName: string; studentCount: number } | null>(null);
+  const [isWithdrawingSchool, setIsWithdrawingSchool] = useState(false);
+
+  // Helper to check if a school is the teacher's own school
+  const isUserSchool = (targetSchoolName: string) => {
+    if (!userProfile) return false;
+    const cleanTarget = String(targetSchoolName || '').trim().toLowerCase();
+    const cleanTeacherSchool = String(userProfile.workLocation || teacherSchoolName || userProfile.schoolName || '').trim().toLowerCase();
+    if (!cleanTarget || !cleanTeacherSchool) return false;
+    return (
+      cleanTarget === cleanTeacherSchool ||
+      cleanTarget.includes(cleanTeacherSchool) ||
+      cleanTeacherSchool.includes(cleanTarget)
+    );
+  };
+
+  // Helper to check if current user can manage/modify/withdraw this school
+  const canManageSchool = (targetSchoolName: string) => {
+    if (canManage) return true;
+    if (isTeacherRole && isUserSchool(targetSchoolName)) return true;
+    return false;
+  };
+
   // Permission checker for modifying or deleting a student
   const canManageThisStudent = (stud: Student) => {
     if (canManage) return true;
@@ -248,6 +280,84 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
 
     // Teacher can edit or delete any participant belonging to their institution
     return true;
+  };
+
+  // Function to execute school withdrawal from this branch/tournament
+  const executeWithdrawSchool = async () => {
+    if (!schoolToWithdraw || !sport) return;
+    setIsWithdrawingSchool(true);
+    const toastId = toast.loading(`جاري سحب مشاركة مؤسسة ${schoolToWithdraw.schoolName}...`);
+    try {
+      const targetBranchAff = (selectedBranchTournament && selectedBranchTournament.affiliationType) || activeBranchModal || selectedAffiliation || 'non_club';
+      const targetCat = selectedBranchTournament ? normalizeCategoryKey(selectedBranchTournament.ageCategory) : (selectedCatId !== 'ALL' ? normalizeCategoryKey(selectedCatId) : undefined);
+      const targetGender = selectedBranchTournament ? selectedBranchTournament.gender : (selectedGender !== 'ALL' ? selectedGender : undefined);
+
+      // Find all students for this school in this sport & branch
+      const studentsToDelete = sportStudents.filter(s => {
+        if (!s) return false;
+        const matchSchool = s.schoolName && (
+          s.schoolName.trim().toLowerCase() === schoolToWithdraw.schoolName.trim().toLowerCase() ||
+          s.schoolName.includes(schoolToWithdraw.schoolName) ||
+          schoolToWithdraw.schoolName.includes(s.schoolName)
+        );
+        if (!matchSchool) return false;
+        
+        const sAff = s.affiliationType || 'non_club';
+        if (sAff !== targetBranchAff) return false;
+
+        if (targetCat) {
+          if (normalizeCategoryKey(s.category) !== targetCat) return false;
+        }
+
+        if (targetGender && targetGender !== 'ALL' && targetGender !== 'Both') {
+          if ((s.gender || 'Male').toLowerCase() !== targetGender.toLowerCase()) return false;
+        }
+
+        return true;
+      });
+
+      for (const st of studentsToDelete) {
+        await DataService.deleteStudent(st.id);
+      }
+      setLocalStudents(prev => prev.filter(s => !studentsToDelete.some(t => t.id === s.id)));
+
+      // Record withdrawal in DataService so it persists across sessions and removes school from electronic draw
+      const matchedSchool = schools.find(sch => 
+        sch.name.trim().toLowerCase() === schoolToWithdraw.schoolName.trim().toLowerCase() ||
+        sch.name.includes(schoolToWithdraw.schoolName) ||
+        schoolToWithdraw.schoolName.includes(sch.name)
+      );
+      const sId = matchedSchool ? matchedSchool.id : schoolToWithdraw.schoolName;
+
+      await DataService.withdrawSchool({
+        sportId: sport.id,
+        schoolName: schoolToWithdraw.schoolName,
+        schoolId: sId,
+        tournamentId: selectedBranchTournament?.id,
+        ageCategory: targetCat,
+        gender: targetGender,
+        affiliationType: targetBranchAff,
+        withdrawnBy: userProfile?.fullName || userProfile?.email
+      });
+
+      await refreshConfirmations();
+
+      toast.dismiss(toastId);
+      toast.success(`تم سحب مشاركة مؤسسة "${schoolToWithdraw.schoolName}" من فرع هذه البطولة بنجاح`);
+      
+      // If we are currently inside this school's drilldown, navigate back to schools list
+      if (selectedSchoolNameForView === schoolToWithdraw.schoolName) {
+        setSelectedSchoolNameForView(null);
+      }
+      setSchoolToWithdraw(null);
+      if (onRefreshData) onRefreshData();
+    } catch (err) {
+      console.error('Error withdrawing school:', err);
+      toast.dismiss(toastId);
+      toast.error('حدث خطأ أثناء سحب المشاركة');
+    } finally {
+      setIsWithdrawingSchool(false);
+    }
   };
 
   // Function to execute student deletion
@@ -369,6 +479,7 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
 
   useEffect(() => {
     setActiveBranchModal(null);
+    setSelectedBranchTournament(null);
     setSelectedSchoolNameForView(null);
     setPdfSchoolName(null);
   }, [sport?.id]);
@@ -384,6 +495,16 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
     const withDeadline = sportTournaments.find(t => t.registrationDeadline);
     return withDeadline?.registrationDeadline || null;
   }, [tournaments, sport]);
+
+  const isDeadlineExpired = useMemo(() => {
+    if (!currentDeadline) return false;
+    try {
+      const d = (currentDeadline as any)?.toDate ? (currentDeadline as any).toDate() : new Date(currentDeadline);
+      return !isNaN(d.getTime()) && d.getTime() < Date.now();
+    } catch {
+      return false;
+    }
+  }, [currentDeadline]);
 
   // Head of Technical Committee assigned to this sport
   const techHead = useMemo(() => {
@@ -409,43 +530,56 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
   // Determine which branch cards to show based on programmed tournaments for this sport
   const sportTournaments = useMemo(() => {
     if (!sport) return [];
-    const raw = tournaments.filter(t => t.sportId === sport.id);
-    if (isTeacherRole && !canManage) {
-      return raw.filter(t => isTeacherLevelAllowedForTournament(teacherCadre, t.level));
-    }
-    return raw;
-  }, [tournaments, sport, isTeacherRole, canManage, teacherCadre]);
+    return tournaments.filter(t => t.sportId === sport.id);
+  }, [tournaments, sport]);
 
   // Categories list configured for this sport
   const seasonalCategories = getAgeCategoriesForSeason(activeSeason, undefined, sport?.id);
   const sportCategories = useMemo(() => {
-    const rawCats = (sport?.ageCategories && sport.ageCategories.length > 0)
+    return (sport?.ageCategories && sport.ageCategories.length > 0)
       ? sport.ageCategories.map(normalizeCategoryKey)
       : seasonalCategories.map(c => c.id);
+  }, [sport, seasonalCategories]);
 
-    if (isTeacherRole && !canManage && teacherCadre) {
-      const cadre = String(teacherCadre).toUpperCase();
-      return rawCats.filter(catId => {
-        const norm = normalizeCategoryKey(catId);
-        if (cadre.includes('PRIMARY') || cadre.includes('ابتدائي')) return norm === 'U12';
-        if (cadre.includes('MIDDLE') || cadre.includes('إعدادي')) return norm === 'U15';
-        if (cadre.includes('HIGH') || cadre.includes('SECONDARY') || cadre.includes('تأهيلي')) return norm === 'U18' || norm === 'U20';
-        return true;
+  // Tournaments belonging to the active classification branch (or fallback virtual tournaments)
+  const displayBranchTournaments = useMemo(() => {
+    if (!activeBranchModal || !sport) return [];
+    const programmed = sportTournaments.filter(t => (t.affiliationType || 'non_club') === activeBranchModal);
+    if (programmed.length > 0) return programmed;
+
+    // Fallback virtual tournaments for configured categories & genders if no specific records exist yet
+    const virtuals: Tournament[] = [];
+    const cats = sportCategories.length > 0 ? sportCategories : ['U15', 'U18'];
+    const genders: Array<'Male' | 'Female'> = ['Male', 'Female'];
+
+    cats.forEach(cat => {
+      genders.forEach(g => {
+        const affPrefix = activeBranchModal === 'club_affiliated' ? 'بطولة المنتمين للأندية' : 'بطولة غير المنتمين للأندية';
+        const gLabel = g === 'Female' ? 'إناث' : 'ذكور';
+        const tName = `${affPrefix} ${cat} ${gLabel}`;
+        virtuals.push({
+          id: `virtual-${sport.id}-${cat}-${g}-${activeBranchModal}`,
+          sportId: sport.id,
+          name: tName,
+          gender: g,
+          ageCategory: cat,
+          affiliationType: activeBranchModal,
+          seasonId: activeSeason || '2026-2027',
+          scope: 'provincial',
+          startDate: new Date().toISOString().split('T')[0],
+          endDate: new Date().toISOString().split('T')[0],
+          status: 'Scheduled',
+          level: 'ALL'
+        });
       });
-    }
-    return rawCats;
-  }, [sport, seasonalCategories, isTeacherRole, canManage, teacherCadre]);
+    });
+    return virtuals;
+  }, [sportTournaments, activeBranchModal, sport, sportCategories]);
 
-  // Derive custom tournament title from programmed tournaments
+  // Main modal title for the sport
   const customTitle = useMemo(() => {
-    if (sportTournaments.length > 0 && sportTournaments[0].name) {
-      const raw = sportTournaments[0].name;
-      const clean = raw.split(/\s*-\s*(?:البرعمات|البراعم|الصغيرات|الصغار|الفتيات|الفتيان|الشابات|الشبان|ذكور|إناث|مختلط|U12|U15|U18|U20|جميع الفئات|فئة|صغار|فتيان|شبان|براعم|صغيرات|فتيات|شابات|برعمات|لا منتمين|للمنتمين للأندية|مفتوحة|مواليد|السلك|دوري)/i)[0].trim();
-      if (clean && clean.length >= 3) return clean;
-      return raw.split(/\s*-\s*/)[0].trim() || raw;
-    }
     return `البطولة الإقليمية المدرسية لـ ${sport?.name || ''}`;
-  }, [sportTournaments, sport?.name]);
+  }, [sport?.name]);
 
   // Check if teacher level is allowed for this sport (at least one tournament matches their cadre)
   const isTeacherAllowedForSport = useMemo(() => {
@@ -541,40 +675,52 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
   }, [sportStudents]);
 
   const effectivePreselectedGender = useMemo(() => {
+    if (!sport) return undefined;
+    if (selectedBranchTournament && selectedBranchTournament.gender && selectedBranchTournament.gender !== 'Both') {
+      return selectedBranchTournament.gender as 'Male' | 'Female';
+    }
     if (selectedGender !== 'ALL') return selectedGender;
     const genders = Array.from(new Set(sportTournaments.map(t => t.gender).filter(g => g === 'Male' || g === 'Female')));
     if (genders.length === 1) return genders[0] as 'Male' | 'Female';
     return undefined;
-  }, [selectedGender, sportTournaments]);
+  }, [sport, selectedBranchTournament, selectedGender, sportTournaments]);
 
   const effectivePreselectedCategory = useMemo(() => {
+    if (!sport) return undefined;
+    if (selectedBranchTournament && selectedBranchTournament.ageCategory) {
+      return normalizeCategoryKey(selectedBranchTournament.ageCategory);
+    }
     if (selectedCatId !== 'ALL' && selectedCatId) return selectedCatId;
     const cats = Array.from(new Set(sportTournaments.map(t => normalizeCategoryKey(t.ageCategory)).filter(Boolean)));
     if (cats.length === 1) return cats[0];
     if (sportCategories.length === 1) return sportCategories[0];
     return undefined;
-  }, [selectedCatId, sportTournaments, sportCategories]);
+  }, [sport, selectedBranchTournament, selectedCatId, sportTournaments, sportCategories]);
 
   const effectivePreselectedAffiliation = useMemo(() => {
+    if (!sport) return 'non_club';
+    if (selectedBranchTournament && selectedBranchTournament.affiliationType) {
+      return selectedBranchTournament.affiliationType as 'non_club' | 'club_affiliated';
+    }
     if (activeBranchModal) return activeBranchModal;
     if (selectedAffiliation) return selectedAffiliation;
     const affs = Array.from(new Set(sportTournaments.map(t => t.affiliationType || 'non_club')));
     if (affs.length === 1) return affs[0] as 'non_club' | 'club_affiliated';
     return 'non_club';
-  }, [activeBranchModal, selectedAffiliation, sportTournaments]);
+  }, [sport, selectedBranchTournament, activeBranchModal, selectedAffiliation, sportTournaments]);
 
   const currentSchoolForPdf = selectedSchoolNameForView || pdfSchoolName;
   const targetSchoolStudents = useMemo(() => {
-    if (!currentSchoolForPdf) return [];
+    if (!sport || !currentSchoolForPdf) return [];
     return sportStudents.filter(s => 
       s.schoolName === currentSchoolForPdf &&
       (s.affiliationType || 'non_club') === (activeBranchModal || selectedAffiliation)
     );
-  }, [sportStudents, currentSchoolForPdf, activeBranchModal, selectedAffiliation]);
+  }, [sport, sportStudents, currentSchoolForPdf, activeBranchModal, selectedAffiliation]);
 
   // Filter students by active category tab & gender & search & affiliationType
   const filteredStudents = sportStudents.filter(s => {
-    if (!s) return false;
+    if (!sport || !s) return false;
     const sCategory = s.category || '';
     const sGender = s.gender || '';
     const sFullName = s.fullName || '';
@@ -604,15 +750,24 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
 
   // List of all participating schools with participant counts, gender counts, and category details
   const participatingSchools = useMemo(() => {
+    if (!sport) return [];
+    const targetAff = (selectedBranchTournament && selectedBranchTournament.affiliationType) || activeBranchModal || selectedAffiliation || 'non_club';
+    const targetCat = selectedBranchTournament 
+      ? normalizeCategoryKey(selectedBranchTournament.ageCategory) 
+      : (selectedCatId && selectedCatId !== 'ALL' ? normalizeCategoryKey(selectedCatId) : 'ALL');
+    const targetGen = selectedBranchTournament 
+      ? selectedBranchTournament.gender 
+      : selectedGender;
+
     const affiliationStudents = sportStudents.filter(s => {
       if (!s) return false;
       const sAffType = s.affiliationType || 'non_club';
-      const sCat = s.category || '';
-      const sGen = s.gender || '';
+      const sNormCat = normalizeCategoryKey(s.category);
+      const sGen = s.gender || 'Male';
 
-      const matchAff = sAffType === selectedAffiliation;
-      const matchCat = selectedCatId === 'ALL' || sCat.toUpperCase() === selectedCatId.toUpperCase();
-      const matchGen = selectedGender === 'ALL' || sGen.toLowerCase() === selectedGender.toLowerCase();
+      const matchAff = sAffType === targetAff;
+      const matchCat = targetCat === 'ALL' || sNormCat === targetCat;
+      const matchGen = targetGen === 'ALL' || targetGen === 'Both' || sGen.toLowerCase() === targetGen.toLowerCase();
       
       return matchAff && matchCat && matchGen;
     });
@@ -650,7 +805,7 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
       } else {
         schoolItem.femaleCount += 1;
       }
-      const cat = s.category || 'U15';
+      const cat = normalizeCategoryKey(s.category || 'U15');
       const key = `${cat}__${gen}`;
       const existing = schoolItem.genderCategories.find(g => g.key === key);
       if (existing) {
@@ -667,30 +822,110 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
       }
     });
 
-    let allSchools = Object.values(schoolsMap);
+    // Merge confirmed schools from Phase 1 into schoolsMap so schools appear even before students are registered
+    if (sport) {
+      const confirmedSchoolsList = getConfirmedSchoolsForSport(sport.id);
+      confirmedSchoolsList.forEach(conf => {
+        if (!conf || !conf.schoolName) return;
 
-    // If teacher role, only view their own institution's participation
-    if (isTeacherRole) {
-      const teacherInst = (userProfile?.workLocation || teacherSchoolName || '').trim().toLowerCase();
-      if (teacherInst) {
-        allSchools = allSchools.filter(sch => {
-          const schName = sch.name.trim().toLowerCase();
-          return schName === teacherInst || schName.includes(teacherInst) || teacherInst.includes(schName);
-        });
+        // Check affiliation match
+        const confAffs: string[] = conf.affiliationTypes && conf.affiliationTypes.length > 0
+          ? conf.affiliationTypes
+          : (conf.affiliationType ? [conf.affiliationType] : ['non_club']);
+        const matchConfAff = confAffs.includes(targetAff);
+        if (!matchConfAff) return;
 
-        // If no records yet, ensure their school is listed so they can register
-        if (allSchools.length === 0) {
-          const exactSchoolName = userProfile?.workLocation || teacherSchoolName || 'مؤسستي';
-          allSchools = [{
-            name: exactSchoolName,
+        // If a specific tournament is selected (Level 3), also check category & gender match
+        if (selectedBranchTournament) {
+          if (conf.categories && conf.categories.length > 0) {
+            const normConfCats = conf.categories.map(normalizeCategoryKey);
+            if (!normConfCats.includes(targetCat)) return;
+          }
+          if (conf.genders && conf.genders.length > 0) {
+            if (targetGen !== 'Both' && targetGen !== 'ALL') {
+              if (!conf.genders.includes(targetGen as 'Male' | 'Female')) return;
+            }
+          }
+        }
+
+        const isConfWithdrawn = DataService.isSchoolWithdrawn({
+          sportId: sport?.id,
+          tournamentId: selectedBranchTournament?.id,
+          ageCategory: targetCat !== 'ALL' ? targetCat : undefined,
+          gender: targetGen !== 'ALL' ? targetGen : undefined,
+          affiliationType: targetAff
+        }, conf.schoolId, conf.schoolName);
+        if (isConfWithdrawn) return;
+
+        if (!schoolsMap[conf.schoolName]) {
+          schoolsMap[conf.schoolName] = {
+            name: conf.schoolName,
             totalCount: 0,
             maleCount: 0,
             femaleCount: 0,
             genderCategories: []
-          }];
+          };
+        }
+      });
+    }
+
+    let allSchools = Object.values(schoolsMap).filter(sch => {
+      if (sch.totalCount === 0) {
+        const isWithdrawn = DataService.isSchoolWithdrawn({
+          sportId: sport?.id,
+          tournamentId: selectedBranchTournament?.id,
+          ageCategory: targetCat !== 'ALL' ? targetCat : undefined,
+          gender: targetGen !== 'ALL' ? targetGen : undefined,
+          affiliationType: targetAff
+        }, undefined, sch.name);
+        if (isWithdrawn) return false;
+      }
+      return true;
+    });
+
+    // If teacher role, ensure their own school is included in the list so they can confirm/register if not present yet
+    const isCentralOrTechAdmin = canManage || userProfile?.role === 'CENTRAL_ADMIN' || userProfile?.isCentralAdmin || userProfile?.isTechCommitteeHead || userProfile?.isSuperAdmin || isSuperAdminEmail(userProfile?.email);
+    const isTeacherUser = !isCentralOrTechAdmin && (isTeacherRole || userProfile?.role === 'TEACHER');
+
+    if (isTeacherUser) {
+      const teacherInst = (userProfile?.workLocation || teacherSchoolName || userProfile?.schoolName || '').trim();
+      if (teacherInst) {
+        const hasOwnSchool = allSchools.some(sch => isUserSchool(sch.name));
+        if (!hasOwnSchool) {
+          const isWithdrawn = DataService.isSchoolWithdrawn({
+            sportId: sport?.id,
+            tournamentId: selectedBranchTournament?.id,
+            ageCategory: targetCat !== 'ALL' ? targetCat : undefined,
+            gender: targetGen !== 'ALL' ? targetGen : undefined,
+            affiliationType: targetAff
+          }, undefined, teacherInst);
+
+          if (!isWithdrawn) {
+            const allowedForTourney = !selectedBranchTournament || (
+              isTeacherLevelAllowedForTournament(userProfile?.teachingCadre, selectedBranchTournament.level)
+            );
+            if (allowedForTourney) {
+              allSchools.push({
+                name: teacherInst,
+                totalCount: 0,
+                maleCount: 0,
+                femaleCount: 0,
+                genderCategories: []
+              });
+            }
+          }
         }
       }
     }
+
+    // Sort schools: Teacher's own school first, then alphabetically
+    allSchools.sort((a, b) => {
+      const aIsOwn = isUserSchool(a.name);
+      const bIsOwn = isUserSchool(b.name);
+      if (aIsOwn && !bIsOwn) return -1;
+      if (!aIsOwn && bIsOwn) return 1;
+      return a.name.localeCompare(b.name, 'ar');
+    });
 
     return allSchools.filter(sch => {
       if (!search.trim()) return true;
@@ -701,18 +936,30 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
       );
       return matchSchoolName || matchCategories;
     });
-  }, [sportStudents, selectedAffiliation, search, isTeacherRole, userProfile?.workLocation, teacherSchoolName]);
+  }, [sportStudents, selectedAffiliation, selectedBranchTournament, selectedCatId, selectedGender, search, isTeacherRole, userProfile, teacherSchoolName, canManage, activeBranchModal, sport, getConfirmedSchoolsForSport]);
 
   // Students belonging to the currently selected school in this sport & affiliation
   const schoolStudents = useMemo(() => {
-    if (!selectedSchoolNameForView) return [];
-    return sportStudents.filter(s => 
-      s.schoolName === selectedSchoolNameForView &&
-      (s.affiliationType || 'non_club') === (activeBranchModal || selectedAffiliation) &&
-      (selectedCatId === 'ALL' || (s.category || '').toUpperCase() === selectedCatId.toUpperCase()) &&
-      (selectedGender === 'ALL' || (s.gender || '').toLowerCase() === selectedGender.toLowerCase())
-    );
-  }, [sportStudents, selectedSchoolNameForView, activeBranchModal, selectedAffiliation, selectedCatId, selectedGender]);
+    if (!sport || !selectedSchoolNameForView) return [];
+    const targetAff = (selectedBranchTournament && selectedBranchTournament.affiliationType) || activeBranchModal || selectedAffiliation || 'non_club';
+    const targetCat = selectedBranchTournament 
+      ? normalizeCategoryKey(selectedBranchTournament.ageCategory) 
+      : (selectedCatId && selectedCatId !== 'ALL' ? normalizeCategoryKey(selectedCatId) : 'ALL');
+    const targetGen = selectedBranchTournament ? selectedBranchTournament.gender : selectedGender;
+
+    return sportStudents.filter(s => {
+      if (!s || s.schoolName !== selectedSchoolNameForView) return false;
+      const sAff = s.affiliationType || 'non_club';
+      const sNormCat = normalizeCategoryKey(s.category);
+      const sGen = s.gender || 'Male';
+
+      const matchAff = sAff === targetAff;
+      const matchCat = targetCat === 'ALL' || sNormCat === targetCat;
+      const matchGen = targetGen === 'ALL' || targetGen === 'Both' || sGen.toLowerCase() === targetGen.toLowerCase();
+
+      return matchAff && matchCat && matchGen;
+    });
+  }, [sportStudents, selectedSchoolNameForView, selectedBranchTournament, activeBranchModal, selectedAffiliation, selectedCatId, selectedGender]);
 
   // Grouped students of this school by category and gender
   const groupedSchoolStudents = useMemo(() => {
@@ -726,12 +973,13 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
     schoolStudents.forEach(s => {
       if (!s.category) return;
       const gen: 'Male' | 'Female' = s.gender === 'Female' ? 'Female' : 'Male';
-      const key = `${s.category}__${gen}`;
+      const normCat = normalizeCategoryKey(s.category);
+      const key = `${normCat}__${gen}`;
       if (!groups[key]) {
         groups[key] = {
-          category: s.category,
+          category: normCat,
           gender: gen,
-          label: getDistinctCategoryLabel(s.category, gen),
+          label: getDistinctCategoryLabel(normCat, gen),
           students: []
         };
       }
@@ -999,7 +1247,7 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
                     </span>
                   </div>
                   <h4 className="text-base font-black text-slate-800 mt-1 group-hover:text-blue-700 transition-colors">
-                    البطولة المدرسية لا منتمين
+                    البطولة الإقليمية المدرسية لغير المنتمين للأندية
                   </h4>
                   <p className="text-xs text-slate-500 font-medium leading-relaxed">
                     خاصة بالتلاميذ المتمدرسين العاديين غير المنخرطين في الأندية الرياضية أو العصب المدنية.
@@ -1036,12 +1284,13 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
                     onClick={(e) => {
                       e.stopPropagation();
                       setSelectedAffiliation('non_club');
+                      setSelectedBranchTournament(null);
                       setSelectedSchoolNameForView(null);
                       setActiveBranchModal('non_club');
                     }}
                     className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black shadow-xs transition-all cursor-pointer flex items-center justify-center gap-1.5 hover:scale-102 active:scale-98"
                   >
-                    <span>دخول واستعراض المؤسسات المشاركة 🔓</span>
+                    <span>دخول واستعراض بطولات هذا الصنف 🔓</span>
                     <ChevronLeft className="w-4 h-4" />
                   </button>
                 </div>
@@ -1054,6 +1303,7 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
                 id="club-affiliated-championship-card"
                 onClick={() => {
                   setSelectedAffiliation('club_affiliated');
+                  setSelectedBranchTournament(null);
                   setSelectedSchoolNameForView(null);
                   setActiveBranchModal('club_affiliated');
                 }}
@@ -1063,14 +1313,14 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
                   <div className="flex items-center justify-between w-full">
                     <span className="text-[11px] font-black px-3 py-1 rounded-full border bg-amber-100 text-amber-900 border-amber-300 flex items-center gap-1.5 shadow-3xs">
                       <span>🟡</span>
-                      <span>بطولة المنتمين للأندية والجمعيات</span>
+                      <span>بطولة المنتمين للأندية</span>
                     </span>
                     <span className="text-[10px] font-black px-2.5 py-0.5 rounded-full bg-amber-100/80 text-amber-900 border border-amber-200">
                       {clubSchoolsCount} مؤسسة مشاركة
                     </span>
                   </div>
                   <h4 className="text-base font-black text-amber-900 mt-1 group-hover:text-amber-950 transition-colors">
-                    البطولة المدرسية للمنتمين للأندية والجمعيات الرياضية
+                    البطولة الإقليمية المدرسية للمنتمين للأندية
                   </h4>
                   <p className="text-xs text-amber-800/80 font-medium leading-relaxed">
                     خاصة بالتلاميذ المتمدرسين الممارسين والمرخصين رسمياً بالنوادي والعصب والجامعات الرياضية.
@@ -1107,12 +1357,13 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
                     onClick={(e) => {
                       e.stopPropagation();
                       setSelectedAffiliation('club_affiliated');
+                      setSelectedBranchTournament(null);
                       setSelectedSchoolNameForView(null);
                       setActiveBranchModal('club_affiliated');
                     }}
                     className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-black shadow-xs transition-all cursor-pointer flex items-center justify-center gap-1.5 hover:scale-102 active:scale-98"
                   >
-                    <span>دخول واستعراض المؤسسات المشاركة 🔓</span>
+                    <span>دخول واستعراض بطولات هذا الصنف 🔓</span>
                     <ChevronLeft className="w-4 h-4" />
                   </button>
                 </div>
@@ -1178,12 +1429,13 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
                     onClick={(e) => {
                       e.stopPropagation();
                       setSelectedAffiliation('open');
+                      setSelectedBranchTournament(null);
                       setSelectedSchoolNameForView(null);
                       setActiveBranchModal('open');
                     }}
                     className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black shadow-xs transition-all cursor-pointer flex items-center justify-center gap-1.5 hover:scale-102 active:scale-98"
                   >
-                    <span>استعراض المشاركين والنتائج 🔓</span>
+                    <span>دخول واستعراض بطولات هذا الصنف 🔓</span>
                     <ChevronLeft className="w-4 h-4" />
                   </button>
                 </div>
@@ -1264,23 +1516,43 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
                           <button
                             type="button"
                             onClick={() => {
+                              if (isDeadlineExpired) {
+                                toast.error('عذراً، لقد انتهى أجل تسجيل وتعديل المشاركين في هذه البطولة 🔒');
+                                return;
+                              }
                               if (isProgrammed) {
                                 setIsBulkRegisterOpen(true);
                               }
                             }}
-                            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black shadow-3xs transition-all cursor-pointer flex items-center gap-1.5"
+                            disabled={isDeadlineExpired}
+                            className={`px-4 py-2 rounded-xl text-xs font-black shadow-3xs transition-all cursor-pointer flex items-center gap-1.5 ${
+                              isDeadlineExpired
+                                ? 'bg-slate-200 text-slate-400 cursor-not-allowed opacity-75'
+                                : 'bg-blue-600 hover:bg-blue-700 text-white'
+                            }`}
                           >
-                            <span>تسجيل المشاركين (المرحلة 2) 👥</span>
+                            <span>{isDeadlineExpired ? 'انتهى أجل التسجيل 🔒' : 'تسجيل المشاركين (المرحلة 2) 👥'}</span>
                           </button>
                         </>
                       ) : (
                         <button
                           type="button"
-                          onClick={() => setIsConfirmModalOpen(true)}
-                          className="px-5 py-2.5 bg-gradient-to-r from-emerald-600 to-emerald-700 hover:from-emerald-500 hover:to-emerald-600 text-white rounded-xl text-xs font-black shadow-md shadow-emerald-700/20 transition-all cursor-pointer flex items-center gap-2 active:scale-98 animate-pulse"
+                          onClick={() => {
+                            if (isDeadlineExpired) {
+                              toast.error('عذراً، لقد انتهى أجل التسجيل وتأكيد مشاركة المؤسسات في هذه البطولة 🔒');
+                              return;
+                            }
+                            setIsConfirmModalOpen(true);
+                          }}
+                          disabled={isDeadlineExpired}
+                          className={`px-5 py-2.5 rounded-xl text-xs font-black shadow-md transition-all cursor-pointer flex items-center gap-2 ${
+                            isDeadlineExpired
+                              ? 'bg-slate-300 text-slate-500 cursor-not-allowed opacity-80'
+                              : 'bg-gradient-to-r from-emerald-600 to-emerald-700 hover:from-emerald-500 hover:to-emerald-600 text-white shadow-emerald-700/20 active:scale-98 animate-pulse'
+                          }`}
                         >
                           <CheckCircle2 className="w-4 h-4" />
-                          <span>تأكيد مشاركة المؤسسة أولاً 📋</span>
+                          <span>{isDeadlineExpired ? 'انتهى أجل التسجيل والتأكيد 🔒' : 'تأكيد مشاركة المؤسسة أولاً 📋'}</span>
                         </button>
                       )}
                     </div>
@@ -1436,61 +1708,67 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
                     <span className="text-[10px] sm:text-xs font-black uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-white/20 text-white border border-white/20 truncate">
-                      {activeBranchModal === 'non_club' ? 'بطولة غير المنتمين للأندية' : 'بطولة المنتمين للأندية'}
+                      {activeBranchModal === 'non_club' ? 'صنف غير المنتمين للأندية' : 'صنف المنتمين للأندية والجمعيات'}
                     </span>
                     <span className="text-[10px] sm:text-xs text-white/80 font-bold">• {sport.name}</span>
                   </div>
                   <h3 className="text-base sm:text-lg md:text-xl font-black text-white mt-1 leading-tight">
-                    {selectedSchoolNameForView
-                      ? `مشاركات مؤسسة: ${selectedSchoolNameForView}`
+                    {selectedBranchTournament
+                      ? selectedSchoolNameForView
+                        ? `مشاركات مؤسسة «${selectedSchoolNameForView}» في ${getBranchTournamentTitle(selectedBranchTournament, activeBranchModal)}`
+                        : getBranchTournamentTitle(selectedBranchTournament, activeBranchModal)
                       : (activeBranchModal === 'non_club'
-                          ? 'المؤسسات التعليمية المشاركة (غير المنتمين)'
-                          : 'المؤسسات التعليمية المشاركة (المنتمون للأندية)')}
+                          ? 'بطولات صنف غير المنتمين للأندية المبرمجة'
+                          : 'بطولات صنف المنتمين للأندية والجمعيات المبرمجة')}
                   </h3>
                 </div>
               </div>
 
               <div className="flex items-center gap-2 flex-wrap w-full lg:w-auto justify-start lg:justify-end shrink-0">
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (!isTeacherAllowedForSport) {
-                      toast.error(`عذراً، بصفتك أستاذ سلك (${teacherCadreAr})، لا يمكنك التسجيل في هذه البطولة المخصصة لـ (${allowedSportLevelsAr})`);
-                      return;
-                    }
-                    setPreselectedSchoolForRegister(selectedSchoolNameForView || undefined);
-                    setIsRegisterModalOpen(true);
-                  }}
-                  className={`px-3 py-2 rounded-xl text-xs sm:text-sm font-black shadow-xs flex items-center gap-1.5 transition-all cursor-pointer hover:scale-102 flex-1 sm:flex-initial justify-center ${
-                    !isTeacherAllowedForSport
-                      ? 'bg-slate-200 text-slate-400 cursor-not-allowed'
-                      : 'bg-emerald-600 hover:bg-emerald-700 text-white'
-                  }`}
-                >
-                  <Plus className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-                  <span>تسجيل واحد تلو الآخر</span>
-                </button>
+                {selectedBranchTournament && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!isTeacherAllowedForSport) {
+                          toast.error(`عذراً، بصفتك أستاذ سلك (${teacherCadreAr})، لا يمكنك التسجيل في هذه البطولة المخصصة لـ (${allowedSportLevelsAr})`);
+                          return;
+                        }
+                        setPreselectedSchoolForRegister(selectedSchoolNameForView || undefined);
+                        setIsRegisterModalOpen(true);
+                      }}
+                      className={`px-3 py-2 rounded-xl text-xs sm:text-sm font-black shadow-xs flex items-center gap-1.5 transition-all cursor-pointer hover:scale-102 flex-1 sm:flex-initial justify-center ${
+                        !isTeacherAllowedForSport
+                          ? 'bg-slate-200 text-slate-400 cursor-not-allowed'
+                          : 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                      }`}
+                    >
+                      <Plus className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                      <span>تسجيل واحد تلو الآخر</span>
+                    </button>
 
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (!isTeacherAllowedForSport) {
-                      toast.error(`عذراً، بصفتك أستاذ سلك (${teacherCadreAr})، لا يمكنك التسجيل في هذه البطولة المخصصة لـ (${allowedSportLevelsAr})`);
-                      return;
-                    }
-                    setPreselectedSchoolForRegister(selectedSchoolNameForView || undefined);
-                    setIsBulkRegisterOpen(true);
-                  }}
-                  className={`px-3 py-2 rounded-xl text-xs sm:text-sm font-black shadow-xs flex items-center gap-1.5 transition-all cursor-pointer hover:scale-102 flex-1 sm:flex-initial justify-center ${
-                    !isTeacherAllowedForSport
-                      ? 'bg-slate-200 text-slate-400 cursor-not-allowed'
-                      : 'bg-amber-500 hover:bg-amber-600 text-slate-950'
-                  }`}
-                  title="تسجيل عدة مشاركين دفعة واحدة لتوفير الوقت"
-                >
-                  <Sparkles className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-                  <span>تسجيل دفعة واحدة ⚡</span>
-                </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!isTeacherAllowedForSport) {
+                          toast.error(`عذراً، بصفتك أستاذ سلك (${teacherCadreAr})، لا يمكنك التسجيل في هذه البطولة المخصصة لـ (${allowedSportLevelsAr})`);
+                          return;
+                        }
+                        setPreselectedSchoolForRegister(selectedSchoolNameForView || undefined);
+                        setIsBulkRegisterOpen(true);
+                      }}
+                      className={`px-3 py-2 rounded-xl text-xs sm:text-sm font-black shadow-xs flex items-center gap-1.5 transition-all cursor-pointer hover:scale-102 flex-1 sm:flex-initial justify-center ${
+                        !isTeacherAllowedForSport
+                          ? 'bg-slate-200 text-slate-400 cursor-not-allowed'
+                          : 'bg-amber-500 hover:bg-amber-600 text-slate-950'
+                      }`}
+                      title="تسجيل عدة مشاركين دفعة واحدة لتوفير الوقت"
+                    >
+                      <Sparkles className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                      <span>تسجيل دفعة واحدة ⚡</span>
+                    </button>
+                  </>
+                )}
 
                 {selectedSchoolNameForView && (
                   <button
@@ -1515,6 +1793,7 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
                   type="button"
                   onClick={() => {
                     setActiveBranchModal(null);
+                    setSelectedBranchTournament(null);
                     setSelectedSchoolNameForView(null);
                   }}
                   className="p-2 rounded-xl bg-white/10 hover:bg-white/20 text-white transition-colors cursor-pointer flex items-center justify-center"
@@ -1527,21 +1806,154 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
 
             {/* Scrollable Body */}
             <div className="p-4 sm:p-6 overflow-y-auto flex-1 bg-slate-50/60 space-y-4">
-              {selectedSchoolNameForView === null ? (
-                /* Schools List View inside the Branch */
+              {selectedBranchTournament === null ? (
+                /* LEVEL 2: Tournaments List inside this Classification Branch */
                 <div className="space-y-4">
-                  {/* Search and summary */}
-                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-white p-3 rounded-2xl border border-slate-200/80 shadow-3xs">
-                    <div className="flex items-center gap-2 flex-1">
-                      <Search className="h-4 w-4 text-slate-400 shrink-0" />
-                      <input
-                        type="text"
-                        placeholder="ابحث عن مؤسسة تعليمية أو فئة عمرية في هذا الصنف..."
-                        value={search}
-                        onChange={(e) => setSearch(e.target.value)}
-                        className="w-full text-xs border-0 focus:ring-0 focus:outline-none text-slate-800 placeholder-slate-400"
-                      />
+                  <div className="bg-white p-4 rounded-2xl border border-slate-200/90 shadow-3xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                    <div>
+                      <h4 className="text-sm font-black text-slate-800 flex items-center gap-2">
+                        <span>🏆 بطولات هذا الصنف المبرمجة ({displayBranchTournaments.length})</span>
+                      </h4>
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        اختر البطولة المطلوبة للولوج إلى استعراض المؤسسات والفرق المشاركة بها وتنزيل لوائح المشاركة.
+                      </p>
                     </div>
+
+                    {canManage && (
+                      <button
+                        onClick={() => onProgramTournament(sport.id)}
+                        className="px-3.5 py-1.5 bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer shrink-0"
+                      >
+                        <Settings className="w-3.5 h-3.5" />
+                        <span>إعداد وإضافة بطولات ⚙️</span>
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Grid of programmed tournaments under this branch */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {displayBranchTournaments.map((t) => {
+                      const tCat = normalizeCategoryKey(t.ageCategory);
+                      const tGender = t.gender;
+                      const tAff = t.affiliationType || activeBranchModal;
+
+                      const tourneyStudents = sportStudents.filter(s =>
+                        (s.affiliationType || 'non_club') === tAff &&
+                        normalizeCategoryKey(s.category) === tCat &&
+                        (tGender === 'Both' || (s.gender || 'Male') === tGender)
+                      );
+                      const tourneySchoolsCount = new Set(tourneyStudents.map(s => s.schoolName).filter(Boolean)).size;
+
+                      return (
+                        <div
+                          key={t.id}
+                          className={`bg-white border-2 rounded-2xl p-5 shadow-3xs hover:shadow-md transition-all cursor-pointer flex flex-col justify-between group min-h-[210px] ${
+                            tAff === 'club_affiliated'
+                              ? 'border-amber-200/90 hover:border-amber-500'
+                              : 'border-slate-200/90 hover:border-blue-500'
+                          }`}
+                          onClick={() => {
+                            setSelectedBranchTournament(t);
+                            setSelectedCatId(normalizeCategoryKey(t.ageCategory));
+                            setSelectedGender(t.gender as any);
+                            setSelectedAffiliation((t.affiliationType || activeBranchModal || 'non_club') as 'non_club' | 'club_affiliated');
+                            setSelectedSchoolNameForView(null);
+                          }}
+                        >
+                          <div className="space-y-3">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className={`text-[11px] font-black px-3 py-1 rounded-full border flex items-center gap-1.5 shadow-3xs ${
+                                tAff === 'club_affiliated'
+                                  ? 'bg-amber-50 text-amber-800 border-amber-200'
+                                  : 'bg-blue-50 text-blue-800 border-blue-200'
+                              }`}>
+                                <span>🏆</span>
+                                <span>{getDistinctCategoryLabel(t.ageCategory, t.gender)} ({t.ageCategory})</span>
+                              </span>
+                              <span className={`text-[10px] font-black px-2.5 py-0.5 rounded-full border ${
+                                t.gender === 'Female' ? 'bg-pink-50 text-pink-700 border-pink-200' : 
+                                tAff === 'club_affiliated' ? 'bg-amber-50 text-amber-700 border-amber-200' :
+                                'bg-blue-50 text-blue-700 border-blue-200'
+                              }`}>
+                                {t.gender === 'Female' ? '👧 إناث' : t.gender === 'Male' ? '👦 ذكور' : '👫 ذكور وإناث'}
+                              </span>
+                            </div>
+
+                            <h4 className={`text-base font-black transition-colors ${
+                              tAff === 'club_affiliated' ? 'text-amber-900 group-hover:text-amber-700' : 'text-slate-800 group-hover:text-blue-700'
+                            }`}>
+                              {getBranchTournamentTitle(t, activeBranchModal)}
+                            </h4>
+
+                            <p className="text-xs text-slate-500 font-medium">
+                              السنوات المعنية: <strong className="font-mono text-slate-700">{getCategoryYearsLabel(t.ageCategory, activeSeason, sport.id)}</strong>
+                            </p>
+
+                            <div className="flex items-center gap-2 text-xs font-bold pt-2.5 border-t border-slate-100 text-slate-600">
+                              <span className="bg-slate-50 px-2.5 py-1 rounded-lg border border-slate-200/80">🏫 المؤسسات: {tourneySchoolsCount}</span>
+                              <span className={`px-2.5 py-1 rounded-lg border ${
+                                tAff === 'club_affiliated' ? 'bg-amber-50 text-amber-800 border-amber-200' : 'bg-blue-50 text-blue-800 border-blue-200'
+                              }`}>👥 المشاركون: {tourneyStudents.length}</span>
+                            </div>
+                          </div>
+
+                          <div className="mt-4 pt-3 border-t border-slate-100">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedBranchTournament(t);
+                                setSelectedCatId(normalizeCategoryKey(t.ageCategory));
+                                setSelectedGender(t.gender as any);
+                                setSelectedSchoolNameForView(null);
+                              }}
+                              className={`w-full py-2.5 px-4 text-white rounded-xl text-xs font-black shadow-xs transition-all cursor-pointer flex items-center justify-center gap-2 group-hover:scale-102 ${
+                                tAff === 'club_affiliated'
+                                  ? 'bg-amber-500 hover:bg-amber-600'
+                                  : 'bg-blue-600 hover:bg-blue-700'
+                              }`}
+                            >
+                              <span>دخول واستعراض المؤسسات المشاركة 🔓</span>
+                              <ChevronLeft className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : selectedSchoolNameForView === null ? (
+                /* LEVEL 3A: Participating Schools View for Selected Tournament */
+                <div className="space-y-4">
+                  {/* Tournament context bar with Back button */}
+                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-white p-3.5 rounded-2xl border border-slate-200/80 shadow-3xs">
+                    <div className="flex items-center gap-3">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedBranchTournament(null);
+                          setSelectedSchoolNameForView(null);
+                          setSelectedCatId('ALL');
+                          setSelectedGender('ALL');
+                        }}
+                        className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl text-xs font-black flex items-center gap-1.5 transition-colors cursor-pointer border border-slate-300"
+                        title="الرجوع للائحة بطولات هذا الصنف"
+                      >
+                        <ArrowRight className="w-4 h-4" />
+                        <span>← الرجوع لبطولات هذا الصنف</span>
+                      </button>
+
+                      <div>
+                        <span className="text-[10px] text-slate-400 font-bold block">البطولة المختارة:</span>
+                        <h4 className="text-xs sm:text-sm font-black text-slate-900 flex items-center gap-2">
+                          <span>🏆 {getBranchTournamentTitle(selectedBranchTournament, activeBranchModal)}</span>
+                          <span className="text-[10px] font-mono text-slate-500">
+                            ({getCategoryYearsLabel(selectedBranchTournament.ageCategory, activeSeason, sport.id)})
+                          </span>
+                        </h4>
+                      </div>
+                    </div>
+
                     <div className="flex items-center gap-2 shrink-0">
                       <span className="text-[11px] font-bold text-slate-600 bg-slate-100 px-3 py-1.5 rounded-xl border border-slate-200">
                         عدد المؤسسات: {participatingSchools.length}
@@ -1558,142 +1970,229 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
                     </div>
                   </div>
 
+                  {/* Search bar */}
+                  <div className="flex items-center gap-2 bg-white p-3 rounded-2xl border border-slate-200/80 shadow-3xs">
+                    <Search className="h-4 w-4 text-slate-400 shrink-0" />
+                    <input
+                      type="text"
+                      placeholder="ابحث عن مؤسسة تعليمية في هذه البطولة..."
+                      value={search}
+                      onChange={(e) => setSearch(e.target.value)}
+                      className="w-full text-xs border-0 focus:ring-0 focus:outline-none text-slate-800 placeholder-slate-400"
+                    />
+                  </div>
+
                   {/* Grid of schools */}
                   {participatingSchools.length > 0 ? (
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                      {participatingSchools.map((sch) => (
-                        <div
-                          key={sch.name}
-                          onClick={() => setSelectedSchoolNameForView(sch.name)}
-                          className="bg-white border border-slate-200/90 rounded-2xl p-4 sm:p-5 shadow-3xs hover:shadow-md hover:border-blue-400 transition-all cursor-pointer flex flex-col justify-between min-h-[210px] group"
-                        >
-                          <div className="space-y-3">
-                            <div className="flex items-start justify-between gap-2">
-                              <div className="flex items-center gap-2.5">
-                                <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center font-bold border border-blue-100 shrink-0 text-lg">
-                                  🏫
-                                </div>
-                                <div className="space-y-1">
-                                  <h4 className="text-sm font-black text-slate-900 leading-tight group-hover:text-blue-700 transition-colors">
-                                    {sch.name}
-                                  </h4>
-                                  <span className={`inline-flex items-center text-[10px] font-black px-2 py-0.5 rounded-md border ${
-                                    activeBranchModal === 'non_club'
-                                      ? 'bg-blue-50/50 text-blue-700 border-blue-100'
-                                      : 'bg-amber-50/50 text-amber-700 border-amber-100'
+                      {participatingSchools.map((sch) => {
+                        const isOwn = isUserSchool(sch.name);
+                        const canManageThis = canManageSchool(sch.name);
+
+                        return (
+                          <div
+                            key={sch.name}
+                            onClick={() => setSelectedSchoolNameForView(sch.name)}
+                            className={`rounded-2xl p-4 sm:p-5 shadow-3xs hover:shadow-md transition-all cursor-pointer flex flex-col justify-between min-h-[220px] group border-2 ${
+                              isOwn
+                                ? 'bg-gradient-to-br from-slate-900 via-slate-800 to-indigo-950 text-white border-blue-400 ring-2 ring-blue-500/30 shadow-md'
+                                : 'bg-white border-slate-200/90 hover:border-blue-400 text-slate-800'
+                            }`}
+                          >
+                            <div className="space-y-3">
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="flex items-center gap-2.5">
+                                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-bold border shrink-0 text-lg ${
+                                    isOwn
+                                      ? 'bg-blue-500/20 text-blue-300 border-blue-400/30'
+                                      : 'bg-blue-50 text-blue-600 border-blue-100'
                                   }`}>
-                                    {activeBranchModal === 'non_club' ? 'صنف: غير المنتمين للأندية' : 'صنف: المنتمين للأندية والجمعيات'}
-                                  </span>
+                                    🏫
+                                  </div>
+                                  <div className="space-y-1">
+                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                      <h4 className={`text-sm font-black leading-tight transition-colors ${
+                                        isOwn ? 'text-white group-hover:text-blue-300' : 'text-slate-900 group-hover:text-blue-700'
+                                      }`}>
+                                        {sch.name}
+                                      </h4>
+                                      {isOwn && (
+                                        <span className="text-[9px] font-black px-2 py-0.5 rounded-full bg-blue-500 text-white shadow-3xs flex items-center gap-1">
+                                          <span>⭐</span>
+                                          <span>مؤسستي التابعة</span>
+                                        </span>
+                                      )}
+                                    </div>
+                                    <span className={`inline-flex items-center text-[10px] font-black px-2 py-0.5 rounded-md border ${
+                                      isOwn
+                                        ? 'bg-white/10 text-blue-200 border-white/20'
+                                        : activeBranchModal === 'non_club'
+                                          ? 'bg-blue-50/50 text-blue-700 border-blue-100'
+                                          : 'bg-amber-50/50 text-amber-700 border-amber-100'
+                                    }`}>
+                                      {activeBranchModal === 'non_club' ? 'صنف: غير المنتمين للأندية' : 'صنف: المنتمين للأندية والجمعيات'}
+                                    </span>
+                                  </div>
                                 </div>
+                                <span className={`text-[11px] font-black px-3 py-1 rounded-full border shrink-0 whitespace-nowrap shadow-3xs ${
+                                  isOwn
+                                    ? 'bg-blue-600/30 text-blue-200 border-blue-400/40'
+                                    : 'bg-blue-50 text-blue-800 border-blue-200'
+                                }`}>
+                                  {sch.totalCount} مشارك(ة)
+                                </span>
                               </div>
-                              <span className="text-[11px] font-black bg-blue-50 text-blue-800 px-3 py-1 rounded-full border border-blue-200 shrink-0 whitespace-nowrap shadow-3xs">
-                                {sch.totalCount} مشارك(ة)
-                              </span>
+
+                              {/* Gender breakdown */}
+                              <div className="flex gap-2 text-[11px] font-bold">
+                                {(!selectedBranchTournament || (selectedBranchTournament.gender !== 'Female' && selectedBranchTournament.gender !== 'female')) && selectedGender !== 'Female' && (
+                                  <span className={`px-2.5 py-1 rounded-lg border ${
+                                    isOwn
+                                      ? 'bg-white/10 text-blue-200 border-white/15'
+                                      : 'bg-blue-50/70 text-blue-800 border-blue-200/70'
+                                  }`}>
+                                    👦 ذكور: {sch.maleCount}
+                                  </span>
+                                )}
+                                {(!selectedBranchTournament || (selectedBranchTournament.gender !== 'Male' && selectedBranchTournament.gender !== 'male')) && selectedGender !== 'Male' && (
+                                  <span className={`px-2.5 py-1 rounded-lg border ${
+                                    isOwn
+                                      ? 'bg-white/10 text-pink-200 border-white/15'
+                                      : 'bg-pink-50/70 text-pink-800 border-pink-200/70'
+                                  }`}>
+                                    👧 إناث: {sch.femaleCount}
+                                  </span>
+                                )}
+                              </div>
+
+                              {/* Categories tags - clearly separated and prominent */}
+                              <div className={`flex flex-wrap gap-2 pt-2.5 border-t ${isOwn ? 'border-white/10' : 'border-slate-100'}`}>
+                                {sch.genderCategories.map((gCat) => (
+                                  <button
+                                    key={gCat.key}
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setPdfSchoolName(sch.name);
+                                      setPdfPreselectedCat(gCat.category);
+                                      setPdfPreselectedGender(gCat.gender);
+                                      setIsPdfModalOpen(true);
+                                    }}
+                                    className={`text-xs font-black px-3 py-1 rounded-xl border flex items-center gap-1.5 shadow-3xs transition-all hover:scale-105 cursor-pointer hover:shadow-xs ${
+                                      isOwn
+                                        ? (gCat.gender === 'Female'
+                                          ? 'bg-pink-500/20 text-pink-200 border-pink-400/30 hover:bg-pink-500/30'
+                                          : 'bg-blue-500/20 text-blue-200 border-blue-400/30 hover:bg-blue-500/30')
+                                        : (gCat.gender === 'Female'
+                                          ? 'bg-pink-50 text-pink-800 border-pink-200 hover:bg-pink-100'
+                                          : 'bg-blue-50 text-blue-800 border-blue-200 hover:bg-blue-100')
+                                    }`}
+                                    title={`معاينة لائحة المشاركة لـ ${gCat.label}`}
+                                  >
+                                    <span>{gCat.gender === 'Female' ? '👧' : '👦'}</span>
+                                    <span>{gCat.label}</span>
+                                    <span className="text-[10px] font-black opacity-75 font-mono">({gCat.count})</span>
+                                  </button>
+                                ))}
+                              </div>
                             </div>
 
-                            {/* Gender breakdown */}
-                            <div className="flex gap-2 text-[11px] font-bold text-slate-600">
-                              <span className="bg-slate-50 px-2.5 py-1 rounded-lg border border-slate-200/70">👦 ذكور: {sch.maleCount}</span>
-                              <span className="bg-slate-50 px-2.5 py-1 rounded-lg border border-slate-200/70">👧 إناث: {sch.femaleCount}</span>
-                            </div>
+                            <div className={`mt-4 pt-3 border-t flex flex-wrap items-center justify-between gap-2 ${
+                              isOwn ? 'border-white/10' : 'border-slate-100'
+                            }`}>
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                {canManageThis ? (
+                                  <>
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        if (!isTeacherAllowedForSport) {
+                                          toast.error(`عذراً، أنت مسجل كأستاذ سلك (${teacherCadreAr})، ولا يمكنك التسجيل في هذه البطولة المخصصة لـ (${allowedSportLevelsAr})`);
+                                          return;
+                                        }
+                                        setPreselectedSchoolForRegister(sch.name);
+                                        setIsRegisterModalOpen(true);
+                                      }}
+                                      className="px-2.5 py-1.5 text-xs font-bold border rounded-xl flex items-center gap-1 transition-all cursor-pointer shadow-3xs hover:scale-102 text-white bg-emerald-600 hover:bg-emerald-700 border-emerald-500"
+                                      title={`إضافة مشارك جديد لمؤسسة ${sch.name}`}
+                                    >
+                                      <Plus className="w-3.5 h-3.5" />
+                                      <span>إضافة مشارك</span>
+                                    </button>
 
-                            {/* Categories tags - clearly separated and prominent */}
-                            <div className="flex flex-wrap gap-2 pt-2.5 border-t border-slate-100">
-                              {sch.genderCategories.map((gCat) => (
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setSchoolToWithdraw({ schoolName: sch.name, studentCount: sch.totalCount });
+                                      }}
+                                      className="px-2 py-1.5 text-xs font-bold border rounded-xl flex items-center gap-1 transition-all cursor-pointer shadow-3xs text-red-600 hover:text-red-700 bg-red-50 hover:bg-red-100 border-red-200"
+                                      title={canManage ? `سحب مشاركة مؤسسة ${sch.name} من فرع هذه البطولة` : `سحب مشاركة ثانويتك من فرع هذه البطولة`}
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                      <span>سحب المشاركة</span>
+                                    </button>
+                                  </>
+                                ) : (
+                                  <span className="text-[10px] font-bold text-slate-400 bg-slate-100 px-2 py-1 rounded-lg border border-slate-200 flex items-center gap-1">
+                                    <Lock className="w-3 h-3" />
+                                    <span>للاطلاع فقط</span>
+                                  </span>
+                                )}
+
                                 <button
-                                  key={gCat.key}
                                   type="button"
                                   onClick={(e) => {
                                     e.stopPropagation();
                                     setPdfSchoolName(sch.name);
-                                    setPdfPreselectedCat(gCat.category);
-                                    setPdfPreselectedGender(gCat.gender);
+                                    
+                                    // Determine preselected category & gender
+                                    let finalCat = 'ALL';
+                                    if (selectedCatId && selectedCatId !== 'ALL') {
+                                      finalCat = selectedCatId;
+                                    } else if (sch.genderCategories.length > 0) {
+                                      finalCat = sch.genderCategories[0].category;
+                                    }
+                                    
+                                    let finalGender: 'ALL' | 'Male' | 'Female' = 'ALL';
+                                    if (selectedGender && selectedGender !== 'ALL') {
+                                      finalGender = selectedGender;
+                                    } else if (sch.genderCategories.length > 0) {
+                                      finalGender = sch.genderCategories[0].gender;
+                                    }
+                                    
+                                    setPdfPreselectedCat(finalCat);
+                                    setPdfPreselectedGender(finalGender);
                                     setIsPdfModalOpen(true);
                                   }}
-                                  className={`text-xs font-black px-3 py-1 rounded-xl border flex items-center gap-1.5 shadow-3xs transition-all hover:scale-105 cursor-pointer hover:shadow-xs ${
-                                    gCat.gender === 'Female'
-                                      ? 'bg-pink-50 text-pink-800 border-pink-200 hover:bg-pink-100'
-                                      : 'bg-blue-50 text-blue-800 border-blue-200 hover:bg-blue-100'
+                                  className={`px-2.5 py-1.5 text-xs font-bold border rounded-lg flex items-center gap-1 transition-colors cursor-pointer ${
+                                    isOwn
+                                      ? 'text-sky-200 bg-sky-950/60 hover:bg-sky-900 border-sky-400/30'
+                                      : 'text-sky-700 bg-sky-50 hover:bg-sky-100 border-sky-200'
                                   }`}
-                                  title={`معاينة لائحة المشاركة لـ ${gCat.label}`}
+                                  title="معاينة لائحة المشاركة"
                                 >
-                                  <span>{gCat.gender === 'Female' ? '👧' : '👦'}</span>
-                                  <span>{gCat.label}</span>
-                                  <span className="text-[10px] font-black opacity-75 font-mono">({gCat.count})</span>
+                                  <FileText className="w-3.5 h-3.5" />
+                                  <span>لائحة المشاركة</span>
                                 </button>
-                              ))}
+                              </div>
+
+                              <div className={`flex items-center gap-1 text-[11px] font-black ${
+                                isOwn ? 'text-blue-300 group-hover:text-blue-200' : 'text-blue-600 group-hover:text-blue-700'
+                              }`}>
+                                <span>دخول واستعراض</span>
+                                <ArrowLeft className="w-3.5 h-3.5 group-hover:-translate-x-1 transition-transform" />
+                              </div>
                             </div>
                           </div>
-
-                          <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between gap-2">
-                            <div className="flex items-center gap-1.5">
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  if (!isTeacherAllowedForSport) {
-                                    toast.error(`عذراً، أنت مسجل كأستاذ سلك (${teacherCadreAr})، ولا يمكنك التسجيل في هذه البطولة المخصصة لـ (${allowedSportLevelsAr})`);
-                                    return;
-                                  }
-                                  setPreselectedSchoolForRegister(sch.name);
-                                  setIsRegisterModalOpen(true);
-                                }}
-                                className={`px-2.5 py-1.5 text-xs font-bold border rounded-xl flex items-center gap-1 transition-all cursor-pointer shadow-3xs hover:scale-102 ${
-                                  !isTeacherAllowedForSport
-                                    ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed'
-                                    : 'text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border-emerald-200'
-                                }`}
-                                title={!isTeacherAllowedForSport ? 'غير مسموح لسلكك التعليمي' : `إضافة مشارك جديد لمؤسسة ${sch.name}`}
-                              >
-                                <Plus className="w-3.5 h-3.5" />
-                                <span>إضافة مشارك</span>
-                              </button>
-
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setPdfSchoolName(sch.name);
-                                  
-                                  // Determine preselected category & gender
-                                  let finalCat = 'ALL';
-                                  if (selectedCatId && selectedCatId !== 'ALL') {
-                                    finalCat = selectedCatId;
-                                  } else if (sch.genderCategories.length > 0) {
-                                    finalCat = sch.genderCategories[0].category;
-                                  }
-                                  
-                                  let finalGender: 'ALL' | 'Male' | 'Female' = 'ALL';
-                                  if (selectedGender && selectedGender !== 'ALL') {
-                                    finalGender = selectedGender;
-                                  } else if (sch.genderCategories.length > 0) {
-                                    finalGender = sch.genderCategories[0].gender;
-                                  }
-                                  
-                                  setPdfPreselectedCat(finalCat);
-                                  setPdfPreselectedGender(finalGender);
-                                  setIsPdfModalOpen(true);
-                                }}
-                                className="px-2.5 py-1.5 text-xs font-bold text-sky-700 bg-sky-50 hover:bg-sky-100 border border-sky-200 rounded-lg flex items-center gap-1 transition-colors cursor-pointer"
-                                title="معاينة لائحة المشاركة"
-                              >
-                                <FileText className="w-3.5 h-3.5" />
-                                <span>لائحة المشاركة</span>
-                              </button>
-                            </div>
-
-                            <div className="flex items-center gap-1 text-[11px] font-black text-blue-600 group-hover:text-blue-700">
-                              <span>دخول واستعراض</span>
-                              <ArrowLeft className="w-3.5 h-3.5 group-hover:-translate-x-1 transition-transform" />
-                            </div>
-                          </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   ) : (
                     <div className="p-12 text-center bg-white border border-slate-200 rounded-3xl text-slate-400 space-y-3">
                       <Building2 className="h-12 w-12 mx-auto text-slate-300" />
-                      <p className="text-sm font-bold text-slate-700">لا توجد مؤسسات تعليمية مسجلة في هذا الصنف حالياً</p>
+                      <p className="text-sm font-bold text-slate-700">لا توجد مؤسسات تعليمية مسجلة في هذه البطولة حالياً</p>
                       <button
                         type="button"
                         onClick={() => {
@@ -1747,27 +2246,43 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <span className="text-xs font-black bg-blue-50 border border-blue-200 text-blue-800 px-3 py-1.5 rounded-xl">
                         إجمالي المشاركين: {schoolStudents.length} تلميذ(ة)
                       </span>
 
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const firstCoach = schoolStudents.find(s => s.coachName);
-                          setCoachNameInput(firstCoach?.coachName || '');
-                          setCoachLeaseInput(firstCoach?.coachLeaseNumber || '');
-                          setCoachPhoneInput(firstCoach?.coachPhone || '');
-                          setCoachCategoryTarget('ALL');
-                          setIsCoachModalOpen(true);
-                        }}
-                        className="px-3.5 py-1.5 bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs rounded-xl flex items-center gap-1.5 cursor-pointer shadow-xs transition-colors"
-                        title="تعديل بيانات الأستاذ المؤطر لهذه المؤسسة عند الطوارئ"
-                      >
-                        <Edit className="w-3.5 h-3.5" />
-                        <span>تعديل المؤطر</span>
-                      </button>
+                      {selectedSchoolNameForView && canManageSchool(selectedSchoolNameForView) && (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const firstCoach = schoolStudents.find(s => s.coachName);
+                              setCoachNameInput(firstCoach?.coachName || '');
+                              setCoachLeaseInput(firstCoach?.coachLeaseNumber || '');
+                              setCoachPhoneInput(firstCoach?.coachPhone || '');
+                              setCoachCategoryTarget('ALL');
+                              setIsCoachModalOpen(true);
+                            }}
+                            className="px-3.5 py-1.5 bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs rounded-xl flex items-center gap-1.5 cursor-pointer shadow-xs transition-colors"
+                            title="تعديل بيانات الأستاذ المؤطر لهذه المؤسسة عند الطوارئ"
+                          >
+                            <Edit className="w-3.5 h-3.5" />
+                            <span>تعديل المؤطر</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSchoolToWithdraw({ schoolName: selectedSchoolNameForView, studentCount: schoolStudents.length });
+                            }}
+                            className="px-3.5 py-1.5 bg-red-600 hover:bg-red-700 text-white font-bold text-xs rounded-xl flex items-center gap-1.5 cursor-pointer shadow-xs transition-colors"
+                            title={canManage ? `سحب مشاركة مؤسسة ${selectedSchoolNameForView} من فرع هذه البطولة` : `سحب مشاركة ثانويتك من فرع هذه البطولة`}
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                            <span>سحب مشاركة المؤسسة</span>
+                          </button>
+                        </>
+                      )}
 
                       {canManage && (
                         <button
@@ -1867,22 +2382,24 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
                           </div>
                         </div>
 
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const firstCoach = schoolStudents.find(s => s.coachName);
-                            setCoachNameInput(firstCoach?.coachName || (isDefaultFromUser && userProfile?.fullName ? userProfile.fullName : ''));
-                            setCoachLeaseInput(firstCoach?.coachLeaseNumber || (isDefaultFromUser && userProfile?.leaseNumber ? userProfile.leaseNumber : ''));
-                            setCoachPhoneInput(firstCoach?.coachPhone || (isDefaultFromUser && userProfile?.phone ? userProfile.phone : ''));
-                            setCoachCategoryTarget('ALL');
-                            setIsCoachModalOpen(true);
-                          }}
-                          className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs rounded-xl flex items-center gap-1.5 cursor-pointer shadow-xs transition-colors"
-                          title="تعديل بيانات الأستاذ المؤطر لهذه المؤسسة عند الطوارئ"
-                        >
-                          <Edit className="w-3.5 h-3.5" />
-                          <span>تعديل بيانات المؤطر</span>
-                        </button>
+                        {selectedSchoolNameForView && canManageSchool(selectedSchoolNameForView) && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const firstCoach = schoolStudents.find(s => s.coachName);
+                              setCoachNameInput(firstCoach?.coachName || (isDefaultFromUser && userProfile?.fullName ? userProfile.fullName : ''));
+                              setCoachLeaseInput(firstCoach?.coachLeaseNumber || (isDefaultFromUser && userProfile?.leaseNumber ? userProfile.leaseNumber : ''));
+                              setCoachPhoneInput(firstCoach?.coachPhone || (isDefaultFromUser && userProfile?.phone ? userProfile.phone : ''));
+                              setCoachCategoryTarget('ALL');
+                              setIsCoachModalOpen(true);
+                            }}
+                            className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs rounded-xl flex items-center gap-1.5 cursor-pointer shadow-xs transition-colors"
+                            title="تعديل بيانات الأستاذ المؤطر لهذه المؤسسة عند الطوارئ"
+                          >
+                            <Edit className="w-3.5 h-3.5" />
+                            <span>تعديل بيانات المؤطر</span>
+                          </button>
+                        )}
                       </div>
                     );
                   })()}
@@ -1915,20 +2432,22 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
                                   {grp.students.length} تلميذ(ة) مشارك
                                 </span>
 
-                                <button
-                                  type="button"
-                                  onClick={() => setCategoryToDelete({
-                                    category: grp.category,
-                                    gender: grp.gender,
-                                    label: grp.label,
-                                    count: grp.students.length
-                                  })}
-                                  className="px-2.5 py-1 text-[11px] font-bold text-red-600 hover:text-red-700 bg-red-50 hover:bg-red-100 border border-red-200 rounded-lg flex items-center gap-1 transition-colors cursor-pointer shadow-3xs"
-                                  title="حذف هذه الفئة وجميع المشاركين المسجلين بها"
-                                >
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                  <span>حذف الفئة</span>
-                                </button>
+                                {selectedSchoolNameForView && canManageSchool(selectedSchoolNameForView) && (
+                                  <button
+                                    type="button"
+                                    onClick={() => setCategoryToDelete({
+                                      category: grp.category,
+                                      gender: grp.gender,
+                                      label: grp.label,
+                                      count: grp.students.length
+                                    })}
+                                    className="px-2.5 py-1 text-[11px] font-bold text-red-600 hover:text-red-700 bg-red-50 hover:bg-red-100 border border-red-200 rounded-lg flex items-center gap-1 transition-colors cursor-pointer shadow-3xs"
+                                    title="حذف هذه الفئة وجميع المشاركين المسجلين بها"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                    <span>حذف الفئة</span>
+                                  </button>
+                                )}
                               </div>
                             </div>
 
@@ -2598,14 +3117,76 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
         </div>
       )}
 
+      {/* Withdraw School Participation Confirmation Modal */}
+      {schoolToWithdraw && (
+        <div className="fixed inset-0 z-80 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="w-full max-w-md bg-white rounded-3xl shadow-2xl border border-red-100 overflow-hidden">
+            <div className="p-5 bg-gradient-to-r from-red-600 via-rose-600 to-red-700 text-white flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center">
+                  <Trash2 className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-black">تأكيد سحب مشاركة المؤسسة</h3>
+                  <p className="text-[11px] text-white/80">{schoolToWithdraw.schoolName}</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSchoolToWithdraw(null)}
+                className="p-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4">
+              <div className="p-4 bg-red-50 border border-red-200 rounded-2xl text-xs space-y-2 text-red-900">
+                <p className="font-black text-sm text-red-700 flex items-center gap-1.5">
+                  <AlertCircle className="w-4 h-4 shrink-0" />
+                  <span>تنبيه هام: سحب المشاركة من فرع هذه البطولة</span>
+                </p>
+                <p className="font-medium leading-relaxed">
+                  أنت على وشك سحب مشاركة مؤسسة <strong>"{schoolToWithdraw.schoolName}"</strong> من <strong>{selectedBranchTournament ? getBranchTournamentTitle(selectedBranchTournament, activeBranchModal) : 'فرع هذه البطولة'}</strong>{schoolToWithdraw.studentCount > 0 ? ` وإلغاء تسجيل جميع التلاميذ المسجلين بها في هذا الفرع وعددهم (${schoolToWithdraw.studentCount}) مشارك(ة)` : ''}.
+                </p>
+                <p className="text-[11px] text-red-600 font-bold bg-white p-2.5 rounded-xl border border-red-200">
+                  ⚠️ لن تظهر المؤسسة في لائحة المشاركين بهذا الفرع أو في القرعة الإلكترونية بعد هذا الإجراء، ويمكن إعادة تأكيد المشاركة والتسجيل لاحقاً طالما أن باب التسجيل ما زال مفتوحاً.
+                </p>
+              </div>
+
+              <div className="flex items-center justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  disabled={isWithdrawingSchool}
+                  onClick={() => setSchoolToWithdraw(null)}
+                  className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition-colors cursor-pointer"
+                >
+                  إلغاء
+                </button>
+                <button
+                  type="button"
+                  disabled={isWithdrawingSchool}
+                  onClick={executeWithdrawSchool}
+                  className="px-5 py-2.5 bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white font-black text-xs rounded-xl shadow-xs transition-colors cursor-pointer flex items-center gap-1.5"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  <span>{isWithdrawingSchool ? 'جاري سحب المشاركة...' : 'تأكيد سحب المشاركة نهائياً'}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
 
       {/* Electronic Draw and Match Scheduling Modal */}
-      {isDrawModalOpen && (
+      {isDrawModalOpen && sport && (
         <ElectronicDrawModal
           isOpen={isDrawModalOpen}
           onClose={() => setIsDrawModalOpen(false)}
           currentUser={userProfile}
           initialSportId={sport.id}
+          initialTournamentId={sportTournaments.length === 1 ? sportTournaments[0].id : undefined}
           onMatchesCreated={() => {
             if (onRefreshData) onRefreshData();
           }}

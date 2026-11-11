@@ -1017,7 +1017,7 @@ export const CrossCountryPodiumView: React.FC<CrossCountryPodiumViewProps> = ({
               }`}
             >
               <span>⚪</span>
-              <span>بطولة غير المنتمين (المدرسي)</span>
+              <span>بطولة غير المنتمين للأندية</span>
               <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${
                 selectedAffiliation === 'non_club' ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-700'
               }`}>
@@ -1035,7 +1035,7 @@ export const CrossCountryPodiumView: React.FC<CrossCountryPodiumViewProps> = ({
               }`}
             >
               <span>🟡</span>
-              <span>بطولة المنتمين للأندية</span>
+              <span>بطولة المنتمين للأندية والجمعيات</span>
               <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${
                 selectedAffiliation === 'club_affiliated' ? 'bg-slate-950/20 text-slate-950' : 'bg-amber-200 text-amber-950'
               }`}>

@@ -342,6 +342,7 @@ export const RegisterStudentModal: React.FC<RegisterStudentModalProps> = ({
       };
 
       await DataService.addStudent(studentData);
+      await DataService.cancelSchoolWithdrawal(sport.id, resolvedSchoolName);
       toast.success(`تم تسجيل التلميذ(ة) ${fullName} ببطولة ${sport.name} بنجاح!`);
       
       // Reset & close
@@ -761,7 +762,7 @@ export const RegisterStudentModal: React.FC<RegisterStudentModalProps> = ({
                 <span className="flex items-center gap-2">
                   <span>{affiliationType === 'club_affiliated' ? '🟡' : '⚪'}</span>
                   <span className="font-extrabold text-blue-950 dark:text-blue-100">
-                    {affiliationType === 'club_affiliated' ? 'منتمي لنادي (بطولة المنتمين)' : 'لا منتمي (مدرسي فقط)'}
+                    {affiliationType === 'club_affiliated' ? 'منتمي لنادي (بطولة المنتمين للأندية)' : 'لا منتمي (بطولة غير المنتمين للأندية)'}
                   </span>
                 </span>
                 <span className="text-[10px] text-slate-400 dark:text-slate-500 font-bold flex items-center gap-1">

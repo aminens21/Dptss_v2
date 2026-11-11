@@ -4,6 +4,7 @@ import { doc, getDoc, setDoc, serverTimestamp, query, collection, where, getDocs
 import { auth, db } from '../firebase/config';
 import { User, Role, SUPER_ADMIN_EMAILS, Directorate } from '../types';
 import { DataService } from '../lib/dataService';
+import { isFlexibleEmailMatch } from '../lib/utils';
 
 interface AuthContextType {
   currentUser: FirebaseUser | null;
@@ -145,7 +146,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           // Check directorates to see if this user is a directorate admin
           const directorates = await DataService.getDirectorates();
           const managedDirectorate = directorates.find(d => 
-            (d.adminEmails || []).some(ae => ae.trim().toLowerCase() === cleanUserEmail)
+            (d.adminEmails || []).some(ae => isFlexibleEmailMatch(ae, cleanUserEmail))
           );
 
           let userDoc = await getDoc(doc(db, 'users', user.uid));
@@ -155,23 +156,54 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           if (userDoc.exists()) {
             matchedData = userDoc.data();
           } else {
-            // Check if there is another user document with the same email in Firestore (pre-registered by admin)
+            // Check if there is another user document with matching email in Firestore
             try {
-              const q = query(collection(db, 'users'), where('email', '==', cleanUserEmail));
-              const querySnap = await getDocs(q);
-              if (!querySnap.empty) {
-                const foundDoc = querySnap.docs[0];
-                matchedData = foundDoc.data();
-                docId = foundDoc.id;
+              const snap = await getDocs(collection(db, 'users'));
+              if (!snap.empty) {
+                const foundDoc = snap.docs.find(d => {
+                  const data = d.data();
+                  return data.email && isFlexibleEmailMatch(data.email, cleanUserEmail);
+                });
+                if (foundDoc) {
+                  matchedData = foundDoc.data();
+                  docId = foundDoc.id;
+                }
               }
             } catch (err) {
               console.warn("Error querying users by email:", err);
             }
           }
 
+          // Also check DataService users & teachers cache if not found directly
+          if (!matchedData) {
+            try {
+              const allUsers = await DataService.getUsers();
+              const foundUser = allUsers.find(u => u.email && isFlexibleEmailMatch(u.email, cleanUserEmail));
+              if (foundUser) {
+                matchedData = foundUser;
+                docId = foundUser.id || user.uid;
+              }
+            } catch (err) {
+              console.warn("Error querying DataService users by email:", err);
+            }
+          }
+
+          if (!matchedData) {
+            try {
+              const allTeachers = await DataService.getTeachers();
+              const foundTeacher = allTeachers.find(t => t.email && isFlexibleEmailMatch(t.email, cleanUserEmail));
+              if (foundTeacher) {
+                matchedData = foundTeacher;
+                docId = foundTeacher.id || user.uid;
+              }
+            } catch (err) {
+              console.warn("Error querying DataService teachers by email:", err);
+            }
+          }
+
           if (matchedData) {
             const data = matchedData as User;
-            let role: Role = data.role;
+            let role: Role = data.role || 'TEACHER';
             if (isSuperAdmin) {
               role = 'CENTRAL_ADMIN';
             } else if (managedDirectorate) {
@@ -205,11 +237,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             if (!isSuperAdmin && profile.directorateId) {
               DataService.setActiveDirectorateId(profile.directorateId);
             }
-
-            // If user is a teacher and has no directorate selected yet, prompt for directorate
-            if (!isSuperAdmin && !managedDirectorate && !data.directorateId) {
-              setIsDirectoratePromptOpen(true);
-            }
           } else {
             // Check if there is a pre-registered manager account in Firestore
             const managerDocId = `mgr_${cleanUserEmail.replace(/[^a-z0-9]/g, '_')}`;
@@ -231,8 +258,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               console.warn("Manager lookup warning:", mgrErr);
             }
 
-            const initialDirectorateId = managedDirectorate?.id || (isSuperAdmin ? 'taourirt' : undefined);
-            const initialDirectorateName = managedDirectorate?.name || (isSuperAdmin ? 'المديرية الإقليمية بتاوريرت' : undefined);
+            const initialDirectorateId = managedDirectorate?.id || 'taourirt';
+            const initialDirectorateName = managedDirectorate?.name || 'المديرية الإقليمية بتاوريرت';
 
             const newProfile: User = {
               id: user.uid,
@@ -265,10 +292,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             // Automatically set the active directorate in localStorage for non-super admins to their assigned directorate
             if (!isSuperAdmin && newProfile.directorateId) {
               DataService.setActiveDirectorateId(newProfile.directorateId);
-            }
-
-            if (!isSuperAdmin && !managedDirectorate && !initialDirectorateId) {
-              setIsDirectoratePromptOpen(true);
             }
           }
         } catch (error) {

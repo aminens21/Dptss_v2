@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { DataService, SPORTS_MAP, getAgeCategoriesForSeason, deduplicateById, getCategoryGenderLabel, isClubTournament, normalizeCategoryKey, getTournamentLevelAr, isTeacherLevelAllowedForTournament, getCustomCategoryName } from '../lib/dataService';
+import { DataService, SPORTS_MAP, getAgeCategoriesForSeason, deduplicateById, getCategoryGenderLabel, isClubTournament, normalizeCategoryKey, getTournamentLevelAr, isTeacherLevelAllowedForTournament, getCustomCategoryName, getCustomCategoryDetails } from '../lib/dataService';
 import { Tournament, User, Student, School, Sport, Match, Directorate } from '../types';
 import { CountdownTimer } from '../components/CountdownTimer';
 import * as XLSX from 'xlsx';
@@ -183,18 +183,27 @@ export const Tournaments: React.FC = () => {
 
   // Helper to format category for badges elegantly in Arabic
   const formatCategoryBadge = (catId: string, sportTournaments: Tournament[] = [], sportId?: string) => {
+    // 1. Check custom age category details configured in settings first!
+    const customDetails = getCustomCategoryDetails(catId, sportId, sportsConfig);
+    if (customDetails && customDetails.name) {
+      return {
+        label: customDetails.name,
+        years: customDetails.yearsExpression ? `مواليد ${customDetails.yearsExpression}` : ''
+      };
+    }
+
     const norm = normalizeCategoryKey(catId);
     const match = activeSeason.match(/(\d{4})/);
     const startYear = match ? parseInt(match[1], 10) : 2026;
 
     // Determine which genders are present
-    const catTournaments = sportTournaments.filter(t => normalizeCategoryKey(t.ageCategory) === norm);
+    const catTournaments = sportTournaments.filter(t => t.ageCategory === catId || normalizeCategoryKey(t.ageCategory) === norm);
     const hasMale = catTournaments.some(t => t.gender === 'Male' || t.gender === 'Mixed');
     const hasFemale = catTournaments.some(t => t.gender === 'Female' || t.gender === 'Mixed');
 
-    // Custom age categories (e.g. 'cat_1793910455460_TEFB') are not U12/U15/U18/U20
+    // Custom age categories fallback
     if (!['U12', 'U15', 'U18', 'U20'].includes(norm)) {
-      const customName = getCustomCategoryName(catId, sportId);
+      const customName = getCustomCategoryName(catId, sportId, sportsConfig);
       return { label: customName || catId, years: '' };
     }
 
@@ -787,27 +796,21 @@ export const Tournaments: React.FC = () => {
         (tch.techCommitteeSports?.includes(sport.id) || tch.sportId === sport.id)
       );
 
-      // Categories list configured: prefer actual active tournament categories if present
-      const tournCats = Array.from(new Set(
-        sportTournaments
-          .map(t => normalizeCategoryKey(t.ageCategory))
-          .filter(c => c && !/^CAT_/i.test(c) && !/^cat_/i.test(c))
-      ));
-      let categoriesList = (sportTournaments.length > 0 && tournCats.length > 0)
-        ? tournCats
-        : ((sport.ageCategories && sport.ageCategories.length > 0)
-          ? sport.ageCategories.map(normalizeCategoryKey).filter(c => !/^CAT_/i.test(c) && !/^cat_/i.test(c))
-          : seasonalCats.map(c => c.id));
-
-      if (isTeacherRole && !isManagerOfSport && teacherCadre) {
-        const cadre = String(teacherCadre).toUpperCase();
-        categoriesList = categoriesList.filter(catId => {
-          const norm = normalizeCategoryKey(catId);
-          if (cadre.includes('PRIMARY') || cadre.includes('ابتدائي')) return norm === 'U12';
-          if (cadre.includes('MIDDLE') || cadre.includes('إعدادي')) return norm === 'U15';
-          if (cadre.includes('HIGH') || cadre.includes('SECONDARY') || cadre.includes('تأهيلي')) return norm === 'U18' || norm === 'U20';
-          return true;
-        });
+      // Categories list configured: prefer custom age categories from settings if configured
+      let categoriesList: string[] = [];
+      if (sport.customAgeCategories && sport.customAgeCategories.length > 0) {
+        categoriesList = sport.customAgeCategories.filter(c => c && c.name).map(c => c.id || c.name);
+      } else {
+        const tournCats = Array.from(new Set(
+          sportTournaments
+            .map(t => t.ageCategory)
+            .filter(Boolean)
+        ));
+        categoriesList = (sportTournaments.length > 0 && tournCats.length > 0)
+          ? tournCats
+          : ((sport.ageCategories && sport.ageCategories.length > 0)
+            ? sport.ageCategories
+            : seasonalCats.map(c => c.id));
       }
 
       // Total students registered in this sport across all schools
@@ -1517,7 +1520,8 @@ export const Tournaments: React.FC = () => {
               return (
                 <div
                   key={sport.id}
-                  className={`flex flex-col rounded-2xl border shadow-3xs overflow-hidden transition-all hover:shadow-md ${
+                  onClick={() => handleOpenSportModal(sport)}
+                  className={`flex flex-col rounded-2xl border shadow-3xs overflow-hidden transition-all hover:shadow-md cursor-pointer ${
                     isClub
                       ? 'bg-amber-50/90 dark:bg-amber-950/40 border-amber-300 dark:border-amber-800 hover:border-amber-400'
                       : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 hover:border-blue-300 dark:hover:border-blue-700'
@@ -1852,28 +1856,30 @@ export const Tournaments: React.FC = () => {
       />
 
       {/* General Sport Championship Modal for viewing categories, controls & rosters */}
-      <SportChampionshipModal
-        isOpen={isSportModalOpen && selectedSportForModal?.id !== 'athletics'}
-        onClose={() => setIsSportModalOpen(false)}
-        sport={selectedSportForModal}
-        tournaments={tournaments}
-        allStudents={allStudents}
-        schools={schools}
-        matches={matches}
-        teachers={teachers}
-        activeSeason={activeSeason}
-        canManage={selectedSportForModal ? canManageSport(selectedSportForModal.id) : false}
-        isProgrammed={selectedSportForModal ? (
-          sportsWithTournamentData.find(item => item.sport.id === selectedSportForModal.id)?.isProgrammed || false
-        ) : false}
-        onProgramTournament={(sId) => {
-          setIsSportModalOpen(false);
-          handleOpenProgramModal(sId);
-        }}
-        onRefreshData={loadData}
-        isTeacherRole={effectiveRole === 'TEACHER'}
-        teacherSchoolName={effectiveRole === 'TEACHER' && userProfile ? userProfile.workLocation : undefined}
-      />
+      {selectedSportForModal && (
+        <SportChampionshipModal
+          isOpen={isSportModalOpen && selectedSportForModal.id !== 'athletics'}
+          onClose={() => setIsSportModalOpen(false)}
+          sport={selectedSportForModal}
+          tournaments={tournaments}
+          allStudents={allStudents}
+          schools={schools}
+          matches={matches}
+          teachers={teachers}
+          activeSeason={activeSeason}
+          canManage={canManageSport(selectedSportForModal.id)}
+          isProgrammed={
+            sportsWithTournamentData.find(item => item.sport.id === selectedSportForModal.id)?.isProgrammed || false
+          }
+          onProgramTournament={(sId) => {
+            setIsSportModalOpen(false);
+            handleOpenProgramModal(sId);
+          }}
+          onRefreshData={loadData}
+          isTeacherRole={effectiveRole === 'TEACHER'}
+          teacherSchoolName={effectiveRole === 'TEACHER' && userProfile ? userProfile.workLocation : undefined}
+        />
+      )}
 
       {/* Athletics Championship dedicated manager modal */}
       <AthleticsChampionshipModal

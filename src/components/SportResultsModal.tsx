@@ -360,7 +360,7 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
                       <div className="flex items-center justify-between w-full">
                         <span className="text-[10px] font-black px-2.5 py-1 rounded-full border bg-blue-50 text-blue-800 border-blue-200 flex items-center gap-1.5">
                           <span className="w-2 h-2 rounded-full bg-blue-600" />
-                          ⚪ بطولة غير المنتمين
+                          ⚪ بطولة غير المنتمين للأندية
                         </span>
                         <span className="text-[10px] font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-xl border border-blue-100">
                           {nonClubMatchesCount} مباراة
@@ -368,7 +368,7 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
                       </div>
 
                       <h4 className="text-sm font-black text-slate-900 mt-1 group-hover:text-blue-600 transition-colors">
-                        نتائج صنف غير المنتمين
+                        نتائج صنف غير المنتمين للأندية
                       </h4>
                       <p className="text-[11px] text-slate-500 font-medium leading-tight">
                         البرمجة والنتائج الخاصة بالتلاميذ المتمدرسين غير المنخرطين بالأندية.
@@ -424,7 +424,7 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
                       </div>
 
                       <h4 className="text-sm font-black text-amber-950 mt-1 group-hover:text-amber-800 transition-colors">
-                        نتائج صنف المنتمين للأندية
+                        نتائج صنف المنتمين للأندية والجمعيات
                       </h4>
                       <p className="text-[11px] text-amber-900/80 font-medium leading-tight">
                         البرمجة والنتائج الخاصة بالتلاميذ المنخرطين بالنوادي والجامعات الرياضية.
@@ -521,13 +521,14 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
                   <div className="w-full max-w-5xl bg-white rounded-3xl shadow-2xl border border-slate-200 overflow-hidden my-auto max-h-[92vh] flex flex-col">
                     {/* Inner Modal Header */}
                     <div
-                      className={`px-5 py-4 flex items-center justify-between border-b shrink-0 text-white ${
+                      className={cn(
+                        "px-5 py-4 flex items-center justify-between border-b shrink-0 text-white",
                         activeBranchModal === 'club_affiliated'
-                          ? 'bg-gradient-to-r from-amber-600 via-amber-700 to-amber-800 border-amber-500/30'
+                          ? 'bg-gradient-to-r from-yellow-600 via-yellow-700 to-yellow-800 border-yellow-500/30'
                           : activeBranchModal === 'open'
                           ? 'bg-gradient-to-r from-emerald-600 via-emerald-700 to-emerald-800 border-emerald-500/30'
                           : 'bg-gradient-to-r from-blue-700 via-indigo-800 to-slate-900 border-blue-500/30'
-                      }`}
+                      )}
                     >
                       <div className="flex items-center gap-3">
                         <div className="w-11 h-11 rounded-2xl bg-white/20 backdrop-blur-xs flex items-center justify-center text-2xl shadow-inner border border-white/20">
@@ -582,7 +583,7 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
                             <ShieldCheck className="w-5 h-5 text-blue-700" />
                             <div>
                               <h5 className="text-xs font-black text-slate-800">
-                                إدارة بطولات {sport.name} ({activeBranchModal === 'club_affiliated' ? 'المنتمين للأندية' : 'غير المنتمين'})
+                                إدارة بطولات {sport.name} ({activeBranchModal === 'club_affiliated' ? 'المنتمين للأندية' : 'غير المنتمين للأندية'})
                               </h5>
                               <p className="text-[11px] text-slate-600 font-medium">
                                 يمكنك تعديل بيانات البطولات المحدثة لهذا الصنف أو حذفها نهائياً
@@ -796,7 +797,7 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
                                   className={cn(
                                     "p-3.5 rounded-2xl border transition-all duration-200 flex flex-col justify-between space-y-2.5 bg-white shadow-3xs hover:shadow-xs",
                                     activeBranchModal === 'club_affiliated'
-                                      ? 'border-amber-200 hover:border-amber-300 bg-amber-50/10'
+                                      ? 'border-yellow-200 hover:border-yellow-300 bg-yellow-50/10'
                                       : activeBranchModal === 'open'
                                       ? 'border-emerald-200 hover:border-emerald-300 bg-emerald-50/10'
                                       : 'border-slate-150 hover:border-blue-300'
@@ -983,8 +984,8 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
                                   )}
 
                                   {/* Venue, Date & Compact Action Buttons Footer */}
-                                  <div className="flex items-center justify-between text-[10px] text-slate-500 font-bold pt-1.5 border-t border-slate-100/70">
-                                    <div className="flex items-center gap-1.5 text-slate-400 truncate max-w-[55%]">
+                                  <div className="flex flex-col sm:flex-row sm:items-center justify-between text-[10px] text-slate-500 font-bold pt-1.5 border-t border-slate-100/70 gap-2">
+                                    <div className="flex items-center gap-1.5 text-slate-400 truncate w-full sm:max-w-[55%]">
                                       <MapPin className="w-3 h-3 text-slate-400 shrink-0" />
                                       <span className="truncate" title={vName}>{vName}</span>
                                       <span className="text-slate-300 shrink-0">•</span>
@@ -999,7 +1000,7 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
 
                                     {/* Inline Actions */}
                                     {canManage ? (
-                                      <div className="flex items-center gap-1 shrink-0">
+                                      <div className="flex items-center gap-1 shrink-0 self-end sm:self-center">
                                         <button
                                           type="button"
                                           onClick={() => onEditScore(m)}

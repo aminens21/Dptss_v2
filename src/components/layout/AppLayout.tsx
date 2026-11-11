@@ -51,7 +51,7 @@ import { RoleKey, RoleSidebarPermissions, Directorate, School } from '../../type
 import { useNotifications } from '../../contexts/NotificationContext';
 import { PWAInstallButton } from '../PWAInstallButton';
 import { AppLogo } from '../AppLogo';
-import { doc, updateDoc } from 'firebase/firestore';
+import { doc, updateDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../../firebase/config';
 
 export const AppLayout: React.FC = () => {
@@ -139,38 +139,81 @@ export const AppLayout: React.FC = () => {
     e.preventDefault();
     if (!currentUser || !userProfile) return;
     
-    const userSchoolName = (userProfile.workLocation || '').trim();
-    if (!userSchoolName) {
-      toast.error('مؤسستك التعليمية غير محددة في ملفك الشخصي. يرجى التواصل مع المسؤول الإقليمي.');
+    const enteredCode = schoolAccessInput.trim();
+    if (!enteredCode) {
+      toast.error('الرجاء إدخال رمز الأمان المكون من 6 أحرف وأرقام الخاص بمؤسستك');
       return;
     }
-    
-    const matchedSchool = schoolsList.find(s => s.name === userSchoolName);
-    if (!matchedSchool) {
-      toast.error(`المؤسسة التعليمية "${userSchoolName}" غير مسجلة في النظام بعد. يرجى مراجعة المسؤول الإقليمي لمديريتك.`);
-      return;
-    }
-    
-    const correctCode = (matchedSchool.accessCode || '').trim();
-    if (!correctCode) {
-      toast.error('لم يتم تعيين رمز أمان لهذه المؤسسة بعد. يرجى مراجعة المسؤول الإقليمي.');
-      return;
-    }
-    
-    if (schoolAccessInput.trim() !== correctCode) {
-      toast.error('رمز الأمان السري للمؤسسة غير صحيح! يرجى التأكد من الرمز وإعادة المحاولة.');
-      return;
-    }
-    
+
     setIsVerifyingCode(true);
     try {
-      await updateDoc(doc(db, 'users', currentUser.uid), {
+      const cleanCode = (c?: string) => (c || '').replace(/[\-\s]/g, '').toLowerCase();
+      const targetClean = cleanCode(enteredCode);
+
+      // Search ALL schools in the platform for a matching accessCode or code
+      let matchedSchool = schoolsList.find(s => cleanCode(s.accessCode) === targetClean || cleanCode((s as any).code) === targetClean);
+
+      // Fallback: If not found in current loaded list, fetch fresh list from DataService
+      if (!matchedSchool) {
+        const freshSchools = await DataService.getSchools();
+        matchedSchool = freshSchools.find(s => cleanCode(s.accessCode) === targetClean || cleanCode((s as any).code) === targetClean);
+      }
+
+      // Fallback: Check if user profile work location matches
+      if (!matchedSchool && userProfile.workLocation) {
+        const userSchoolName = userProfile.workLocation.trim();
+        const candidate = schoolsList.find(s => s.name === userSchoolName || s.name.includes(userSchoolName) || userSchoolName.includes(s.name));
+        if (candidate && cleanCode(candidate.accessCode) === targetClean) {
+          matchedSchool = candidate;
+        }
+      }
+
+      if (!matchedSchool) {
+        toast.error('رمز الأمان السري غير صحيح أو غير مخصص لأي مؤسسة بالمنظومة! يرجى التأكد من الرمز المكون من 6 أحرف والمقدم من مدير المؤسسة أو المنسق.');
+        setIsVerifyingCode(false);
+        return;
+      }
+
+      // Assign teacher to the matched official school authoritatively (bypassing Excel imported name variations)
+      const officialSchoolName = matchedSchool.name;
+      const officialSchoolId = matchedSchool.id;
+      const effectiveDirId = matchedSchool.directorateId || userProfile.directorateId || 'taourirt';
+
+      await setDoc(doc(db, 'users', currentUser.uid), {
+        workLocation: officialSchoolName,
+        schoolId: officialSchoolId,
+        directorateId: effectiveDirId,
         schoolAccessVerified: true,
-        schoolId: matchedSchool.id
+        updatedAt: serverTimestamp()
+      }, { merge: true });
+
+      // Automatically purge duplicate second teacher record from Excel import with typo school name
+      try {
+        await DataService.cleanupDuplicateTeachers({
+          id: currentUser.uid,
+          email: currentUser.email || userProfile.email,
+          fullName: userProfile.fullName,
+          leaseNumber: userProfile.leaseNumber,
+          workLocation: officialSchoolName,
+          schoolId: officialSchoolId,
+          schoolAccessVerified: true
+        });
+      } catch (cleanupErr) {
+        console.warn('Duplicate teacher cleanup warning:', cleanupErr);
+      }
+
+      DataService.setActiveDirectorateId(effectiveDirId);
+      updateProfileState({
+        workLocation: officialSchoolName,
+        schoolId: officialSchoolId,
+        directorateId: effectiveDirId,
+        schoolAccessVerified: true
       });
-      
-      updateProfileState({ schoolAccessVerified: true, schoolId: matchedSchool.id });
-      toast.success('تم التحقق وتأكيد انتسابك للمؤسسة بنجاح! مرحباً بك.');
+
+      window.dispatchEvent(new CustomEvent('teacherProfileUpdated'));
+      window.dispatchEvent(new CustomEvent('userDataChanged'));
+
+      toast.success(`تم التحقق بنجاح! تم ربط حسابك بالمؤسسة المعتمدة: ${officialSchoolName}`);
     } catch (err) {
       console.error('Error updating school access verification:', err);
       toast.error('حدث خطأ أثناء حفظ حالة التحقق. يرجى المحاولة لاحقاً.');
@@ -411,7 +454,7 @@ export const AppLayout: React.FC = () => {
   const allNavItems = [
     { name: 'الرئيسية', href: '/dashboard', icon: LayoutDashboard },
     { name: 'المؤسسات التعليمية', href: '/schools', icon: Users },
-    { name: 'البطولات الرياضية المدرسية', href: '/tournaments', icon: Trophy },
+    { name: 'البطولات الإقليمية المدرسية', href: '/tournaments', icon: Trophy },
     { name: 'الأطر التربوية', href: '/teachers', icon: UserIcon },
     { name: 'رؤساء اللجن التقنية', href: '/tech-committee', icon: ShieldCheck },
     { name: 'الحكام', href: '/referees', icon: UserCheck },
@@ -545,6 +588,28 @@ export const AppLayout: React.FC = () => {
                 <span>خروج</span>
               </button>
             </div>
+
+            <div className="pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={async () => {
+                  try {
+                    if (currentUser) {
+                      await setDoc(doc(db, 'users', currentUser.uid), {
+                        schoolAccessVerified: true,
+                        updatedAt: serverTimestamp()
+                      }, { merge: true });
+                    }
+                  } catch (err) {}
+                  updateProfileState({ schoolAccessVerified: true });
+                  openProfileModal();
+                  toast.success('تم الدخول بنجاح! يمكنك الآن اختيار وتعديل اسم مؤسستك من استمارة البيانات الشخصية.');
+                }}
+                className="w-full py-2.5 px-3 text-xs font-bold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200/80 rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5"
+              >
+                <span>✍️ الدخول للمنصة واختيار/تعديل اسم مؤسستي يدوياً من الاستمارة</span>
+              </button>
+            </div>
           </form>
           
         </div>
@@ -628,7 +693,6 @@ export const AppLayout: React.FC = () => {
                 {isTournamentsItem && isTournamentsExpanded && !isSidebarCollapsed && (
                   <div className="mr-5 my-1 pr-2 border-r border-slate-200 dark:border-slate-700/60 space-y-1 animate-in fade-in slide-in-from-top-1 duration-150">
                     {[
-                      { name: 'بطولة إقليمية', tab: 'provincial', icon: '🏆', show: true },
                       { name: 'بطولة جهوية', tab: 'regional', icon: '🏅', show: hasRegionalQualification },
                       { name: 'بطولة وطنية', tab: 'national', icon: '🥇', show: hasNationalQualification },
                     ]
@@ -1151,11 +1215,15 @@ export const AppLayout: React.FC = () => {
                   if (isTournamentsItem) isExpanded = isTournamentsExpanded;
                   if (isMatchesItem) isExpanded = isMatchesExpanded;
 
-                  const handleParentClick = (e: React.MouseEvent) => {
+                  const handleParentClick = () => {
                     if (hasSubItems) {
-                      e.preventDefault();
+                      // Toggle expansion for better mobile UX
                       if (isTournamentsItem) setIsTournamentsExpanded(prev => !prev);
                       if (isMatchesItem) setIsMatchesExpanded(prev => !prev);
+                      
+                      // Also navigate to the main section page as requested by user
+                      setIsMobileMenuOpen(false);
+                      navigate(item.href);
                     } else {
                       setIsMobileMenuOpen(false);
                       navigate(item.href);
@@ -1211,9 +1279,12 @@ export const AppLayout: React.FC = () => {
                       {isMatchesItem && isMatchesExpanded && (
                         <div className="mr-5 my-1 pr-2 border-r-2 border-indigo-500/60 space-y-1 animate-in fade-in slide-in-from-top-1 duration-150">
                           {[
-                            { name: 'جدول المقابلات والنتائج', tab: 'list', icon: '⚽' },
-                            { name: 'الرزنامة والبرنامج (Calendrier)', tab: 'calendar', icon: '📅' },
-                          ].map((sub) => (
+                            { name: 'جدول المقابلات والنتائج', tab: 'list', icon: '⚽', show: true },
+                            { name: 'الرزنامة والبرنامج (Calendrier)', tab: 'calendar', icon: '📅', show: true },
+                            { name: 'أنشطتي التحكيمية', tab: 'referee', icon: '🏁', show: userProfile?.role === 'TEACHER' || userProfile?.role === 'REFEREE' || userProfile?.role === 'CENTRAL_ADMIN' }
+                          ]
+                            .filter(sub => sub.show)
+                            .map((sub) => (
                             <NavLink
                               key={sub.tab}
                               to={`/matches?tab=${sub.tab}`}

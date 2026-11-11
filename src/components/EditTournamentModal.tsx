@@ -193,8 +193,8 @@ export const EditTournamentModal: React.FC<EditTournamentModalProps> = ({
                 onChange={(e) => setAffiliationType(e.target.value as any)}
                 className="w-full px-3 py-2 text-xs font-bold border border-slate-300 dark:border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 transition-colors cursor-pointer"
               >
-                <option value="non_club">⚪ بطولة غير المنتمين (بيضاء)</option>
-                <option value="club_affiliated">🟡 بطولة المنتمين (صفراء)</option>
+                <option value="non_club">⚪ بطولة غير المنتمين للأندية (بيضاء)</option>
+                <option value="club_affiliated">🟡 بطولة المنتمين للأندية (صفراء)</option>
                 <option value="open">🟢 بطولة مفتوحة (للجميع)</option>
               </select>
             </div>

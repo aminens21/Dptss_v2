@@ -62,6 +62,7 @@ export interface User {
   techCommitteeSports?: string[]; // التخصصات الرياضية التي يترأس لجنتها التقنية
   isTechCommitteeMember?: boolean; // عضو لجنة تقنية
   techCommitteeSportsMemberOf?: string[]; // التخصصات الرياضية التي يشارك في لجنتها التقنية كعضو
+  schoolAccessVerified?: boolean; // هل تم تأكيد رمز أمان المؤسسة المعتمدة
   photoUrl?: string; // صورة الأستاذ الشخصية
   teachingCadre?: 'PRIMARY' | 'MIDDLE' | 'HIGH' | string; // الإطار التعليمي: أستاذ الابتدائي / ثانوي إعدادي / ثانوي تأهيلي
   pendingTransfer?: DirectorateTransferRequest | null; // طلب انتقال معلق إلى مديرية أخرى بانتظار موافقة مسيرها
@@ -94,33 +95,6 @@ export const TARGET_AFFILIATIONS: TargetAffiliationConfig[] = [
     icon: '⚪'
   },
   {
-    id: 'espoir_non_club',
-    label: 'الأمل الرياضي: لغير المنتمين',
-    shortLabel: 'أمل رياضي (غير منتمين)',
-    badgeBg: 'bg-sky-50',
-    badgeText: 'text-sky-800',
-    badgeBorder: 'border-sky-300',
-    icon: '🌟'
-  },
-  {
-    id: 'sports_tracks',
-    label: 'مسالك رياضة',
-    shortLabel: 'مسالك رياضة',
-    badgeBg: 'bg-indigo-50',
-    badgeText: 'text-indigo-800',
-    badgeBorder: 'border-indigo-300',
-    icon: '🎯'
-  },
-  {
-    id: 'espoir_club',
-    label: 'الأمل الرياضي: للمنتمين',
-    shortLabel: 'أمل رياضي (منتمين)',
-    badgeBg: 'bg-purple-50',
-    badgeText: 'text-purple-800',
-    badgeBorder: 'border-purple-300',
-    icon: '⭐'
-  },
-  {
     id: 'club_affiliated',
     label: 'المنتمين للأندية',
     shortLabel: 'منتمين لأندية',
@@ -145,6 +119,7 @@ export interface Sport {
   athleticsSpecialties?: string[]; // تخصصات ألعاب القوى المتاحة (القفز الطولي، القفز العلوي، جري 80 متر...)
   isCustom?: boolean; // رياضة مضافة من طرف المسير المركزي
   isProgrammed?: boolean; // وضع البطولة: مبرمجة (true) أو في طور الإعداد (false)
+  isDeleted?: boolean; // هل تم حذف الرياضة من المنظومة (خاصة للرياضات الأساسية)
   createdAt?: any;
 }
 
@@ -235,6 +210,20 @@ export interface SchoolTournamentConfirmation {
     gender: 'Male' | 'Female';
     affiliationType: string;
   }>;
+}
+
+export interface SchoolWithdrawalRecord {
+  id: string;
+  schoolName: string;
+  schoolId?: string;
+  sportId: string;
+  tournamentId?: string;
+  ageCategory?: string;
+  gender?: string;
+  affiliationType?: string;
+  withdrawnAt: string;
+  withdrawnBy?: string;
+  directorateId?: string;
 }
 
 export interface Team {

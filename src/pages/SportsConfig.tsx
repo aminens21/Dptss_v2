@@ -1,8 +1,9 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { DataService, SPORTS_MAP, getAgeCategoriesForSeason, normalizeCategoryKey } from '../lib/dataService';
+import { DataService, SPORTS_MAP, getAgeCategoriesForSeason, normalizeCategoryKey, isTeamSport, getDefaultTeamAgeCategories } from '../lib/dataService';
 import { Sport, Tournament, RoleKey, RoleSidebarPermissions, CustomAgeCategory, TARGET_AFFILIATIONS } from '../types';
-import { useAuth } from '../contexts/AuthContext';
+import { useAuth, isSuperAdminEmail } from '../contexts/AuthContext';
+import { ConfirmDeleteModal } from '../components/ConfirmDeleteModal';
 import {
   Settings,
   Save,
@@ -97,8 +98,9 @@ const CustomCategoryForm: React.FC<{ onAdd: (name: string) => void }> = ({ onAdd
 const SportAgeCategoriesManager: React.FC<{
   sportId: string;
   customCategories: CustomAgeCategory[];
+  currentSeason: string;
   onChange: (updated: CustomAgeCategory[]) => void;
-}> = ({ sportId, customCategories, onChange }) => {
+}> = ({ sportId, customCategories, currentSeason, onChange }) => {
   const [editingCatId, setEditingCatId] = useState<string | null>(null);
   const [nameInput, setNameInput] = useState('');
   const [yearsInput, setYearsInput] = useState('');
@@ -222,19 +224,28 @@ const SportAgeCategoriesManager: React.FC<{
           <button
             type="button"
             onClick={() => {
-              // Prepopulate with defaults
-              const defaultCats = [
-                { id: 'U12', name: 'البراعم والبرعمات', yearsExpression: '2015 وما بعد' },
-                { id: 'U15', name: 'الصغار والصغيرات', yearsExpression: '2012/2013/2014' },
-                { id: 'U18', name: 'الفتيان والفتيات', yearsExpression: '2009/2010/2011' },
-                { id: 'U20', name: 'الشبان والشابات', yearsExpression: '2009 وما بعد' }
-              ];
-              onChange(defaultCats);
-              toast.success('تم توليد الفئات الافتراضية بنجاح للتعديل عليها');
+              if (isTeamSport(sportId)) {
+                const defaultCats = getDefaultTeamAgeCategories(currentSeason);
+                onChange(defaultCats);
+                toast.success('تم توليد فئات الألعاب الجماعية الافتراضية (U15 و U18) بنجاح');
+              } else {
+                // Prepopulate with dynamic defaults based on season
+                const dynCats = getAgeCategoriesForSeason(currentSeason, undefined, sportId);
+                const defaultCats = dynCats.map(c => {
+                  const parts = c.name.split(' - ');
+                  return {
+                    id: c.id,
+                    name: c.shortName || parts[0],
+                    yearsExpression: parts[1] || ''
+                  };
+                });
+                onChange(defaultCats);
+                toast.success('تم توليد الفئات الافتراضية بنجاح للتعديل عليها');
+              }
             }}
             className="text-[11px] font-bold text-blue-600 hover:underline cursor-pointer bg-blue-50/50 hover:bg-blue-50 px-3 py-1.5 rounded-xl border border-blue-100"
           >
-            ⚡ توليد الفئات الافتراضية للتخصيص
+            {isTeamSport(sportId) ? '⚡ توليد فئات الألعاب الجماعية الافتراضية (U15 و U18)' : '⚡ توليد الفئات الافتراضية للتخصيص'}
           </button>
         </div>
       ) : (
@@ -487,9 +498,14 @@ export const SportsConfig: React.FC = () => {
     });
   };
 
-  const isCentralAdmin = userProfile?.role === 'CENTRAL_ADMIN';
+  const isCentralAdmin = 
+    userProfile?.role === 'CENTRAL_ADMIN' || 
+    userProfile?.role === 'SUPER_ADMIN' || 
+    userProfile?.isSuperAdmin === true || 
+    isSuperAdminEmail(userProfile?.email);
   const isTechCommitteeHead = userProfile?.isTechCommitteeHead === true;
   const mySports = userProfile?.techCommitteeSports || [];
+  const [sportToDelete, setSportToDelete] = useState<{ id: string; name: string } | null>(null);
 
   const visibleSportsList = useMemo(() => {
     return sportsList.filter(s => {
@@ -548,12 +564,15 @@ export const SportsConfig: React.FC = () => {
   // Initialize categories for new sport modal when season loads
   useEffect(() => {
     if (currentSeason && newSportCategories.length === 0) {
-      const defaultCats = [
-        { id: 'U12', name: 'البراعم والبرعمات', yearsExpression: '2015 وما بعد' },
-        { id: 'U15', name: 'الصغار والصغيرات', yearsExpression: '2012/2013/2014' },
-        { id: 'U18', name: 'الفتيان والفتيات', yearsExpression: '2009/2010/2011' },
-        { id: 'U20', name: 'الشبان والشابات', yearsExpression: '2009 وما بعد' }
-      ];
+      const dynCats = getAgeCategoriesForSeason(currentSeason);
+      const defaultCats = dynCats.map(c => {
+        const parts = c.name.split(' - ');
+        return {
+          id: c.id,
+          name: c.shortName || parts[0],
+          yearsExpression: parts[1] || ''
+        };
+      });
       setNewSportCustomCategories(defaultCats);
       setNewSportCategories(defaultCats.map(c => c.id));
     }
@@ -747,7 +766,19 @@ export const SportsConfig: React.FC = () => {
   const handleToggleSportProgrammedStatus = (sportId: string, targetStatus: boolean) => {
     setSportsList(prev => prev.map(s => {
       if (s.id !== sportId) return s;
-      return { ...s, isProgrammed: targetStatus };
+      
+      let updated = { ...s, isProgrammed: targetStatus };
+
+      // Requirement: When programming a team sport, default to U15 and U18 only
+      if (targetStatus === true && isTeamSport(sportId)) {
+        if (!s.customAgeCategories || s.customAgeCategories.length === 0) {
+          const defaultTeamCats = getDefaultTeamAgeCategories(currentSeason);
+          updated.customAgeCategories = defaultTeamCats;
+          updated.ageCategories = defaultTeamCats.map(c => c.id);
+        }
+      }
+
+      return updated;
     }));
   };
 
@@ -787,10 +818,13 @@ export const SportsConfig: React.FC = () => {
     }
   };
 
-  // Central Admin: Delete custom sport
-  const handleDeleteSport = async (sportId: string, sportName: string) => {
-    if (!isCentralAdmin) return;
-    if (!window.confirm(`هل أنت متأكد من حذف التخصص الرياضي "${sportName}" نهائياً من المنظومة؟`)) {
+  // Central Admin: Delete sport confirmation handler
+  const handleConfirmDeleteSport = async () => {
+    if (!sportToDelete) return;
+    const { id: sportId, name: sportName } = sportToDelete;
+    if (!isCentralAdmin) {
+      toast.error('عفواً، صلاحية حذف التخصصات الرياضية مقتصرة على المسير المركزي فقط.');
+      setSportToDelete(null);
       return;
     }
 
@@ -799,6 +833,7 @@ export const SportsConfig: React.FC = () => {
       await DataService.deleteSport(sportId);
       setSportsList(prev => prev.filter(s => s.id !== sportId));
       toast.success(`تم حذف التخصص الرياضي "${sportName}" بنجاح`);
+      setSportToDelete(null);
     } catch (error) {
       console.error('Error deleting sport:', error);
       toast.error('حدث خطأ أثناء محاولة حذف الرياضة');
@@ -1080,7 +1115,7 @@ export const SportsConfig: React.FC = () => {
               const sidebarItemsList = [
                 { href: '/dashboard', label: 'الرئيسية والإشعارات', icon: '🏠', desc: 'لوحة التحكم الرئيسية والتنبيهات العامة' },
                 { href: '/schools', label: 'المؤسسات التعليمية', icon: '🏫', desc: 'دليل ورعاة وممثلي المؤسسات التعليمية بمديرية تاوريرت' },
-                { href: '/tournaments', label: 'البطولات الرياضية المدرسية', icon: '🏆', desc: 'استعراض وإدارة البطولات الإقليمية والجهوية والوطنية وتفرعاتها وتسجيل الفرق' },
+                { href: '/tournaments', label: 'البطولات الإقليمية المدرسية', icon: '🏆', desc: 'استعراض وإدارة البطولات الإقليمية والجهوية والوطنية وتفرعاتها وتسجيل الفرق' },
                 { href: '/teachers', label: 'الأطر التربوية', icon: '👨‍🏫', desc: 'قائمة أساتذة التربية البدنية ومؤطري الرياضة المدرسية' },
                 { href: '/tech-committee', label: 'رؤساء اللجن التقنية', icon: '🛡️', desc: 'إدارة وتعيين مسؤولي اللجان التقنية حسب الرياضات' },
                 { href: '/referees', label: 'الحكام', icon: '🏁', desc: 'سجل وتنظيم الحكام المعتمدين وتعيينات المباريات' },
@@ -1713,7 +1748,12 @@ export const SportsConfig: React.FC = () => {
                   {/* Categories Selector */}
                   <SportAgeCategoriesManager
                     sportId={sport.id}
-                    customCategories={sport.customAgeCategories || []}
+                    customCategories={
+                      (sport.customAgeCategories && sport.customAgeCategories.length > 0)
+                        ? sport.customAgeCategories
+                        : (isTeamSport(sport.id) ? getDefaultTeamAgeCategories(currentSeason) : [])
+                    }
+                    currentSeason={currentSeason}
                     onChange={(updated) => {
                       setSportsList(prev => prev.map(s => {
                         if (s.id === sport.id) {
@@ -1875,7 +1915,7 @@ export const SportsConfig: React.FC = () => {
                     {isCentralAdmin && (
                       <button
                         type="button"
-                        onClick={() => handleDeleteSport(sport.id, sport.name || mappedSport.name)}
+                        onClick={() => setSportToDelete({ id: sport.id, name: sport.name || mappedSport.name })}
                         disabled={deletingId === sport.id}
                         className="w-full sm:w-auto inline-flex items-center justify-center gap-1.5 bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 font-bold text-xs px-3 py-2.5 rounded-xl transition-all cursor-pointer disabled:opacity-50"
                         title="حذف هذا التخصص الرياضي"
@@ -2073,6 +2113,7 @@ export const SportsConfig: React.FC = () => {
               <SportAgeCategoriesManager
                 sportId="new_sport"
                 customCategories={newSportCustomCategories}
+                currentSeason={currentSeason}
                 onChange={(updated) => {
                   setNewSportCustomCategories(updated);
                   setNewSportCategories(updated.map(c => c.id));
@@ -2147,6 +2188,17 @@ export const SportsConfig: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Sport Deletion Confirmation Modal */}
+      <ConfirmDeleteModal
+        isOpen={!!sportToDelete}
+        onClose={() => setSportToDelete(null)}
+        onConfirm={handleConfirmDeleteSport}
+        title="حذف التخصص الرياضي نهائياً"
+        message={`هل أنت متأكد من حذف التخصص الرياضي "${sportToDelete?.name}" نهائياً من المنظومة؟ لن يظهر هذا التخصص في قائمة البطولات أو شريط الرياضات المبرمجة.`}
+        itemName={sportToDelete?.name}
+        isDeleting={deletingId === sportToDelete?.id}
+      />
     </div>
   );
 };

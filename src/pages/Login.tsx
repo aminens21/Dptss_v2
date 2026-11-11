@@ -53,7 +53,7 @@ import {
   updateProfile,
   signOut
 } from 'firebase/auth';
-import { doc, setDoc, getDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, setDoc, getDoc, serverTimestamp, query, collection, where, getDocs } from 'firebase/firestore';
 import { auth, db } from '../firebase/config';
 import { User, Role, Directorate, School, Tournament, Match, Student, CrossCountryCategoryResult, AthleticsCategoryResult, AthleticsWinner, Sport } from '../types';
 import { DataService, SPORTS_MAP, getAgeCategoriesForSeason, getCategoryYearsLabel } from '../lib/dataService';
@@ -62,7 +62,7 @@ import { AppLogo } from '../components/AppLogo';
 import { SportsIntroAnimation } from '../components/SportsIntroAnimation';
 import { CrossCountryPodiumView } from '../components/CrossCountryPodiumView';
 import toast from 'react-hot-toast';
-import { cn } from '../lib/utils';
+import { cn, isFlexibleEmailMatch } from '../lib/utils';
 
 export const Login: React.FC = () => {
   const { currentUser, userProfile, loading, updateProfileState } = useAuth();
@@ -549,7 +549,7 @@ export const Login: React.FC = () => {
   };
 
   useEffect(() => {
-    loadAllData();
+    loadAllData('taourirt');
 
     const unsubSchools = DataService.subscribeToSchools((s) => setSchools(s));
     const unsubTournaments = DataService.subscribeToTournaments((t) => setTournaments(t));
@@ -566,22 +566,15 @@ export const Login: React.FC = () => {
     };
   }, []);
 
-  // Determine if existing logged-in user has complete profile
-  const isProfileComplete = Boolean(
-    userProfile && (
-      userProfile.isSuperAdmin ||
-      userProfile.role === 'CENTRAL_ADMIN' ||
-      userProfile.role === 'SPORT_MANAGER' ||
-      (userProfile.directorateId && (userProfile.workLocation || userProfile.leaseNumber))
-    )
-  );
+  // Determine if existing logged-in user has a profile
+  const isProfileComplete = Boolean(userProfile);
 
-  // Redirect to dashboard if already authenticated & complete profile
+  // Redirect to dashboard if already authenticated & has profile
   useEffect(() => {
-    if (!loading && currentUser && isProfileComplete && loginMode !== 'REGISTER_TEACHER') {
+    if (!loading && currentUser && userProfile) {
       navigate('/dashboard', { replace: true });
     }
-  }, [loading, currentUser, isProfileComplete, loginMode, navigate]);
+  }, [loading, currentUser, userProfile, navigate]);
 
   // Filtered approved schools by directorate and cycle (including private schools)
   const { filteredSchools, publicSchools, privateSchools } = useMemo(() => {
@@ -691,18 +684,20 @@ export const Login: React.FC = () => {
       }
 
       const dirs = await DataService.getDirectorates();
-      const managedDir = dirs.find(d => (d.adminEmails || []).some(ae => ae.trim().toLowerCase() === cleanEmail));
+      const managedDir = dirs.find(d => (d.adminEmails || []).some(ae => isFlexibleEmailMatch(ae, cleanEmail)));
       if (managedDir) {
         toast.success(`مرحباً بك! تم تسجيل الدخول كمسير إقليمي لـ ${managedDir.name}`);
         navigate('/dashboard', { replace: true });
         return;
       }
 
-      // 3. Check if user is pre-registered/added in users collection or local list
+      // 3. Check if user email exists anywhere in the platform (users collection, teachers, schools, local cache)
       let matchedTeacher: User | null = null;
+
+      // 3.a. Check users list with flexible email match
       try {
         const allUsers = await DataService.getUsers();
-        const found = allUsers.find(u => u.email && u.email.trim().toLowerCase() === cleanEmail);
+        const found = allUsers.find(u => u.email && isFlexibleEmailMatch(u.email, cleanEmail));
         if (found) {
           matchedTeacher = found;
         }
@@ -710,7 +705,20 @@ export const Login: React.FC = () => {
         console.warn("Error checking users list:", checkErr);
       }
 
-      // Check Firestore user doc by UID
+      // 3.b. Check teachers list with flexible email match
+      if (!matchedTeacher) {
+        try {
+          const allTeachers = await DataService.getTeachers();
+          const found = allTeachers.find(t => t.email && isFlexibleEmailMatch(t.email, cleanEmail));
+          if (found) {
+            matchedTeacher = found;
+          }
+        } catch (tErr) {
+          console.warn("Error checking teachers list:", tErr);
+        }
+      }
+
+      // 3.c. Check Firestore user doc by UID
       try {
         const userDoc = await getDoc(doc(db, 'users', googleUser.uid));
         if (userDoc.exists()) {
@@ -721,41 +729,122 @@ export const Login: React.FC = () => {
         console.warn("Error checking user doc in Firestore:", checkErr);
       }
 
-      // If matched, allow login and update UID link
+      // 3.d. Check Firestore users collection docs with flexible match
+      if (!matchedTeacher) {
+        try {
+          const snap = await getDocs(collection(db, 'users'));
+          if (!snap.empty) {
+            const foundDoc = snap.docs.find(d => {
+              const data = d.data();
+              return data.email && isFlexibleEmailMatch(data.email, cleanEmail);
+            });
+            if (foundDoc) {
+              matchedTeacher = { ...(foundDoc.data() as User), id: foundDoc.id };
+            }
+          }
+        } catch (qErr) {
+          console.warn("Error querying users collection by email:", qErr);
+        }
+      }
+
+      // 3.e. Check schools coordinator or teacher contact email
+      if (!matchedTeacher) {
+        try {
+          const allSchools = await DataService.getSchools();
+          const matchedSchool = allSchools.find(s => 
+            ((s as any).email && isFlexibleEmailMatch((s as any).email, cleanEmail)) ||
+            ((s as any).coordinatorEmail && isFlexibleEmailMatch((s as any).coordinatorEmail, cleanEmail))
+          );
+          if (matchedSchool) {
+            matchedTeacher = {
+              id: googleUser.uid,
+              fullName: googleUser.displayName || `أستاذ(ة) ${matchedSchool.name}`,
+              email: cleanEmail,
+              role: 'TEACHER',
+              workLocation: matchedSchool.name,
+              schoolId: matchedSchool.id,
+              directorateId: matchedSchool.directorateId || 'taourirt',
+              isActive: true,
+              createdAt: new Date(),
+              updatedAt: new Date()
+            };
+          }
+        } catch (sErr) {
+          console.warn("Error checking schools for coordinator email:", sErr);
+        }
+      }
+
+      // 4. If email is recognized in the app: ALLOW ENTRY IMMEDIATELY
+      // The teacher can view, complete, and modify all their data inside the platform after login.
       if (matchedTeacher) {
         const effectiveDirId = matchedTeacher.directorateId || 'taourirt';
+        const effectiveDir = dirs.find(d => d.id === effectiveDirId);
+        const effectiveDirName = matchedTeacher.directorateName || effectiveDir?.name || 'المديرية الإقليمية بتاوريرت';
         DataService.setActiveDirectorateId(effectiveDirId);
 
-        try {
-          await setDoc(doc(db, 'users', googleUser.uid), {
-            ...matchedTeacher,
-            id: googleUser.uid,
-            email: cleanEmail,
-            photoUrl: googleUser.photoURL || matchedTeacher.photoUrl || '',
-            lastLoginAt: serverTimestamp()
-          }, { merge: true });
-        } catch (linkErr) {
-          console.warn("Error linking user uid:", linkErr);
-        }
-
-        updateProfileState({
+        const mergedProfile: User = {
           ...matchedTeacher,
           id: googleUser.uid,
           email: cleanEmail,
-          photoUrl: googleUser.photoURL || matchedTeacher.photoUrl || ''
-        });
+          fullName: matchedTeacher.fullName || googleUser.displayName || 'أستاذ(ة)',
+          role: matchedTeacher.role || 'TEACHER',
+          directorateId: effectiveDirId,
+          directorateName: effectiveDirName,
+          photoUrl: googleUser.photoURL || matchedTeacher.photoUrl || '',
+          isActive: true
+        };
 
-        toast.success(`مرحباً بك ذ. ${matchedTeacher.fullName || googleUser.displayName || 'الأستاذ'}! تم تسجيل الدخول بنجاح`);
+        try {
+          await setDoc(doc(db, 'users', googleUser.uid), {
+            ...mergedProfile,
+            lastLoginAt: serverTimestamp(),
+            updatedAt: serverTimestamp()
+          }, { merge: true });
+
+          // Purge duplicate second record created during Excel import with typo school name
+          await DataService.cleanupDuplicateTeachers(mergedProfile);
+        } catch (linkErr) {
+          console.warn("Error linking user uid or cleaning duplicates:", linkErr);
+        }
+
+        updateProfileState(mergedProfile);
+
+        toast.success(`مرحباً بك ذ. ${mergedProfile.fullName}! تم تسجيل الدخول بنجاح. يمكنك تعديل بياناتك الشخصية من داخل المنصة في أي وقت.`);
         navigate('/dashboard', { replace: true });
         return;
       }
 
-      // If email is NOT added/whitelisted in the system: STRICT ACCESS REJECTION
-      await signOut(auth);
-      toast.error(
-        `عذراً، البريد الإلكتروني (${cleanEmail}) غير مسجل في المنظومة. الدخول متاح حصرياً للأساتذة والأطر الذين تمت إضافة بريدهم مسبقاً من طرف الإدارة.`,
-        { duration: 7000 }
-      );
+      // 5. Fallback: If email is not pre-registered in cache, bootstrap profile and allow immediate entry as TEACHER
+      const defaultTeacherProfile: User = {
+        id: googleUser.uid,
+        fullName: googleUser.displayName || 'أستاذ(ة)',
+        email: cleanEmail,
+        role: 'TEACHER',
+        directorateId: 'taourirt',
+        directorateName: 'المديرية الإقليمية بتاوريرت',
+        workLocation: '',
+        leaseNumber: '',
+        isActive: true,
+        createdAt: new Date(),
+        updatedAt: new Date()
+      };
+
+      try {
+        await setDoc(doc(db, 'users', googleUser.uid), {
+          ...defaultTeacherProfile,
+          lastLoginAt: serverTimestamp(),
+          updatedAt: serverTimestamp()
+        }, { merge: true });
+      } catch (linkErr) {
+        console.warn("Error saving default teacher profile:", linkErr);
+      }
+
+      DataService.setActiveDirectorateId('taourirt');
+      updateProfileState(defaultTeacherProfile);
+
+      toast.success(`مرحباً بك ذ. ${defaultTeacherProfile.fullName}! تم تسجيل الدخول بنجاح. يمكنك اختيار وتعديل اسم مؤسستك وبياناتك الآن.`);
+      navigate('/dashboard', { replace: true });
+      return;
 
     } catch (error: any) {
       console.error("Google sign in error:", error);
@@ -918,7 +1007,7 @@ export const Login: React.FC = () => {
         <div className="p-3 bg-emerald-50/90 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 rounded-2xl text-[11px] text-emerald-900 dark:text-emerald-300 font-bold leading-relaxed flex items-start gap-2">
           <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
           <div>
-            <span>الدخول مخصص حصرياً للأساتذة والأطر المضافة حساباتهم مسبقاً من طرف الإدارة أو المديرية الإقليمية. فتح الحسابات الذاتية غير متاح.</span>
+            <span>الدخول متاح مباشرة عبر البريد الإلكتروني (Google) المسجل في التطبيق. يمكنك بعد الدخول إلى المنصة تعديل واستكمال بياناتك ومؤسستك وصورتك الشخصية بكل مرونة.</span>
           </div>
         </div>
       </div>
@@ -953,7 +1042,11 @@ export const Login: React.FC = () => {
       // Date Filter: Match must be on the selected day
       if (m.date && !safeDateCompare(m.date, selectedDate)) return false;
       
-      if (selectedSport !== 'ALL' && m.sportId !== selectedSport) return false;
+      if (selectedSport !== 'ALL') {
+        const tourn = tournaments.find(t => t.id === m.tournamentId);
+        const mSport = m.sportId || tourn?.sportId;
+        if (mSport !== selectedSport) return false;
+      }
       if (selectedCategory !== 'ALL' && m.category && !m.category.toUpperCase().includes(selectedCategory.toUpperCase())) return false;
       if (selectedGender !== 'ALL' && m.gender !== selectedGender) return false;
       if (searchQuery.trim()) {
@@ -966,7 +1059,7 @@ export const Login: React.FC = () => {
       }
       return true;
     });
-  }, [matches, selectedDate, selectedSport, selectedCategory, selectedGender, searchQuery]);
+  }, [matches, tournaments, selectedDate, selectedSport, selectedCategory, selectedGender, searchQuery]);
 
   // Cross Country Results Data (Strictly Separated, Deduplicated, & Recalculated by Affiliation)
   const crossCountryList = useMemo(() => {
@@ -1150,7 +1243,9 @@ export const Login: React.FC = () => {
         if (!cat || !gender) return;
         
         const genderLabel = gender === 'Male' ? 'ذكور' : gender === 'Female' ? 'إناث' : 'مختلط';
-        const catLabel = cat === 'U12' ? 'براعم' : cat === 'U15' ? 'صغار' : cat === 'U18' ? 'فتيان' : 'شبان';
+        // Resolve custom category name from sportsConfig
+        const customName = DataService.getCustomCategoryName(cat, 'cross_country', sportsConfig);
+        const catLabel = customName !== cat ? customName : (cat === 'U12' ? 'براعم' : cat === 'U15' ? 'صغار' : cat === 'U18' ? 'فتيان' : 'شبان');
         
         list.push({
           id: key,
@@ -1183,7 +1278,9 @@ export const Login: React.FC = () => {
         if (!cat || !gender) return;
         
         const genderLabel = gender === 'Male' ? 'ذكور' : gender === 'Female' ? 'إناث' : 'مختلط';
-        const catLabel = cat === 'U12' ? 'براعم' : cat === 'U15' ? 'صغار' : cat === 'U18' ? 'فتيان' : 'شبان';
+        // Resolve custom category name from sportsConfig
+        const customName = DataService.getCustomCategoryName(cat, 'athletics', sportsConfig);
+        const catLabel = customName !== cat ? customName : (cat === 'U12' ? 'براعم' : cat === 'U15' ? 'صغار' : cat === 'U18' ? 'فتيان' : 'شبان');
         
         list.push({
           id: key,
@@ -1222,7 +1319,9 @@ export const Login: React.FC = () => {
         if (!cat || !gender) return;
         
         const genderLabel = gender === 'Male' ? 'ذكور' : gender === 'Female' ? 'إناث' : 'مختلط';
-        const catLabel = cat === 'U12' ? 'براعم' : cat === 'U15' ? 'صغار' : cat === 'U18' ? 'فتيان' : 'شبان';
+        // Resolve custom category name from sportsConfig
+        const customName = DataService.getCustomCategoryName(cat, selectedSport !== 'ALL' ? selectedSport : undefined, sportsConfig);
+        const catLabel = customName !== cat ? customName : (cat === 'U12' ? 'براعم' : cat === 'U15' ? 'صغار' : cat === 'U18' ? 'فتيان' : 'شبان');
         
         const sportIcon = selectedSport !== 'ALL' ? (SPORTS_MAP[selectedSport]?.icon || '👥') : '👥';
 
@@ -1240,60 +1339,38 @@ export const Login: React.FC = () => {
     return [
       { id: 'ALL_ALL', cat: 'ALL', gender: 'ALL', label: 'جميع الفئات 🌟' }
     ];
-  }, [activePublicTab, tournaments, crossCountryResults, athleticsResults, selectedSport]);
+  }, [activePublicTab, tournaments, crossCountryResults, athleticsResults, selectedSport, sportsConfig]);
 
-  // Filtered sports for sports bar: ONLY sports that have recorded results as explicitly requested
+  // Filtered sports for sports bar: STRICTLY sports that are programmed AND open for registration
   const programmedSportsEntries = useMemo(() => {
-    // 1. Cross country results: check if any category has podium, winners, or arrivals
-    const hasCcResults = Object.values(crossCountryResults || {}).some((res: any) => 
-      res && (
-        (Array.isArray(res.podium) && res.podium.length > 0) || 
-        (Array.isArray(res.winners) && res.winners.length > 0) || 
-        (Array.isArray(res.arrivals) && res.arrivals.length > 0) || 
-        (Array.isArray(res.teamRankings) && res.teamRankings.length > 0)
-      )
-    );
-
-    // 2. Athletics results: check if any event/category has winners, podium or records
-    const hasAthResults = Object.values(athleticsResults || {}).some((res: any) =>
-      res && (
-        (Array.isArray(res.podium) && res.podium.length > 0) || 
-        (Array.isArray(res.winners) && res.winners.length > 0) || 
-        (Array.isArray(res.records) && res.records.length > 0)
-      )
-    );
-
     return Object.entries(SPORTS_MAP).filter(([sportKey]) => {
-      if (sportKey === 'cross_country') {
-        return hasCcResults;
-      }
-      if (sportKey === 'athletics') {
-        return hasAthResults;
-      }
+      // 1. Check if sport is explicitly marked isProgrammed in sportsConfig
+      const conf = sportsConfig.find(s => s.id === sportKey);
+      const isConfigProgrammed = conf?.isProgrammed === true;
+      
+      // If sport is NOT explicitly programmed, exclude it immediately as per user request
+      if (!isConfigProgrammed) return false;
 
-      // 3. For team sports / matches: check if there are completed matches or matches with scores
-      const hasCompletedMatches = matches.some(m => {
+      // 2. Check if sport has open, active tournaments (Open for registration)
+      const openTournaments = tournaments.filter(t => 
+        t.sportId === sportKey && 
+        (t as any).isActive !== false &&
+        t.status !== 'Draft' && 
+        t.status !== 'Archived'
+      );
+      const hasOpenTournaments = openTournaments.length > 0;
+
+      // 3. Check if active matches exist for this sport
+      const hasMatches = matches.some(m => {
         const tourn = tournaments.find(t => t.id === m.tournamentId);
         const mSport = m.sportId || tourn?.sportId;
-        if (mSport !== sportKey) return false;
-        const hasScore = (m.scoreA !== undefined && m.scoreA !== null && String(m.scoreA).trim() !== '' &&
-                          m.scoreB !== undefined && m.scoreB !== null && String(m.scoreB).trim() !== '');
-        const isDone = m.status === 'COMPLETED' || (m as any).isCompleted || !!m.winnerTeamId || !!m.winnerTeamName;
-        return hasScore || isDone;
+        return mSport === sportKey;
       });
 
-      // 4. Also check if any tournament in this sport has recorded results / podium
-      const hasTournResults = tournaments.some(t => 
-        t.sportId === sportKey && (
-          (t as any).isCompleted || 
-          (Array.isArray((t as any).podium) && (t as any).podium.length > 0) ||
-          (Array.isArray((t as any).results) && (t as any).results.length > 0)
-        )
-      );
-
-      return hasCompletedMatches || hasTournResults;
+      // Show ONLY if it is programmed AND (has open tournaments OR has active matches)
+      return isConfigProgrammed && (hasOpenTournaments || hasMatches);
     });
-  }, [tournaments, matches, crossCountryResults, athleticsResults]);
+  }, [sportsConfig, tournaments, matches]);
 
   // News Marquee Items
   const marqueeNews = [
@@ -1304,12 +1381,30 @@ export const Login: React.FC = () => {
     { id: 5, icon: '🏁', text: 'تحميل الشواهد التقديرية ومحاضر المباريات والنتائج الرسمية متاح مباشرة عبر المنصة.' }
   ];
 
+  // Auto select first programmed sport if selectedSport is ALL or invalid
+  useEffect(() => {
+    if (programmedSportsEntries.length > 0) {
+      const keys = programmedSportsEntries.map(([k]) => k);
+      if (selectedSport === 'ALL' || !keys.includes(selectedSport)) {
+        setSelectedSport(keys[0]);
+      }
+    }
+  }, [programmedSportsEntries]);
+
   // Interactive Monthly Calendar & Daily Program Widget (نافذة البرنامج اليومي والشهرية)
   const renderMonthlyProgramWidget = (isMobile = false) => {
     const year = currentCalendarMonth.getFullYear();
     const monthStr = String(currentCalendarMonth.getMonth() + 1).padStart(2, '0');
+    
+    const sportRelevantMatches = matches.filter(m => {
+      if (selectedSport === 'ALL') return true;
+      const tourn = tournaments.find(t => t.id === m.tournamentId);
+      const mSport = m.sportId || tourn?.sportId;
+      return mSport === selectedSport;
+    });
+
     const set = new Set<string>();
-    matches.forEach(m => {
+    sportRelevantMatches.forEach(m => {
       if (m.date && m.date.startsWith(`${year}-${monthStr}`)) {
         set.add(m.date);
       }
@@ -1548,7 +1643,7 @@ export const Login: React.FC = () => {
                   const cellYmd = `${year}-${monthStr}-${dayStr}`;
 
                   const isSelected = selectedDate === cellYmd;
-                  const dayMatchesCount = matches.filter(m => safeDateCompare(m.date, cellYmd)).length;
+                  const dayMatchesCount = sportRelevantMatches.filter(m => safeDateCompare(m.date, cellYmd)).length;
                   const hasMatches = dayMatchesCount > 0;
 
                   return (
@@ -1675,7 +1770,7 @@ export const Login: React.FC = () => {
               const cellYmd = `${year}-${monthStr}-${dayStr}`;
 
               const isSelected = selectedDate === cellYmd;
-              const dayMatchesCount = matches.filter(m => safeDateCompare(m.date, cellYmd)).length;
+              const dayMatchesCount = sportRelevantMatches.filter(m => safeDateCompare(m.date, cellYmd)).length;
               const hasMatches = dayMatchesCount > 0;
 
               return (
@@ -1913,61 +2008,24 @@ export const Login: React.FC = () => {
         
         {/* TOP HEADER BAR - Centered & Optimized on Mobile */}
         <header className="border-b border-slate-200 dark:border-slate-800 px-3 sm:px-6 py-2 sm:py-2.5 transition-colors">
-          <div className="max-w-7xl mx-auto flex flex-col lg:flex-row items-center lg:justify-between gap-2.5 lg:gap-4">
+          <div className="max-w-7xl mx-auto flex items-center justify-between gap-4">
             
-            {/* Logo & Platform Name - Centered on Mobile */}
-            <div className="flex flex-col sm:flex-row items-center gap-2 sm:gap-3 text-center sm:text-right w-full lg:w-auto">
-              <div className="flex items-center justify-center gap-2">
-                <AppLogo size={38} showText={false} className="shrink-0" />
-                <h1 className="text-xs sm:text-sm md:text-base font-black text-slate-900 dark:text-white tracking-tight">
+            {/* Logo & Platform Name */}
+            <div className="flex items-center gap-3">
+              <AppLogo size={42} showText={false} className="shrink-0" />
+              <div className="flex flex-col items-start text-right">
+                <h1 className="text-sm sm:text-base md:text-lg font-black text-slate-900 dark:text-white tracking-tight leading-tight">
                   نتائج البطولات الإقليمية للرياضة المدرسية
                 </h1>
-              </div>
-              
-              <div className="flex items-center justify-center gap-1.5">
-                <Building2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
-                <select
-                  value={activeDirectorate?.id || 'taourirt'}
-                  onChange={(e) => handleDirectorateChange(e.target.value)}
-                  className="text-[11px] sm:text-xs font-bold text-emerald-800 dark:text-emerald-300 bg-emerald-50/90 dark:bg-emerald-950/70 border border-emerald-300/80 dark:border-emerald-700 rounded-lg px-2 py-0.5 focus:outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer max-w-[200px] sm:max-w-xs truncate shadow-3xs"
-                  title="تغيير واختيار المديرية الإقليمية"
-                >
-                  {directorates.map(dir => (
-                    <option key={dir.id} value={dir.id} className="text-slate-900 bg-white">
-                      {dir.name}
-                    </option>
-                  ))}
-                </select>
+                <span className="text-[10px] sm:text-xs font-black text-emerald-600 dark:text-emerald-400">
+                  المديرية الإقليمية لتاوريرت
+                </span>
               </div>
             </div>
 
-            {/* Action Buttons: Centered Underneath on Mobile */}
-            <div className="flex items-center justify-center gap-1.5 sm:gap-2 shrink-0 flex-wrap w-full lg:w-auto">
-              {/* Replay Intro Animation Button */}
-              <button
-                type="button"
-                onClick={() => setIsIntroOpen(true)}
-                className="p-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 rounded-full text-xs font-bold transition-all cursor-pointer shadow-2xs"
-                title="إعادة تشغيل الدخلة الرياضية الترحيبية"
-              >
-                <Play className="w-3.5 h-3.5 text-amber-500 fill-current" />
-              </button>
-
-              {/* Dark Mode Toggle */}
-              <button
-                type="button"
-                onClick={toggleDarkMode}
-                className="p-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700 rounded-full text-xs font-bold transition-all cursor-pointer shadow-2xs"
-                title={isDarkMode ? 'التحويل للوضع النهاري' : 'التحويل للوضع الليلي'}
-              >
-                {isDarkMode ? (
-                  <Sun className="w-4 h-4 text-amber-400 shrink-0" />
-                ) : (
-                  <Moon className="w-4 h-4 text-indigo-600 shrink-0" />
-                )}
-              </button>
-
-              {/* Teacher Login Button */}
+            {/* Action Icons: Far Left (End in RTL) - Optimized as small icons in a single row */}
+            <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
+              {/* Teacher Login Icon Button - Person Icon */}
               <button
                 type="button"
                 onClick={() => {
@@ -1978,15 +2036,28 @@ export const Login: React.FC = () => {
                     setTimeout(() => loginPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 100);
                   }
                 }}
-                className={`px-3 py-1.5 sm:px-3.5 sm:py-1.5 rounded-full text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-sm ${
+                className={`p-1.5 rounded-lg transition-all flex items-center justify-center cursor-pointer ${
                   showLoginPanel 
-                    ? 'bg-emerald-700 text-white ring-2 ring-emerald-400' 
-                    : 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                    ? 'bg-emerald-600 text-white ring-1 ring-emerald-400' 
+                    : 'bg-slate-100 dark:bg-slate-800 hover:bg-emerald-50 dark:hover:bg-emerald-950 text-emerald-600 dark:text-emerald-400 border border-slate-200 dark:border-slate-700'
                 }`}
+                title="دخول الأطر والمسيرين"
               >
-                <LogIn className="w-4 h-4" />
-                <span className="hidden sm:inline">دخول الأطر والمسيرين</span>
-                <span className="sm:hidden">تسجيل الدخول</span>
+                <UserIcon className="w-4 h-4 sm:w-4.5 sm:h-4.5" />
+              </button>
+
+              {/* Dark Mode Toggle Icon Button */}
+              <button
+                type="button"
+                onClick={toggleDarkMode}
+                className="p-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700 rounded-lg transition-all cursor-pointer flex items-center justify-center"
+                title={isDarkMode ? 'التحويل للوضع النهاري' : 'التحويل للوضع الليلي'}
+              >
+                {isDarkMode ? (
+                  <Sun className="w-4 h-4 sm:w-4.5 sm:h-4.5 text-amber-400 shrink-0" />
+                ) : (
+                  <Moon className="w-4 h-4 sm:w-4.5 sm:h-4.5 text-indigo-600 shrink-0" />
+                )}
               </button>
 
               {/* Mobile Menu Dropdown Toggle */}
@@ -1994,13 +2065,13 @@ export const Login: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-                  className={`p-2 rounded-full transition-all cursor-pointer flex items-center justify-center border ${
+                  className={`p-1.5 rounded-lg transition-all cursor-pointer flex items-center justify-center border ${
                     isMobileMenuOpen 
                       ? 'bg-emerald-600 text-white border-emerald-500 shadow-md' 
-                      : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 shadow-sm'
+                      : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700'
                   }`}
                 >
-                  {isMobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+                  {isMobileMenuOpen ? <X className="w-4 h-4 sm:w-4.5 sm:h-4.5" /> : <Menu className="w-4 h-4 sm:w-4.5 sm:h-4.5" />}
                 </button>
 
                 {/* Dropdown Menu Overlay */}
@@ -2103,7 +2174,6 @@ export const Login: React.FC = () => {
                 )}
               </div>
             </div>
-
           </div>
         </header>
 
@@ -2139,130 +2209,38 @@ export const Login: React.FC = () => {
 
               <div 
                 ref={sportsBarRef}
-                onMouseDown={(e) => {
-                  triggerSportsBarPause();
-                  setIsSportsBarDragging(true);
-                  setSportsBarStartX(e.pageX - sportsBarRef.current!.offsetLeft);
-                  setSportsBarScrollLeft(sportsBarRef.current!.scrollLeft);
-                }}
-                onMouseLeave={() => setIsSportsBarDragging(false)}
-                onMouseUp={() => setIsSportsBarDragging(false)}
-                onWheel={() => triggerSportsBarPause()}
-                onTouchStart={() => triggerSportsBarPause()}
-                onMouseMove={(e) => {
-                  if (!isSportsBarDragging || !sportsBarRef.current) return;
-                  e.preventDefault();
-                  triggerSportsBarPause();
-                  const x = e.pageX - sportsBarRef.current.offsetLeft;
-                  const walk = (x - sportsBarStartX) * 1.5;
-                  sportsBarRef.current.scrollLeft = sportsBarScrollLeft - walk;
-                }}
                 className="flex-1 overflow-x-auto overflow-y-hidden relative py-0.5 group cursor-grab active:cursor-grabbing no-scrollbar"
               >
-                <div className="flex items-center gap-1.5 w-max">
-                  {/* Set 1 */}
-                  <div ref={set1Ref} className="flex items-center gap-1.5 shrink-0">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        triggerSportsBarPause();
-                        setSelectedSport('ALL');
-                        setActivePublicTab('MATCHES');
-                        setSelectedCategory('ALL');
-                      }}
-                      className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer flex items-center gap-1.5 shrink-0 ${
-                        selectedSport === 'ALL'
-                          ? 'bg-emerald-500 text-white shadow-md shadow-emerald-500/20'
-                          : 'bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white border border-slate-200 dark:border-slate-700/60'
-                      }`}
-                    >
-                      <span>🏆</span>
-                      <span>جميع الرياضات</span>
-                    </button>
-
-                    {programmedSportsEntries.map(([sportKey, sport]) => {
-                      const isSelected = selectedSport === sportKey;
-                      return (
-                        <button
-                          key={sportKey}
-                          type="button"
-                          onClick={() => {
-                            triggerSportsBarPause();
-                            setSelectedSport(sportKey);
-                            if (sportKey === 'cross_country') {
-                              setActivePublicTab('CC_PODIUM');
-                            } else if (sportKey === 'athletics') {
-                              setActivePublicTab('ATHLETICS');
-                            } else {
-                              setActivePublicTab('MATCHES');
-                            }
-                            setSelectedCategory('ALL');
-                          }}
-                          className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer flex items-center gap-1.5 shrink-0 ${
-                            isSelected
-                              ? 'bg-emerald-500 text-white shadow-md shadow-emerald-500/20'
-                              : 'bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white border border-slate-200 dark:border-slate-700/60'
-                          }`}
-                        >
-                          <span className="text-sm">{sport.icon}</span>
-                          <span>{sport.name}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-
-                  {/* Set 2 (Duplicate for seamless loop) */}
-                  <div className="flex items-center gap-1.5 shrink-0">
-                    <button
-                      type="button"
-                      aria-hidden="true"
-                      onClick={() => {
-                        triggerSportsBarPause();
-                        setSelectedSport('ALL');
-                        setActivePublicTab('MATCHES');
-                        setSelectedCategory('ALL');
-                      }}
-                      className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer flex items-center gap-1.5 shrink-0 ${
-                        selectedSport === 'ALL'
-                          ? 'bg-emerald-500 text-white shadow-md shadow-emerald-500/20'
-                          : 'bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white border border-slate-200 dark:border-slate-700/60'
-                      }`}
-                    >
-                      <span>🏆</span>
-                      <span>جميع الرياضات</span>
-                    </button>
-
-                    {programmedSportsEntries.map(([sportKey, sport]) => {
-                      const isSelected = selectedSport === sportKey;
-                      return (
-                        <button
-                          key={`dup-${sportKey}`}
-                          type="button"
-                          aria-hidden="true"
-                          onClick={() => {
-                            triggerSportsBarPause();
-                            setSelectedSport(sportKey);
-                            if (sportKey === 'cross_country') {
-                              setActivePublicTab('CC_PODIUM');
-                            } else if (sportKey === 'athletics') {
-                              setActivePublicTab('ATHLETICS');
-                            } else {
-                              setActivePublicTab('MATCHES');
-                            }
-                            setSelectedCategory('ALL');
-                          }}
-                          className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer flex items-center gap-1.5 shrink-0 ${
-                            isSelected
-                              ? 'bg-emerald-500 text-white shadow-md shadow-emerald-500/20'
-                              : 'bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white border border-slate-200 dark:border-slate-700/60'
-                          }`}
-                        >
-                          <span className="text-sm">{sport.icon}</span>
-                          <span>{sport.name}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  {programmedSportsEntries.map(([sportKey, sport]) => {
+                    const isSelected = selectedSport === sportKey;
+                    return (
+                      <button
+                        key={sportKey}
+                        type="button"
+                        onClick={() => {
+                          triggerSportsBarPause();
+                          setSelectedSport(sportKey);
+                          if (sportKey === 'cross_country') {
+                            setActivePublicTab('CC_PODIUM');
+                          } else if (sportKey === 'athletics') {
+                            setActivePublicTab('ATHLETICS');
+                          } else {
+                            setActivePublicTab('MATCHES');
+                          }
+                          setSelectedCategory('ALL');
+                        }}
+                        className={`px-3.5 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer flex items-center gap-1.5 shrink-0 ${
+                          isSelected
+                            ? 'bg-emerald-500 text-white shadow-md shadow-emerald-500/20 font-black scale-105'
+                            : 'bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white border border-slate-200 dark:border-slate-700/60'
+                        }`}
+                      >
+                        <span className="text-sm">{sport.icon}</span>
+                        <span>{sport.name}</span>
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
             </div>

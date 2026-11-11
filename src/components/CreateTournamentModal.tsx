@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Tournament, Sport, Directorate, TARGET_AFFILIATIONS, TargetAffiliationConfig } from '../types';
-import { AGE_CATEGORIES, DataService, getAgeCategoriesForSeason, SPORTS_MAP, getCategoryGenderLabel, normalizeCategoryKey } from '../lib/dataService';
+import { AGE_CATEGORIES, DataService, getAgeCategoriesForSeason, SPORTS_MAP, getCategoryGenderLabel, normalizeCategoryKey, isTeamSport } from '../lib/dataService';
 import { X, Trophy, Calendar, Users, Target, Award, Sparkles, ShieldCheck, RefreshCw, Check, Clock, GraduationCap } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -89,21 +89,42 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
     return TARGET_AFFILIATIONS.filter(a => ['non_club', 'espoir_non_club', 'sports_tracks', 'espoir_club'].includes(a.id));
   }, [activeSportConfig]);
 
-  // Sync selected affiliations whenever available affiliations change
-  useEffect(() => {
-    if (availableAffiliations.length > 0) {
-      setSelectedAffiliations(availableAffiliations.map(a => a.id));
+  // Compute categoriesToRender based strictly on configured/programmed categories in SportsConfig
+  const categoriesToRender = useMemo(() => {
+    if (activeSportConfig?.customAgeCategories && activeSportConfig.customAgeCategories.length > 0) {
+      return activeSportConfig.customAgeCategories.map(c => ({
+        id: normalizeCategoryKey(c.id),
+        name: c.name,
+        shortName: c.name
+      }));
     }
-  }, [availableAffiliations]);
-
-  // Offer the 4 official age categories so user can add, remove, or switch categories freely
-  const categoriesToRender = seasonalCategories
-    .map(c => ({
+    if (activeSportConfig?.ageCategories && activeSportConfig.ageCategories.length > 0) {
+      return activeSportConfig.ageCategories.map(catKey => {
+        const normKey = normalizeCategoryKey(catKey);
+        const found = seasonalCategories.find(sc => sc.id === normKey);
+        return {
+          id: normKey,
+          name: found ? found.name : catKey,
+          shortName: found ? found.shortName : catKey
+        };
+      });
+    }
+    if (isTeamSport(sportId)) {
+      return seasonalCategories
+        .filter(c => c.id === 'U15' || c.id === 'U18')
+        .map(c => ({
+          id: c.id,
+          name: c.name,
+          shortName: c.shortName
+        }));
+    }
+    return seasonalCategories.map(c => ({
       id: c.id,
       name: c.name,
       shortName: c.shortName
     }));
-  
+  }, [activeSportConfig, seasonalCategories, sportId]);
+
   const [scope, setScope] = useState<'Provincial' | 'Regional' | 'National'>('Provincial');
   const [status, setStatus] = useState<Tournament['status']>('Scheduled');
   const [startDate, setStartDate] = useState('2026-03-01');
@@ -114,112 +135,107 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
 
   // Auto-prefill existing tournament data for sport if present
   useEffect(() => {
-    if (isOpen && sportId) {
-      DataService.getTournaments().then(allTourns => {
-        const activeDirId = activeDirObj?.id || DataService.getActiveDirectorateId();
-        const sportTourns = allTourns.filter(t => 
-          t.sportId === sportId && 
-          (!t.seasonId || !currentSeason || t.seasonId === currentSeason) &&
-          (!t.directorateId || (t.directorateId || 'taourirt') === (activeDirId || 'taourirt'))
-        );
+    if (!isOpen || !sportId) return;
 
-        if (sportTourns.length > 0) {
-          setIsEditing(true);
-          const sample = sportTourns[0];
-          if (sample.name) {
-            const cleanName = sample.name.split(/\s*-\s*(?:البرعمات|البراعم|الصغيرات|الصغار|الفتيات|الفتيان|الشابات|الشبان|ذكور|إناث|مختلط|U12|U15|U18|U20|جميع الفئات|فئة|صغار|فتيان|شبان|براعم|صغيرات|فتيات|شابات|برعمات|لا منتمين|للمنتمين للأندية|مفتوحة|مواليد|السلك|دوري)/i)[0].trim();
-            setName(cleanName && cleanName.length >= 3 ? cleanName : sample.name);
-          }
-          if (sample.startDate) {
-            let d: Date | null = null;
-            if (typeof sample.startDate === 'object' && 'toDate' in sample.startDate && typeof (sample.startDate as any).toDate === 'function') d = (sample.startDate as any).toDate();
-            else if (sample.startDate instanceof Date) d = sample.startDate;
-            else d = new Date(sample.startDate);
-            if (d && !isNaN(d.getTime())) setStartDate(d.toISOString().split('T')[0]);
-          }
-          if (sample.endDate) {
-            let d: Date | null = null;
-            if (typeof sample.endDate === 'object' && 'toDate' in sample.endDate && typeof (sample.endDate as any).toDate === 'function') d = (sample.endDate as any).toDate();
-            else if (sample.endDate instanceof Date) d = sample.endDate;
-            else d = new Date(sample.endDate);
-            if (d && !isNaN(d.getTime())) setEndDate(d.toISOString().split('T')[0]);
-          }
-          if (sample.registrationDeadline) {
-            let d: Date | null = null;
-            if (typeof sample.registrationDeadline === 'object' && 'toDate' in sample.registrationDeadline && typeof (sample.registrationDeadline as any).toDate === 'function') d = (sample.registrationDeadline as any).toDate();
-            else if (sample.registrationDeadline instanceof Date) d = sample.registrationDeadline;
-            else d = new Date(sample.registrationDeadline);
-            if (d && !isNaN(d.getTime())) {
-              const year = d.getFullYear();
-              const month = String(d.getMonth() + 1).padStart(2, '0');
-              const day = String(d.getDate()).padStart(2, '0');
-              const hours = String(d.getHours()).padStart(2, '0');
-              const mins = String(d.getMinutes()).padStart(2, '0');
-              setRegistrationDeadline(`${year}-${month}-${day}T${hours}:${mins}`);
-            }
-          }
-          if (sample.description) setDescription(sample.description);
-          if (sample.scope) setScope(sample.scope as any);
-          if (sample.status) setStatus(sample.status);
-          if (sample.level) {
-            const lvls = sample.level.split(',').map((l: string) => l.trim()).filter(Boolean) as ('Primary' | 'Middle' | 'High')[];
-            if (lvls.length > 0) setSelectedLevels(lvls);
-          }
+    let isMounted = true;
+    DataService.getTournaments().then(allTourns => {
+      if (!isMounted) return;
+      const activeDirId = activeDirObj?.id || DataService.getActiveDirectorateId();
+      const sportTourns = allTourns.filter(t => 
+        t.sportId === sportId && 
+        (!t.seasonId || !currentSeason || t.seasonId === currentSeason) &&
+        (!t.directorateId || (t.directorateId || 'taourirt') === (activeDirId || 'taourirt'))
+      );
 
-          const activeSportConfig = sportsConfig.find(s => s.id === sportId);
-          if (activeSportConfig?.ageCategories && activeSportConfig.ageCategories.length > 0) {
-            const cleanCats = activeSportConfig.ageCategories
-              .map(normalizeCategoryKey)
-              .filter(c => ['U12', 'U15', 'U18', 'U20'].includes(c));
-            setSelectedCategories(cleanCats.length > 0 ? cleanCats : ['U15']);
-          } else {
-            const existingCats = Array.from(new Set(
-              sportTourns
-                .map(t => normalizeCategoryKey(t.ageCategory))
-                .filter(c => ['U12', 'U15', 'U18', 'U20'].includes(c))
-            ));
-            if (existingCats.length > 0) {
-              setSelectedCategories(existingCats);
-            } else {
-              setSelectedCategories(['U12', 'U15', 'U18', 'U20']);
-            }
-          }
-
-          const genders = new Set(sportTourns.map(t => t.gender));
-          if (genders.has('Male') && genders.has('Female')) setGenderSelection('Both');
-          else if (genders.has('Mixed')) setGenderSelection('Mixed');
-          else if (genders.has('Male')) setGenderSelection('Male');
-          else if (genders.has('Female')) setGenderSelection('Female');
-          else if (sportId === 'cross_country') setGenderSelection('Both');
-
-          const affs = new Set(sportTourns.map(t => t.affiliationType || 'non_club').filter(Boolean) as string[]);
-          if (affs.size > 0) {
-            setSelectedAffiliations(Array.from(affs));
-          } else {
-            setSelectedAffiliations(availableAffiliations.map(a => a.id));
-          }
-        } else {
-          setIsEditing(false);
-          const activeSportConfig = sportsConfig.find(s => s.id === sportId);
-          const sportName = SPORTS_MAP[sportId]?.name || activeSportConfig?.name || sportId;
-          setName(`البطولة الإقليمية المدرسية لـ ${sportName}`);
-
-          if (activeSportConfig?.ageCategories && activeSportConfig.ageCategories.length > 0) {
-            const cleanCats = activeSportConfig.ageCategories
-              .map(normalizeCategoryKey)
-              .filter(c => ['U12', 'U15', 'U18', 'U20'].includes(c));
-            setSelectedCategories(cleanCats.length > 0 ? cleanCats : ['U12', 'U15', 'U18', 'U20']);
-          } else {
-            setSelectedCategories(['U12', 'U15', 'U18', 'U20']);
-          }
-          setGenderSelection('Both');
-          setSelectedAffiliations(availableAffiliations.map(a => a.id));
+      if (sportTourns.length > 0) {
+        setIsEditing(true);
+        const sample = sportTourns[0];
+        if (sample.name) {
+          const cleanName = sample.name.split(/\s*-\s*(?:البرعمات|البراعم|الصغيرات|الصغار|الفتيات|الفتيان|الشابات|الشبان|ذكور|إناث|مختلط|U12|U15|U18|U20|جميع الفئات|فئة|صغار|فتيان|شبان|براعم|صغيرات|فتيات|شابات|برعمات|لا منتمين|للمنتمين للأندية|مفتوحة|مواليد|السلك|دوري)/i)[0].trim();
+          setName(cleanName && cleanName.length >= 3 ? cleanName : sample.name);
         }
-      });
-    } else if (!isOpen) {
-      setIsEditing(false);
-    }
-  }, [isOpen, sportId, currentSeason, activeDirObj, sportsConfig]);
+        if (sample.startDate) {
+          let d: Date | null = null;
+          if (typeof sample.startDate === 'object' && 'toDate' in sample.startDate && typeof (sample.startDate as any).toDate === 'function') d = (sample.startDate as any).toDate();
+          else if (sample.startDate instanceof Date) d = sample.startDate;
+          else d = new Date(sample.startDate);
+          if (d && !isNaN(d.getTime())) setStartDate(d.toISOString().split('T')[0]);
+        }
+        if (sample.endDate) {
+          let d: Date | null = null;
+          if (typeof sample.endDate === 'object' && 'toDate' in sample.endDate && typeof (sample.endDate as any).toDate === 'function') d = (sample.endDate as any).toDate();
+          else if (sample.endDate instanceof Date) d = sample.endDate;
+          else d = new Date(sample.endDate);
+          if (d && !isNaN(d.getTime())) setEndDate(d.toISOString().split('T')[0]);
+        }
+        if (sample.registrationDeadline) {
+          let d: Date | null = null;
+          if (typeof sample.registrationDeadline === 'object' && 'toDate' in sample.registrationDeadline && typeof (sample.registrationDeadline as any).toDate === 'function') d = (sample.registrationDeadline as any).toDate();
+          else if (sample.registrationDeadline instanceof Date) d = sample.registrationDeadline;
+          else d = new Date(sample.registrationDeadline);
+          if (d && !isNaN(d.getTime())) {
+            const year = d.getFullYear();
+            const month = String(d.getMonth() + 1).padStart(2, '0');
+            const day = String(d.getDate()).padStart(2, '0');
+            const hours = String(d.getHours()).padStart(2, '0');
+            const mins = String(d.getMinutes()).padStart(2, '0');
+            setRegistrationDeadline(`${year}-${month}-${day}T${hours}:${mins}`);
+          }
+        }
+        if (sample.description) setDescription(sample.description);
+        if (sample.scope) setScope(sample.scope as any);
+        if (sample.status) setStatus(sample.status);
+        if (sample.level) {
+          const lvls = sample.level.split(',').map((l: string) => l.trim()).filter(Boolean) as ('Primary' | 'Middle' | 'High')[];
+          if (lvls.length > 0) setSelectedLevels(lvls);
+        }
+
+        const existingCats = Array.from(new Set(
+          sportTourns
+            .map(t => normalizeCategoryKey(t.ageCategory))
+            .filter(Boolean)
+        ));
+        if (existingCats.length > 0) {
+          setSelectedCategories(existingCats);
+        } else if (categoriesToRender.length > 0) {
+          setSelectedCategories([categoriesToRender[0].id]);
+        } else {
+          setSelectedCategories(['U15']);
+        }
+
+        const genders = new Set(sportTourns.map(t => t.gender));
+        if (genders.has('Male') && genders.has('Female')) setGenderSelection('Both');
+        else if (genders.has('Mixed')) setGenderSelection('Mixed');
+        else if (genders.has('Male')) setGenderSelection('Male');
+        else if (genders.has('Female')) setGenderSelection('Female');
+        else if (sportId === 'cross_country') setGenderSelection('Both');
+
+        const affs = new Set(sportTourns.map(t => t.affiliationType || 'non_club').filter(Boolean) as string[]);
+        if (affs.size > 0) {
+          setSelectedAffiliations(Array.from(affs));
+        } else {
+          setSelectedAffiliations(['non_club']);
+        }
+      } else {
+        setIsEditing(false);
+        const activeSportConfig = sportsConfig.find(s => s.id === sportId);
+        const sportName = SPORTS_MAP[sportId]?.name || activeSportConfig?.name || sportId;
+        setName(`البطولة الإقليمية المدرسية لـ ${sportName}`);
+
+        if (categoriesToRender.length > 0) {
+          setSelectedCategories([categoriesToRender[0].id]);
+        } else {
+          setSelectedCategories(['U15']);
+        }
+        setGenderSelection('Both');
+        setSelectedAffiliations(['non_club']);
+      }
+    });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [isOpen, sportId]);
 
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -277,12 +293,14 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
           const genderCatName = getCategoryGenderLabel(catId, gen);
 
           for (const affId of selectedAffiliations) {
+            const affPrefix = affId === 'club_affiliated' ? 'بطولة المنتمين للأندية' : 'بطولة غير المنتمين للأندية';
+            const genLabel = gen === 'Female' ? 'إناث' : gen === 'Male' ? 'ذكور' : 'مختلط';
+            const normCat = normalizeCategoryKey(catId);
             const affConfig = TARGET_AFFILIATIONS.find(a => a.id === affId);
             const affLabel = affConfig?.label || (affId === 'non_club' ? 'غير المنتمين للأندية' : affId);
-            const affSuffix = ` - ${affLabel}`;
             
-            // Formulate distinct tournament name with affiliation
-            const finalTournamentName = `${name.trim()} - ${genderCatName}${affSuffix}`;
+            // Formulate distinct tournament name according to standard
+            const finalTournamentName = `${affPrefix} ${normCat} ${genLabel}`;
 
             tournamentsBatch.push({
               name: finalTournamentName,
