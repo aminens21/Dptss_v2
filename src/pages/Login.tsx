@@ -80,10 +80,10 @@ export const Login: React.FC = () => {
   const [isAboutModalOpen, setIsAboutModalOpen] = useState(false);
   const [isIntroOpen, setIsIntroOpen] = useState<boolean>(() => {
     try {
-      const saved = localStorage.getItem('app_intro_enabled');
-      return saved !== null ? saved === 'true' : true;
+      const saved = localStorage.getItem('app_intro_enabled_v2');
+      return saved === 'true';
     } catch {
-      return true;
+      return false;
     }
   });
 

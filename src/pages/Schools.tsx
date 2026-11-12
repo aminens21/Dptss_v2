@@ -1,7 +1,8 @@
 import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { DataService, SPORTS_MAP, AGE_CATEGORIES, deduplicateById, generateSecureAccessCode } from '../lib/dataService';
+import { DataService, SPORTS_MAP, AGE_CATEGORIES, deduplicateById, generateSecureAccessCode, getEffectiveConfirmedBranches, formatBranchLabelAr, normalizeCategoryKey, ConfirmedBranchTuple } from '../lib/dataService';
 import { School, Match, Directorate } from '../types';
+import { useSchoolConfirmations } from '../hooks/useSchoolConfirmations';
 import * as XLSX from 'xlsx';
 import {
   Plus,
@@ -53,6 +54,7 @@ export const Schools: React.FC = () => {
   const [activeDirObj, setActiveDirObj] = useState<Directorate | null>(null);
   const [matches, setMatches] = useState<Match[]>([]);
   const [students, setStudents] = useState<any[]>([]);
+  const { confirmations } = useSchoolConfirmations(activeDirObj?.id);
   const [loading, setLoading] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
   const [search, setSearch] = useState('');
@@ -508,37 +510,68 @@ export const Schools: React.FC = () => {
 
   const handleExportCurrentSchools = () => {
     try {
-      const exportData = schools.map((s, idx) => {
+      const exportList = filtered && filtered.length > 0 ? filtered : schools;
+      const exportData = exportList.map((s, idx) => {
         const isMine = isTeacherSchool(s);
         const canSeeSecrets = isPrivilegedAdmin || isMine;
+
+        // Calculate registered participants count for this school
+        const schoolStudents = students.filter(
+          stud => (stud.schoolId === s.id || stud.schoolName === s.name) && (selectedSport === 'ALL' || stud.sportId === selectedSport)
+        );
+        const participantsCount = schoolStudents.length;
+
+        // Calculate confirmed sports/branches count for this school
+        const schoolConfirmations = confirmations.filter(
+          conf => (conf.schoolId === s.id || conf.schoolName?.trim().toLowerCase() === s.name.trim().toLowerCase()) &&
+                  (selectedSport === 'ALL' || conf.sportId === selectedSport)
+        );
+        const confirmedBranches = schoolConfirmations.flatMap(c => getEffectiveConfirmedBranches(c, true));
+
+        // Format participants breakdown text
+        const participantsDetail = participantsCount > 0
+          ? `${participantsCount} تلميذ(ة)`
+          : confirmedBranches.length > 0
+          ? `مؤكدة في ${confirmedBranches.length} فروع (0 مسجلين)`
+          : '0 مشارك';
+
         return {
-          'الرقم': idx + 1,
+          'الرقم الترتيبي': idx + 1,
           'اسم المؤسسة التعليمية': s.name,
+          'مدير المؤسسة': s.principalName || '—',
+          'هاتف مدير المؤسسة': canSeeSecrets ? (s.principalPhone || '—') : '—',
+          'رمز الأمان': canSeeSecrets ? (s.accessCode || '—') : '—',
+          'المشاركون': participantsCount,
+          'تفاصيل المشاركة': participantsDetail,
           'السلك التعليمي': s.type === 'تأهيلي' ? 'ثانوي تأهيلي' : s.type === 'إعدادي' ? 'ثانوي إعدادي' : 'ابتدائي',
-          'الجماعة / الدائرة': s.commune,
-          'المنسق (أستاذ التربية البدنية)': s.coordinatorName || s.teacherName,
-          'هاتف المنسق': s.phone || '',
-          'اسم مدير المؤسسة': s.principalName || '',
-          'هاتف مدير المؤسسة': canSeeSecrets ? (s.principalPhone || '') : 'غير متاح'
+          'الجماعة / الدائرة': s.commune || '—',
+          'المنسق (أستاذ التربية البدنية)': s.coordinatorName || s.teacherName || '—',
+          'هاتف المنسق': s.phone || '—'
         };
       });
 
       const ws = XLSX.utils.json_to_sheet(exportData);
+      ws['!views'] = [{ RTL: true }];
       ws['!cols'] = [
-        { wch: 8 },
-        { wch: 35 },
-        { wch: 20 },
-        { wch: 20 },
-        { wch: 30 },
-        { wch: 18 },
-        { wch: 25 },
-        { wch: 18 }
+        { wch: 8 },  // الرقم الترتيبي
+        { wch: 35 }, // اسم المؤسسة التعليمية
+        { wch: 25 }, // مدير المؤسسة
+        { wch: 18 }, // هاتف مدير المؤسسة
+        { wch: 16 }, // رمز الأمان
+        { wch: 12 }, // المشاركون
+        { wch: 30 }, // تفاصيل المشاركة
+        { wch: 18 }, // السلك التعليمي
+        { wch: 20 }, // الجماعة / الدائرة
+        { wch: 28 }, // المنسق
+        { wch: 18 }  // هاتف المنسق
       ];
 
+      const dirName = activeDirObj?.name || 'مديرية_تاوريرت';
+      const cleanDirName = dirName.replace(/\s+/g, '_');
       const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, 'المؤسسات التعليمية تاوريرت');
-      XLSX.writeFile(wb, 'المؤسسات_التعليمية_مديرية_تاوريرت.xlsx');
-      toast.success(`تم تصدير ${schools.length} مؤسسة تعليمية إلى Excel بنجاح!`);
+      XLSX.utils.book_append_sheet(wb, ws, 'معطيات المؤسسات التعليمية');
+      XLSX.writeFile(wb, `معطيات_المؤسسات_التعليمية_${cleanDirName}.xlsx`);
+      toast.success(`تم تحميل ملف Excel لمعطيات ${exportList.length} مؤسسة تعليمية بنجاح! 📊`, { duration: 4000 });
     } catch (err) {
       console.error('Error exporting schools:', err);
       toast.error('حدث خطأ أثناء تصدير البيانات إلى Excel');
@@ -571,8 +604,21 @@ export const Schools: React.FC = () => {
       }
     });
 
+    // 3. Schools with active Phase 1 confirmations in this sport
+    confirmations.forEach(conf => {
+      if (conf.sportId === selectedSport && conf.status === 'confirmed' && getEffectiveConfirmedBranches(conf, true).length > 0) {
+        if (conf.schoolId) ids.add(conf.schoolId);
+        if (conf.schoolName) ids.add(conf.schoolName.trim().toLowerCase());
+        const school = schools.find(sch => sch.id === conf.schoolId || sch.name.trim().toLowerCase() === conf.schoolName?.trim().toLowerCase());
+        if (school) {
+          ids.add(school.id);
+          ids.add(school.name.trim().toLowerCase());
+        }
+      }
+    });
+
     return ids;
-  }, [selectedSport, matches, students, schools]);
+  }, [selectedSport, matches, students, schools, confirmations]);
 
   // For teachers: Locate their exact institution, or synthesize from profile if not yet in database
   const teacherMatchedSchool = useMemo(() => {
@@ -1353,15 +1399,53 @@ export const Schools: React.FC = () => {
                           </div>
                         </div>
 
-                        {/* Participation Breakdown Preview */}
+                        {/* Participation Breakdown Preview (Exact Branches: Students + Phase 1 Confirmations) */}
                         {(() => {
+                          const targetNameLower = (s.name || '').trim().toLowerCase();
                           const schoolStudentsAll = students.filter(
-                            stud => stud.schoolId === s.id || stud.schoolName === s.name
+                            stud => stud.schoolId === s.id || (stud.schoolName && stud.schoolName.trim().toLowerCase() === targetNameLower)
                           );
-                          const participatedSportKeys = Array.from(new Set(schoolStudentsAll.map(st => st.sportId).filter(Boolean)));
-                          const participatedCatKeys = Array.from(new Set(schoolStudentsAll.map(st => st.category).filter(Boolean)));
-                          const hasClub = schoolStudentsAll.some(st => st.affiliationType === 'club_affiliated');
-                          const hasSchoolOnly = schoolStudentsAll.some(st => st.affiliationType !== 'club_affiliated');
+                          const schoolConfsAll = confirmations.filter(conf => {
+                            if (conf.status !== 'confirmed') return false;
+                            const cName = (conf.schoolName || '').trim().toLowerCase();
+                            return (conf.schoolId && (conf.schoolId === s.id || conf.schoolId.trim().toLowerCase() === targetNameLower)) ||
+                                   (cName.length > 0 && cName === targetNameLower);
+                          });
+
+                          const sportIdsSet = new Set<string>();
+                          const exactBranchesMap = new Map<string, { sportId: string; tuple: ConfirmedBranchTuple }>();
+
+                          schoolStudentsAll.forEach(st => {
+                            if (!st.sportId || !st.category) return;
+                            const cat = normalizeCategoryKey(st.category);
+                            const gen: 'Male' | 'Female' = st.gender === 'Female' ? 'Female' : 'Male';
+                            const aff = (st.affiliationType || 'non_club').trim();
+                            if (DataService.isSchoolWithdrawn({ sportId: st.sportId, ageCategory: cat, gender: gen, affiliationType: aff }, s.id, s.name)) {
+                              return;
+                            }
+                            sportIdsSet.add(st.sportId);
+                            const k = `${st.sportId}__${aff}__${cat}__${gen}`;
+                            if (!exactBranchesMap.has(k)) {
+                              exactBranchesMap.set(k, { sportId: st.sportId, tuple: { category: cat, gender: gen, affiliationType: aff } });
+                            }
+                          });
+
+                          schoolConfsAll.forEach(conf => {
+                            const eff = getEffectiveConfirmedBranches(conf, true);
+                            if (eff.length === 0) return;
+                            sportIdsSet.add(conf.sportId);
+                            eff.forEach(b => {
+                              const k = `${conf.sportId}__${b.affiliationType}__${b.category}__${b.gender}`;
+                              if (!exactBranchesMap.has(k)) {
+                                exactBranchesMap.set(k, { sportId: conf.sportId, tuple: b });
+                              }
+                            });
+                          });
+
+                          const participatedSportKeys = Array.from(sportIdsSet);
+                          const exactBranchItems = Array.from(exactBranchesMap.values());
+                          const hasClub = exactBranchItems.some(x => x.tuple.affiliationType === 'club_affiliated');
+                          const hasSchoolOnly = exactBranchItems.some(x => x.tuple.affiliationType !== 'club_affiliated');
 
                           if (participatedSportKeys.length === 0) {
                             return (
@@ -1387,15 +1471,26 @@ export const Schools: React.FC = () => {
                                 })}
                               </div>
 
-                              {/* Categories */}
-                              {participatedCatKeys.length > 0 && (
+                              {/* Exact Gender-Separated Branches */}
+                              {exactBranchItems.length > 0 && (
                                 <div className="flex items-center gap-1 flex-wrap pt-0.5">
-                                  <span className="font-black text-slate-700 text-[10px]">الفئات:</span>
-                                  {participatedCatKeys.map(cKey => {
-                                    const cat = AGE_CATEGORIES.find(c => c.id === cKey);
+                                  <span className="font-black text-slate-700 text-[10px]">الفروع المشارك فيها:</span>
+                                  {exactBranchItems.map(({ sportId: spId, tuple }) => {
+                                    const isClubBr = tuple.affiliationType === 'club_affiliated';
+                                    const isFemBr = tuple.gender === 'Female';
                                     return (
-                                      <span key={cKey} className="px-1.5 py-0.5 bg-emerald-50 text-emerald-900 font-bold border border-emerald-200 rounded-md text-[10px]">
-                                        {cat ? cat.shortName : cKey}
+                                      <span
+                                        key={`${spId}_${tuple.affiliationType}_${tuple.category}_${tuple.gender}`}
+                                        className={`px-1.5 py-0.5 font-bold border rounded-md text-[10px] flex items-center gap-1 ${
+                                          isClubBr
+                                            ? 'bg-amber-100 text-amber-950 border-amber-300'
+                                            : isFemBr
+                                            ? 'bg-pink-50 text-pink-900 border-pink-200'
+                                            : 'bg-emerald-50 text-emerald-900 border-emerald-200'
+                                        }`}
+                                      >
+                                        <span>{isClubBr ? '🟡' : '⚪'}</span>
+                                        <span>{formatBranchLabelAr(tuple, spId)}</span>
                                       </span>
                                     );
                                   })}

@@ -1,11 +1,13 @@
 import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { DataService, SPORTS_MAP, AGE_CATEGORIES, getAgeCategoriesForSeason, getCategoryGenderLabel, isClubTournament, normalizeCategoryKey, validateBirthDateForCategory, isTeacherLevelAllowedForTournament } from '../lib/dataService';
+import { DataService, SPORTS_MAP, AGE_CATEGORIES, getAgeCategoriesForSeason, getCategoryGenderLabel, isClubTournament, normalizeCategoryKey, validateBirthDateForCategory, isTeacherLevelAllowedForTournament, getEffectiveConfirmedBranches, formatBranchLabelAr, getGenderSpecificCategoryTitle } from '../lib/dataService';
+import { useSchoolConfirmations } from '../hooks/useSchoolConfirmations';
 import { Student, Sport, Tournament, School, Directorate } from '../types';
 import { ParticipationFormPdfModal } from '../components/ParticipationFormPdfModal';
 import { CrossCountryBulkRegisterModal } from '../components/CrossCountryBulkRegisterModal';
 import { SportBulkRegisterModal } from '../components/SportBulkRegisterModal';
+import { ConfirmedParticipationBadge } from '../components/ConfirmedParticipationBadge';
 import { CROSS_COUNTRY_CATEGORIES } from '../lib/crossCountryConfig';
 import * as XLSX from 'xlsx';
 import {
@@ -119,8 +121,19 @@ export const TeacherTeams: React.FC = () => {
   const [lockedGender, setLockedGender] = useState<'Male' | 'Female' | null>(null);
   const [lockedAffiliation, setLockedAffiliation] = useState<'non_club' | 'club_affiliated' | null>(null);
 
-  // Category Selection for Drill-down student view (catId_gender)
+  // Category Selection for Drill-down student view (catId_gender_affiliation)
   const [selectedCategoryKey, setSelectedCategoryKey] = useState<string | null>(null);
+  const [categoryKeyToDelete, setCategoryKeyToDelete] = useState<string | null>(null);
+
+  const parseBranchKey = (keyStr: string | null): { catId: string; gender: 'Male' | 'Female'; affiliationType?: 'non_club' | 'club_affiliated' } => {
+    if (!keyStr) return { catId: '', gender: 'Male' };
+    const parts = keyStr.split('_');
+    const catId = parts[0] || '';
+    const gender = (parts[1] === 'Female' ? 'Female' : 'Male') as 'Male' | 'Female';
+    const rawAff = parts.length > 2 ? parts.slice(2).join('_') : undefined;
+    const affiliationType = (rawAff === 'club_affiliated' || rawAff === 'non_club') ? rawAff : undefined;
+    return { catId, gender, affiliationType };
+  };
 
   // Category Coaches states
   const [predefinedCoaches, setPredefinedCoaches] = useState<Record<string, { coachName: string; coachLeaseNumber: string; coachPhone: string }>>({});
@@ -138,6 +151,8 @@ export const TeacherTeams: React.FC = () => {
   const [activeDirectorateObj, setActiveDirectorateObj] = useState<Directorate | null>(null);
   const [showOnlyParticipatingCoaches, setShowOnlyParticipatingCoaches] = useState(true);
   const [rosterGenderFilter, setRosterGenderFilter] = useState<'ALL' | 'Male' | 'Female'>('ALL');
+
+  const { getConfirmation } = useSchoolConfirmations(activeDirectorateObj?.id);
 
   // Verification: Teacher profile completeness
   const isTeacher = userProfile?.role === 'TEACHER';
@@ -921,14 +936,11 @@ export const TeacherTeams: React.FC = () => {
   const displayedSportStudents = useMemo(() => {
     return activeSportStudents.filter(s => {
       if (selectedCategoryKey) {
-        const parts = selectedCategoryKey.split('_');
-        const catId = parts[0];
-        const g = parts[1];
-        const aff = parts[2];
-        
+        const { catId, gender: g, affiliationType: aff } = parseBranchKey(selectedCategoryKey);
         const normStudentCat = normalizeCategoryKey(s.category);
         if (normStudentCat !== catId || s.gender !== g) return false;
-        if (aff && s.affiliationType !== aff) return false;
+        const sAff = s.affiliationType === 'club_affiliated' ? 'club_affiliated' : 'non_club';
+        if (aff && sAff !== aff) return false;
       } else {
         // If no category card is selected, do not display any student list
         return false;
@@ -943,17 +955,18 @@ export const TeacherTeams: React.FC = () => {
     // First, fill using the existing student data (from DB)
     activeSportStudents.forEach(s => {
       const normCat = normalizeCategoryKey(s.category);
-      // For cross country, we might want to split coaches by affiliation if we split cards
-      const key = (selectedSportId === 'cross_country' && s.affiliationType)
-        ? `${normCat}_${s.gender}_${s.affiliationType}`
-        : `${normCat}_${s.gender}`;
+      const sAff = s.affiliationType === 'club_affiliated' ? 'club_affiliated' : 'non_club';
+      const baseKey = `${normCat}_${s.gender}`;
+      const affKey = `${normCat}_${s.gender}_${sAff}`;
         
-      if (s.coachName && !coaches[key]) {
-        coaches[key] = {
+      if (s.coachName) {
+        const info = {
           coachName: s.coachName,
           coachLeaseNumber: s.coachLeaseNumber || '',
           coachPhone: s.coachPhone || ''
         };
+        if (!coaches[affKey]) coaches[affKey] = info;
+        if (!coaches[baseKey]) coaches[baseKey] = info;
       }
     });
 
@@ -1049,8 +1062,10 @@ export const TeacherTeams: React.FC = () => {
 
   const handleExportCurrentCategoryExcel = () => {
     if (!selectedCategoryKey) return;
-    const parts = selectedCategoryKey.split('_');
-    const catLabel = getCategoryLabel(parts[0], parts[1]);
+    const { catId, gender: g, affiliationType: aff } = parseBranchKey(selectedCategoryKey);
+    const catLabel = aff
+      ? formatBranchLabelAr({ category: catId, gender: g, affiliationType: aff }, selectedSportId)
+      : getGenderSpecificCategoryTitle(catId, g, selectedSportId);
     handleExportStudentsListToExcel(displayedSportStudents, `فئة_${catLabel}`);
   };
 
@@ -1132,21 +1147,44 @@ export const TeacherTeams: React.FC = () => {
   // Render sports cards distinguishing white (non-club) vs yellow (club-affiliated)
   const renderSportCard = (sport: Sport) => {
     const mapped = SPORTS_MAP[sport.id] || { name: sport.name, icon: '🏆' };
-    const count = students.filter(s => s.sportId === sport.id).length;
+    const sportStudents = students.filter(s => s.sportId === sport.id);
+    const count = sportStudents.length;
     const hasConfiguredCategories = sport.ageCategories && sport.ageCategories.length > 0;
     const isProgrammed = isSportProgrammed(sport);
+
+    const schoolConf = schoolName ? getConfirmation(sport.id, schoolName) : undefined;
+    const confirmedBranches = getEffectiveConfirmedBranches(schoolConf, true);
+
+    const schoolBranchesMap = new Map<string, { category: string; gender: 'Male' | 'Female'; affiliationType: string }>();
+    sportStudents.forEach(s => {
+      const cat = normalizeCategoryKey(s.category);
+      const gen = (s.gender === 'Female' ? 'Female' : 'Male') as 'Male' | 'Female';
+      const aff = s.affiliationType === 'club_affiliated' ? 'club_affiliated' : 'non_club';
+      schoolBranchesMap.set(`${aff}|${cat}|${gen}`, { category: cat, gender: gen, affiliationType: aff });
+    });
+    confirmedBranches.forEach(b => {
+      const key = `${b.affiliationType}|${b.category}|${b.gender}`;
+      if (!schoolBranchesMap.has(key)) {
+        schoolBranchesMap.set(key, b);
+      }
+    });
+    const schoolBranches = Array.from(schoolBranchesMap.values());
+    const hasSchoolParticipation = schoolBranches.length > 0;
 
     const sportTourns = tournaments.filter(t => t.sportId === sport.id);
     const mainTourn = sportTourns.length > 0 ? sportTourns[0] : null;
     
     const hasClubTournaments = sportTourns.some(t => isClubTournament(t));
     const hasSchoolOnlyTournaments = sportTourns.some(t => !isClubTournament(t));
-    const hasBothClasses = hasClubTournaments && hasSchoolOnlyTournaments;
 
-    const sportStudents = students.filter(s => s.sportId === sport.id);
-    const isClub = sportStudents.length > 0 
-      ? sportStudents.some(s => s.affiliationType === 'club_affiliated')
-      : (isClubTournament(mainTourn) && !hasBothClasses);
+    const hasClub = hasSchoolParticipation
+      ? schoolBranches.some(b => b.affiliationType === 'club_affiliated')
+      : hasClubTournaments;
+    const hasNonClub = hasSchoolParticipation
+      ? schoolBranches.some(b => b.affiliationType !== 'club_affiliated')
+      : hasSchoolOnlyTournaments;
+    const hasBothClasses = hasClub && hasNonClub;
+    const isClub = hasClub && !hasNonClub && (hasSchoolParticipation || isClubTournament(mainTourn));
 
     return (
       <div
@@ -1163,7 +1201,7 @@ export const TeacherTeams: React.FC = () => {
         <div className="space-y-2">
           <div className="flex items-center justify-between gap-1 flex-wrap">
             <span className="text-3xl block">{mapped.icon}</span>
-            <div className="flex items-center gap-1">
+            <div className="flex items-center gap-1 flex-wrap justify-end">
               {hasBothClasses ? (
                 <div className="flex items-center gap-1 flex-wrap justify-end">
                   <span className="text-[9px] font-extrabold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-950 border border-amber-300 shadow-3xs">
@@ -1179,40 +1217,58 @@ export const TeacherTeams: React.FC = () => {
                 </span>
               ) : (
                 <span className="text-[9px] font-extrabold px-2 py-0.5 rounded-full bg-slate-100 text-slate-800 border border-slate-300 shadow-3xs">
-                  ⚪ لا منتمين (العموميون)
+                  ⚪ لا منتمين
                 </span>
               )}
-              {isProgrammed && (
+              {confirmedBranches.length > 0 ? (
+                <div onClick={(e) => e.stopPropagation()}>
+                  <ConfirmedParticipationBadge
+                    sportId={sport.id}
+                    sportName={sport.name}
+                    schoolId={userProfile?.schoolId}
+                    schoolName={schoolName}
+                    variant="light"
+                    label="✓ مؤكدة"
+                    count={confirmedBranches.length}
+                    className="!py-0.5 !px-1.5 !text-[9px] !rounded-full"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleSelectSport(sport.id);
+                    }}
+                    onCancelSuccess={() => {
+                      loadInitialData();
+                    }}
+                  />
+                </div>
+              ) : isProgrammed ? (
                 <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200">
                   ✅ مبرمجة
                 </span>
-              )}
+              ) : null}
             </div>
           </div>
           
           <h4 className="text-xs md:text-sm font-bold text-slate-800 group-hover:text-blue-600 transition-colors">
             {mapped.name}
           </h4>
-          <p className="text-[10px] text-slate-500 font-medium line-clamp-1">
-            {(() => {
-              const sportStudents = students.filter(s => s.sportId === sport.id);
-              const uniqueParticipatingCats = Array.from(new Set(sportStudents.map(s => s.category).filter(Boolean))) as string[];
-              if (uniqueParticipatingCats.length > 0) {
-                return `الفئات المشارك فيها: ${uniqueParticipatingCats.map(c => getCategoryGenderLabel(c, undefined, currentSeason, sport.id)).join(' - ')}`;
-              }
-              return hasConfiguredCategories
-                ? `الفئات المتاحة: ${sport.ageCategories?.map(c => getCategoryGenderLabel(c, undefined, currentSeason, sport.id)).join(' - ')}`
-                : 'لم يتم تفعيل أي فئة';
-            })()}
+          <p className="text-[10px] text-slate-500 font-medium line-clamp-2">
+            {hasSchoolParticipation
+              ? `المشاركات المؤكدة: ${schoolBranches.map(b => formatBranchLabelAr(b, sport.id)).join(' • ')}`
+              : hasConfiguredCategories
+                ? `الفئات المتاحة: ${sport.ageCategories?.flatMap(c => [
+                    getGenderSpecificCategoryTitle(c, 'Male', sport.id),
+                    getGenderSpecificCategoryTitle(c, 'Female', sport.id)
+                  ]).join(' - ')}`
+                : 'لم يتم تفعيل أي فئة'}
           </p>
         </div>
 
         <div className="pt-2 border-t border-slate-200/60 flex items-center justify-between text-[11px]">
           <span className="text-slate-500 font-bold">المسجلون بالفريق:</span>
           <span className={`font-bold px-2 py-0.5 rounded border ${
-            count > 0 ? 'text-blue-700 bg-blue-50 border-blue-200' : 'text-slate-400 bg-slate-50 border-slate-200'
+            count > 0 ? 'text-blue-700 bg-blue-50 border-blue-200' : confirmedBranches.length > 0 ? 'text-emerald-700 bg-emerald-50 border-emerald-200' : 'text-slate-400 bg-slate-50 border-slate-200'
           }`}>
-            {count} تلاميذ
+            {count > 0 ? `${count} تلاميذ` : confirmedBranches.length > 0 ? `${confirmedBranches.length} فروع مؤكدة` : '0 تلاميذ'}
           </span>
         </div>
       </div>
@@ -1342,56 +1398,87 @@ export const TeacherTeams: React.FC = () => {
                 <FileSpreadsheet className="h-4 w-4" />
                 <span>استخراج اللائحة Excel 📊</span>
               </button>
-              {selectedCategoryKey && (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => setIsPdfModalOpen(true)}
-                    disabled={displayedSportStudents.length === 0}
-                    title={displayedSportStudents.length === 0 ? 'يرجى تسجيل تلاميذ أولاً لعرض المطبوع' : 'معاينة وعرض لائحة المشاركة الرسمية لهذه الفئة'}
-                    className="bg-sky-700 hover:bg-sky-600 text-white font-bold text-xs px-3.5 py-2 rounded-xl shadow-xs flex items-center gap-1.5 transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
-                  >
-                    <FileText className="h-4 w-4" />
-                    <span>عرض لائحة المشاركة</span>
-                  </button>
-                  {selectedSportId === 'cross_country' ? (
+              {selectedCategoryKey && (() => {
+                const parsed = parseBranchKey(selectedCategoryKey);
+                const activeSchoolConf = (selectedSportId && schoolName) ? getConfirmation(selectedSportId, schoolName) : undefined;
+                const confirmedBranches = getEffectiveConfirmedBranches(activeSchoolConf, true);
+
+                const hasParticipationInBranch = !isTeacherRole || canManage || (() => {
+                  const hasStudentsInBranch = activeSportStudents.some(s => {
+                    const sAff = s.affiliationType === 'club_affiliated' ? 'club_affiliated' : 'non_club';
+                    return (
+                      normalizeCategoryKey(s.category) === parsed.catId &&
+                      s.gender === parsed.gender &&
+                      (!parsed.affiliationType || sAff === parsed.affiliationType)
+                    );
+                  });
+                  if (hasStudentsInBranch) return true;
+
+                  if (confirmedBranches.length > 0) {
+                    return confirmedBranches.some(b =>
+                      b.category === parsed.catId &&
+                      b.gender === parsed.gender &&
+                      (!parsed.affiliationType || b.affiliationType === parsed.affiliationType)
+                    );
+                  }
+                  return false;
+                })();
+
+                return (
+                  <>
                     <button
                       type="button"
-                      onClick={() => handleOpenCrossCountryBulk(selectedCategoryKey)}
-                      disabled={!activeSportCategories || activeSportCategories.length === 0 || !activeSportConfig || !isSportProgrammed(activeSportConfig)}
-                      title="تسجيل 8 مشاركين في آن واحد (3 فردي + 5 فريق المؤسسة)"
-                      className="bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 text-slate-950 font-black text-xs px-4 py-2 rounded-xl shadow-xs flex items-center gap-1.5 transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer hover:scale-102 active:scale-98"
+                      onClick={() => setIsPdfModalOpen(true)}
+                      disabled={displayedSportStudents.length === 0}
+                      title={displayedSportStudents.length === 0 ? 'يرجى تسجيل تلاميذ أولاً لعرض المطبوع' : 'معاينة وعرض لائحة المشاركة الرسمية لهذه الفئة'}
+                      className="bg-sky-700 hover:bg-sky-600 text-white font-bold text-xs px-3.5 py-2 rounded-xl shadow-xs flex items-center gap-1.5 transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
                     >
-                      <Sparkles className="h-4 w-4 text-slate-950" />
-                      <span>تسجيل دفعة واحدة ⚡</span>
+                      <FileText className="h-4 w-4" />
+                      <span>عرض لائحة المشاركة</span>
                     </button>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => setIsSportBulkOpen(true)}
-                      disabled={!activeSportCategories || activeSportCategories.length === 0 || !activeSportConfig || !isSportProgrammed(activeSportConfig)}
-                      title="تسجيل عدة مشاركين دفعة واحدة لتوفير الوقت"
-                      className="bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 text-slate-950 font-black text-xs px-4 py-2 rounded-xl shadow-xs flex items-center gap-1.5 transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer hover:scale-102 active:scale-98"
-                    >
-                      <Sparkles className="h-4 w-4 text-slate-950" />
-                      <span>تسجيل دفعة واحدة ⚡</span>
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const parts = selectedCategoryKey.split('_');
-                      handleOpenNewStudentForm(parts[0], parts[1] as 'Male' | 'Female', parts[2] as 'non_club' | 'club_affiliated');
-                    }}
-                    disabled={!activeSportCategories || activeSportCategories.length === 0 || !activeSportConfig || !isSportProgrammed(activeSportConfig)}
-                    title={activeSportConfig && !isSportProgrammed(activeSportConfig) ? 'هذه البطولة في طور الإعداد وغير مفتوحة للتسجيل' : 'إضافة تلميذ جديد'}
-                    className="bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs px-4 py-2 rounded-xl shadow-xs flex items-center gap-1.5 transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
-                  >
-                    <Plus className="h-4 w-4" />
-                    <span>تسجيل واحد تلو الآخر</span>
-                  </button>
-                </>
-              )}
+
+                    {hasParticipationInBranch && (
+                      <>
+                        {selectedSportId === 'cross_country' ? (
+                          <button
+                            type="button"
+                            onClick={() => handleOpenCrossCountryBulk(selectedCategoryKey)}
+                            disabled={!activeSportCategories || activeSportCategories.length === 0 || !activeSportConfig || !isSportProgrammed(activeSportConfig)}
+                            title="تسجيل 8 مشاركين في آن واحد (3 فردي + 5 فريق المؤسسة)"
+                            className="bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 text-slate-950 font-black text-xs px-4 py-2 rounded-xl shadow-xs flex items-center gap-1.5 transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer hover:scale-102 active:scale-98"
+                          >
+                            <Sparkles className="h-4 w-4 text-slate-950" />
+                            <span>تسجيل دفعة واحدة ⚡</span>
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => setIsSportBulkOpen(true)}
+                            disabled={!activeSportCategories || activeSportCategories.length === 0 || !activeSportConfig || !isSportProgrammed(activeSportConfig)}
+                            title="تسجيل عدة مشاركين دفعة واحدة لتوفير الوقت"
+                            className="bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 text-slate-950 font-black text-xs px-4 py-2 rounded-xl shadow-xs flex items-center gap-1.5 transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer hover:scale-102 active:scale-98"
+                          >
+                            <Sparkles className="h-4 w-4 text-slate-950" />
+                            <span>تسجيل دفعة واحدة ⚡</span>
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            handleOpenNewStudentForm(parsed.catId, parsed.gender, parsed.affiliationType);
+                          }}
+                          disabled={!activeSportCategories || activeSportCategories.length === 0 || !activeSportConfig || !isSportProgrammed(activeSportConfig)}
+                          title={activeSportConfig && !isSportProgrammed(activeSportConfig) ? 'هذه البطولة في طور الإعداد وغير مفتوحة للتسجيل' : 'إضافة تلميذ جديد'}
+                          className="bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs px-4 py-2 rounded-xl shadow-xs flex items-center gap-1.5 transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                        >
+                          <Plus className="h-4 w-4" />
+                          <span>تسجيل واحد تلو الآخر</span>
+                        </button>
+                      </>
+                    )}
+                  </>
+                );
+              })()}
             </div>
           </div>
 
@@ -2071,43 +2158,90 @@ export const TeacherTeams: React.FC = () => {
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {(() => {
-                  const allItems: { catId: string; gender: 'Male' | 'Female'; affiliationType?: string; label: string }[] = [];
+                  const sportTourns = tournaments.filter(t => t.sportId === selectedSportId);
+                  const activeSchoolConf = (selectedSportId && schoolName) ? getConfirmation(selectedSportId, schoolName) : undefined;
+                  const confirmedBranches = getEffectiveConfirmedBranches(activeSchoolConf, true);
+
+                  const hasNonClubTourn = sportTourns.length === 0 || sportTourns.some(t => !isClubTournament(t) || t.affiliationType === 'non_club' || t.affiliationType === 'open');
+                  const hasClubTourn = sportTourns.some(t => isClubTournament(t) || t.affiliationType === 'club_affiliated' || t.affiliationType === 'open');
+                  const splitByAffiliation = selectedSportId === 'cross_country' || (hasNonClubTourn && hasClubTourn) || confirmedBranches.length > 0;
+
+                  const allItems: { catId: string; gender: 'Male' | 'Female'; affiliationType?: 'non_club' | 'club_affiliated'; label: string }[] = [];
                   
                   activeSportCategories.forEach(catId => {
-                    if (selectedSportId === 'cross_country') {
-                      allItems.push({ catId, gender: 'Male', affiliationType: 'non_club', label: `${getCategoryLabel(catId, 'Male')} (غير المنتمين للأندية)` });
-                      allItems.push({ catId, gender: 'Male', affiliationType: 'club_affiliated', label: `${getCategoryLabel(catId, 'Male')} (المنتمين للأندية)` });
-                      allItems.push({ catId, gender: 'Female', affiliationType: 'non_club', label: `${getCategoryLabel(catId, 'Female')} (غير المنتميات للأندية)` });
-                      allItems.push({ catId, gender: 'Female', affiliationType: 'club_affiliated', label: `${getCategoryLabel(catId, 'Female')} (المنتميات للأندية)` });
+                    if (splitByAffiliation) {
+                      allItems.push({
+                        catId,
+                        gender: 'Male',
+                        affiliationType: 'non_club',
+                        label: formatBranchLabelAr({ category: catId, gender: 'Male', affiliationType: 'non_club' }, selectedSportId)
+                      });
+                      allItems.push({
+                        catId,
+                        gender: 'Female',
+                        affiliationType: 'non_club',
+                        label: formatBranchLabelAr({ category: catId, gender: 'Female', affiliationType: 'non_club' }, selectedSportId)
+                      });
+                      allItems.push({
+                        catId,
+                        gender: 'Male',
+                        affiliationType: 'club_affiliated',
+                        label: formatBranchLabelAr({ category: catId, gender: 'Male', affiliationType: 'club_affiliated' }, selectedSportId)
+                      });
+                      allItems.push({
+                        catId,
+                        gender: 'Female',
+                        affiliationType: 'club_affiliated',
+                        label: formatBranchLabelAr({ category: catId, gender: 'Female', affiliationType: 'club_affiliated' }, selectedSportId)
+                      });
                     } else {
-                      allItems.push({ catId, gender: 'Male', label: getCategoryLabel(catId, 'Male') });
-                      allItems.push({ catId, gender: 'Female', label: getCategoryLabel(catId, 'Female') });
+                      const singleAff: 'non_club' | 'club_affiliated' = hasClubTourn && !hasNonClubTourn ? 'club_affiliated' : 'non_club';
+                      allItems.push({
+                        catId,
+                        gender: 'Male',
+                        affiliationType: singleAff,
+                        label: formatBranchLabelAr({ category: catId, gender: 'Male', affiliationType: singleAff }, selectedSportId)
+                      });
+                      allItems.push({
+                        catId,
+                        gender: 'Female',
+                        affiliationType: singleAff,
+                        label: formatBranchLabelAr({ category: catId, gender: 'Female', affiliationType: singleAff }, selectedSportId)
+                      });
                     }
                   });
-                  
-                  const sportTourns = tournaments.filter(t => t.sportId === selectedSportId);
 
                   const filteredItems = allItems.filter(item => {
                     const { catId, gender: g, affiliationType: aff } = item;
                     
-                    // 1. If students are already registered in this category/gender/affiliation, keep it so teacher can view/manage
-                    const hasStudents = activeSportStudents.some(s => 
-                      normalizeCategoryKey(s.category) === catId && 
-                      s.gender === g && 
-                      (!aff || s.affiliationType === aff)
-                    );
+                    // 1. If students are already registered in this exact branch, keep it so teacher can view/manage
+                    const hasStudents = activeSportStudents.some(s => {
+                      const sAff = s.affiliationType === 'club_affiliated' ? 'club_affiliated' : 'non_club';
+                      return (
+                        normalizeCategoryKey(s.category) === catId &&
+                        s.gender === g &&
+                        (!aff || sAff === aff)
+                      );
+                    });
                     if (hasStudents) return true;
 
-                    // 2. If no active tournaments are programmed for this sport, show all categories by default
-                    if (sportTourns.length === 0) return true;
+                    // 2. If the school has confirmed participation in Phase 1, strictly show ONLY its confirmed branches!
+                    if (confirmedBranches.length > 0) {
+                      return confirmedBranches.some(b =>
+                        b.category === catId &&
+                        b.gender === g &&
+                        (!aff || b.affiliationType === aff)
+                      );
+                    }
 
-                    // 3. Otherwise, strictly keep items that match at least one active programmed tournament
+                    // 3. If no active tournaments are programmed for this sport, show default non-club categories
+                    if (sportTourns.length === 0) return !aff || aff === 'non_club';
+
+                    // 4. Otherwise, strictly keep items that match at least one active programmed tournament
                     return sportTourns.some(t => {
-                      // Gender check
                       const genderMatch = t.gender === 'Mixed' || t.gender === g;
                       if (!genderMatch) return false;
 
-                      // Category check
                       const tCatKey = normalizeCategoryKey(t.ageCategory);
                       const categoryMatch = !tCatKey || tCatKey === 'OPEN' || tCatKey === catId || (
                         t.ageCategory && (
@@ -2120,7 +2254,6 @@ export const TeacherTeams: React.FC = () => {
                       );
                       if (!categoryMatch) return false;
 
-                      // Affiliation check
                       if (aff) {
                         const tAff = t.affiliationType || (isClubTournament(t) ? 'club_affiliated' : 'non_club');
                         if (tAff !== 'open' && tAff !== aff) return false;
@@ -2134,16 +2267,19 @@ export const TeacherTeams: React.FC = () => {
                 })().map((item) => {
                   const { catId, gender: g, label, affiliationType: aff } = item;
                   const key = aff ? `${catId}_${g}_${aff}` : `${catId}_${g}`;
-                  const currentCoach = effectiveCoaches[key] || {
+                  const currentCoach = effectiveCoaches[key] || effectiveCoaches[`${catId}_${g}`] || {
                     coachName: userProfile?.fullName || '',
                     coachLeaseNumber: userProfile?.leaseNumber || '',
                     coachPhone: userProfile?.phone || ''
                   };
-                  const matchingStudents = activeSportStudents.filter(s => 
-                    normalizeCategoryKey(s.category) === catId && 
-                    s.gender === g &&
-                    (!aff || s.affiliationType === aff)
-                  );
+                  const matchingStudents = activeSportStudents.filter(s => {
+                    const sAff = s.affiliationType === 'club_affiliated' ? 'club_affiliated' : 'non_club';
+                    return (
+                      normalizeCategoryKey(s.category) === catId &&
+                      s.gender === g &&
+                      (!aff || sAff === aff)
+                    );
+                  });
                   const isEditing = editingCoachKey === key;
                   const isSelected = selectedCategoryKey === key;
                   const isCategoryClub = aff === 'club_affiliated' || (!aff && matchingStudents.some(s => s.affiliationType === 'club_affiliated'));
@@ -2197,44 +2333,70 @@ export const TeacherTeams: React.FC = () => {
                           )}
 
                           {matchingStudents.length > 0 && (
-                            <button
-                              type="button"
-                              onClick={async (e) => {
-                                e.stopPropagation();
-                                if (!window.confirm(`هل أنت متأكد من حذف فئة "${label}" بالكامل وجميع المشاركين المسجلين بها (${matchingStudents.length} مشارك)؟`)) return;
-                                const toastId = toast.loading(`جاري حذف فئة ${label}...`);
-                                try {
-                                  for (const s of matchingStudents) {
-                                    await DataService.deleteStudent(s.id);
-                                  }
-                                  setStudents(prev => prev.filter(s => {
-                                    const match = s.sportId === selectedSportId && normalizeCategoryKey(s.category) === catId && s.gender === g;
-                                    if (match && aff) {
-                                      return s.affiliationType !== aff;
+                            categoryKeyToDelete === key ? (
+                              <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                                <button
+                                  type="button"
+                                  onClick={async (e) => {
+                                    e.stopPropagation();
+                                    setCategoryKeyToDelete(null);
+                                    const toastId = toast.loading(`جاري حذف فئة ${label}...`);
+                                    try {
+                                      for (const s of matchingStudents) {
+                                        await DataService.deleteStudent(s.id);
+                                      }
+                                      setStudents(prev => prev.filter(s => {
+                                        const sAff = s.affiliationType === 'club_affiliated' ? 'club_affiliated' : 'non_club';
+                                        const match = s.sportId === selectedSportId && normalizeCategoryKey(s.category) === catId && s.gender === g;
+                                        if (match && aff) {
+                                          return sAff !== aff;
+                                        }
+                                        return !match;
+                                      }));
+                                      setPredefinedCoaches(prev => {
+                                        const next = { ...prev };
+                                        delete next[key];
+                                        return next;
+                                      });
+                                      if (selectedCategoryKey === key) {
+                                        setSelectedCategoryKey(null);
+                                      }
+                                      toast.dismiss(toastId);
+                                      toast.success(`تم حذف فئة ${label} بنجاح`);
+                                    } catch (err) {
+                                      toast.dismiss(toastId);
+                                      toast.error('حدث خطأ أثناء حذف الفئة');
                                     }
-                                    return !match;
-                                  }));
-                                  setPredefinedCoaches(prev => {
-                                    const next = { ...prev };
-                                    delete next[key];
-                                    return next;
-                                  });
-                                  if (selectedCategoryKey === key) {
-                                    setSelectedCategoryKey(null);
-                                  }
-                                  toast.dismiss(toastId);
-                                  toast.success(`تم حذف فئة ${label} بنجاح`);
-                                } catch (err) {
-                                  toast.dismiss(toastId);
-                                  toast.error('حدث خطأ أثناء حذف الفئة');
-                                }
-                              }}
-                              className="text-[10px] text-red-600 hover:text-red-800 font-extrabold flex items-center gap-1 px-2 py-1 rounded bg-red-50 border border-red-200 cursor-pointer"
-                              title="حذف هذه الفئة ومشاركيها"
-                            >
-                              <Trash2 className="w-3 h-3" />
-                              <span>حذف</span>
-                            </button>
+                                  }}
+                                  className="text-[10px] text-white font-black px-2 py-1 rounded bg-red-600 hover:bg-red-700 cursor-pointer"
+                                >
+                                  تأكيد الحذف
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setCategoryKeyToDelete(null);
+                                  }}
+                                  className="text-[10px] text-slate-600 font-bold px-1.5 py-1 rounded bg-slate-100 hover:bg-slate-200 cursor-pointer"
+                                >
+                                  تراجع
+                                </button>
+                              </div>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setCategoryKeyToDelete(key);
+                                }}
+                                className="text-[10px] text-red-600 hover:text-red-800 font-extrabold flex items-center gap-1 px-2 py-1 rounded bg-red-50 border border-red-200 cursor-pointer"
+                                title="حذف هذه الفئة ومشاركيها"
+                              >
+                                <Trash2 className="w-3 h-3" />
+                                <span>حذف</span>
+                              </button>
+                            )
                           )}
 
                           {!isEditing && (
@@ -2423,13 +2585,12 @@ export const TeacherTeams: React.FC = () => {
                       <span className="text-amber-800 bg-amber-50 px-2.5 py-0.5 rounded-lg border border-amber-200 font-extrabold text-[11px] flex items-center gap-1 shadow-3xs">
                         <span>🏷️</span>
                         <span>
-                          {getCategoryLabel(selectedCategoryKey.split('_')[0], selectedCategoryKey.split('_')[1])}
-                          {selectedCategoryKey.split('_')[2] && (
-                            ` (${selectedCategoryKey.split('_')[2] === 'club_affiliated' 
-                              ? (selectedCategoryKey.split('_')[1] === 'Female' ? 'المنتميات' : 'المنتمين')
-                              : (selectedCategoryKey.split('_')[1] === 'Female' ? 'اللامنتميات' : 'اللامنتمين')
-                            })`
-                          )}
+                          {(() => {
+                            const parsed = parseBranchKey(selectedCategoryKey);
+                            return parsed.affiliationType
+                              ? formatBranchLabelAr({ category: parsed.catId, gender: parsed.gender, affiliationType: parsed.affiliationType }, selectedSportId)
+                              : getGenderSpecificCategoryTitle(parsed.catId, parsed.gender, selectedSportId);
+                          })()}
                         </span>
                       </span>
                       <span className="text-slate-400 font-normal">({displayedSportStudents.length} تلاميذ)</span>
@@ -2943,21 +3104,24 @@ export const TeacherTeams: React.FC = () => {
         </div>
       )}
       {/* PDF Export Modal */}
-      {isPdfModalOpen && selectedSportId && (
-        <ParticipationFormPdfModal
-          isOpen={isPdfModalOpen}
-          onClose={() => setIsPdfModalOpen(false)}
-          students={activeSportStudents}
-          sport={sportsConfig.find(s => s.id === selectedSportId) || null}
-          schoolName={schoolName}
-          season={currentSeason}
-          directorateName={activeDirectorateObj?.name}
-          regionName={activeDirectorateObj?.regionName}
-          preselectedCategory={selectedCategoryKey ? selectedCategoryKey.split('_')[0] : undefined}
-          preselectedGender={selectedCategoryKey ? selectedCategoryKey.split('_')[1] as 'Male' | 'Female' : undefined}
-          preselectedAffiliation={selectedCategoryKey ? selectedCategoryKey.split('_')[2] as 'non_club' | 'club_affiliated' : undefined}
-        />
-      )}
+      {isPdfModalOpen && selectedSportId && (() => {
+        const parsed = parseBranchKey(selectedCategoryKey);
+        return (
+          <ParticipationFormPdfModal
+            isOpen={isPdfModalOpen}
+            onClose={() => setIsPdfModalOpen(false)}
+            students={activeSportStudents}
+            sport={sportsConfig.find(s => s.id === selectedSportId) || null}
+            schoolName={schoolName}
+            season={currentSeason}
+            directorateName={activeDirectorateObj?.name}
+            regionName={activeDirectorateObj?.regionName}
+            preselectedCategory={selectedCategoryKey ? parsed.catId : undefined}
+            preselectedGender={selectedCategoryKey ? parsed.gender : undefined}
+            preselectedAffiliation={selectedCategoryKey ? parsed.affiliationType : undefined}
+          />
+        );
+      })()}
 
       {/* Cross Country 8-Participant Bulk Registration Modal */}
       {isCrossCountryBulkOpen && (
@@ -2978,26 +3142,34 @@ export const TeacherTeams: React.FC = () => {
       )}
 
       {/* Generic Sport Bulk Registration Modal */}
-      {isSportBulkOpen && (
-        <SportBulkRegisterModal
-          isOpen={isSportBulkOpen}
-          onClose={() => setIsSportBulkOpen(false)}
-          sport={activeSportConfig}
-          schools={schools}
-          preselectedCategory={selectedCategoryKey ? selectedCategoryKey.split('_')[0] : undefined}
-          preselectedGender={
-            selectedCategoryKey
-              ? (selectedCategoryKey.split('_')[1]?.toLowerCase() === 'female' ? 'Female' : 'Male')
-              : 'Male'
-          }
-          preselectedSchoolName={schoolName}
-          allExistingStudents={students}
-          currentSeason={currentSeason}
-          onRegistered={async () => {
-            await loadInitialData();
-          }}
-        />
-      )}
+      {isSportBulkOpen && (() => {
+        const parsed = parseBranchKey(selectedCategoryKey);
+        return (
+          <SportBulkRegisterModal
+            isOpen={isSportBulkOpen}
+            onClose={() => setIsSportBulkOpen(false)}
+            sport={activeSportConfig}
+            schools={schools}
+            preselectedCategory={selectedCategoryKey ? parsed.catId : undefined}
+            preselectedGender={selectedCategoryKey ? parsed.gender : 'Male'}
+            preselectedSchoolName={schoolName}
+            tournaments={
+              parsed.affiliationType
+                ? tournaments.filter(t => {
+                    if (t.sportId !== selectedSportId) return false;
+                    const tAff = t.affiliationType || (isClubTournament(t) ? 'club_affiliated' : 'non_club');
+                    return tAff === parsed.affiliationType || tAff === 'open';
+                  })
+                : tournaments.filter(t => t.sportId === selectedSportId)
+            }
+            allExistingStudents={students}
+            currentSeason={currentSeason}
+            onRegistered={async () => {
+              await loadInitialData();
+            }}
+          />
+        );
+      })()}
     </div>
   );
 };

@@ -4666,8 +4666,50 @@ export const DataService = {
     }>;
   }): Promise<SchoolTournamentConfirmation> {
     const confirmationId = `${data.sportId}_${data.schoolId}`;
+
+    // Normalize exact selected branches if provided, otherwise synthesize from flat arrays
+    let normalizedBranches: ConfirmedBranchTuple[] = [];
+    if (Array.isArray(data.selectedBranches) && data.selectedBranches.length > 0) {
+      const seen = new Set<string>();
+      data.selectedBranches.forEach(b => {
+        if (!b || !b.category) return;
+        const cat = normalizeCategoryKey(b.category);
+        const gen: 'Male' | 'Female' = b.gender === 'Female' ? 'Female' : 'Male';
+        const aff = (b.affiliationType || 'non_club').trim();
+        const key = `${aff}__${cat}__${gen}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          normalizedBranches.push({ category: cat, gender: gen, affiliationType: aff });
+        }
+      });
+    } else {
+      const cats = (data.categories && data.categories.length > 0 ? data.categories : ['U15']).map(normalizeCategoryKey);
+      const gens: ('Male' | 'Female')[] = data.genders && data.genders.length > 0 ? data.genders : ['Male', 'Female'];
+      const affs = data.affiliationTypes && data.affiliationTypes.length > 0 ? data.affiliationTypes : ['non_club'];
+      const seen = new Set<string>();
+      affs.forEach(aff => {
+        cats.forEach(cat => {
+          gens.forEach(gen => {
+            const key = `${aff}__${cat}__${gen}`;
+            if (!seen.has(key)) {
+              seen.add(key);
+              normalizedBranches.push({ category: cat, gender: gen, affiliationType: aff });
+            }
+          });
+        });
+      });
+    }
+
+    const derivedCategories = Array.from(new Set(normalizedBranches.map(b => b.category)));
+    const derivedGenders = Array.from(new Set(normalizedBranches.map(b => b.gender)));
+    const derivedAffiliations = Array.from(new Set(normalizedBranches.map(b => b.affiliationType)));
+
     const payload: SchoolTournamentConfirmation = {
       ...data,
+      categories: derivedCategories,
+      genders: derivedGenders,
+      affiliationTypes: derivedAffiliations,
+      selectedBranches: normalizedBranches,
       id: confirmationId,
       status: 'confirmed',
       confirmedAt: new Date().toISOString(),
@@ -4785,7 +4827,7 @@ export const DataService = {
       console.warn('Error saving withdrawal to Firestore:', err);
     }
 
-    // Also cancel or update confirmation for this sport/school if it exists
+    // Update or cancel exact branch confirmation for this sport/school if it exists
     try {
       const confirmations = getLocal<SchoolTournamentConfirmation>(STORAGE_KEYS.CONFIRMATIONS, []);
       const matchedConf = confirmations.find(c => 
@@ -4797,21 +4839,35 @@ export const DataService = {
         )
       );
       if (matchedConf) {
-        if (matchedConf.tournamentId && data.tournamentId && matchedConf.tournamentId === data.tournamentId) {
+        if (matchedConf.tournamentId && data.tournamentId && matchedConf.tournamentId === data.tournamentId && (!matchedConf.selectedBranches || matchedConf.selectedBranches.length <= 1)) {
           await this.cancelSchoolConfirmation(data.sportId, matchedConf.schoolId || matchedConf.schoolName);
-        } else if (normCat && matchedConf.categories) {
-          const newCats = matchedConf.categories.filter(c => normalizeCategoryKey(c) !== normCat);
-          if (newCats.length === 0) {
+        } else {
+          const currentBranches = getEffectiveConfirmedBranches(matchedConf, false);
+          const remainingBranches = currentBranches.filter(b => {
+            const catMatches = !normCat || normalizeCategoryKey(b.category) === normCat;
+            const genMatches = !data.gender || data.gender === 'Both' || data.gender === 'Mixed' || data.gender === 'ALL' || b.gender.toLowerCase() === data.gender.toLowerCase();
+            const affMatches = !data.affiliationType || data.affiliationType === 'ALL' || b.affiliationType === data.affiliationType;
+            return !(catMatches && genMatches && affMatches);
+          });
+
+          if (remainingBranches.length === 0) {
             await this.cancelSchoolConfirmation(data.sportId, matchedConf.schoolId || matchedConf.schoolName);
           } else {
-            matchedConf.categories = newCats;
-            const updatedConfs = confirmations.map(c => c.id === matchedConf.id ? matchedConf : c);
+            const updatedConf: SchoolTournamentConfirmation = {
+              ...matchedConf,
+              selectedBranches: remainingBranches,
+              categories: Array.from(new Set(remainingBranches.map(b => b.category))),
+              genders: Array.from(new Set(remainingBranches.map(b => b.gender))),
+              affiliationTypes: Array.from(new Set(remainingBranches.map(b => b.affiliationType)))
+            };
+            const updatedConfs = confirmations.map(c => c.id === matchedConf.id ? updatedConf : c);
             setLocal(STORAGE_KEYS.CONFIRMATIONS, updatedConfs);
             try {
-              await setDoc(doc(db, 'school_confirmations', matchedConf.id), matchedConf, { merge: true });
+              await setDoc(doc(db, 'school_confirmations', matchedConf.id), sanitizeFirestorePayload(updatedConf), { merge: true });
             } catch (e) {
               console.warn(e);
             }
+            window.dispatchEvent(new CustomEvent('schoolConfirmationsUpdated', { detail: updatedConf }));
           }
         }
       }
@@ -4877,4 +4933,141 @@ export const DataService = {
     window.dispatchEvent(new CustomEvent('schoolWithdrawalsUpdated'));
   }
 };
+
+export interface ConfirmedBranchTuple {
+  category: string;
+  gender: 'Male' | 'Female';
+  affiliationType: string;
+}
+
+/**
+ * Returns the exact list of confirmed (category, gender, affiliationType) branch tuples for a school confirmation.
+ * Uses `selectedBranches` when present (eliminating Cartesian-product false positives), with fallback to legacy arrays.
+ */
+export function getEffectiveConfirmedBranches(
+  conf?: SchoolTournamentConfirmation | null,
+  excludeWithdrawn = true
+): ConfirmedBranchTuple[] {
+  if (!conf || conf.status !== 'confirmed') return [];
+
+  const raw: ConfirmedBranchTuple[] = [];
+  const seen = new Set<string>();
+
+  const pushTuple = (category: string, gender: 'Male' | 'Female', affiliationType: string) => {
+    const normCat = normalizeCategoryKey(category);
+    if (!normCat) return;
+    const normGen: 'Male' | 'Female' = gender === 'Female' ? 'Female' : 'Male';
+    const normAff = (affiliationType || 'non_club').trim();
+    const key = `${normAff}__${normCat}__${normGen}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    raw.push({ category: normCat, gender: normGen, affiliationType: normAff });
+  };
+
+  if (Array.isArray(conf.selectedBranches) && conf.selectedBranches.length > 0) {
+    conf.selectedBranches.forEach(b => {
+      if (!b || !b.category) return;
+      pushTuple(b.category, b.gender === 'Female' ? 'Female' : 'Male', b.affiliationType || 'non_club');
+    });
+  } else {
+    const cats = conf.categories && conf.categories.length > 0 ? conf.categories : [];
+    const gens: ('Male' | 'Female')[] = conf.genders && conf.genders.length > 0 ? conf.genders : ['Male', 'Female'];
+    const affs = conf.affiliationTypes && conf.affiliationTypes.length > 0
+      ? conf.affiliationTypes
+      : ((conf as any).affiliationType ? [(conf as any).affiliationType] : ['non_club']);
+
+    affs.forEach(aff => {
+      cats.forEach(cat => {
+        gens.forEach(gen => {
+          pushTuple(cat, gen, aff);
+        });
+      });
+    });
+  }
+
+  if (!excludeWithdrawn) return raw;
+
+  return raw.filter(b => !DataService.isSchoolWithdrawn({
+    sportId: conf.sportId,
+    ageCategory: b.category,
+    gender: b.gender,
+    affiliationType: b.affiliationType
+  }, conf.schoolId, conf.schoolName));
+}
+
+/**
+ * Checks whether a school confirmation explicitly includes a target championship branch
+ * (affiliationType, category, gender).
+ */
+export function doesConfirmationMatchBranch(
+  conf: SchoolTournamentConfirmation | undefined | null,
+  branch: {
+    category?: string;
+    gender?: string;
+    affiliationType?: string;
+  }
+): boolean {
+  const tuples = getEffectiveConfirmedBranches(conf, true);
+  if (tuples.length === 0) return false;
+
+  const targetAff = branch.affiliationType && branch.affiliationType !== 'ALL' ? branch.affiliationType : undefined;
+  const targetCat = branch.category && branch.category !== 'ALL' ? normalizeCategoryKey(branch.category) : undefined;
+  const targetGen = branch.gender && branch.gender !== 'ALL' && branch.gender !== 'Both' && branch.gender !== 'Mixed'
+    ? branch.gender.toLowerCase()
+    : undefined;
+
+  return tuples.some(b => {
+    if (targetAff && b.affiliationType !== targetAff) return false;
+    if (targetCat && normalizeCategoryKey(b.category) !== targetCat) return false;
+    if (targetGen && b.gender.toLowerCase() !== targetGen) return false;
+    return true;
+  });
+}
+
+/**
+ * Returns a strictly gender-separated Arabic category title:
+ * U12: البراعم / البرعمات
+ * U15: الصغار / الصغيرات
+ * U18: الفتيان / الفتيات
+ * U20: الشبان / الشابات
+ */
+export function getGenderSpecificCategoryTitle(
+  category: string,
+  gender: 'Male' | 'Female',
+  sportId?: string
+): string {
+  const norm = normalizeCategoryKey(category);
+  const isFem = gender === 'Female';
+  if (norm === 'U12') return isFem ? 'البرعمات (U12 إناث)' : 'البراعم (U12 ذكور)';
+  if (norm === 'U15') return isFem ? 'الصغيرات (U15 إناث)' : 'الصغار (U15 ذكور)';
+  if (norm === 'U18') return isFem ? 'الفتيات (U18 إناث)' : 'الفتيان (U18 ذكور)';
+  if (norm === 'U20') return isFem ? 'الشابات (U20 إناث)' : 'الشبان (U20 ذكور)';
+
+  const rawCustom = getCustomCategoryName(norm, sportId) || norm;
+  const separated = rawCustom
+    .replace(/البراعم والبرعمات/g, isFem ? 'البرعمات' : 'البراعم')
+    .replace(/الصغار والصغيرات/g, isFem ? 'الصغيرات' : 'الصغار')
+    .replace(/الفتيان والفتيات/g, isFem ? 'الفتيات' : 'الفتيان')
+    .replace(/الشبان والشابات/g, isFem ? 'الشابات' : 'الشبان');
+
+  const genWord = isFem ? 'إناث' : 'ذكور';
+  if (separated.includes(genWord)) return separated;
+  return `${separated} (${genWord})`;
+}
+
+/**
+ * Formats an exact branch tuple in clear gender-separated Arabic,
+ * e.g. "لا منتمين — الصغار (U15 ذكور)" or "لا منتمين — الفتيات (U18 إناث)"
+ */
+export function formatBranchLabelAr(branch: ConfirmedBranchTuple, sportId?: string): string {
+  const affLabel = branch.affiliationType === 'club_affiliated'
+    ? 'منتمين للأندية'
+    : branch.affiliationType === 'open'
+    ? 'مفتوحة'
+    : 'لا منتمين';
+  const catGenderTitle = getGenderSpecificCategoryTitle(branch.category, branch.gender, sportId);
+  return `${affLabel} — ${catGenderTitle}`;
+}
+
+
 

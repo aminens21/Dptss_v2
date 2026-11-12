@@ -46,6 +46,7 @@ import { downloadIndividualCardPdf } from '../lib/participationPdfService';
 import { compressImageToBase64 } from '../lib/imageUtils';
 import { BibGeneratorModal } from './BibGeneratorModal';
 import { ConfirmParticipationModal } from './ConfirmParticipationModal';
+import { ConfirmedParticipationBadge } from './ConfirmedParticipationBadge';
 import { useSchoolConfirmations } from '../hooks/useSchoolConfirmations';
 
 interface CrossCountryChampionshipModalProps {
@@ -704,18 +705,29 @@ export const CrossCountryChampionshipModal: React.FC<CrossCountryChampionshipMod
               </div>
               <div className="flex items-center gap-2 flex-wrap">
                 {isTeacherRole && effectiveSchoolName && (
-                  <button
-                    type="button"
-                    onClick={() => setIsConfirmModalOpen(true)}
-                    className={`px-3.5 py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer flex items-center gap-1.5 ${
-                      isSchoolCurrentlyConfirmed
-                        ? 'bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100'
-                        : 'bg-gradient-to-r from-emerald-600 to-emerald-700 text-white border-emerald-600 hover:from-emerald-500 hover:to-emerald-600 shadow-sm animate-pulse'
-                    }`}
-                  >
-                    <CheckCircle2 className="w-3.5 h-3.5" />
-                    <span>{isSchoolCurrentlyConfirmed ? 'مشاركة المؤسسة مؤكدة ✓' : 'تأكيد مشاركة المؤسسة أولاً 📋'}</span>
-                  </button>
+                  isSchoolCurrentlyConfirmed ? (
+                    <ConfirmedParticipationBadge
+                      sportId="cross_country"
+                      sportName="العدو الريفي"
+                      schoolId={userProfile?.schoolId}
+                      schoolName={effectiveSchoolName}
+                      variant="light"
+                      label="مشاركة المؤسسة مؤكدة ✓"
+                      onClick={() => setIsConfirmModalOpen(true)}
+                      onCancelSuccess={() => {
+                        refreshConfirmations();
+                      }}
+                    />
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setIsConfirmModalOpen(true)}
+                      className="px-3.5 py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer flex items-center gap-1.5 bg-gradient-to-r from-emerald-600 to-emerald-700 text-white border-emerald-600 hover:from-emerald-500 hover:to-emerald-600 shadow-sm animate-pulse"
+                    >
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                      <span>تأكيد مشاركة المؤسسة أولاً 📋</span>
+                    </button>
+                  )
                 )}
 
                 <button
@@ -1682,6 +1694,7 @@ export const CrossCountryChampionshipModal: React.FC<CrossCountryChampionshipMod
           isOpen={isConfirmModalOpen}
           onClose={() => setIsConfirmModalOpen(false)}
           sport={ccSportObject}
+          tournaments={ccTournaments}
           schoolName={effectiveSchoolName}
           schoolId={userProfile?.schoolId || effectiveSchoolName}
           teacherId={userProfile?.id}

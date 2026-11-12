@@ -474,13 +474,13 @@ export const SportsConfig: React.FC = () => {
   const [newSportIsProgrammed, setNewSportIsProgrammed] = useState<boolean>(true);
   const [isSubmittingSport, setIsSubmittingSport] = useState(false);
 
-  // App intro animation toggle state (persisted in localStorage)
+  // App intro animation toggle state (disabled by default, persisted in localStorage)
   const [isIntroEnabled, setIsIntroEnabled] = useState<boolean>(() => {
     try {
-      const saved = localStorage.getItem('app_intro_enabled');
-      return saved !== null ? saved === 'true' : true;
+      const saved = localStorage.getItem('app_intro_enabled_v2');
+      return saved === 'true';
     } catch {
-      return true;
+      return false;
     }
   });
 
@@ -488,6 +488,7 @@ export const SportsConfig: React.FC = () => {
     setIsIntroEnabled(prev => {
       const next = !prev;
       try {
+        localStorage.setItem('app_intro_enabled_v2', String(next));
         localStorage.setItem('app_intro_enabled', String(next));
         window.dispatchEvent(new CustomEvent('introToggled', { detail: next }));
       } catch (e) {

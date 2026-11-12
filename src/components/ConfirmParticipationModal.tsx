@@ -1,7 +1,17 @@
-import React, { useState, useMemo } from 'react';
-import { Sport, SchoolTournamentConfirmation, TARGET_AFFILIATIONS } from '../types';
-import { DataService, getCustomCategoryName, getCategoryShortName } from '../lib/dataService';
+import React, { useState, useMemo, useEffect } from 'react';
+import { Sport, Tournament, SchoolTournamentConfirmation, TARGET_AFFILIATIONS } from '../types';
+import {
+  DataService,
+  ConfirmedBranchTuple,
+  getEffectiveConfirmedBranches,
+  formatBranchLabelAr,
+  getGenderSpecificCategoryTitle,
+  getCustomCategoryName,
+  getCategoryShortName,
+  normalizeCategoryKey
+} from '../lib/dataService';
 import { CountdownTimer } from './CountdownTimer';
+import { ConfirmedParticipationBadge } from './ConfirmedParticipationBadge';
 import {
   X,
   Building,
@@ -16,8 +26,6 @@ import {
   CheckSquare,
   Square,
   Layers,
-  Users2,
-  Tags,
   Edit3
 } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -26,6 +34,7 @@ interface ConfirmParticipationModalProps {
   isOpen: boolean;
   onClose: () => void;
   sport: Sport | { id: string; name: string; icon?: string; ageCategories?: string[]; customAgeCategories?: any[]; targetAffiliations?: string[] };
+  tournaments?: Tournament[];
   schoolName: string;
   schoolId?: string;
   teacherId?: string;
@@ -39,10 +48,20 @@ interface ConfirmParticipationModalProps {
   onProceedToRegister?: () => void;
 }
 
+interface BranchOptionItem {
+  key: string;
+  category: string;
+  categoryName: string;
+  years: string;
+  gender: 'Male' | 'Female';
+  affiliationType: string;
+}
+
 export const ConfirmParticipationModal: React.FC<ConfirmParticipationModalProps> = ({
   isOpen,
   onClose,
   sport,
+  tournaments: propTournaments,
   schoolName,
   schoolId,
   teacherId,
@@ -57,70 +76,170 @@ export const ConfirmParticipationModal: React.FC<ConfirmParticipationModalProps>
 }) => {
   const isConfirmed = !!confirmedRecord && confirmedRecord.status === 'confirmed';
   const [isEditingExisting, setIsEditingExisting] = useState(false);
+  const [confirmCancelStep, setConfirmCancelStep] = useState(false);
+  const [loadedTournaments, setLoadedTournaments] = useState<Tournament[]>([]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    if (propTournaments && propTournaments.length > 0) {
+      setLoadedTournaments(propTournaments);
+      return;
+    }
+    let mounted = true;
+    DataService.getTournaments().then(list => {
+      if (mounted) {
+        setLoadedTournaments((list || []).filter(t => t.sportId === sport.id && t.status !== 'Archived' && t.status !== 'Draft'));
+      }
+    }).catch(() => {});
+    return () => {
+      mounted = false;
+    };
+  }, [isOpen, propTournaments, sport.id]);
+
+  const activeSportTournaments = useMemo(() => {
+    const source = propTournaments && propTournaments.length > 0 ? propTournaments : loadedTournaments;
+    return source.filter(t => t.sportId === sport.id && t.status !== 'Archived' && t.status !== 'Draft');
+  }, [propTournaments, loadedTournaments, sport.id]);
 
   // Available categories for this sport
   const availableCategories = useMemo(() => {
     const customCats = (sport as any)?.customAgeCategories;
     if (Array.isArray(customCats) && customCats.length > 0) {
-      return customCats.map(c => ({
-        id: c.id,
+      return customCats.map((c: any) => ({
+        id: normalizeCategoryKey(c.id),
         name: c.name,
         years: c.yearsExpression || ''
       }));
     }
     const ageCats = (sport as any)?.ageCategories;
     if (Array.isArray(ageCats) && ageCats.length > 0) {
-      return ageCats.map((cat: string) => ({
-        id: cat,
-        name: getCustomCategoryName(cat, sport.id) || getCategoryShortName(cat) || cat,
-        years: ''
-      }));
+      return ageCats.map((cat: string) => {
+        const norm = normalizeCategoryKey(cat);
+        return {
+          id: norm,
+          name: getCustomCategoryName(norm, sport.id) || getCategoryShortName(norm) || norm,
+          years: ''
+        };
+      });
+    }
+    if (sport.id === 'cross_country' || sport.id === 'athletics') {
+      return [
+        { id: 'U12', name: 'البراعم والبرعمات (U12)', years: '' },
+        { id: 'U15', name: 'الصغار والصغيرات (U15)', years: '' },
+        { id: 'U18', name: 'الفتيان والفتيات (U18)', years: '' },
+        { id: 'U20', name: 'الشبان والشابات (U20)', years: '' }
+      ];
     }
     return [
-      { id: 'U12', name: 'البراعم (U12)', years: '' },
-      { id: 'U15', name: 'الصغار (U15)', years: '' },
-      { id: 'U18', name: 'الفتيان (U18)', years: '' },
-      { id: 'U20', name: 'الشبان (U20)', years: '' }
+      { id: 'U15', name: 'الصغار والصغيرات (U15)', years: '' },
+      { id: 'U18', name: 'الفتيان والفتيات (U18)', years: '' }
     ];
   }, [sport]);
 
-  // Gender options
-  const genderOptions: { id: 'Male' | 'Female'; label: string; icon: string }[] = [
-    { id: 'Male', label: 'ذكور', icon: '👦' },
-    { id: 'Female', label: 'إناث', icon: '👧' }
-  ];
+  // Build exact programmable branches grouped by affiliation
+  const affiliationGroups = useMemo(() => {
+    const groupsMap = new Map<string, BranchOptionItem[]>();
 
-  // Affiliation options (صنف المشاركين)
-  const affiliationOptions = useMemo(() => {
-    return TARGET_AFFILIATIONS;
-  }, []);
+    const addBranchOption = (affiliationType: string, catIdRaw: string, gender: 'Male' | 'Female') => {
+      const catId = normalizeCategoryKey(catIdRaw);
+      if (!catId) return;
+      const aff = (affiliationType || 'non_club').trim();
+      const catMeta = availableCategories.find(c => c.id === catId);
+      const catName = getGenderSpecificCategoryTitle(catId, gender, sport.id);
+      const years = catMeta?.years || '';
+      const key = `${aff}__${catId}__${gender}`;
 
-  // Multi-selection states
-  const [selectedCategories, setSelectedCategories] = useState<string[]>(() => {
-    if (confirmedRecord?.categories && confirmedRecord.categories.length > 0) {
-      return confirmedRecord.categories;
+      if (!groupsMap.has(aff)) {
+        groupsMap.set(aff, []);
+      }
+      const arr = groupsMap.get(aff)!;
+      if (!arr.some(item => item.key === key)) {
+        arr.push({
+          key,
+          category: catId,
+          categoryName: catName,
+          years,
+          gender,
+          affiliationType: aff
+        });
+      }
+    };
+
+    if (activeSportTournaments.length > 0) {
+      activeSportTournaments.forEach(t => {
+        const aff = t.affiliationType || 'non_club';
+        const catId = normalizeCategoryKey(t.ageCategory || t.category || 'U15');
+        if (t.gender === 'Male' || t.gender === 'Female') {
+          addBranchOption(aff, catId, t.gender);
+        } else {
+          addBranchOption(aff, catId, 'Male');
+          addBranchOption(aff, catId, 'Female');
+        }
+      });
+    } else {
+      const sportAffs: string[] = Array.isArray((sport as any)?.targetAffiliations) && (sport as any).targetAffiliations.length > 0
+        ? (sport as any).targetAffiliations
+        : (sport.id === 'cross_country' ? ['non_club', 'club_affiliated'] : ['non_club', 'club_affiliated']);
+
+      sportAffs.forEach(aff => {
+        // Normalize legacy targetAffiliation IDs to canonical non_club / club_affiliated if needed
+        const canonicalAff = aff === 'club_affiliated' ? 'club_affiliated' : aff === 'open' ? 'open' : 'non_club';
+        availableCategories.forEach(cat => {
+          addBranchOption(canonicalAff, cat.id, 'Male');
+          addBranchOption(canonicalAff, cat.id, 'Female');
+        });
+      });
     }
-    // Default to all sport categories
-    return availableCategories.map(c => c.id);
+
+    const orderAffs = ['non_club', 'club_affiliated', 'open'];
+    const catOrder = ['U12', 'U15', 'U18', 'U20', 'OPEN'];
+
+    return Array.from(groupsMap.entries())
+      .sort((a, b) => {
+        const ia = orderAffs.indexOf(a[0]);
+        const ib = orderAffs.indexOf(b[0]);
+        return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+      })
+      .map(([affId, items]) => {
+        const affConfig = TARGET_AFFILIATIONS.find(x => x.id === affId);
+        const sortedItems = [...items].sort((x, y) => {
+          const cx = catOrder.indexOf(x.category);
+          const cy = catOrder.indexOf(y.category);
+          const diff = (cx === -1 ? 99 : cx) - (cy === -1 ? 99 : cy);
+          if (diff !== 0) return diff;
+          return x.gender === 'Male' ? -1 : 1;
+        });
+        return {
+          affiliationId: affId,
+          label: affId === 'club_affiliated'
+            ? 'بطولة المنتمين للأندية والجمعيات الرياضية'
+            : affId === 'open'
+            ? 'البطولة المفتوحة (Open)'
+            : 'بطولة غير المنتمين للأندية (لا منتمين)',
+          shortLabel: affConfig?.shortLabel || (affId === 'club_affiliated' ? 'منتمين للأندية' : 'لا منتمين'),
+          icon: affId === 'club_affiliated' ? '🟡' : affId === 'open' ? '🟢' : '⚪',
+          items: sortedItems
+        };
+      });
+  }, [activeSportTournaments, availableCategories, sport]);
+
+  // Exact selected branches state (NO hidden Cartesian product & NO auto-selecting club_affiliated!)
+  const [selectedBranches, setSelectedBranches] = useState<ConfirmedBranchTuple[]>(() => {
+    if (confirmedRecord && confirmedRecord.status === 'confirmed') {
+      return getEffectiveConfirmedBranches(confirmedRecord, true);
+    }
+    return [];
   });
 
-  const [selectedGenders, setSelectedGenders] = useState<('Male' | 'Female')[]>(() => {
-    if (confirmedRecord?.genders && confirmedRecord.genders.length > 0) {
-      return confirmedRecord.genders;
+  useEffect(() => {
+    if (!isOpen) return;
+    setConfirmCancelStep(false);
+    if (confirmedRecord && confirmedRecord.status === 'confirmed') {
+      setSelectedBranches(getEffectiveConfirmedBranches(confirmedRecord, true));
+    } else {
+      setSelectedBranches([]);
     }
-    return ['Male', 'Female'];
-  });
-
-  const [selectedAffiliations, setSelectedAffiliations] = useState<string[]>(() => {
-    if (confirmedRecord?.affiliationTypes && confirmedRecord.affiliationTypes.length > 0) {
-      return confirmedRecord.affiliationTypes;
-    }
-    const sportAffils = (sport as any)?.targetAffiliations;
-    if (Array.isArray(sportAffils) && sportAffils.length > 0) {
-      return sportAffils;
-    }
-    return ['non_club']; // Default to Non-Club
-  });
+  }, [isOpen, confirmedRecord]);
 
   const [notes, setNotes] = useState(confirmedRecord?.notes || '');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -139,38 +258,57 @@ export const ConfirmParticipationModal: React.FC<ConfirmParticipationModalProps>
     }
   })();
 
-  // Toggle Category
-  const toggleCategory = (catId: string) => {
-    setSelectedCategories(prev =>
-      prev.includes(catId) ? prev.filter(c => c !== catId) : [...prev, catId]
-    );
+  const makeBranchKey = (b: { affiliationType: string; category: string; gender: 'Male' | 'Female' }) =>
+    `${b.affiliationType}__${normalizeCategoryKey(b.category)}__${b.gender}`;
+
+  const isBranchChecked = (item: BranchOptionItem) => {
+    const targetKey = makeBranchKey(item);
+    return selectedBranches.some(b => makeBranchKey(b) === targetKey);
   };
 
-  const handleSelectAllCategories = () => {
-    setSelectedCategories(availableCategories.map(c => c.id));
+  const toggleBranch = (item: BranchOptionItem) => {
+    const targetKey = makeBranchKey(item);
+    setSelectedBranches(prev => {
+      const exists = prev.some(b => makeBranchKey(b) === targetKey);
+      if (exists) {
+        return prev.filter(b => makeBranchKey(b) !== targetKey);
+      }
+      return [
+        ...prev,
+        {
+          category: item.category,
+          gender: item.gender,
+          affiliationType: item.affiliationType
+        }
+      ];
+    });
   };
 
-  const handleDeselectAllCategories = () => {
-    setSelectedCategories([]);
+  const selectAllInAffiliation = (affId: string) => {
+    const group = affiliationGroups.find(g => g.affiliationId === affId);
+    if (!group) return;
+    setSelectedBranches(prev => {
+      const map = new Map<string, ConfirmedBranchTuple>();
+      prev.forEach(b => map.set(makeBranchKey(b), b));
+      group.items.forEach(item => {
+        const tuple: ConfirmedBranchTuple = {
+          category: item.category,
+          gender: item.gender,
+          affiliationType: item.affiliationType
+        };
+        map.set(makeBranchKey(tuple), tuple);
+      });
+      return Array.from(map.values());
+    });
   };
 
-  // Toggle Gender
-  const toggleGender = (gender: 'Male' | 'Female') => {
-    setSelectedGenders(prev =>
-      prev.includes(gender) ? prev.filter(g => g !== gender) : [...prev, gender]
-    );
+  const clearAffiliation = (affId: string) => {
+    setSelectedBranches(prev => prev.filter(b => b.affiliationType !== affId));
   };
 
-  // Toggle Affiliation
-  const toggleAffiliation = (affId: string) => {
-    setSelectedAffiliations(prev =>
-      prev.includes(affId) ? prev.filter(a => a !== affId) : [...prev, affId]
-    );
-  };
-
-  const handleSelectAllAffiliations = () => {
-    setSelectedAffiliations(affiliationOptions.map(a => a.id));
-  };
+  const confirmedBranchesForSummary = confirmedRecord
+    ? getEffectiveConfirmedBranches(confirmedRecord, true)
+    : [];
 
   const handleConfirm = async () => {
     if (!schoolName) {
@@ -183,24 +321,20 @@ export const ConfirmParticipationModal: React.FC<ConfirmParticipationModalProps>
       return;
     }
 
-    if (selectedCategories.length === 0) {
-      toast.error('يرجى تحديد فئة عمرية واحدة على الأقل للمشاركة في البطولة');
+    if (selectedBranches.length === 0) {
+      toast.error('يرجى تحديد فرع واحد على الأقل (مثلاً: لا منتمين U15 ذكور) لتأكيد مشاركة المؤسسة');
       return;
     }
 
-    if (selectedGenders.length === 0) {
-      toast.error('يرجى تحديد الجنس (ذكور و/أو إناث) للمشاركة في البطولة');
-      return;
-    }
-
-    if (selectedAffiliations.length === 0) {
-      toast.error('يرجى تحديد صنف واحد على الأقل للمشاركين (مثل: غير المنتمين للأندية)');
-      return;
-    }
+    const derivedCategories: string[] = Array.from(new Set<string>(selectedBranches.map(b => b.category)));
+    const derivedGenders: ('Male' | 'Female')[] = Array.from(new Set<'Male' | 'Female'>(selectedBranches.map(b => b.gender)));
+    const derivedAffiliations: string[] = Array.from(new Set<string>(selectedBranches.map(b => b.affiliationType)));
 
     setIsSubmitting(true);
-    const toastId = toast.loading('جاري حفظ تأكيد مشاركة المؤسسة في البطولة...');
+    const toastId = toast.loading('جاري حفظ تأكيد مشاركة المؤسسة في الفروع المحددة...');
     try {
+      await DataService.cancelSchoolWithdrawal(sport.id, schoolId || schoolName);
+
       await DataService.confirmSchoolParticipation({
         sportId: sport.id,
         sportName: sport.name,
@@ -212,15 +346,14 @@ export const ConfirmParticipationModal: React.FC<ConfirmParticipationModalProps>
         teacherLeaseNumber: teacherLeaseNumber || '',
         registrationDeadline: registrationDeadline ? (registrationDeadline?.toISOString ? registrationDeadline.toISOString() : String(registrationDeadline)) : undefined,
         notes: notes.trim() || undefined,
-        categories: selectedCategories,
-        genders: selectedGenders,
-        affiliationTypes: selectedAffiliations
+        categories: derivedCategories,
+        genders: derivedGenders,
+        affiliationTypes: derivedAffiliations,
+        selectedBranches
       });
 
-      await DataService.cancelSchoolWithdrawal(sport.id, schoolId || schoolName);
-
       toast.dismiss(toastId);
-      toast.success(`تم تأكيد مشاركة «${schoolName}» في بطولة ${sport.name} بنجاح! 🎉\nيمكنك الآن تسجيل أسماء وتفاصيل المشاركين قبل نهاية الأجل.`, { duration: 5000 });
+      toast.success(`تم تأكيد مشاركة «${schoolName}» في ${selectedBranches.length} فرع(فروع) من بطولة ${sport.name} بنجاح!`, { duration: 4500 });
       setIsEditingExisting(false);
       if (onConfirmSuccess) onConfirmSuccess();
       onClose();
@@ -234,16 +367,13 @@ export const ConfirmParticipationModal: React.FC<ConfirmParticipationModalProps>
   };
 
   const handleCancelConfirmation = async () => {
-    if (!window.confirm(`هل أنت متأكد من رغبتك في إلغاء تأكيد مشاركة مؤسسة «${schoolName}» في بطولة ${sport.name}؟`)) {
-      return;
-    }
-
     setIsCancelling(true);
     const toastId = toast.loading('جاري إلغاء تأكيد المشاركة...');
     try {
       await DataService.cancelSchoolConfirmation(sport.id, schoolId || schoolName);
       toast.dismiss(toastId);
       toast.success(`تم إلغاء تأكيد مشاركة مؤسسة «${schoolName}»`);
+      setConfirmCancelStep(false);
       if (onCancelSuccess) onCancelSuccess();
       onClose();
     } catch (err) {
@@ -279,10 +409,23 @@ export const ConfirmParticipationModal: React.FC<ConfirmParticipationModalProps>
                   تأكيد المشاركة الرسمية
                 </span>
                 {isConfirmed && (
-                  <span className="text-[10px] font-black bg-emerald-500 text-white px-2.5 py-0.5 rounded-full flex items-center gap-1 shadow-xs">
-                    <CheckCircle2 className="w-3 h-3" />
-                    <span>مشاركة مؤكدة</span>
-                  </span>
+                  <ConfirmedParticipationBadge
+                    sportId={sport.id}
+                    sportName={sport.name}
+                    schoolId={schoolId || schoolName}
+                    schoolName={schoolName}
+                    variant="dark"
+                    label="مشاركة مؤكدة ✓ (اضغط 3ث للإلغاء)"
+                    count={confirmedBranchesForSummary.length}
+                    className="!py-0.5 !px-2.5 !text-[10px] !rounded-full"
+                    onCancelSuccess={() => {
+                      setIsEditingExisting(false);
+                      setSelectedBranches([]);
+                      if (onCancelSuccess) onCancelSuccess();
+                      if (onConfirmSuccess) onConfirmSuccess();
+                      onClose();
+                    }}
+                  />
                 )}
               </div>
               <h3 className="text-base sm:text-lg font-black text-white mt-1">
@@ -299,18 +442,17 @@ export const ConfirmParticipationModal: React.FC<ConfirmParticipationModalProps>
           <div className="bg-gradient-to-br from-blue-50/80 via-indigo-50/50 to-slate-50 p-3.5 rounded-2xl border border-blue-100 space-y-2.5">
             <h4 className="text-xs font-black text-blue-950 flex items-center gap-1.5">
               <Sparkles className="w-4 h-4 text-amber-500 shrink-0" />
-              <span>نظام المشاركة في البطولات المدرسية (على مرحلتين):</span>
+              <span>نظام المشاركة في البطولات المدرسية (على مرحلتين متناسقتين):</span>
             </h4>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {/* Phase 1 */}
               <div className={`p-2.5 rounded-xl border transition-all ${
                 isConfirmed
                   ? 'bg-emerald-50/90 border-emerald-300 text-emerald-950'
                   : 'bg-white border-blue-300 text-blue-950 shadow-3xs ring-2 ring-blue-500/20'
               }`}>
                 <div className="flex items-center justify-between font-black text-[11px] mb-0.5">
-                  <span>المرحلة 1: تأكيد المشاركة والفئات</span>
+                  <span>المرحلة 1: تحديد الفروع بدقة</span>
                   {isConfirmed ? (
                     <span className="text-emerald-700 text-[10px] font-extrabold flex items-center gap-0.5">
                       ✓ مكتملة
@@ -320,22 +462,21 @@ export const ConfirmParticipationModal: React.FC<ConfirmParticipationModalProps>
                   )}
                 </div>
                 <p className="text-[10.5px] leading-relaxed text-slate-600">
-                  حجز مقعد المؤسسة في القرعة وتحديد الفئات والجنس وصنف المشاركين.
+                  اختر الفروع الدقيقة التي ستشارك فيها مؤسستك فقط (مثلاً: لا منتمين U15 ذكور، لا منتمين U18 إناث).
                 </p>
               </div>
 
-              {/* Phase 2 */}
               <div className={`p-2.5 rounded-xl border transition-all ${
                 isConfirmed
                   ? 'bg-white border-blue-400 text-blue-950 shadow-3xs ring-2 ring-blue-500/20'
                   : 'bg-white/60 border-slate-200 text-slate-500'
               }`}>
                 <div className="flex items-center justify-between font-black text-[11px] mb-0.5">
-                  <span>المرحلة 2: أسماء التلاميذ</span>
+                  <span>المرحلة 2: لوائح التلاميذ</span>
                   <span className="text-amber-600 text-[10px] font-extrabold">قبل نهاية الأجل ⏳</span>
                 </div>
                 <p className="text-[10.5px] leading-relaxed text-slate-600">
-                  إدخال لائحة التلاميذ الممثلين للمؤسسة وصورهم ومصادقة البيانات.
+                  ستدرج مؤسستك حصرياً في الفروع المؤكدة وفي ملف مشاركات مؤسستك لاستكمال أسماء التلاميذ.
                 </p>
               </div>
             </div>
@@ -398,10 +539,10 @@ export const ConfirmParticipationModal: React.FC<ConfirmParticipationModalProps>
           {/* ========================================================================= */}
           {isConfirmed && confirmedRecord && !isEditingExisting && (
             <div className="p-4 bg-emerald-50/90 border border-emerald-200 rounded-2xl text-emerald-950 space-y-3">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between gap-2 flex-wrap">
                 <div className="flex items-center gap-2 font-black text-xs text-emerald-800">
                   <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                  <span>مشاركة المؤسسة مؤكدة رسمياً</span>
+                  <span>الفروع المؤكدة رسمياً لمؤسستك ({confirmedBranchesForSummary.length}):</span>
                 </div>
                 {!isDeadlinePassed && (
                   <button
@@ -410,73 +551,29 @@ export const ConfirmParticipationModal: React.FC<ConfirmParticipationModalProps>
                     className="px-2.5 py-1 bg-white hover:bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-lg text-[10px] font-bold flex items-center gap-1 cursor-pointer transition-colors"
                   >
                     <Edit3 className="w-3 h-3" />
-                    <span>تعديل الفئات والأصناف</span>
+                    <span>تعديل الفروع المؤكدة</span>
                   </button>
                 )}
               </div>
 
-              {/* Confirmed Details Grid */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1 text-[11px]">
-                {/* Categories */}
-                <div className="bg-white/80 p-2.5 rounded-xl border border-emerald-200/80">
-                  <div className="font-bold text-slate-600 mb-1 flex items-center gap-1 text-[10px]">
-                    <Layers className="w-3 h-3 text-emerald-600" />
-                    <span>الفئات المحددة:</span>
-                  </div>
-                  <div className="flex flex-wrap gap-1">
-                    {confirmedRecord.categories && confirmedRecord.categories.length > 0 ? (
-                      confirmedRecord.categories.map(cat => (
-                        <span key={cat} className="px-2 py-0.5 bg-emerald-100 text-emerald-900 rounded-md font-black text-[10px]">
-                          {getCustomCategoryName(cat, sport.id) || cat}
-                        </span>
-                      ))
-                    ) : (
-                      <span className="text-slate-400 text-[10px]">جميع الفئات</span>
-                    )}
-                  </div>
-                </div>
-
-                {/* Gender */}
-                <div className="bg-white/80 p-2.5 rounded-xl border border-emerald-200/80">
-                  <div className="font-bold text-slate-600 mb-1 flex items-center gap-1 text-[10px]">
-                    <Users2 className="w-3 h-3 text-emerald-600" />
-                    <span>الجنس المحدد:</span>
-                  </div>
-                  <div className="flex flex-wrap gap-1">
-                    {confirmedRecord.genders && confirmedRecord.genders.length > 0 ? (
-                      confirmedRecord.genders.map(g => (
-                        <span key={g} className="px-2 py-0.5 bg-blue-100 text-blue-900 rounded-md font-black text-[10px]">
-                          {g === 'Female' ? '👧 إناث' : '👦 ذكور'}
-                        </span>
-                      ))
-                    ) : (
-                      <span className="text-slate-400 text-[10px]">ذكور وإناث</span>
-                    )}
-                  </div>
-                </div>
-
-                {/* Affiliations */}
-                <div className="bg-white/80 p-2.5 rounded-xl border border-emerald-200/80">
-                  <div className="font-bold text-slate-600 mb-1 flex items-center gap-1 text-[10px]">
-                    <Tags className="w-3 h-3 text-emerald-600" />
-                    <span>أصناف المشاركين:</span>
-                  </div>
-                  <div className="flex flex-wrap gap-1">
-                    {confirmedRecord.affiliationTypes && confirmedRecord.affiliationTypes.length > 0 ? (
-                      confirmedRecord.affiliationTypes.map(affId => {
-                        const aff = TARGET_AFFILIATIONS.find(a => a.id === affId);
-                        return (
-                          <span key={affId} className="px-2 py-0.5 bg-amber-100 text-amber-900 rounded-md font-black text-[10px] flex items-center gap-0.5">
-                            <span>{aff?.icon || '⚪'}</span>
-                            <span>{aff?.shortLabel || affId}</span>
-                          </span>
-                        );
-                      })
-                    ) : (
-                      <span className="text-slate-400 text-[10px]">غير المنتمين</span>
-                    )}
-                  </div>
-                </div>
+              <div className="flex flex-wrap gap-2 pt-1">
+                {confirmedBranchesForSummary.map(branch => {
+                  const isClub = branch.affiliationType === 'club_affiliated';
+                  return (
+                    <span
+                      key={`${branch.affiliationType}_${branch.category}_${branch.gender}`}
+                      className={`px-3 py-1.5 rounded-xl font-black text-[11px] border flex items-center gap-1.5 shadow-2xs ${
+                        isClub
+                          ? 'bg-amber-100 text-amber-950 border-amber-300'
+                          : 'bg-white text-slate-900 border-emerald-300'
+                      }`}
+                    >
+                      <span>{isClub ? '🟡' : '⚪'}</span>
+                      <span>{formatBranchLabelAr(branch, sport.id)}</span>
+                      <span>{branch.gender === 'Female' ? '👧' : '👦'}</span>
+                    </span>
+                  );
+                })}
               </div>
 
               <p className="text-[10px] text-emerald-700 leading-relaxed border-t border-emerald-200 pt-1.5">
@@ -488,150 +585,169 @@ export const ConfirmParticipationModal: React.FC<ConfirmParticipationModalProps>
                     year: 'numeric'
                   })}
                 </strong>{' '}
-                بواسطة الأستاذ <strong>{confirmedRecord.teacherName}</strong>.
+                بواسطة الأستاذ <strong>{confirmedRecord.teacherName}</strong>. تظهر مؤسستك الآن حصرياً في هذه الفروع فقط.
               </p>
             </div>
           )}
 
           {/* ========================================================================= */}
-          {/* SELECTION FORM: CATEGORIES, GENDER & AFFILIATIONS (MULTI-SELECTION) */}
+          {/* EXACT BRANCH SELECTION BY AFFILIATION (NO CARTESIAN PRODUCT) */}
           {/* ========================================================================= */}
           {(!isConfirmed || isEditingExisting) && (
-            <div className="space-y-3.5 bg-slate-50/60 p-3.5 rounded-2xl border border-slate-200">
-              
-              {/* SECTION 1: CATEGORIES MULTI-SELECT */}
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <label className="text-xs font-black text-slate-800 flex items-center gap-1.5">
-                    <Layers className="w-3.5 h-3.5 text-blue-600" />
-                    <span>1. فئات المشاركة المستهدفة (يمكن تحديد أكثر من خيار):</span>
-                  </label>
-                  <div className="flex items-center gap-1.5">
-                    <button
-                      type="button"
-                      onClick={handleSelectAllCategories}
-                      className="text-[10px] text-blue-600 hover:text-blue-800 font-bold cursor-pointer"
-                    >
-                      تحديد الكل
-                    </button>
-                    <span className="text-slate-300">|</span>
-                    <button
-                      type="button"
-                      onClick={handleDeselectAllCategories}
-                      className="text-[10px] text-slate-500 hover:text-slate-700 font-bold cursor-pointer"
-                    >
-                      إلغاء التحديد
-                    </button>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                  {availableCategories.map(cat => {
-                    const isChecked = selectedCategories.includes(cat.id);
-                    return (
-                      <div
-                        key={cat.id}
-                        onClick={() => toggleCategory(cat.id)}
-                        className={`p-2 rounded-xl border transition-all cursor-pointer flex items-center justify-between text-xs ${
-                          isChecked
-                            ? 'bg-blue-50 border-blue-500 text-blue-950 font-black shadow-xs ring-1 ring-blue-400/30'
-                            : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
-                        }`}
-                      >
-                        <div className="truncate">
-                          <div className="truncate">{cat.name}</div>
-                          {cat.years && <span className="text-[9px] text-slate-400 block truncate">{cat.years}</span>}
-                        </div>
-                        {isChecked ? (
-                          <CheckSquare className="w-4 h-4 text-blue-600 shrink-0 ml-1" />
-                        ) : (
-                          <Square className="w-4 h-4 text-slate-300 shrink-0 ml-1" />
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* SECTION 2: GENDER MULTI-SELECT */}
-              <div className="space-y-2 pt-1 border-t border-slate-200/70">
+            <div className="space-y-3.5">
+              <div className="flex items-center justify-between px-1">
                 <label className="text-xs font-black text-slate-800 flex items-center gap-1.5">
-                  <Users2 className="w-3.5 h-3.5 text-indigo-600" />
-                  <span>2. جنس المشاركين (يمكن تحديد ذكور و/أو إناث):</span>
+                  <Layers className="w-4 h-4 text-blue-600" />
+                  <span>اختر فروع البطولة الدقيقة التي تود المشاركة فيها:</span>
                 </label>
-
-                <div className="grid grid-cols-2 gap-2">
-                  {genderOptions.map(gen => {
-                    const isChecked = selectedGenders.includes(gen.id);
-                    return (
-                      <div
-                        key={gen.id}
-                        onClick={() => toggleGender(gen.id)}
-                        className={`p-2.5 rounded-xl border transition-all cursor-pointer flex items-center justify-between text-xs ${
-                          isChecked
-                            ? 'bg-indigo-50 border-indigo-500 text-indigo-950 font-black shadow-xs ring-1 ring-indigo-400/30'
-                            : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
-                        }`}
-                      >
-                        <div className="flex items-center gap-2">
-                          <span className="text-base">{gen.icon}</span>
-                          <span>{gen.label}</span>
-                        </div>
-                        {isChecked ? (
-                          <CheckSquare className="w-4 h-4 text-indigo-600 shrink-0" />
-                        ) : (
-                          <Square className="w-4 h-4 text-slate-300 shrink-0" />
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* SECTION 3: PARTICIPANT AFFILIATIONS (صنف المشاركين) */}
-              <div className="space-y-2 pt-1 border-t border-slate-200/70">
-                <div className="flex items-center justify-between">
-                  <label className="text-xs font-black text-slate-800 flex items-center gap-1.5">
-                    <Tags className="w-3.5 h-3.5 text-amber-600" />
-                    <span>3. صنف المشاركين في البطولة (تحديد صنف أو أكثر):</span>
-                  </label>
+                {selectedBranches.length > 0 && (
                   <button
                     type="button"
-                    onClick={handleSelectAllAffiliations}
-                    className="text-[10px] text-amber-700 hover:text-amber-900 font-bold cursor-pointer"
+                    onClick={() => setSelectedBranches([])}
+                    className="text-[10px] text-red-600 hover:text-red-800 font-bold cursor-pointer"
                   >
-                    تحديد جميع الأصناف
+                    إلغاء تحديد الكل ({selectedBranches.length})
                   </button>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  {affiliationOptions.map(aff => {
-                    const isChecked = selectedAffiliations.includes(aff.id);
-                    return (
-                      <div
-                        key={aff.id}
-                        onClick={() => toggleAffiliation(aff.id)}
-                        className={`p-2 rounded-xl border transition-all cursor-pointer flex items-center justify-between text-xs ${
-                          isChecked
-                            ? `${aff.badgeBg} ${aff.badgeBorder} ${aff.badgeText} font-black shadow-xs ring-1 ring-amber-400/40`
-                            : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
-                        }`}
-                      >
-                        <div className="flex items-center gap-2 truncate">
-                          <span className="text-sm shrink-0">{aff.icon}</span>
-                          <span className="truncate">{aff.label}</span>
-                        </div>
-                        {isChecked ? (
-                          <CheckSquare className="w-4 h-4 text-amber-600 shrink-0 ml-1" />
-                        ) : (
-                          <Square className="w-4 h-4 text-slate-300 shrink-0 ml-1" />
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
+                )}
               </div>
 
+              {affiliationGroups.map(affGroup => {
+                const isClubGroup = affGroup.affiliationId === 'club_affiliated';
+                const selectedInGroupCount = affGroup.items.filter(item => isBranchChecked(item)).length;
+                const allSelectedInGroup = affGroup.items.length > 0 && selectedInGroupCount === affGroup.items.length;
+
+                return (
+                  <div
+                    key={affGroup.affiliationId}
+                    className={`p-3.5 rounded-2xl border-2 space-y-2.5 transition-all ${
+                      isClubGroup
+                        ? selectedInGroupCount > 0
+                          ? 'bg-amber-50/80 border-amber-400'
+                          : 'bg-amber-50/30 border-amber-200/80'
+                        : selectedInGroupCount > 0
+                        ? 'bg-blue-50/50 border-blue-400'
+                        : 'bg-slate-50/70 border-slate-200'
+                    }`}
+                  >
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-slate-200/70">
+                      <div className="flex items-center gap-2">
+                        <span className="text-base">{affGroup.icon}</span>
+                        <span className={`text-xs font-black ${isClubGroup ? 'text-amber-950' : 'text-slate-900'}`}>
+                          {affGroup.label}
+                        </span>
+                        {selectedInGroupCount > 0 && (
+                          <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${
+                            isClubGroup ? 'bg-amber-200 text-amber-950' : 'bg-blue-600 text-white'
+                          }`}>
+                            {selectedInGroupCount} محدد
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-2 self-end sm:self-auto">
+                        {!allSelectedInGroup ? (
+                          <button
+                            type="button"
+                            onClick={() => selectAllInAffiliation(affGroup.affiliationId)}
+                            className={`px-2.5 py-1 rounded-lg text-[10px] font-black border cursor-pointer transition-colors ${
+                              isClubGroup
+                                ? 'bg-amber-100 hover:bg-amber-200 text-amber-950 border-amber-300'
+                                : 'bg-blue-100 hover:bg-blue-200 text-blue-900 border-blue-300'
+                            }`}
+                          >
+                            تحديد جميع فئات {affGroup.shortLabel} فقط
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => clearAffiliation(affGroup.affiliationId)}
+                            className="px-2.5 py-1 rounded-lg text-[10px] font-bold bg-white hover:bg-slate-100 text-slate-600 border border-slate-300 cursor-pointer transition-colors"
+                          >
+                            إلغاء تحديد {affGroup.shortLabel}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      {affGroup.items.map(item => {
+                        const checked = isBranchChecked(item);
+                        const isFemale = item.gender === 'Female';
+                        return (
+                          <button
+                            key={item.key}
+                            type="button"
+                            onClick={() => toggleBranch(item)}
+                            className={`p-2.5 rounded-xl border text-right transition-all cursor-pointer flex items-center justify-between gap-2 ${
+                              checked
+                                ? isClubGroup
+                                  ? 'bg-amber-100 border-amber-500 text-amber-950 font-black shadow-xs ring-1 ring-amber-400/40'
+                                  : isFemale
+                                  ? 'bg-pink-50 border-pink-500 text-pink-950 font-black shadow-xs ring-1 ring-pink-400/30'
+                                  : 'bg-blue-50 border-blue-600 text-blue-950 font-black shadow-xs ring-1 ring-blue-500/30'
+                                : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                            }`}
+                          >
+                            <div className="flex items-center gap-2 min-w-0">
+                              <span className="text-base shrink-0">{isFemale ? '👧' : '👦'}</span>
+                              <div className="min-w-0">
+                                <div className="text-xs font-black truncate">
+                                  {affGroup.shortLabel} — {item.categoryName}
+                                </div>
+                                {item.years && (
+                                  <div className="text-[10px] text-slate-500 font-medium truncate">
+                                    مواليد: {item.years}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                            {checked ? (
+                              <CheckSquare className={`w-4 h-4 shrink-0 ${
+                                isClubGroup ? 'text-amber-700' : isFemale ? 'text-pink-600' : 'text-blue-600'
+                              }`} />
+                            ) : (
+                              <Square className="w-4 h-4 text-slate-300 shrink-0" />
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+
+              {/* Live Preview of Exact Branches */}
+              <div className={`p-3 rounded-2xl border ${
+                selectedBranches.length > 0
+                  ? 'bg-emerald-50/80 border-emerald-300 text-emerald-950'
+                  : 'bg-slate-100/80 border-slate-200 text-slate-500'
+              }`}>
+                <div className="font-black text-[11px] mb-1.5">
+                  {selectedBranches.length > 0
+                    ? `✓ ستدرج مشاركة مؤسستك حصرياً في الفروع التالية (${selectedBranches.length}):`
+                    : 'لم يتم تحديد أي فرع بعد — اضغط على الفروع المطلوبة أعلاه:'}
+                </div>
+                {selectedBranches.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5">
+                    {selectedBranches.map(b => {
+                      const isClub = b.affiliationType === 'club_affiliated';
+                      return (
+                        <span
+                          key={makeBranchKey(b)}
+                          className={`px-2.5 py-1 rounded-lg text-[10.5px] font-black border flex items-center gap-1 ${
+                            isClub
+                              ? 'bg-amber-100 text-amber-950 border-amber-300'
+                              : 'bg-white text-emerald-950 border-emerald-300'
+                          }`}
+                        >
+                          <span>{isClub ? '🟡' : '⚪'}</span>
+                          <span>{formatBranchLabelAr(b, sport.id)}</span>
+                        </span>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
             </div>
           )}
 
@@ -645,7 +761,7 @@ export const ConfirmParticipationModal: React.FC<ConfirmParticipationModalProps>
                 rows={2}
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
-                placeholder="مثال: ستشارك المؤسسة بفريقين، وجاري ضبط الأسماء النهائية..."
+                placeholder="مثال: ستشارك المؤسسة في الفروع المحددة أعلاه وجاري ضبط اللائحة النهائية..."
                 className="w-full text-xs p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-blue-600 focus:outline-none transition-all"
               />
             </div>
@@ -667,7 +783,7 @@ export const ConfirmParticipationModal: React.FC<ConfirmParticipationModalProps>
 
         {/* Footer actions */}
         <div className="p-4 bg-slate-50 border-t border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-2.5">
-          <div className="w-full sm:w-auto flex items-center gap-2">
+          <div className="w-full sm:w-auto flex items-center gap-2 flex-wrap">
             <button
               type="button"
               onClick={onClose}
@@ -676,23 +792,48 @@ export const ConfirmParticipationModal: React.FC<ConfirmParticipationModalProps>
               إغلاق
             </button>
 
-            {isConfirmed && !isEditingExisting && (
+            {isConfirmed && !isEditingExisting && !confirmCancelStep && (
               <button
                 type="button"
                 disabled={isCancelling}
-                onClick={handleCancelConfirmation}
+                onClick={() => setConfirmCancelStep(true)}
                 className="w-full sm:w-auto px-3.5 py-2 bg-red-50 border border-red-200 hover:bg-red-100 text-red-600 rounded-xl font-bold text-xs transition-colors cursor-pointer flex items-center justify-center gap-1.5"
                 title="إلغاء تأكيد مشاركة المؤسسة"
               >
                 <Trash2 className="w-3.5 h-3.5" />
-                <span>{isCancelling ? 'جاري الإلغاء...' : 'إلغاء التأكيد'}</span>
+                <span>إلغاء التأكيد</span>
               </button>
+            )}
+
+            {isConfirmed && !isEditingExisting && confirmCancelStep && (
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  disabled={isCancelling}
+                  onClick={handleCancelConfirmation}
+                  className="px-3 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl font-black text-xs transition-colors cursor-pointer"
+                >
+                  {isCancelling ? 'جاري الإلغاء...' : 'تأكيد إلغاء المشاركة نهائياً'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setConfirmCancelStep(false)}
+                  className="px-2.5 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-xl font-bold text-xs transition-colors cursor-pointer"
+                >
+                  تراجع
+                </button>
+              </div>
             )}
 
             {isEditingExisting && (
               <button
                 type="button"
-                onClick={() => setIsEditingExisting(false)}
+                onClick={() => {
+                  setIsEditingExisting(false);
+                  if (confirmedRecord) {
+                    setSelectedBranches(getEffectiveConfirmedBranches(confirmedRecord, true));
+                  }
+                }}
                 className="w-full sm:w-auto px-3 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-xl font-bold text-xs transition-colors cursor-pointer"
               >
                 إلغاء التعديل
@@ -716,7 +857,7 @@ export const ConfirmParticipationModal: React.FC<ConfirmParticipationModalProps>
             ) : (
               <button
                 type="button"
-                disabled={isSubmitting || isDeadlinePassed}
+                disabled={isSubmitting || isDeadlinePassed || selectedBranches.length === 0}
                 onClick={handleConfirm}
                 className="w-full sm:w-auto px-6 py-2.5 bg-gradient-to-r from-emerald-600 to-emerald-700 hover:from-emerald-500 hover:to-emerald-600 disabled:opacity-50 text-white rounded-xl font-black text-xs shadow-md shadow-emerald-700/20 transition-all cursor-pointer flex items-center justify-center gap-2 active:scale-98"
               >
@@ -725,8 +866,8 @@ export const ConfirmParticipationModal: React.FC<ConfirmParticipationModalProps>
                   {isSubmitting
                     ? 'جاري الحفظ...'
                     : isEditingExisting
-                    ? 'حفظ تعديلات الفئات والأصناف ✓'
-                    : 'تأكيد مشاركة المؤسسة والفئات رسمياً (المرحلة 1) ✓'}
+                    ? `حفظ تعديلات الفروع (${selectedBranches.length}) ✓`
+                    : `تأكيد المشاركة في الفروع المحددة (${selectedBranches.length}) ✓`}
                 </span>
               </button>
             )}

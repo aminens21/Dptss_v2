@@ -31,7 +31,7 @@ import {
   Award
 } from 'lucide-react';
 import { Tournament, School, Team, Match, User, Venue, Sport, Referee, SchoolTournamentConfirmation } from '../types';
-import { DataService, SPORTS_MAP, deduplicateById, normalizeCategoryKey, getCustomCategoryName } from '../lib/dataService';
+import { DataService, SPORTS_MAP, deduplicateById, normalizeCategoryKey, getCustomCategoryName, doesConfirmationMatchBranch } from '../lib/dataService';
 import { cn } from '../lib/utils';
 import * as XLSX from 'xlsx';
 import toast from 'react-hot-toast';
@@ -553,7 +553,7 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
     return selectedTournament.sportName || SPORTS_MAP[selectedTournament.sportId]?.name || selectedTournament.sportId;
   }, [selectedTournament]);
 
-  // Compute schools that confirmed participation for this specific tournament
+  // Compute schools that confirmed participation for this specific tournament branch
   const confirmedSchoolsForTournament = useMemo(() => {
     if (!selectedTournament) return [];
     return confirmations.filter(c => {
@@ -574,26 +574,12 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
       const matchesSport = c.sportId === selectedTournament.sportId || (c.tournamentId && c.tournamentId === selectedTournament.id);
       if (!matchesSport) return false;
 
-      // 2. Age Category check (if specified in confirmation)
-      if (c.categories && c.categories.length > 0 && selectedTournament.ageCategory) {
-        const tournCatNorm = normalizeCategoryKey(selectedTournament.ageCategory);
-        const matchesCat = c.categories.some(cat => 
-          normalizeCategoryKey(cat) === tournCatNorm || cat === selectedTournament.ageCategory
-        );
-        if (!matchesCat) return false;
-      }
-
-      // 3. Gender check (if specified in confirmation)
-      if (c.genders && c.genders.length > 0 && selectedTournament.gender && selectedTournament.gender !== 'Mixed') {
-        if (!c.genders.includes(selectedTournament.gender as any)) return false;
-      }
-
-      // 4. Affiliation check (if specified in confirmation and tournament)
-      if (selectedTournament.affiliationType && c.affiliationTypes && c.affiliationTypes.length > 0) {
-        if (!c.affiliationTypes.includes(selectedTournament.affiliationType)) return false;
-      }
-
-      return true;
+      // 2. Exact Branch tuple check (Category + Gender + Affiliation)
+      return doesConfirmationMatchBranch(c, {
+        category: selectedTournament.ageCategory,
+        gender: selectedTournament.gender,
+        affiliationType: selectedTournament.affiliationType || 'non_club'
+      });
     });
   }, [confirmations, selectedTournament]);
 

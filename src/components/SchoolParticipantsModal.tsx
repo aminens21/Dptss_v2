@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { School, Student, Tournament, Sport, SchoolTournamentConfirmation } from '../types';
-import { DataService, SPORTS_MAP, AGE_CATEGORIES, getCategoryGenderLabel, deduplicateById } from '../lib/dataService';
+import { DataService, SPORTS_MAP, AGE_CATEGORIES, getCategoryGenderLabel, deduplicateById, normalizeCategoryKey, getEffectiveConfirmedBranches, formatBranchLabelAr } from '../lib/dataService';
 import { useNavigate } from 'react-router-dom';
 import * as XLSX from 'xlsx';
 import { cn } from '../lib/utils';
@@ -219,112 +219,155 @@ export const SchoolParticipantsModal: React.FC<SchoolParticipantsModalProps> = (
     );
   }, [localStudents, school?.id, school?.name]);
 
-  // Group school students by Sport (One Card per Sport)
-  // Include sports that the school confirmed participation in, even if no students are registered yet
+  // Group school participations by Sport with exact (affiliation + category + gender) branch tuples
   const participatingGroups = useMemo(() => {
     if (!school) return [];
+
+    interface ExactBranchEntry {
+      key: string; // `${affiliationType}__${category}__${gender}`
+      affiliationType: string;
+      category: string;
+      gender: 'Male' | 'Female';
+      count: number;
+      isConfirmed: boolean;
+    }
+
     const groups: {
       id: string;
       sportId: string;
       categories: string[];
+      branches: ExactBranchEntry[];
       students: Student[];
       hasClubAffiliated: boolean;
       hasNonClub: boolean;
       isConfirmedOnly?: boolean;
     }[] = [];
 
-    // 1. Add sports from actual student registrations
-    schoolStudents.forEach(st => {
-      if (!st.category || !st.sportId) return;
-      if (selectedSportFilter !== 'ALL' && st.sportId !== selectedSportFilter) return;
-
-      // STRICT CHECK: Sport MUST have an active (Scheduled or Ongoing) tournament
-      const activeTournament = tournaments.find(t => t.sportId === st.sportId && (t.status === 'Scheduled' || t.status === 'Ongoing'));
-      if (!activeTournament) return;
-      
-      // Also ensure the sport itself is programmed
-      const sportDef = sportsConfig.find(s => s.id === st.sportId);
-      if (sportDef && !sportDef.isProgrammed) return;
-
-      const sId = st.sportId;
-      const cat = st.category;
-      const isClub = st.affiliationType === 'club_affiliated';
-
+    const ensureGroup = (sId: string) => {
       let g = groups.find(x => x.sportId === sId);
       if (!g) {
         g = {
           id: sId,
           sportId: sId,
           categories: [],
+          branches: [],
           students: [],
           hasClubAffiliated: false,
-          hasNonClub: false,
+          hasNonClub: false
         };
         groups.push(g);
       }
-      if (!g.categories.includes(cat)) {
-        g.categories.push(cat);
-      }
-      if (isClub) g.hasClubAffiliated = true;
-      else g.hasNonClub = true;
+      return g;
+    };
 
+    const isSportActiveOrProgrammed = (sId: string) => {
+      const hasActiveTourn = tournaments.some(t => t.sportId === sId && t.status !== 'Archived' && t.status !== 'Draft');
+      const sportDef = sportsConfig.find(s => s.id === sId);
+      if (hasActiveTourn) return true;
+      if (sportDef && sportDef.isProgrammed) return true;
+      if (tournaments.length === 0 && (!sportDef || sportDef.isProgrammed !== false)) return true;
+      return false;
+    };
+
+    // 1. Add exact branches from actual student registrations
+    schoolStudents.forEach(st => {
+      if (!st.category || !st.sportId) return;
+      if (selectedSportFilter !== 'ALL' && st.sportId !== selectedSportFilter) return;
+      if (!isSportActiveOrProgrammed(st.sportId)) return;
+
+      const sId = st.sportId;
+      const cat = normalizeCategoryKey(st.category);
+      const gen: 'Male' | 'Female' = st.gender === 'Female' ? 'Female' : 'Male';
+      const aff = (st.affiliationType || 'non_club').trim();
+      const bKey = `${aff}__${cat}__${gen}`;
+
+      if (DataService.isSchoolWithdrawn({
+        sportId: sId,
+        ageCategory: cat,
+        gender: gen,
+        affiliationType: aff
+      }, school.id, school.name)) {
+        return;
+      }
+
+      const g = ensureGroup(sId);
+      if (!g.categories.includes(cat)) g.categories.push(cat);
+      let bEntry = g.branches.find(b => b.key === bKey);
+      if (!bEntry) {
+        bEntry = { key: bKey, affiliationType: aff, category: cat, gender: gen, count: 0, isConfirmed: false };
+        g.branches.push(bEntry);
+      }
+      bEntry.count += 1;
       g.students.push(st);
     });
 
-    // 2. Add sports from confirmations (expressed interest) if not already present
-    // ONLY include confirmations for the active season and ACTIVE programmed tournaments
+    // 2. Merge exact confirmed branches from Phase 1 confirmations
+    const targetSchoolNameLower = (school.name || '').trim().toLowerCase();
     const schoolConfirmations = confirmations.filter(c => {
-      const isForSchool = (c.schoolId && c.schoolId === school.id) || 
-                         (c.schoolName && c.schoolName.trim() === (school.name || '').trim());
+      if (c.status !== 'confirmed') return false;
+      const cNameLower = (c.schoolName || '').trim().toLowerCase();
+      const isForSchool = (c.schoolId && (c.schoolId === school.id || c.schoolId.trim().toLowerCase() === targetSchoolNameLower)) ||
+                          (cNameLower.length > 0 && cNameLower === targetSchoolNameLower);
       const isForActiveSeason = !c.seasonId || c.seasonId === activeSeason;
-      
-      // MUST be part of an active (Scheduled or Ongoing) tournament
-      const isPartOfActiveTournament = tournaments.some(t => t.sportId === c.sportId && (t.status === 'Scheduled' || t.status === 'Ongoing'));
-
-      return isForSchool && isForActiveSeason && isPartOfActiveTournament;
+      return isForSchool && isForActiveSeason && isSportActiveOrProgrammed(c.sportId);
     });
 
     schoolConfirmations.forEach(conf => {
       if (selectedSportFilter !== 'ALL' && conf.sportId !== selectedSportFilter) return;
-      
-      let g = groups.find(x => x.sportId === conf.sportId);
-      if (!g) {
-        g = {
-          id: conf.sportId,
-          sportId: conf.sportId,
-          categories: conf.categories || [],
-          students: [],
-          hasClubAffiliated: (conf.affiliationTypes || []).includes('club_affiliated'),
-          hasNonClub: (conf.affiliationTypes || []).includes('non_club'),
-          isConfirmedOnly: true
-        };
-        groups.push(g);
-      } else {
-        // If already present via students, just ensure categories from confirmation are merged if missing
-        if (conf.categories) {
-          conf.categories.forEach(c => {
-            if (!g!.categories.includes(c)) g!.categories.push(c);
-          });
+      const effectiveBranches = getEffectiveConfirmedBranches(conf, true);
+      if (effectiveBranches.length === 0) return;
+
+      const g = ensureGroup(conf.sportId);
+      effectiveBranches.forEach(b => {
+        const cat = normalizeCategoryKey(b.category);
+        const gen = b.gender;
+        const aff = b.affiliationType || 'non_club';
+        const bKey = `${aff}__${cat}__${gen}`;
+
+        if (!g.categories.includes(cat)) g.categories.push(cat);
+        let bEntry = g.branches.find(x => x.key === bKey);
+        if (!bEntry) {
+          bEntry = { key: bKey, affiliationType: aff, category: cat, gender: gen, count: 0, isConfirmed: true };
+          g.branches.push(bEntry);
+        } else {
+          bEntry.isConfirmed = true;
         }
-      }
+      });
     });
 
-    // Sort categories in each group according to AGE_CATEGORIES order
+    const catOrder = ['U12', 'U15', 'U18', 'U20', 'OPEN'];
+    const affOrder = ['non_club', 'club_affiliated', 'open'];
+
     groups.forEach(g => {
+      g.isConfirmedOnly = g.students.length === 0;
+      g.hasClubAffiliated = g.branches.some(b => b.affiliationType === 'club_affiliated');
+      g.hasNonClub = g.branches.some(b => b.affiliationType !== 'club_affiliated');
+
       g.categories.sort((a, b) => {
         const idxA = AGE_CATEGORIES.findIndex(c => c.id === a);
         const idxB = AGE_CATEGORIES.findIndex(c => c.id === b);
         return (idxA !== -1 ? idxA : 99) - (idxB !== -1 ? idxB : 99);
       });
+
+      g.branches.sort((a, b) => {
+        const aa = affOrder.indexOf(a.affiliationType);
+        const ab = affOrder.indexOf(b.affiliationType);
+        const affDiff = (aa === -1 ? 99 : aa) - (ab === -1 ? 99 : ab);
+        if (affDiff !== 0) return affDiff;
+        const ca = catOrder.indexOf(a.category);
+        const cb = catOrder.indexOf(b.category);
+        const catDiff = (ca === -1 ? 99 : ca) - (cb === -1 ? 99 : cb);
+        if (catDiff !== 0) return catDiff;
+        return a.gender === 'Male' ? -1 : 1;
+      });
     });
 
-    // Sort groups by Sport Name
     return groups.sort((a, b) => {
       const sportA = SPORTS_MAP[a.sportId]?.name || a.sportId;
       const sportB = SPORTS_MAP[b.sportId]?.name || b.sportId;
       return sportA.localeCompare(sportB, 'ar');
     });
-  }, [school, schoolStudents, selectedSportFilter, confirmations]);
+  }, [school, schoolStudents, selectedSportFilter, confirmations, tournaments, sportsConfig, activeSeason]);
 
   useEffect(() => {
     if (isOpen) {
@@ -703,14 +746,14 @@ export const SchoolParticipantsModal: React.FC<SchoolParticipantsModalProps> = (
                                       </div>
                                       <div>
                                         <div className="flex items-center gap-1.5 flex-wrap">
+                                          {group.hasNonClub && (
+                                            <span className="text-[9px] font-black px-2 py-0.5 rounded-full bg-slate-100 text-slate-800 border border-slate-200">
+                                              ⚪ لا منتمين
+                                            </span>
+                                          )}
                                           {group.hasClubAffiliated && (
                                             <span className="text-[9px] font-black px-2 py-0.5 rounded-full bg-amber-100 text-amber-900 border border-amber-300">
                                               🟡 منتمين للأندية
-                                            </span>
-                                          )}
-                                          {group.hasNonClub && (
-                                            <span className="text-[9px] font-black px-2 py-0.5 rounded-full bg-slate-100 text-slate-800 border border-slate-200">
-                                              ⚪ مدرسيين
                                             </span>
                                           )}
                                         </div>
@@ -721,40 +764,57 @@ export const SchoolParticipantsModal: React.FC<SchoolParticipantsModalProps> = (
                                     </div>
                                   </div>
 
-                                  {/* List of Participating Age Categories inside Card */}
+                                  {/* Exact Participating Branches inside Card */}
                                   <div className="mt-3 pt-2.5 border-t border-slate-100">
-                                    <span className="text-[10px] font-bold text-slate-500 block mb-1.5">الفئات المشاركة بهذه البطولة:</span>
+                                    <span className="text-[10px] font-bold text-slate-500 block mb-1.5">
+                                      الفروع المشارك فيها بهذه البطولة ({group.branches.length}):
+                                    </span>
                                     <div className="flex items-center gap-1.5 flex-wrap">
-                                      {group.categories.map(catId => {
-                                        const catObj = AGE_CATEGORIES.find(c => c.id === catId);
-                                        const catCount = group.students.filter(s => s.category === catId).length;
+                                      {group.branches.map(br => {
+                                        const isClubBr = br.affiliationType === 'club_affiliated';
+                                        const isFemBr = br.gender === 'Female';
                                         return (
                                           <span
-                                            key={catId}
-                                            className="px-2.5 py-1 rounded-xl bg-blue-50 text-blue-900 text-[11px] font-black border border-blue-200/90 shadow-2xs flex items-center gap-1.5"
+                                            key={br.key}
+                                            className={cn(
+                                              "px-2.5 py-1 rounded-xl text-[10.5px] font-black border shadow-2xs flex items-center gap-1.5",
+                                              isClubBr
+                                                ? "bg-amber-100/90 text-amber-950 border-amber-300"
+                                                : isFemBr
+                                                ? "bg-pink-50 text-pink-950 border-pink-200"
+                                                : "bg-blue-50 text-blue-900 border-blue-200/90"
+                                            )}
                                           >
-                                            <span>{catObj?.shortName || catId}</span>
-                                            <span className="bg-blue-600 text-white rounded-md px-1.5 py-0.2 text-[9px] font-extrabold">{catCount}</span>
+                                            <span>{isClubBr ? '🟡' : '⚪'}</span>
+                                            <span>{formatBranchLabelAr(br, group.sportId)}</span>
+                                            <span className={cn(
+                                              "rounded-md px-1.5 py-0.2 text-[9px] font-extrabold",
+                                              br.count > 0
+                                                ? "bg-blue-600 text-white"
+                                                : "bg-emerald-600 text-white"
+                                            )}>
+                                              {br.count > 0 ? br.count : 'مؤكد ✓'}
+                                            </span>
                                           </span>
                                         );
                                       })}
                                     </div>
                                   </div>
 
-                                      {/* Stats Summary */}
-                                  <div className="my-3 grid grid-cols-3 gap-2 text-center">
-                                    <div className="bg-slate-50/80 rounded-xl p-2 border border-slate-100">
-                                      <span className="text-[10px] text-slate-400 font-bold block mb-0.5">المشاركون</span>
+                                  {/* Stats Summary - strictly matching branches this school actually participates in */}
+                                  <div className="my-3 flex items-center gap-2 text-center">
+                                    <div className="flex-1 bg-slate-50/80 rounded-xl p-2 border border-slate-100">
+                                      <span className="text-[10px] text-slate-400 font-bold block mb-0.5">المشاركون المسجلون</span>
                                       <span className="text-xs font-black text-slate-900">{group.students.length}</span>
                                     </div>
-                                    { (tournaments.find(t => t.sportId === group.sportId && t.status !== 'Archived')?.gender !== 'Female') && (
-                                      <div className="bg-blue-50/60 rounded-xl p-2 border border-blue-100">
+                                    {group.branches.some(b => b.gender === 'Male') && (
+                                      <div className="flex-1 bg-blue-50/60 rounded-xl p-2 border border-blue-100">
                                         <span className="text-[10px] text-blue-600 font-bold block mb-0.5">ذكور 👦</span>
                                         <span className="text-xs font-black text-blue-700">{groupMaleCount}</span>
                                       </div>
                                     )}
-                                    { (tournaments.find(t => t.sportId === group.sportId && t.status !== 'Archived')?.gender !== 'Male') && (
-                                      <div className="bg-rose-50/60 rounded-xl p-2 border border-rose-100">
+                                    {group.branches.some(b => b.gender === 'Female') && (
+                                      <div className="flex-1 bg-rose-50/60 rounded-xl p-2 border border-rose-100">
                                         <span className="text-[10px] text-rose-600 font-bold block mb-0.5">إناث 👧</span>
                                         <span className="text-xs font-black text-rose-700">{groupFemaleCount}</span>
                                       </div>
@@ -765,7 +825,7 @@ export const SchoolParticipantsModal: React.FC<SchoolParticipantsModalProps> = (
                                 {/* Card Footer Button */}
                                 <div className="pt-1">
                                   <div className="w-full py-2 px-3 bg-slate-100 group-hover:bg-blue-600 text-slate-700 group-hover:text-white rounded-xl text-xs font-black transition-all flex items-center justify-between shadow-2xs">
-                                    <span>عرض تفاصيل المشاركة واللائحة 🔍</span>
+                                    <span>عرض تفاصيل الفروع واللائحة 🔍</span>
                                     <ChevronLeft className="w-4 h-4 transition-transform group-hover:-translate-x-1" />
                                   </div>
                                 </div>
@@ -786,10 +846,13 @@ export const SchoolParticipantsModal: React.FC<SchoolParticipantsModalProps> = (
                         const groupMaleCount = selectedGroup.students.filter(st => st.gender === 'Male').length;
                         const groupFemaleCount = selectedGroup.students.filter(st => st.gender === 'Female').length;
 
-                        // Filter students inside detail view by category if selected
+                        // Filter students inside detail view by exact branch key (`aff__cat__gender`) if selected
                         const filteredDetailStudents = detailCatFilter === 'ALL'
                           ? selectedGroup.students
-                          : selectedGroup.students.filter(s => s.category === detailCatFilter);
+                          : selectedGroup.students.filter(s => {
+                              const sKey = `${(s.affiliationType || 'non_club').trim()}__${normalizeCategoryKey(s.category)}__${s.gender === 'Female' ? 'Female' : 'Male'}`;
+                              return sKey === detailCatFilter;
+                            });
 
                         return (
                           <div className="space-y-4 animate-in fade-in duration-200">
@@ -844,19 +907,19 @@ export const SchoolParticipantsModal: React.FC<SchoolParticipantsModalProps> = (
                                       <h3 className="text-sm sm:text-base font-black text-slate-900">
                                         تفاصيل مشاركة بطولة {sObj.name}
                                       </h3>
+                                      {selectedGroup.hasNonClub && (
+                                        <span className="text-[10px] font-black px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-800 border border-slate-200">
+                                          ⚪ لا منتمين
+                                        </span>
+                                      )}
                                       {selectedGroup.hasClubAffiliated && (
                                         <span className="text-[10px] font-black px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-900 border border-amber-300">
                                           🟡 منتمين للأندية
                                         </span>
                                       )}
-                                      {selectedGroup.hasNonClub && (
-                                        <span className="text-[10px] font-black px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-800 border border-slate-200">
-                                          ⚪ مدرسيين
-                                        </span>
-                                      )}
                                     </div>
                                     <p className="text-xs text-slate-600 font-medium">
-                                      إجمالي المشاركين: <strong className="text-slate-900 font-black">{selectedGroup.students.length} مشارك(ة)</strong> ({groupMaleCount} ذكور ، {groupFemaleCount} إناث)
+                                      إجمالي المشاركين المسجلين: <strong className="text-slate-900 font-black">{selectedGroup.students.length} مشارك(ة)</strong> في <strong className="text-blue-800 font-black">{selectedGroup.branches.length} فرع(فروع)</strong>
                                     </p>
                                   </div>
                                 </div>
@@ -864,7 +927,10 @@ export const SchoolParticipantsModal: React.FC<SchoolParticipantsModalProps> = (
                                 {/* Sport Actions */}
                                 <div className="flex items-center gap-2 shrink-0 flex-wrap">
                                   <button
-                                    onClick={() => handleOpenPdfForGroup(selectedGroup.sportId, selectedGroup.students, detailCatFilter)}
+                                    onClick={() => {
+                                      const pdfCat = detailCatFilter === 'ALL' ? 'ALL' : (detailCatFilter.split('__')[1] || 'ALL');
+                                      handleOpenPdfForGroup(selectedGroup.sportId, filteredDetailStudents, pdfCat);
+                                    }}
                                     className="px-3.5 py-2 bg-gradient-to-r from-sky-600 to-blue-700 hover:from-sky-700 hover:to-blue-800 text-white font-bold text-xs rounded-xl transition-all shadow-xs cursor-pointer flex items-center gap-1.5"
                                   >
                                     <FileText className="w-4 h-4" />
@@ -873,10 +939,10 @@ export const SchoolParticipantsModal: React.FC<SchoolParticipantsModalProps> = (
                                 </div>
                               </div>
 
-                              {/* Category Filter Pills inside Detail View */}
-                              {selectedGroup.categories.length > 1 && (
-                                <div className="mt-3 pt-3 border-t border-blue-200/60 flex items-center gap-2 flex-wrap">
-                                  <span className="text-xs font-black text-slate-700">تصفية حسب الفئة:</span>
+                              {/* Exact Branch Filter Pills inside Detail View */}
+                              <div className="mt-3 pt-3 border-t border-blue-200/60 flex items-center gap-2 flex-wrap">
+                                <span className="text-xs font-black text-slate-700">الفروع المشارك فيها بالمؤسسة:</span>
+                                {selectedGroup.branches.length > 1 && (
                                   <button
                                     onClick={() => setDetailCatFilter('ALL')}
                                     className={`px-3 py-1 rounded-xl text-xs font-black transition-all cursor-pointer ${
@@ -885,28 +951,31 @@ export const SchoolParticipantsModal: React.FC<SchoolParticipantsModalProps> = (
                                         : 'bg-white text-slate-700 hover:bg-slate-100 border border-slate-200'
                                     }`}
                                   >
-                                    🌟 جميع الفئات ({selectedGroup.students.length})
+                                    🌟 جميع فروع المؤسسة ({selectedGroup.students.length})
                                   </button>
-                                  {selectedGroup.categories.map(catId => {
-                                    const catObj = AGE_CATEGORIES.find(c => c.id === catId);
-                                    const catCount = selectedGroup.students.filter(s => s.category === catId).length;
-                                    const isSelected = detailCatFilter === catId;
-                                    return (
-                                      <button
-                                        key={catId}
-                                        onClick={() => setDetailCatFilter(catId)}
-                                        className={`px-3 py-1 rounded-xl text-xs font-black transition-all cursor-pointer ${
-                                          isSelected
-                                            ? 'bg-blue-600 text-white shadow-3xs'
-                                            : 'bg-white text-slate-700 hover:bg-slate-100 border border-slate-200'
-                                        }`}
-                                      >
-                                        {getCategoryGenderLabel(catId, undefined, '2026/2027', selectedGroup.sportId)} ({catCount})
-                                      </button>
-                                    );
-                                  })}
-                                </div>
-                              )}
+                                )}
+                                {selectedGroup.branches.map(br => {
+                                  const isSelected = detailCatFilter === br.key;
+                                  const isClubBr = br.affiliationType === 'club_affiliated';
+                                  return (
+                                    <button
+                                      key={br.key}
+                                      onClick={() => setDetailCatFilter(br.key)}
+                                      className={`px-3 py-1 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-1.5 border ${
+                                        isSelected
+                                          ? 'bg-blue-600 text-white border-blue-600 shadow-3xs'
+                                          : isClubBr
+                                          ? 'bg-amber-50 text-amber-950 hover:bg-amber-100 border-amber-300'
+                                          : 'bg-white text-slate-800 hover:bg-slate-100 border-slate-200'
+                                      }`}
+                                    >
+                                      <span>{isClubBr ? '🟡' : '⚪'}</span>
+                                      <span>{formatBranchLabelAr(br, selectedGroup.sportId)}</span>
+                                      <span className="font-mono text-[10px] opacity-85">({br.count > 0 ? br.count : 'مؤكد ✓'})</span>
+                                    </button>
+                                  );
+                                })}
+                              </div>
                             </div>
 
                             {/* Participant Roster Table */}
@@ -1013,6 +1082,28 @@ export const SchoolParticipantsModal: React.FC<SchoolParticipantsModalProps> = (
                                         </tr>
                                       );
                                     })}
+                                    {filteredDetailStudents.length === 0 && (
+                                      <tr>
+                                        <td colSpan={9} className="p-8 text-center text-slate-500 space-y-2">
+                                          <p className="font-black text-slate-800 text-xs">
+                                            ✓ المشاركة مؤكدة رسمياً في هذا الفرع (المرحلة 1)، ولم يتم إدراج أسماء التلاميذ بعد.
+                                          </p>
+                                          {(!isTeacher || isUserBelongToSchool) && (
+                                            <button
+                                              type="button"
+                                              onClick={() => {
+                                                onClose();
+                                                navigate(`/teams?sport=${selectedGroup.sportId}&school=${encodeURIComponent(school.name)}`);
+                                              }}
+                                              className="mt-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black inline-flex items-center gap-1.5 cursor-pointer shadow-xs"
+                                            >
+                                              <span>إدراج أسماء التلاميذ في هذا الفرع الآن</span>
+                                              <ChevronLeft className="w-4 h-4" />
+                                            </button>
+                                          )}
+                                        </td>
+                                      </tr>
+                                    )}
                                   </tbody>
                                 </table>
                               </div>

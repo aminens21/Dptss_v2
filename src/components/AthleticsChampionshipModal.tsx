@@ -76,6 +76,7 @@ import { ConfirmDeleteModal } from './ConfirmDeleteModal';
 import { AthleticsBibGeneratorModal } from './AthleticsBibGeneratorModal';
 import { AthleticsTrackQrScannerModal } from './AthleticsTrackQrScannerModal';
 import { ConfirmParticipationModal } from './ConfirmParticipationModal';
+import { ConfirmedParticipationBadge } from './ConfirmedParticipationBadge';
 import { useSchoolConfirmations } from '../hooks/useSchoolConfirmations';
 import toast from 'react-hot-toast';
 
@@ -2443,19 +2444,30 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                     {/* Action Buttons: Add, Print, Excel, MockData */}
                   <div className="flex items-center gap-1.5 sm:gap-2.5 flex-wrap w-full lg:w-auto">
                     {isTeacher && effectiveAthleticsSchool && (
-                      <button
-                        type="button"
-                        onClick={() => setIsConfirmModalOpen(true)}
-                        className={`p-2 sm:px-4 sm:py-2.5 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-1.5 shadow-md cursor-pointer active:scale-95 ${
-                          isAthleticsConfirmed
-                            ? 'bg-emerald-700 hover:bg-emerald-600 text-white shadow-emerald-700/30'
-                            : 'bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white shadow-emerald-600/30 animate-pulse'
-                        }`}
-                        title="تأكيد مشاركة المؤسسة في بطولة ألعاب القوى (المرحلة 1)"
-                      >
-                        <CheckCircle2 className="w-4 h-4" />
-                        <span>{isAthleticsConfirmed ? 'مشاركة المؤسسة مؤكدة ✓' : 'تأكيد مشاركة المؤسسة (م1) 📋'}</span>
-                      </button>
+                      isAthleticsConfirmed ? (
+                        <ConfirmedParticipationBadge
+                          sportId="athletics"
+                          sportName="ألعاب القوى"
+                          schoolId={currentUser?.schoolId}
+                          schoolName={effectiveAthleticsSchool}
+                          variant="light"
+                          label="مشاركة المؤسسة مؤكدة ✓"
+                          onClick={() => setIsConfirmModalOpen(true)}
+                          onCancelSuccess={() => {
+                            refreshConfirmations();
+                          }}
+                        />
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setIsConfirmModalOpen(true)}
+                          className="p-2 sm:px-4 sm:py-2.5 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-1.5 shadow-md cursor-pointer active:scale-95 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white shadow-emerald-600/30 animate-pulse"
+                          title="تأكيد مشاركة المؤسسة في بطولة ألعاب القوى (المرحلة 1)"
+                        >
+                          <CheckCircle2 className="w-4 h-4" />
+                          <span>تأكيد مشاركة المؤسسة (م1) 📋</span>
+                        </button>
+                      )
                     )}
                     <button
                       type="button"

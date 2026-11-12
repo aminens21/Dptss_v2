@@ -40,6 +40,7 @@ import { ProgramExportModal } from '../components/ProgramExportModal';
 import { ElectronicDrawModal, TEAM_SPORTS_IDS } from '../components/ElectronicDrawModal';
 import { DemoDataModal } from '../components/DemoDataModal';
 import { ConfirmParticipationModal } from '../components/ConfirmParticipationModal';
+import { ConfirmedParticipationBadge } from '../components/ConfirmedParticipationBadge';
 import { useSchoolConfirmations } from '../hooks/useSchoolConfirmations';
 import { TeacherTeams } from './TeacherTeams';
 import { OfficialLogos } from '../lib/dataService';
@@ -1325,18 +1326,20 @@ export const Tournaments: React.FC = () => {
                       {isTeacherRole ? (
                         isSchoolConfirmed('cross_country', teacherSchoolName) ? (
                           <div className="flex items-center gap-1.5 flex-1">
-                            <button
-                              type="button"
+                            <ConfirmedParticipationBadge
+                              sportId="cross_country"
+                              sportName="العدو الريفي"
+                              schoolId={userProfile?.schoolId}
+                              schoolName={teacherSchoolName}
+                              variant="dark"
                               onClick={(e) => {
                                 e.stopPropagation();
                                 setConfirmParticipationSport({ id: 'cross_country', name: 'العدو الريفي', icon: '🏃‍♂️' });
                               }}
-                              className="py-2 px-2.5 bg-emerald-500/25 hover:bg-emerald-500/35 text-emerald-200 border border-emerald-400/40 text-[11px] font-bold rounded-xl flex items-center justify-center gap-1 shrink-0 cursor-pointer"
-                              title="مشاركة مؤسستك مؤكدة في العدو الريفي"
-                            >
-                              <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
-                              <span>مؤكدة ✓</span>
-                            </button>
+                              onCancelSuccess={() => {
+                                refreshConfirmations();
+                              }}
+                            />
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
@@ -1680,18 +1683,20 @@ export const Tournaments: React.FC = () => {
                     {userProfile?.role === 'TEACHER' ? (
                       isSchoolConfirmed(sport.id, teacherSchoolName) ? (
                         <div className="flex items-center gap-1.5 flex-1">
-                          <button
-                            type="button"
+                          <ConfirmedParticipationBadge
+                            sportId={sport.id}
+                            sportName={sport.name}
+                            schoolId={userProfile?.schoolId}
+                            schoolName={teacherSchoolName}
+                            variant="light"
                             onClick={(e) => {
                               e.stopPropagation();
                               setConfirmParticipationSport(sport);
                             }}
-                            title="تفاصيل / إلغاء تأكيد المشاركة"
-                            className="py-2.5 px-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 font-black text-[11px] rounded-xl flex items-center justify-center gap-1 shrink-0 transition-colors cursor-pointer"
-                          >
-                            <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
-                            <span>مؤكدة ✓</span>
-                          </button>
+                            onCancelSuccess={() => {
+                              refreshConfirmations();
+                            }}
+                          />
                           <button
                             onClick={() => handleOpenSportModal(sport)}
                             className="flex-1 py-2.5 px-3 bg-blue-600 hover:bg-blue-700 text-white font-black text-xs rounded-xl flex items-center justify-center gap-1.5 transition-all shadow-3xs cursor-pointer"
@@ -1939,6 +1944,7 @@ export const Tournaments: React.FC = () => {
           isOpen={true}
           onClose={() => setConfirmParticipationSport(null)}
           sport={confirmParticipationSport}
+          tournaments={tournaments.filter(t => t.sportId === confirmParticipationSport.id)}
           schoolName={teacherSchoolName}
           schoolId={userProfile?.schoolId || teacherSchoolName}
           teacherId={userProfile?.id}

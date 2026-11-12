@@ -244,8 +244,14 @@ export const ParticipationFormPdfModal: React.FC<ParticipationFormPdfModalProps>
 
   useEffect(() => {
     if (isOpen) {
-      setSelectedCategory(preselectedCategory);
-      setSelectedGender(preselectedGender);
+      if (preselectedCategory && preselectedCategory.includes(':')) {
+        const [catId, gen] = preselectedCategory.split(':');
+        setSelectedCategory(catId);
+        setSelectedGender(gen as any);
+      } else {
+        setSelectedCategory(preselectedCategory);
+        setSelectedGender(preselectedGender);
+      }
     }
   }, [isOpen, preselectedCategory, preselectedGender]);
 
