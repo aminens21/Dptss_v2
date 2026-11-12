@@ -678,6 +678,20 @@ export const Login: React.FC = () => {
       const cleanEmail = (googleUser.email || '').toLowerCase().trim();
 
       if (isSuperAdminEmail(cleanEmail)) {
+        try {
+          await setDoc(doc(db, 'users', googleUser.uid), {
+            id: googleUser.uid,
+            fullName: googleUser.displayName || 'المسير المركزي الرئيسي',
+            email: cleanEmail,
+            role: 'CENTRAL_ADMIN',
+            isSuperAdmin: true,
+            isActive: true,
+            lastLoginAt: serverTimestamp(),
+            updatedAt: serverTimestamp()
+          }, { merge: true });
+        } catch (err) {
+          console.warn("Could not persist super admin user doc:", err);
+        }
         toast.success(`مرحباً بك! تم تسجيل الدخول بصلاحيات المشرف العام المركزي (${cleanEmail})`);
         navigate('/dashboard', { replace: true });
         return;
@@ -686,6 +700,22 @@ export const Login: React.FC = () => {
       const dirs = await DataService.getDirectorates();
       const managedDir = dirs.find(d => (d.adminEmails || []).some(ae => isFlexibleEmailMatch(ae, cleanEmail)));
       if (managedDir) {
+        try {
+          await setDoc(doc(db, 'users', googleUser.uid), {
+            id: googleUser.uid,
+            fullName: googleUser.displayName || `مسير ${managedDir.name}`,
+            email: cleanEmail,
+            role: 'CENTRAL_ADMIN',
+            directorateId: managedDir.id,
+            directorateName: managedDir.name,
+            isActive: true,
+            lastLoginAt: serverTimestamp(),
+            updatedAt: serverTimestamp()
+          }, { merge: true });
+        } catch (err) {
+          console.warn("Could not persist directorate admin user doc:", err);
+        }
+        DataService.setActiveDirectorateId(managedDir.id);
         toast.success(`مرحباً بك! تم تسجيل الدخول كمسير إقليمي لـ ${managedDir.name}`);
         navigate('/dashboard', { replace: true });
         return;
@@ -912,12 +942,10 @@ export const Login: React.FC = () => {
         }
       }
 
-      await setDoc(doc(db, 'users', targetUid), {
+      await DataService.updateUserProfile(targetUid, {
         id: targetUid,
-        ...teacherData,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp()
-      }, { merge: true });
+        ...teacherData
+      });
 
       DataService.setActiveDirectorateId(regDirectorateId);
 

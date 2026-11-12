@@ -5,6 +5,7 @@ service cloud.firestore {
     function isSuperAdminEmail() {
       return request.auth != null && (
         request.auth.token.email == 'aminens21@gmail.com' ||
+        request.auth.token.email == 'omrhaman.figuig@gmail.com' ||
         request.auth.token.email == 'printomrdesigne@gmail.com'
       );
     }
@@ -15,79 +16,53 @@ service cloud.firestore {
         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'CENTRAL_ADMIN')
       );
     }
-    
-    function isSportManager() {
-      return request.auth != null && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'SPORT_MANAGER';
-    }
-    
-    function isManagerForSport(sportId) {
-      return isSportManager() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.sportId == sportId;
-    }
-
-    function isTechCommitteeHead() {
-      return request.auth != null && 
-        exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isTechCommitteeHead == true;
-    }
-    
-    function isAuthenticated() {
-      return request.auth != null;
-    }
 
     match /users/{userId} {
-      allow read: if true;
-      allow create, update: if true;
-      allow delete: if isAdmin();
+      allow read, write: if true;
     }
 
     match /sports/{document=**} {
-      allow read: if true;
-      allow write: if true;
+      allow read, write: if true;
     }
 
     match /tournaments/{document=**} {
-      allow read: if true;
-      allow write: if true;
+      allow read, write: if true;
     }
 
     match /schools/{document=**} {
-      allow read: if true;
-      allow write: if true;
+      allow read, write: if true;
     }
 
     match /teams/{document=**} {
-      allow read: if true;
-      allow write: if true;
+      allow read, write: if true;
     }
 
     match /matches/{document=**} {
-      allow read: if true;
-      allow write: if true;
+      allow read, write: if true;
     }
 
     match /venues/{document=**} {
-      allow read: if true;
-      allow write: if true;
+      allow read, write: if true;
     }
 
     match /announcements/{document=**} {
-      allow read: if true;
-      allow write: if true;
+      allow read, write: if true;
     }
 
     match /referees/{document=**} {
-      allow read: if true;
-      allow write: if true;
+      allow read, write: if true;
     }
 
     match /students/{document=**} {
-      allow read: if true;
-      allow write: if true;
+      allow read, write: if true;
     }
 
     match /cross_country_results/{document=**} {
-      allow read: if true;
-      allow write: if true;
+      allow read, write: if true;
+    }
+
+    match /athletics_results/{document=**} {
+      allow read, write: if true;
     }
 
     match /notifications/{document=**} {
@@ -95,17 +70,27 @@ service cloud.firestore {
     }
 
     match /directorates/{document=**} {
-      allow read: if true;
-      allow write: if true;
+      allow read, write: if true;
     }
 
     match /school_confirmations/{document=**} {
       allow read, write: if true;
     }
 
+    match /school_withdrawals/{document=**} {
+      allow read, write: if true;
+    }
+
+    match /settings/{document=**} {
+      allow read, write: if true;
+    }
+
     match /config/{document=**} {
-      allow read: if true;
-      allow write: if true;
+      allow read, write: if true;
+    }
+
+    match /test/{document=**} {
+      allow read, write: if true;
     }
   }
 }

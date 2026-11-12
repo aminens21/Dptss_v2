@@ -37,6 +37,7 @@ export const DemoDataModal: React.FC<DemoDataModalProps> = ({
 }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [isClearing, setIsClearing] = useState(false);
+  const [confirmClear, setConfirmClear] = useState(false);
   const [overwrite, setOverwrite] = useState(false);
   const [resultCounts, setResultCounts] = useState<DemoDataCounts | null>(null);
 
@@ -45,6 +46,7 @@ export const DemoDataModal: React.FC<DemoDataModalProps> = ({
   const handlePopulate = async () => {
     setIsLoading(true);
     setResultCounts(null);
+    setConfirmClear(false);
     try {
       const counts = await DemoDataService.populateDemoData(
         activeDirectorateId,
@@ -63,14 +65,12 @@ export const DemoDataModal: React.FC<DemoDataModalProps> = ({
   };
 
   const handleClear = async () => {
-    if (!window.confirm('هل أنت متأكد من رغبتك في حذف البيانات التجريبية فقط؟')) {
-      return;
-    }
     setIsClearing(true);
     try {
       await DemoDataService.clearDirectorateData(activeDirectorateId);
       toast.success('تم حذف البيانات التجريبية بنجاح.');
       setResultCounts(null);
+      setConfirmClear(false);
       onDataLoaded();
     } catch (e) {
       console.error(e);
@@ -249,19 +249,39 @@ export const DemoDataModal: React.FC<DemoDataModalProps> = ({
 
         {/* Modal Footer */}
         <div className="p-4 px-6 bg-slate-50 border-t border-slate-100 flex flex-wrap items-center justify-between gap-3">
-          <button
-            onClick={handleClear}
-            disabled={isClearing || isLoading}
-            className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-rose-600 hover:text-rose-700 hover:bg-rose-50 rounded-xl transition-colors cursor-pointer disabled:opacity-50"
-            title="حذف البيانات التجريبية فقط"
-          >
-            {isClearing ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
+          {confirmClear ? (
+            <div className="flex items-center gap-2 bg-rose-50 px-3 py-1.5 rounded-xl border border-rose-200">
+              <span className="text-xs font-bold text-rose-800">تأكيد الحذف؟</span>
+              <button
+                type="button"
+                onClick={handleClear}
+                disabled={isClearing}
+                className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-lg transition-colors cursor-pointer disabled:opacity-50"
+              >
+                {isClearing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                <span>نعم، احذف</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setConfirmClear(false)}
+                disabled={isClearing}
+                className="px-2 py-1 text-xs font-bold text-slate-600 hover:text-slate-800 cursor-pointer"
+              >
+                تراجع
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setConfirmClear(true)}
+              disabled={isClearing || isLoading}
+              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-rose-600 hover:text-rose-700 hover:bg-rose-50 rounded-xl transition-colors cursor-pointer disabled:opacity-50"
+              title="حذف البيانات التجريبية فقط"
+            >
               <Trash2 className="h-4 w-4" />
-            )}
-            <span>حذف البيانات التجريبية</span>
-          </button>
+              <span>حذف البيانات التجريبية</span>
+            </button>
+          )}
 
           <div className="flex items-center gap-2">
             <button

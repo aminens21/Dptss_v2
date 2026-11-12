@@ -238,6 +238,11 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
   }, [matches, venueId, date, startTime]);
 
   const hasConflict = conflictingMatches.length > 0;
+  const [forceScheduleDespiteConflict, setForceScheduleDespiteConflict] = useState(false);
+
+  useEffect(() => {
+    setForceScheduleDespiteConflict(false);
+  }, [venueId, date, startTime, isOpen]);
 
   // Filter schools to only show those registered in the selected tournament with students
   const eligibleSchools = useMemo(() => {
@@ -416,13 +421,10 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
       return;
     }
 
-    if (hasConflict) {
-      const confirmProceed = window.confirm(
-        `تنبيه: مركز التباري "${selectedVenue?.name || ''}" غير شاغر في هذا التوقيت ومبرمج فيه نشاط آخر في وقت متقارب (أقل من ساعة فرق) في نفس التاريخ (${date})!\n\nهل ترغب في تثبيت البرمجة رغم التعارض، أم تفضل تغيير التاريخ/المركز/التوقيت؟`
-      );
-      if (!confirmProceed) {
-        return;
-      }
+    if (hasConflict && !forceScheduleDespiteConflict) {
+      setForceScheduleDespiteConflict(true);
+      toast('مركز التباري محجوز في هذا التوقيت — اضغط على الزر مرة أخرى لتأكيد البرمجة رغم التعارض', { icon: '⚠️' });
+      return;
     }
 
     setIsSubmitting(true);
@@ -990,10 +992,22 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
               type="submit"
               disabled={isSubmitting}
               className={`px-5 py-2.5 text-xs font-bold text-white rounded-xl transition-all shadow-md active:scale-95 disabled:bg-slate-300 cursor-pointer ${
-                hasConflict ? 'bg-amber-600 hover:bg-amber-700 shadow-amber-600/20' : 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-600/20'
+                hasConflict
+                  ? forceScheduleDespiteConflict
+                    ? 'bg-red-600 hover:bg-red-700 shadow-red-600/20'
+                    : 'bg-amber-600 hover:bg-amber-700 shadow-amber-600/20'
+                  : 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-600/20'
               }`}
             >
-              {isSubmitting ? 'جاري الحفظ...' : hasConflict ? 'تأكيد الحفظ رغم التعارض' : (editingMatch ? 'حفظ التعديلات' : 'تأكيد برمجة المباراة')}
+              {isSubmitting
+                ? 'جاري الحفظ...'
+                : hasConflict
+                ? forceScheduleDespiteConflict
+                  ? 'نعم، تثبيت البرمجة رغم التعارض'
+                  : 'برمجة رغم التعارض (تأكيد)'
+                : editingMatch
+                ? 'حفظ التعديلات'
+                : 'تأكيد برمجة المباراة'}
             </button>
           </div>
         </form>

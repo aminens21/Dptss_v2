@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Venue, User } from '../types';
 import { DataService } from '../lib/dataService';
 import { X, MapPin, Building, Users, FileText, UserCheck, Phone, Mail } from 'lucide-react';
+import toast from 'react-hot-toast';
 
 interface CreateVenueModalProps {
   isOpen: boolean;
@@ -93,7 +94,7 @@ export const CreateVenueModal: React.FC<CreateVenueModalProps> = ({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim() || !address.trim()) {
-      alert('يرجى إدخال اسم مركز التباري والعنوان');
+      toast.error('يرجى إدخال اسم مركز التباري والعنوان');
       return;
     }
 

@@ -63,6 +63,108 @@ export function sanitizeFirestorePayload<T>(obj: T): T {
   return cleaned as any;
 }
 
+// Helper to recursively omit undefined keys without altering numbers/booleans/FieldValues/Timestamps/Dates
+export function stripUndefinedDeep<T>(obj: T): T {
+  if (obj === undefined || obj === null) {
+    return obj;
+  }
+  if (
+    typeof obj !== 'object' ||
+    obj instanceof Date ||
+    (obj as any)?._methodName !== undefined ||
+    (obj as any)?.toMillis !== undefined ||
+    (obj as any)?.seconds !== undefined
+  ) {
+    return obj;
+  }
+  if (Array.isArray(obj)) {
+    return obj
+      .filter(item => item !== undefined)
+      .map(item => stripUndefinedDeep(item)) as any;
+  }
+  const cleaned: any = {};
+  for (const key in obj) {
+    if (Object.prototype.hasOwnProperty.call(obj, key)) {
+      const val = (obj as any)[key];
+      if (val !== undefined) {
+        cleaned[key] = stripUndefinedDeep(val);
+      }
+    }
+  }
+  return cleaned as any;
+}
+
+const PENDING_WRITES_STORAGE_KEY = 'app_pending_firestore_writes_v1';
+const RECENT_DELETES_TTL_MS = 60000;
+const recentDeletesMemory: Record<string, Record<string, number>> = {};
+
+function readPendingWritesMap(): Record<string, string[]> {
+  try {
+    const raw = localStorage.getItem(PENDING_WRITES_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function writePendingWritesMap(map: Record<string, string[]>) {
+  try {
+    localStorage.setItem(PENDING_WRITES_STORAGE_KEY, JSON.stringify(map));
+  } catch {
+    // ignore storage quota errors
+  }
+}
+
+function markPendingWrite(col: string, id?: string) {
+  if (!id) return;
+  const map = readPendingWritesMap();
+  const list = Array.isArray(map[col]) ? map[col] : [];
+  if (!list.includes(id)) {
+    map[col] = [...list, id];
+    writePendingWritesMap(map);
+  }
+  if (recentDeletesMemory[col]) {
+    delete recentDeletesMemory[col][id];
+  }
+}
+
+function clearPendingWrite(col: string, id?: string) {
+  if (!id) return;
+  const map = readPendingWritesMap();
+  if (Array.isArray(map[col]) && map[col].includes(id)) {
+    map[col] = map[col].filter(x => x !== id);
+    writePendingWritesMap(map);
+  }
+}
+
+function isPendingWrite(col: string, id?: string): boolean {
+  if (!id) return false;
+  const map = readPendingWritesMap();
+  return Array.isArray(map[col]) && map[col].includes(id);
+}
+
+function markRecentlyDeleted(col: string, id?: string) {
+  if (!id) return;
+  clearPendingWrite(col, id);
+  if (!recentDeletesMemory[col]) {
+    recentDeletesMemory[col] = {};
+  }
+  recentDeletesMemory[col][id] = Date.now();
+}
+
+function isRecentlyDeleted(col: string, id?: string): boolean {
+  if (!id) return false;
+  const ts = recentDeletesMemory[col]?.[id];
+  if (!ts) return false;
+  if (Date.now() - ts > RECENT_DELETES_TTL_MS) {
+    delete recentDeletesMemory[col][id];
+    return false;
+  }
+  return true;
+}
+
 // Local storage helpers with automatic deduplication and self-healing
 function getLocal<T extends { id?: string }>(key: string, fallback: T[]): T[] {
   try {
@@ -768,11 +870,11 @@ export const DataService = {
     const initialFallback = (all === true || activeDirId === 'taourirt') ? INITIAL_TOURNAMENTS : [];
     const localList = getLocal<Tournament>(STORAGE_KEYS.TOURNAMENTS, tournsMap.size > 0 ? [] : initialFallback);
     localList.forEach(t => {
-      if (t && t.id) {
+      if (t && t.id && !isRecentlyDeleted('tournaments', t.id)) {
         const existing = tournsMap.get(t.id);
         if (!existing) {
           // If Firestore is loaded, only merge local items that are unsynced pending creations
-          if (tournsMap.size === 0 || t.id.startsWith('tourn-')) {
+          if (tournsMap.size === 0 || isPendingWrite('tournaments', t.id) || t.id.startsWith('tourn-')) {
             tournsMap.set(t.id, {
               ...t,
               directorateId: t.directorateId || 'taourirt',
@@ -781,28 +883,22 @@ export const DataService = {
               registrationDeadline: t.registrationDeadline ? (typeof t.registrationDeadline === 'object' && 'toDate' in t.registrationDeadline ? (t.registrationDeadline as any).toDate() : (t.registrationDeadline instanceof Date ? t.registrationDeadline : new Date(t.registrationDeadline))) : undefined
             });
           }
-        } else {
-          // If local item exists and has newer or equal updatedAt date than firestore, merge local updates into tournsMap
-          const localUpdated = t.updatedAt ? (typeof t.updatedAt === 'object' && 'toDate' in t.updatedAt ? (t.updatedAt as any).toDate().getTime() : new Date(t.updatedAt).getTime()) : 0;
-          const remoteUpdated = existing.updatedAt ? (typeof existing.updatedAt === 'object' && 'toDate' in existing.updatedAt ? (existing.updatedAt as any).toDate().getTime() : new Date(existing.updatedAt).getTime()) : 0;
-          
-          if (localUpdated >= remoteUpdated) {
-            tournsMap.set(t.id, {
-              ...existing,
-              ...t,
-              directorateId: t.directorateId || existing.directorateId || 'taourirt',
-              startDate: t.startDate ? (typeof t.startDate === 'object' && 'toDate' in t.startDate ? (t.startDate as any).toDate() : (t.startDate instanceof Date ? t.startDate : new Date(t.startDate))) : existing.startDate,
-              endDate: t.endDate ? (typeof t.endDate === 'object' && 'toDate' in t.endDate ? (t.endDate as any).toDate() : (t.endDate instanceof Date ? t.endDate : new Date(t.endDate))) : existing.endDate,
-              registrationDeadline: t.registrationDeadline !== undefined 
-                ? (t.registrationDeadline ? (typeof t.registrationDeadline === 'object' && 'toDate' in t.registrationDeadline ? (t.registrationDeadline as any).toDate() : (t.registrationDeadline instanceof Date ? t.registrationDeadline : new Date(t.registrationDeadline))) : undefined) 
-                : existing.registrationDeadline
-            });
-          }
+        } else if (isPendingWrite('tournaments', t.id)) {
+          tournsMap.set(t.id, {
+            ...existing,
+            ...t,
+            directorateId: t.directorateId || existing.directorateId || 'taourirt',
+            startDate: t.startDate ? (typeof t.startDate === 'object' && 'toDate' in t.startDate ? (t.startDate as any).toDate() : (t.startDate instanceof Date ? t.startDate : new Date(t.startDate))) : existing.startDate,
+            endDate: t.endDate ? (typeof t.endDate === 'object' && 'toDate' in t.endDate ? (t.endDate as any).toDate() : (t.endDate instanceof Date ? t.endDate : new Date(t.endDate))) : existing.endDate,
+            registrationDeadline: t.registrationDeadline !== undefined 
+              ? (t.registrationDeadline ? (typeof t.registrationDeadline === 'object' && 'toDate' in t.registrationDeadline ? (t.registrationDeadline as any).toDate() : (t.registrationDeadline instanceof Date ? t.registrationDeadline : new Date(t.registrationDeadline))) : undefined) 
+              : existing.registrationDeadline
+          });
         }
       }
     });
 
-    const mergedList = Array.from(tournsMap.values());
+    const mergedList = Array.from(tournsMap.values()).filter(t => !isRecentlyDeleted('tournaments', t.id));
     const sanitizedList = mergedList.map(t => {
       let cleanCat = normalizeCategoryKey(t.ageCategory);
       if (/^CAT_/i.test(cleanCat) || /^cat_/i.test(cleanCat)) {
@@ -835,44 +931,42 @@ export const DataService = {
   },
 
   async addTournament(tournament: Omit<Tournament, 'id'>): Promise<Tournament> {
-    const activeDirId = this.getActiveDirectorateId();
+    const activeDirId = this.getActiveDirectorateId() || 'taourirt';
+    const docRef = doc(collection(db, 'tournaments'));
+    const realId = docRef.id;
+
     const tournamentWithDir = {
       ...tournament,
-      directorateId: tournament.directorateId || activeDirId,
+      directorateId: tournament.directorateId || (activeDirId === 'all' ? 'taourirt' : activeDirId),
       createdAt: new Date(),
       updatedAt: new Date()
     };
-    const tempId = `tourn-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
     const newTournament: Tournament = {
       ...tournamentWithDir,
-      id: tempId
+      id: realId
     };
 
-    // Always update local cache first for instant feedback
+    // Always update local cache first with final Firestore ID
     const localList = getLocal<Tournament>(STORAGE_KEYS.TOURNAMENTS, []);
-    const filtered = localList.filter(t => t.id !== tempId);
-    const updated = [newTournament, ...filtered];
-    setLocal(STORAGE_KEYS.TOURNAMENTS, updated);
+    const filtered = localList.filter(t => t.id !== realId);
+    setLocal(STORAGE_KEYS.TOURNAMENTS, [newTournament, ...filtered]);
+    markPendingWrite('tournaments', realId);
 
-    // Sync to Firestore if online
+    // Sync to Firestore with clean payload (no undefined fields)
     try {
-      const docRef = await addDoc(collection(db, 'tournaments'), {
+      const firestorePayload = stripUndefinedDeep({
         ...tournamentWithDir,
+        id: realId,
         startDate: tournamentWithDir.startDate instanceof Date ? Timestamp.fromDate(tournamentWithDir.startDate) : (tournamentWithDir.startDate ? Timestamp.fromDate(new Date(tournamentWithDir.startDate)) : null),
         endDate: tournamentWithDir.endDate instanceof Date ? Timestamp.fromDate(tournamentWithDir.endDate) : (tournamentWithDir.endDate ? Timestamp.fromDate(new Date(tournamentWithDir.endDate)) : null),
         registrationDeadline: tournamentWithDir.registrationDeadline instanceof Date ? Timestamp.fromDate(tournamentWithDir.registrationDeadline) : (tournamentWithDir.registrationDeadline ? Timestamp.fromDate(new Date(tournamentWithDir.registrationDeadline)) : null),
-        createdAt: Timestamp.now(),
-        updatedAt: Timestamp.now()
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
       });
-      const realId = docRef.id;
-      newTournament.id = realId;
-
-      // Update local cache with the Firestore ID
-      const currentList = getLocal<Tournament>(STORAGE_KEYS.TOURNAMENTS, []);
-      const synced = currentList.map(t => t.id === tempId ? { ...t, id: realId } : t);
-      setLocal(STORAGE_KEYS.TOURNAMENTS, synced);
+      await setDoc(docRef, firestorePayload);
+      clearPendingWrite('tournaments', realId);
     } catch (e) {
-      console.warn("Saved locally; Firestore sync pending:", e);
+      console.warn("Saved tournament locally; Firestore sync pending:", e);
     }
 
     // Automatically set sport isProgrammed to true in database & cache when a tournament is created
@@ -902,6 +996,7 @@ export const DataService = {
 
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('tournamentDataChanged'));
+      window.dispatchEvent(new CustomEvent('tournamentsUpdated'));
     }
 
     return newTournament;
@@ -965,6 +1060,7 @@ export const DataService = {
       }
 
       // 5. Delete the tournament itself from local storage
+      markRecentlyDeleted('tournaments', id);
       const localList = getLocal<Tournament>(STORAGE_KEYS.TOURNAMENTS, []);
       const updated = localList.filter(t => t.id !== id);
       setLocal(STORAGE_KEYS.TOURNAMENTS, updated);
@@ -1006,6 +1102,7 @@ export const DataService = {
       // 8. Dispatch synchronization events across all pages/components
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('tournamentDataChanged', { detail: { tournamentId: id } }));
+        window.dispatchEvent(new CustomEvent('tournamentsUpdated'));
         window.dispatchEvent(new CustomEvent('matchesDataChanged'));
         window.dispatchEvent(new CustomEvent('resultsChanged'));
         window.dispatchEvent(new CustomEvent('sportsConfigChanged'));
@@ -1014,12 +1111,14 @@ export const DataService = {
     } catch (e) {
       console.warn("Error during cascade delete:", e);
       // Fallback: still delete the tournament locally even if cascade failed
+      markRecentlyDeleted('tournaments', id);
       const localList = getLocal<Tournament>(STORAGE_KEYS.TOURNAMENTS, []);
       const updated = localList.filter(t => t.id !== id);
       setLocal(STORAGE_KEYS.TOURNAMENTS, updated);
       await deleteDoc(doc(db, 'tournaments', id)).catch(() => {});
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('tournamentDataChanged', { detail: { tournamentId: id } }));
+        window.dispatchEvent(new CustomEvent('tournamentsUpdated'));
         window.dispatchEvent(new CustomEvent('matchesDataChanged'));
         window.dispatchEvent(new CustomEvent('sportsConfigChanged'));
       }
@@ -1029,6 +1128,7 @@ export const DataService = {
   async bulkDeleteTournamentsBySport(sportId: string): Promise<void> {
     const localList = getLocal<Tournament>(STORAGE_KEYS.TOURNAMENTS, []);
     const tournamentsToDelete = localList.filter(t => t.sportId === sportId);
+    tournamentsToDelete.forEach(t => markRecentlyDeleted('tournaments', t.id));
     const updatedTournaments = localList.filter(t => t.sportId !== sportId);
     setLocal(STORAGE_KEYS.TOURNAMENTS, updatedTournaments);
 
@@ -1191,10 +1291,11 @@ export const DataService = {
     }
 
     // Build clean Firestore payload with valid Timestamps for dates
-    const cleanFirestorePayload: Record<string, any> = {
+    markPendingWrite('tournaments', id);
+    const cleanFirestorePayload: Record<string, any> = stripUndefinedDeep({
       ...fullUpdatedTournament,
       updatedAt: serverTimestamp()
-    };
+    });
     if (fullUpdatedTournament.startDate) {
       cleanFirestorePayload.startDate = fullUpdatedTournament.startDate instanceof Date 
         ? Timestamp.fromDate(fullUpdatedTournament.startDate) 
@@ -1215,12 +1316,14 @@ export const DataService = {
 
     try {
       await setDoc(doc(db, 'tournaments', id), cleanFirestorePayload, { merge: true });
+      clearPendingWrite('tournaments', id);
     } catch (e) {
       console.warn("Firestore tournament update error:", e);
     }
 
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('tournamentDataChanged'));
+      window.dispatchEvent(new CustomEvent('tournamentsUpdated'));
     }
   },
 
@@ -1319,22 +1422,35 @@ export const DataService = {
     };
 
     let allMatches: Match[] = [];
+    let fetchedFromCloud = false;
     try {
       const snap = await getDocs(collection(db, 'matches'));
+      fetchedFromCloud = true;
       if (!snap.empty) {
-        const firestoreList = snap.docs.map(d => normalizeMatch({ id: d.id, ...d.data() } as Match));
+        const firestoreList = snap.docs
+          .filter(d => !isRecentlyDeleted('matches', d.id))
+          .map(d => normalizeMatch({ id: d.id, ...d.data() } as Match));
         const filtered = firestoreList.filter(m => m.id !== 'mat-1' && m.id !== 'mat-2' && m.id !== 'mat-3');
-        allMatches = deduplicateById(filtered);
+        const localPending = getLocal<Match>(STORAGE_KEYS.MATCHES, []).filter(
+          lm => lm && lm.id && isPendingWrite('matches', lm.id) && !isRecentlyDeleted('matches', lm.id)
+        );
+        allMatches = deduplicateById([...localPending, ...filtered]);
+        setLocal(STORAGE_KEYS.MATCHES, allMatches);
+      } else {
+        const localPending = getLocal<Match>(STORAGE_KEYS.MATCHES, []).filter(
+          lm => lm && lm.id && isPendingWrite('matches', lm.id) && !isRecentlyDeleted('matches', lm.id)
+        );
+        allMatches = deduplicateById(localPending);
         setLocal(STORAGE_KEYS.MATCHES, allMatches);
       }
     } catch (e) {
       console.warn("Firestore fetch matches error, falling back to cache:", e);
     }
 
-    if (allMatches.length === 0) {
+    if (!fetchedFromCloud && allMatches.length === 0) {
       const initialFallback = (all === true || activeDirId === 'taourirt') ? INITIAL_MATCHES : [];
       const localList = getLocal<Match>(STORAGE_KEYS.MATCHES, initialFallback).map(normalizeMatch);
-      const cleaned = localList.filter(m => m.id !== 'mat-1' && m.id !== 'mat-2' && m.id !== 'mat-3');
+      const cleaned = localList.filter(m => m.id !== 'mat-1' && m.id !== 'mat-2' && m.id !== 'mat-3' && !isRecentlyDeleted('matches', m.id));
       if (cleaned.length !== localList.length) {
         setLocal(STORAGE_KEYS.MATCHES, cleaned);
       }
@@ -1349,34 +1465,39 @@ export const DataService = {
   },
 
   async addMatch(match: Omit<Match, 'id'>): Promise<Match> {
-    const activeDirId = this.getActiveDirectorateId();
+    const activeDirId = this.getActiveDirectorateId() || 'taourirt';
+    const docRef = doc(collection(db, 'matches'));
+    const realId = docRef.id;
+
     const matchWithDir = {
       ...match,
-      directorateId: match.directorateId || activeDirId
+      directorateId: match.directorateId || (activeDirId === 'all' ? 'taourirt' : activeDirId)
     };
-    const tempId = `mat-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
     const newMatch: Match = {
       ...matchWithDir,
-      id: tempId
+      id: realId
     };
-    const localList = getLocal<Match>(STORAGE_KEYS.MATCHES, INITIAL_MATCHES);
-    const filtered = localList.filter(m => m.id !== tempId);
-    const updated = [newMatch, ...filtered];
-    setLocal(STORAGE_KEYS.MATCHES, updated);
+    const localList = getLocal<Match>(STORAGE_KEYS.MATCHES, []);
+    const filtered = localList.filter(m => m.id !== realId);
+    setLocal(STORAGE_KEYS.MATCHES, [newMatch, ...filtered]);
+    markPendingWrite('matches', realId);
 
     try {
-      const docRef = await addDoc(collection(db, 'matches'), {
+      const firestorePayload = stripUndefinedDeep({
         ...matchWithDir,
-        updatedAt: Timestamp.now()
+        id: realId,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
       });
-      const realId = docRef.id;
-      newMatch.id = realId;
-
-      const currentList = getLocal<Match>(STORAGE_KEYS.MATCHES, INITIAL_MATCHES);
-      const synced = currentList.map(m => m.id === tempId ? { ...m, id: realId } : m);
-      setLocal(STORAGE_KEYS.MATCHES, synced);
+      await setDoc(docRef, firestorePayload);
+      clearPendingWrite('matches', realId);
     } catch (e) {
-      console.warn("Match saved locally:", e);
+      console.warn("Match saved locally; Firestore sync pending:", e);
+    }
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('matchesDataChanged'));
+      window.dispatchEvent(new CustomEvent('matchesUpdated'));
     }
 
     // Trigger notification
@@ -1386,21 +1507,27 @@ export const DataService = {
   },
 
   async updateMatch(matchId: string, matchData: Partial<Match>): Promise<void> {
-    const localList = getLocal<Match>(STORAGE_KEYS.MATCHES, INITIAL_MATCHES);
+    const localList = getLocal<Match>(STORAGE_KEYS.MATCHES, []);
     const updated = localList.map(m => m.id === matchId ? { ...m, ...matchData } : m);
     setLocal(STORAGE_KEYS.MATCHES, updated);
+    markPendingWrite('matches', matchId);
 
     try {
-      // Remove id from matchData if it exists before updating Firestore
       const { id, ...dataToUpdate } = matchData as any;
-      const sanitizedData = sanitizeFirestorePayload(dataToUpdate);
-      await updateDoc(doc(db, 'matches', matchId), {
-        ...sanitizedData,
+      const cleanData = stripUndefinedDeep(dataToUpdate);
+      await setDoc(doc(db, 'matches', matchId), {
+        ...cleanData,
+        id: matchId,
         updatedAt: serverTimestamp()
-      });
+      }, { merge: true });
+      clearPendingWrite('matches', matchId);
     } catch (e) {
-      console.error("Error updating match in Firestore:", e);
-      throw e;
+      console.warn("Match updated locally; Firestore sync pending:", e);
+    }
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('matchesDataChanged'));
+      window.dispatchEvent(new CustomEvent('matchesUpdated'));
     }
 
     const fullMatch = updated.find(m => m.id === matchId);
@@ -1423,7 +1550,7 @@ export const DataService = {
       updatedBy?: string;
     }
   ): Promise<void> {
-    const localList = getLocal<Match>(STORAGE_KEYS.MATCHES, INITIAL_MATCHES);
+    const localList = getLocal<Match>(STORAGE_KEYS.MATCHES, []);
     const updated = localList.map(m => m.id === matchId ? {
       ...m,
       score1,
@@ -1434,21 +1561,28 @@ export const DataService = {
       ...(extras || {})
     } : m);
     setLocal(STORAGE_KEYS.MATCHES, updated);
+    markPendingWrite('matches', matchId);
 
     try {
-      const sanitizedExtras = sanitizeFirestorePayload(extras || {});
-      await updateDoc(doc(db, 'matches', matchId), {
+      const cleanExtras = stripUndefinedDeep(extras || {});
+      await setDoc(doc(db, 'matches', matchId), {
+        id: matchId,
         score1,
         score2,
         team1Score: score1,
         team2Score: score2,
         status,
-        ...sanitizedExtras,
+        ...cleanExtras,
         updatedAt: serverTimestamp()
-      });
+      }, { merge: true });
+      clearPendingWrite('matches', matchId);
     } catch (e) {
-      console.error("Error updating match score in Firestore:", e);
-      throw e;
+      console.warn("Match score updated locally; Firestore sync pending:", e);
+    }
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('matchesDataChanged'));
+      window.dispatchEvent(new CustomEvent('matchesUpdated'));
     }
 
     const fullMatch = updated.find(m => m.id === matchId);
@@ -1458,7 +1592,8 @@ export const DataService = {
   },
 
   async deleteMatch(id: string): Promise<void> {
-    const localList = getLocal<Match>(STORAGE_KEYS.MATCHES, INITIAL_MATCHES);
+    markRecentlyDeleted('matches', id);
+    const localList = getLocal<Match>(STORAGE_KEYS.MATCHES, []);
     const updated = localList.filter(m => m.id !== id);
     setLocal(STORAGE_KEYS.MATCHES, updated);
 
@@ -1466,6 +1601,11 @@ export const DataService = {
       await deleteDoc(doc(db, 'matches', id));
     } catch (e) {
       console.warn("Match deleted locally:", e);
+    }
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('matchesDataChanged'));
+      window.dispatchEvent(new CustomEvent('matchesUpdated'));
     }
   },
 
@@ -1476,19 +1616,9 @@ export const DataService = {
       const snap = await getDocs(collection(db, 'schools'));
       if (!snap.empty) {
         const firestoreList = snap.docs
+          .filter(d => !isRecentlyDeleted('schools', d.id))
           .map(d => ({ id: d.id, ...d.data(), directorateId: d.data().directorateId || 'taourirt' } as School))
-          .filter(s => s && s.name && !s.name.includes('الكندي') && !s.name.includes('غير محدد') && s.name.trim() !== 'ثانوية المغرب العربي التأهيلية');
-        
-        // Auto-clean any document with name 'ثانوية المغرب العربي التأهيلية'
-        const duplicateDocs = snap.docs.filter(d => {
-          const name = d.data()?.name?.trim();
-          return name === 'ثانوية المغرب العربي التأهيلية';
-        });
-        if (duplicateDocs.length > 0) {
-          duplicateDocs.forEach(d => {
-            deleteDoc(doc(db, 'schools', d.id)).catch(err => console.warn("Failed to delete duplicate school doc:", err));
-          });
-        }
+          .filter(s => s && s.name && !s.name.includes('غير محدد'));
 
         // Auto-heal accessCode for legacy schools
         const listWithCodes = firestoreList.map(s => {
@@ -1497,68 +1627,76 @@ export const DataService = {
           }
           const accessCode = generateSecureAccessCode();
           if (s.id) {
-            updateDoc(doc(db, 'schools', s.id), { accessCode }).catch(err => 
+            setDoc(doc(db, 'schools', s.id), { accessCode }, { merge: true }).catch(err => 
               console.warn(`Failed to auto-update school ${s.name} accessCode:`, err)
             );
           }
           return { ...s, accessCode };
         });
 
-        // CRITICAL FIX: Merge with local storage schools so that freshly added schools
-        // are NEVER lost or overwritten before Firestore completes replication
+        // Merge ONLY genuinely pending local writes (not deleted schools)
         const localList = getLocal<School>(STORAGE_KEYS.SCHOOLS, []);
         const localPending = localList.filter(ls => 
-          ls && ls.name && 
-          !listWithCodes.some(fs => fs.id === ls.id || fs.name.trim().toLowerCase() === ls.name.trim().toLowerCase()) &&
-          !ls.name.includes('الكندي') && !ls.name.includes('غير محدد') && ls.name.trim() !== 'ثانوية المغرب العربي التأهيلية'
+          ls && ls.id && ls.name &&
+          isPendingWrite('schools', ls.id) &&
+          !isRecentlyDeleted('schools', ls.id) &&
+          !ls.name.includes('غير محدد')
         );
 
         if (localPending.length > 0) {
           localPending.forEach(ls => {
-            const docRef = ls.id ? doc(db, 'schools', ls.id) : doc(collection(db, 'schools'));
-            const sanitized = sanitizeFirestorePayload({
+            const docRef = doc(db, 'schools', ls.id);
+            const sanitized = stripUndefinedDeep({
               ...ls,
               id: docRef.id,
-              directorateId: ls.directorateId || activeDirId,
-              createdAt: serverTimestamp()
+              directorateId: ls.directorateId || (activeDirId === 'all' ? 'taourirt' : activeDirId),
+              updatedAt: serverTimestamp()
             });
-            setDoc(docRef, sanitized, { merge: true }).catch(err => console.warn("Failed to background-persist local school:", err));
+            setDoc(docRef, sanitized, { merge: true })
+              .then(() => clearPendingWrite('schools', ls.id))
+              .catch(err => console.warn("Failed to background-persist pending school:", err));
           });
         }
 
-        const combinedList = deduplicateById<School>([...listWithCodes, ...localPending]);
+        const combinedList = deduplicateById<School>([...localPending, ...listWithCodes]);
         setLocal(STORAGE_KEYS.SCHOOLS, combinedList);
         if (all === true || !activeDirId || activeDirId === 'all') {
           return combinedList;
         }
         return combinedList.filter(s => (s.directorateId || 'taourirt') === activeDirId);
       } else {
-        // If Firestore is empty, check if we have local schools to upload before wiping
+        // Firestore collection is empty: preserve only genuinely pending local creations
         const localList = getLocal<School>(STORAGE_KEYS.SCHOOLS, []);
-        const filtered = localList.filter(s => s && s.name && !s.name.includes('الكندي') && !s.name.includes('غير محدد') && s.name.trim() !== 'ثانوية المغرب العربي التأهيلية');
-        if (filtered.length > 0) {
-          filtered.forEach(ls => {
-            const docRef = ls.id ? doc(db, 'schools', ls.id) : doc(collection(db, 'schools'));
-            const sanitized = sanitizeFirestorePayload({
+        const pendingOnly = localList.filter(ls =>
+          ls && ls.id && ls.name &&
+          isPendingWrite('schools', ls.id) &&
+          !isRecentlyDeleted('schools', ls.id) &&
+          !ls.name.includes('غير محدد')
+        );
+        if (pendingOnly.length > 0) {
+          pendingOnly.forEach(ls => {
+            const docRef = doc(db, 'schools', ls.id);
+            const sanitized = stripUndefinedDeep({
               ...ls,
               id: docRef.id,
-              directorateId: ls.directorateId || activeDirId,
-              createdAt: serverTimestamp()
+              directorateId: ls.directorateId || (activeDirId === 'all' ? 'taourirt' : activeDirId),
+              createdAt: serverTimestamp(),
+              updatedAt: serverTimestamp()
             });
-            setDoc(docRef, sanitized, { merge: true }).catch(err => console.warn("Background upload of local school failed:", err));
+            setDoc(docRef, sanitized, { merge: true })
+              .then(() => clearPendingWrite('schools', ls.id))
+              .catch(err => console.warn("Background upload of pending school failed:", err));
           });
-          return (all === true || !activeDirId || activeDirId === 'all') 
-            ? filtered 
-            : filtered.filter(s => (s.directorateId || 'taourirt') === activeDirId);
         }
-        setLocal(STORAGE_KEYS.SCHOOLS, []);
-        return [];
+        setLocal(STORAGE_KEYS.SCHOOLS, pendingOnly);
+        return (all === true || !activeDirId || activeDirId === 'all')
+          ? pendingOnly
+          : pendingOnly.filter(s => (s.directorateId || 'taourirt') === activeDirId);
       }
     } catch (e) {
       console.warn("Firestore schools fetch error:", e);
-      // Fallback to local storage only, without INITIAL_SCHOOLS to respect empty state
       const localList = getLocal<School>(STORAGE_KEYS.SCHOOLS, []);
-      const filtered = localList.filter(s => s && s.name && !s.name.includes('الكندي') && !s.name.includes('غير محدد') && s.name.trim() !== 'ثانوية المغرب العربي التأهيلية');
+      const filtered = localList.filter(s => s && s.name && !s.name.includes('غير محدد') && !isRecentlyDeleted('schools', s.id));
       if (all === true || !activeDirId || activeDirId === 'all') {
         return filtered;
       }
@@ -1570,8 +1708,9 @@ export const DataService = {
     try {
       const unsubscribe = onSnapshot(collection(db, 'schools'), (snap) => {
         const firestoreList = snap.docs
+          .filter(d => !isRecentlyDeleted('schools', d.id))
           .map(d => ({ id: d.id, ...d.data(), directorateId: d.data().directorateId || 'taourirt' } as School))
-          .filter(s => s && s.name && !s.name.includes('الكندي') && !s.name.includes('غير محدد') && s.name.trim() !== 'ثانوية المغرب العربي التأهيلية');
+          .filter(s => s && s.name && !s.name.includes('غير محدد'));
         
         // Auto-heal accessCode for legacy schools in real-time
         const listWithCodes = firestoreList.map(s => {
@@ -1580,7 +1719,7 @@ export const DataService = {
           }
           const accessCode = generateSecureAccessCode();
           if (s.id) {
-            updateDoc(doc(db, 'schools', s.id), { accessCode }).catch(err => 
+            setDoc(doc(db, 'schools', s.id), { accessCode }, { merge: true }).catch(err => 
               console.warn(`Failed to auto-update school ${s.name} accessCode:`, err)
             );
           }
@@ -1589,12 +1728,13 @@ export const DataService = {
 
         const localList = getLocal<School>(STORAGE_KEYS.SCHOOLS, []);
         const localPending = localList.filter(ls => 
-          ls && ls.name && 
-          !listWithCodes.some(fs => fs.id === ls.id || fs.name.trim().toLowerCase() === ls.name.trim().toLowerCase()) &&
-          !ls.name.includes('الكندي') && !ls.name.includes('غير محدد') && ls.name.trim() !== 'ثانوية المغرب العربي التأهيلية'
+          ls && ls.id && ls.name &&
+          isPendingWrite('schools', ls.id) &&
+          !isRecentlyDeleted('schools', ls.id) &&
+          !ls.name.includes('غير محدد')
         );
 
-        const combined = deduplicateById<School>([...listWithCodes, ...localPending]);
+        const combined = deduplicateById<School>([...localPending, ...listWithCodes]);
         setLocal(STORAGE_KEYS.SCHOOLS, combined);
         callback(combined);
       }, (err) => {
@@ -1612,6 +1752,7 @@ export const DataService = {
       const unsubscribe = onSnapshot(collection(db, 'tournaments'), (snap) => {
         const tournsMap = new Map<string, Tournament>();
         snap.docs.forEach(d => {
+          if (isRecentlyDeleted('tournaments', d.id)) return;
           const data = d.data();
           const firestoreTourn: Tournament = {
             id: d.id,
@@ -1639,6 +1780,10 @@ export const DataService = {
           } as Tournament;
           tournsMap.set(d.id, firestoreTourn);
         });
+        const localPending = getLocal<Tournament>(STORAGE_KEYS.TOURNAMENTS, []).filter(
+          lt => lt && lt.id && isPendingWrite('tournaments', lt.id) && !isRecentlyDeleted('tournaments', lt.id)
+        );
+        localPending.forEach(lt => tournsMap.set(lt.id, lt));
         const list = Array.from(tournsMap.values());
         setLocal(STORAGE_KEYS.TOURNAMENTS, list);
         callback(list);
@@ -1655,9 +1800,14 @@ export const DataService = {
   subscribeToMatches(callback: (matches: Match[]) => void): () => void {
     try {
       const unsubscribe = onSnapshot(collection(db, 'matches'), (snap) => {
-        const firestoreList = snap.docs.map(d => ({ id: d.id, ...d.data() } as Match));
+        const firestoreList = snap.docs
+          .filter(d => !isRecentlyDeleted('matches', d.id))
+          .map(d => ({ id: d.id, ...d.data() } as Match));
         const filtered = firestoreList.filter(m => m.id !== 'mat-1' && m.id !== 'mat-2' && m.id !== 'mat-3');
-        const deduped = deduplicateById(filtered);
+        const localPending = getLocal<Match>(STORAGE_KEYS.MATCHES, []).filter(
+          lm => lm && lm.id && isPendingWrite('matches', lm.id) && !isRecentlyDeleted('matches', lm.id)
+        );
+        const deduped = deduplicateById([...localPending, ...filtered]);
         setLocal(STORAGE_KEYS.MATCHES, deduped);
         callback(deduped);
       }, (err) => {
@@ -1673,8 +1823,13 @@ export const DataService = {
   subscribeToVenues(callback: (venues: Venue[]) => void): () => void {
     try {
       const unsubscribe = onSnapshot(collection(db, 'venues'), (snap) => {
-        const firestoreList = snap.docs.map(d => ({ id: d.id, ...d.data() } as Venue));
-        const deduped = deduplicateById(firestoreList);
+        const firestoreList = snap.docs
+          .filter(d => !isRecentlyDeleted('venues', d.id))
+          .map(d => ({ id: d.id, ...d.data() } as Venue));
+        const localPending = getLocal<Venue>(STORAGE_KEYS.VENUES, []).filter(
+          lv => lv && lv.id && isPendingWrite('venues', lv.id) && !isRecentlyDeleted('venues', lv.id)
+        );
+        const deduped = deduplicateById([...localPending, ...firestoreList]);
         setLocal(STORAGE_KEYS.VENUES, deduped);
         callback(deduped);
       }, (err) => {
@@ -1705,7 +1860,8 @@ export const DataService = {
               return {
                 ...f,
                 ...loc,
-                ageCategories: (loc.ageCategories && loc.ageCategories.length > 0) ? loc.ageCategories : f.ageCategories
+                ...f,
+                ageCategories: (f.ageCategories && f.ageCategories.length > 0) ? f.ageCategories : loc.ageCategories
               };
             }
             return f;
@@ -1731,7 +1887,6 @@ export const DataService = {
       : generateSecureAccessCode();
     const cleanName = school.name?.trim() || '';
     
-    // Auto-generate Firestore doc reference or unique ID
     const newDocRef = doc(collection(db, 'schools'));
     const realId = newDocRef.id;
 
@@ -1750,13 +1905,12 @@ export const DataService = {
       principalPhone: school.principalPhone || ''
     };
 
-    // Update local state immediately
+    // Update local state immediately and mark pending until Firestore confirms
     const localList = getLocal<School>(STORAGE_KEYS.SCHOOLS, []);
-    const filtered = localList.filter(s => s.id !== realId && s.name?.trim() !== 'ثانوية المغرب العربي التأهيلية');
-    const updated = [schoolWithDir, ...filtered];
-    setLocal(STORAGE_KEYS.SCHOOLS, updated);
+    const filtered = localList.filter(s => s.id !== realId);
+    setLocal(STORAGE_KEYS.SCHOOLS, [schoolWithDir, ...filtered]);
+    markPendingWrite('schools', realId);
 
-    // Save to Firestore using setDoc with explicit clean payload
     const firestoreDocData: Record<string, any> = {
       id: realId,
       name: cleanName,
@@ -1775,6 +1929,7 @@ export const DataService = {
 
     try {
       await setDoc(newDocRef, firestoreDocData);
+      clearPendingWrite('schools', realId);
     } catch (e) {
       console.warn("Primary Firestore school save failed, retrying fallback:", e);
       try {
@@ -1783,41 +1938,40 @@ export const DataService = {
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString()
         });
+        clearPendingWrite('schools', realId);
       } catch (errFallback) {
-        console.error("Critical: Firestore school save fallback failed:", errFallback);
+        console.error("Critical: Firestore school save fallback failed (kept in pending queue):", errFallback);
       }
     }
 
-    // Trigger global refresh event
     window.dispatchEvent(new CustomEvent('schoolsUpdated'));
     return schoolWithDir;
   },
 
   async updateSchool(id: string, updates: Partial<School>): Promise<void> {
     const localList = getLocal<School>(STORAGE_KEYS.SCHOOLS, []);
-    const updated = localList.map(s => s.id === id ? { ...s, ...updates } : s).filter(s => s.name?.trim() !== 'ثانوية المغرب العربي التأهيلية');
+    const updated = localList.map(s => s.id === id ? { ...s, ...updates } : s);
     setLocal(STORAGE_KEYS.SCHOOLS, updated);
+    markPendingWrite('schools', id);
 
     try {
-      const cleanUpdates: Record<string, any> = {};
-      Object.entries(updates).forEach(([k, v]) => {
-        if (v !== undefined && v !== null) {
-          cleanUpdates[k] = v;
-        }
+      const cleanUpdates = stripUndefinedDeep({
+        ...updates,
+        id,
+        updatedAt: serverTimestamp()
       });
-      cleanUpdates.updatedAt = serverTimestamp();
       await setDoc(doc(db, 'schools', id), cleanUpdates, { merge: true });
+      clearPendingWrite('schools', id);
     } catch (e) {
       console.warn("Primary Firestore school update failed, retrying fallback:", e);
       try {
-        const cleanUpdates: Record<string, any> = {};
-        Object.entries(updates).forEach(([k, v]) => {
-          if (v !== undefined && v !== null) {
-            cleanUpdates[k] = v;
-          }
+        const cleanUpdates = stripUndefinedDeep({
+          ...updates,
+          id,
+          updatedAt: new Date().toISOString()
         });
-        cleanUpdates.updatedAt = new Date().toISOString();
         await setDoc(doc(db, 'schools', id), cleanUpdates, { merge: true });
+        clearPendingWrite('schools', id);
       } catch (err2) {
         console.error("Critical: Firestore school update fallback failed:", err2);
       }
@@ -1827,6 +1981,7 @@ export const DataService = {
   },
 
   async deleteSchool(id: string): Promise<void> {
+    markRecentlyDeleted('schools', id);
     const localList = getLocal<School>(STORAGE_KEYS.SCHOOLS, []);
     const updated = localList.filter(s => s.id !== id);
     setLocal(STORAGE_KEYS.SCHOOLS, updated);
@@ -1841,27 +1996,43 @@ export const DataService = {
   },
 
   async deleteAllSchools(): Promise<void> {
-    const activeDirId = this.getActiveDirectorateId();
+    const activeDirId = this.getActiveDirectorateId() || 'taourirt';
+    const localList = getLocal<School>(STORAGE_KEYS.SCHOOLS, []);
+    localList
+      .filter(s => activeDirId === 'all' || (s.directorateId || 'taourirt') === activeDirId)
+      .forEach(s => markRecentlyDeleted('schools', s.id));
     
     // 1. Delete from Firestore
     try {
-      const q = query(collection(db, 'schools'), where('directorateId', '==', activeDirId));
-      const snap = await getDocs(q);
+      const snap = activeDirId === 'all'
+        ? await getDocs(collection(db, 'schools'))
+        : await getDocs(query(collection(db, 'schools'), where('directorateId', '==', activeDirId)));
       
       if (!snap.empty) {
-        const batch = writeBatch(db);
-        snap.docs.forEach((d) => {
+        let batch = writeBatch(db);
+        let count = 0;
+        for (const d of snap.docs) {
+          markRecentlyDeleted('schools', d.id);
           batch.delete(d.ref);
-        });
-        await batch.commit();
+          count++;
+          if (count >= 450) {
+            await batch.commit();
+            batch = writeBatch(db);
+            count = 0;
+          }
+        }
+        if (count > 0) {
+          await batch.commit();
+        }
       }
     } catch (e) {
       console.error("Error deleting all schools from Firestore:", e);
     }
 
     // 2. Delete from Local Storage
-    const localList = getLocal<School>(STORAGE_KEYS.SCHOOLS, []);
-    const updated = localList.filter(s => (s.directorateId || 'taourirt') !== activeDirId);
+    const updated = activeDirId === 'all'
+      ? []
+      : localList.filter(s => (s.directorateId || 'taourirt') !== activeDirId);
     setLocal(STORAGE_KEYS.SCHOOLS, updated);
     
     // Trigger global UI refresh
@@ -1869,20 +2040,19 @@ export const DataService = {
   },
 
   async addSchoolsBulk(newSchools: Omit<School, 'id'>[]): Promise<School[]> {
-    const activeDirId = this.getActiveDirectorateId();
+    const activeDirId = this.getActiveDirectorateId() || 'taourirt';
+    const effectiveDirId = activeDirId === 'all' ? 'taourirt' : activeDirId;
     const existing = await this.getSchools();
     const createdOrUpdatedList: School[] = [];
     const updatedMap = new Map<string, School>();
     
-    // Index existing by clean name
     existing.forEach(s => {
       if (s.name) {
         updatedMap.set(s.name.trim().toLowerCase(), s);
       }
     });
 
-    // Use Firestore Batch for atomic and fast updates (up to 500 docs per batch)
-    const batch = writeBatch(db);
+    let batch = writeBatch(db);
     let batchCount = 0;
 
     for (const item of newSchools) {
@@ -1890,19 +2060,14 @@ export const DataService = {
       if (!cleanName) continue;
       const key = cleanName.toLowerCase();
       
-      // Ensure no field is undefined for Firestore
       const cleanItem: any = {};
       Object.entries(item).forEach(([k, v]) => {
-        if (v !== undefined) {
-          cleanItem[k] = v;
-        } else {
-          cleanItem[k] = ""; // Replace undefined with empty string
-        }
+        cleanItem[k] = v !== undefined ? v : "";
       });
 
       const itemWithDir = {
         ...cleanItem,
-        directorateId: item.directorateId || activeDirId,
+        directorateId: item.directorateId || effectiveDirId,
         updatedAt: serverTimestamp()
       };
 
@@ -1915,24 +2080,22 @@ export const DataService = {
       };
 
       if (existingSchool) {
-        // Update existing school
         const updatedItem: School = {
           ...existingSchool,
           ...itemWithDirAndCode,
           name: cleanName,
           id: existingSchool.id,
-          coordinatorName: itemWithDirAndCode.coordinatorName || itemWithDirAndCode.teacherName || existingSchool.coordinatorName,
-          teacherName: itemWithDirAndCode.coordinatorName || itemWithDirAndCode.teacherName || existingSchool.teacherName
+          coordinatorName: itemWithDirAndCode.coordinatorName || itemWithDirAndCode.teacherName || existingSchool.coordinatorName || '',
+          teacherName: itemWithDirAndCode.coordinatorName || itemWithDirAndCode.teacherName || existingSchool.teacherName || ''
         } as any;
         
         updatedMap.set(key, updatedItem);
         createdOrUpdatedList.push(updatedItem);
         
         const docRef = doc(db, 'schools', existingSchool.id);
-        batch.update(docRef, itemWithDirAndCode);
+        batch.set(docRef, { ...itemWithDirAndCode, id: existingSchool.id }, { merge: true });
         batchCount++;
       } else {
-        // Create new school
         const docRef = doc(collection(db, 'schools'));
         const newSchool: School = {
           ...itemWithDirAndCode,
@@ -1943,16 +2106,16 @@ export const DataService = {
           createdAt: serverTimestamp()
         } as any;
         
-        batch.set(docRef, { ...itemWithDirAndCode, createdAt: serverTimestamp() });
+        batch.set(docRef, { ...itemWithDirAndCode, id: docRef.id, createdAt: serverTimestamp() }, { merge: true });
         updatedMap.set(key, newSchool);
         createdOrUpdatedList.push(newSchool);
         batchCount++;
       }
 
-      // Firestore batches are limited to 500 operations
       if (batchCount >= 450) {
         await batch.commit();
-        // Reset batch if we have more
+        batch = writeBatch(db);
+        batchCount = 0;
       }
     }
 
@@ -1961,14 +2124,11 @@ export const DataService = {
         await batch.commit();
       } catch (e) {
         console.error("Firestore batch commit error:", e);
-        // If Firestore fails, we still have the local state for immediate use
       }
     }
 
     const finalList = Array.from(updatedMap.values());
     setLocal(STORAGE_KEYS.SCHOOLS, finalList);
-    
-    // Trigger global UI refresh
     window.dispatchEvent(new CustomEvent('schoolsUpdated'));
     
     return createdOrUpdatedList;
@@ -1979,46 +2139,62 @@ export const DataService = {
     try {
       const snap = await getDocs(collection(db, 'venues'));
       if (!snap.empty) {
-        const firestoreList = snap.docs.map(d => ({ id: d.id, ...d.data() } as Venue));
-        return deduplicateById(firestoreList);
+        const firestoreList = snap.docs
+          .filter(d => !isRecentlyDeleted('venues', d.id))
+          .map(d => ({ id: d.id, ...d.data() } as Venue));
+        const localPending = getLocal<Venue>(STORAGE_KEYS.VENUES, []).filter(
+          lv => lv && lv.id && isPendingWrite('venues', lv.id) && !isRecentlyDeleted('venues', lv.id)
+        );
+        const merged = deduplicateById([...localPending, ...firestoreList]);
+        setLocal(STORAGE_KEYS.VENUES, merged);
+        return merged;
+      } else {
+        const localPending = getLocal<Venue>(STORAGE_KEYS.VENUES, []).filter(
+          lv => lv && lv.id && isPendingWrite('venues', lv.id) && !isRecentlyDeleted('venues', lv.id)
+        );
+        if (localPending.length > 0) {
+          setLocal(STORAGE_KEYS.VENUES, localPending);
+          return localPending;
+        }
       }
     } catch (e) {
       console.warn("Firestore venues fetch error:", e);
     }
-    const localList = getLocal<Venue>(STORAGE_KEYS.VENUES, INITIAL_VENUES);
+    const localList = getLocal<Venue>(STORAGE_KEYS.VENUES, INITIAL_VENUES).filter(v => !isRecentlyDeleted('venues', v.id));
     return deduplicateById(localList);
   },
 
   async addVenue(venue: Omit<Venue, 'id'>): Promise<Venue> {
-    const activeDirId = this.getActiveDirectorateId();
+    const activeDirId = this.getActiveDirectorateId() || 'taourirt';
+    const docRef = doc(collection(db, 'venues'));
+    const realId = docRef.id;
+
     const venueWithDir = {
       ...venue,
-      directorateId: venue.directorateId || activeDirId
+      directorateId: venue.directorateId || (activeDirId === 'all' ? 'taourirt' : activeDirId)
     };
-    const tempId = `ven-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
     const newVenue: Venue = {
       ...venueWithDir,
-      id: tempId
+      id: realId
     };
     const localList = getLocal<Venue>(STORAGE_KEYS.VENUES, INITIAL_VENUES);
-    const filtered = localList.filter(v => v.id !== tempId);
-    const updated = [newVenue, ...filtered];
-    setLocal(STORAGE_KEYS.VENUES, updated);
+    const filtered = localList.filter(v => v.id !== realId);
+    setLocal(STORAGE_KEYS.VENUES, [newVenue, ...filtered]);
+    markPendingWrite('venues', realId);
 
     try {
-      const docRef = await addDoc(collection(db, 'venues'), {
+      const cleanPayload = stripUndefinedDeep({
         ...venueWithDir,
-        createdAt: Timestamp.now()
+        id: realId,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
       });
-      const realId = docRef.id;
-      newVenue.id = realId;
-
-      const currentList = getLocal<Venue>(STORAGE_KEYS.VENUES, INITIAL_VENUES);
-      const synced = currentList.map(v => v.id === tempId ? { ...v, id: realId } : v);
-      setLocal(STORAGE_KEYS.VENUES, synced);
+      await setDoc(docRef, cleanPayload);
+      clearPendingWrite('venues', realId);
     } catch (e) {
-      console.warn("Saved venue locally:", e);
+      console.warn("Saved venue locally; Firestore sync pending:", e);
     }
+    window.dispatchEvent(new CustomEvent('venuesUpdated'));
     return newVenue;
   },
 
@@ -2026,18 +2202,24 @@ export const DataService = {
     const localList = getLocal<Venue>(STORAGE_KEYS.VENUES, INITIAL_VENUES);
     const updated = localList.map(v => v.id === id ? { ...v, ...updates } : v);
     setLocal(STORAGE_KEYS.VENUES, updated);
+    markPendingWrite('venues', id);
 
     try {
-      await updateDoc(doc(db, 'venues', id), {
+      const cleanUpdates = stripUndefinedDeep({
         ...updates,
-        updatedAt: Timestamp.now()
+        id,
+        updatedAt: serverTimestamp()
       });
+      await setDoc(doc(db, 'venues', id), cleanUpdates, { merge: true });
+      clearPendingWrite('venues', id);
     } catch (e) {
-      console.warn("Updated venue locally:", e);
+      console.warn("Updated venue locally; Firestore sync pending:", e);
     }
+    window.dispatchEvent(new CustomEvent('venuesUpdated'));
   },
 
   async deleteVenue(id: string): Promise<void> {
+    markRecentlyDeleted('venues', id);
     const localList = getLocal<Venue>(STORAGE_KEYS.VENUES, INITIAL_VENUES);
     const updated = localList.filter(v => v.id !== id);
     setLocal(STORAGE_KEYS.VENUES, updated);
@@ -2047,25 +2229,36 @@ export const DataService = {
     } catch (e) {
       console.warn("Deleted venue locally:", e);
     }
+    window.dispatchEvent(new CustomEvent('venuesUpdated'));
   },
 
   // REFEREES
   async getReferees(): Promise<Referee[]> {
     let explicitReferees: Referee[] = [];
+    const readCachedRefs = () => {
+      const primary = getLocal<Referee>('taourirt_referees_data', []);
+      const legacy = getLocal<Referee>('referees', []);
+      return deduplicateById([...primary, ...legacy]).filter(r => !isRecentlyDeleted('referees', r.id));
+    };
+
     try {
       const snap = await getDocs(collection(db, 'referees'));
-      if (!snap.empty) {
-        explicitReferees = snap.docs.map(d => ({ id: d.id, ...d.data() } as Referee));
-      }
+      const firestoreRefs = snap.empty
+        ? []
+        : snap.docs
+            .filter(d => !isRecentlyDeleted('referees', d.id))
+            .map(d => ({ id: d.id, ...d.data() } as Referee));
+      const pendingRefs = readCachedRefs().filter(r => isPendingWrite('referees', r.id));
+      explicitReferees = deduplicateById([...pendingRefs, ...firestoreRefs]);
+      setLocal('taourirt_referees_data', explicitReferees);
+      setLocal('referees', explicitReferees);
     } catch (e) {
       console.warn("Firestore fetch referees error, falling back to local:", e);
-      explicitReferees = getLocal<Referee>('referees', []);
+      explicitReferees = readCachedRefs();
     }
 
-    // Helper text normalizer for name matching
     const norm = (s?: string) => (s || '').replace(/[\s\-\_\.]/g, '').replace(/[أإآ]/g, 'ا').replace(/ة/g, 'ه').replace(/ى/g, 'ي').toLowerCase();
 
-    // Fetch teachers/users to sync phone numbers and teacher referees
     let usersList: User[] = [];
     try {
       usersList = await this.getUsers();
@@ -2073,7 +2266,6 @@ export const DataService = {
       console.warn("Failed to fetch users for referee merge:", e);
     }
 
-    // Merge latest phone numbers into explicit referees if a user profile has a fresher phone
     explicitReferees = explicitReferees.map(r => {
       const matchedUser = usersList.find(u => 
         u.id === r.id || 
@@ -2089,23 +2281,22 @@ export const DataService = {
       return r;
     });
 
-    // Automatically fill referees from teachers who have referee data filled
     const teacherReferees: Referee[] = usersList
-      .filter(t => t.role === 'TEACHER' && (Array.isArray(t.refereeSpecialty) ? t.refereeSpecialty.length > 0 : !!t.refereeSpecialty))
+      .filter(t => !isRecentlyDeleted('referees', t.id) && t.role === 'TEACHER' && (Array.isArray(t.refereeSpecialty) ? t.refereeSpecialty.length > 0 : !!t.refereeSpecialty))
       .map(t => ({
         id: t.id,
         fullName: t.fullName + ' (أستاذ)',
         phone: t.phone || 'غير محدد',
         specialty: Array.isArray(t.refereeSpecialty) ? t.refereeSpecialty : [t.refereeSpecialty || 'كرة القدم'],
+        directorateId: t.directorateId || 'taourirt',
         isActive: t.isActive !== false,
         isTeacher: true,
         photoUrl: t.photoUrl
       }));
 
-    // Deduplicate by ID first, then by normalized name, guaranteeing unique keys
     const idMap = new Map<string, Referee>();
     [...explicitReferees, ...teacherReferees].forEach(r => {
-      if (!r || !r.id) return;
+      if (!r || !r.id || isRecentlyDeleted('referees', r.id)) return;
       if (!idMap.has(r.id)) {
         idMap.set(r.id, r);
       } else {
@@ -2136,73 +2327,117 @@ export const DataService = {
   },
 
   async addReferee(referee: Omit<Referee, 'id'>): Promise<Referee> {
-    const activeDirId = this.getActiveDirectorateId();
+    const activeDirId = this.getActiveDirectorateId() || 'taourirt';
+    const docRef = doc(collection(db, 'referees'));
+    const realId = docRef.id;
+
     const refereeWithDir = {
       ...referee,
-      directorateId: referee.directorateId || activeDirId
+      directorateId: referee.directorateId || (activeDirId === 'all' ? 'taourirt' : activeDirId)
     };
-    const newRef: Referee = { ...refereeWithDir, id: `ref-${Date.now()}` };
-    const list = getLocal<Referee>('referees', []);
-    setLocal('referees', [newRef, ...list]);
+    const newRef: Referee = { ...refereeWithDir, id: realId };
+    const list = deduplicateById([...getLocal<Referee>('taourirt_referees_data', []), ...getLocal<Referee>('referees', [])]);
+    const updated = [newRef, ...list.filter(r => r.id !== realId)];
+    setLocal('taourirt_referees_data', updated);
+    setLocal('referees', updated);
+    markPendingWrite('referees', realId);
 
     try {
-      const docRef = await addDoc(collection(db, 'referees'), {
+      const cleanPayload = stripUndefinedDeep({
         ...refereeWithDir,
-        createdAt: Timestamp.now()
+        id: realId,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
       });
-      newRef.id = docRef.id;
+      await setDoc(docRef, cleanPayload);
+      clearPendingWrite('referees', realId);
     } catch (e) {
-      console.warn("Saved referee locally:", e);
+      console.warn("Saved referee locally; Firestore sync pending:", e);
     }
+    window.dispatchEvent(new CustomEvent('refereesUpdated'));
     return newRef;
   },
 
   async updateReferee(id: string, updates: Partial<Referee>): Promise<void> {
-    const list = getLocal<Referee>('referees', []);
+    const list = deduplicateById([...getLocal<Referee>('taourirt_referees_data', []), ...getLocal<Referee>('referees', [])]);
     const norm = (s?: string) => (s || '').replace(/[\s\-\_\.]/g, '').replace(/[أإآ]/g, 'ا').replace(/ة/g, 'ه').replace(/ى/g, 'ي').toLowerCase();
     
     const targetRef = list.find(r => r.id === id);
-    const updated = list.map(r => r.id === id ? { ...r, ...updates } : r);
+    const updated = list.some(r => r.id === id)
+      ? list.map(r => r.id === id ? { ...r, ...updates } : r)
+      : list;
+    setLocal('taourirt_referees_data', updated);
     setLocal('referees', updated);
 
+    // Check if this referee corresponds to a teacher user profile
+    let matchedTeacherUser: User | undefined;
     try {
-      await updateDoc(doc(db, 'referees', id), {
-        ...updates,
-        updatedAt: Timestamp.now()
-      });
-    } catch (e) {
-      console.warn("Updated referee locally:", e);
+      const users = await this.getUsers();
+      const refName = (updates.fullName || targetRef?.fullName || '').replace(/\s*\(أستاذ\)\s*/g, '');
+      matchedTeacherUser = users.find(u => 
+        u.id === id || 
+        (refName && u.fullName && (norm(u.fullName) === norm(refName) || norm(u.fullName).includes(norm(refName)) || norm(refName).includes(norm(u.fullName))))
+      );
+    } catch (err) {
+      console.warn("Error looking up teacher for referee update:", err);
     }
 
-    // Bidirectional sync: if this referee has a user profile (or matching name like عثماني خالد), update the user profile phone as well!
-    if (updates.phone || updates.fullName) {
+    // Update explicit referees collection if not purely a teacher-derived record (or if present in explicit list)
+    if (!matchedTeacherUser || list.some(r => r.id === id)) {
+      markPendingWrite('referees', id);
       try {
-        const users = await this.getUsers();
-        const refName = updates.fullName || targetRef?.fullName || '';
-        const matchedUser = users.find(u => 
-          u.id === id || 
-          (refName && u.fullName && (norm(u.fullName) === norm(refName) || norm(u.fullName).includes(norm(refName)) || norm(refName).includes(norm(u.fullName))))
-        );
-        if (matchedUser) {
-          await this.updateUserProfile(matchedUser.id, {
-            ...(updates.phone ? { phone: updates.phone } : {}),
-            ...(updates.fullName ? { fullName: updates.fullName } : {})
-          });
-        }
+        const cleanUpdates = stripUndefinedDeep({
+          ...updates,
+          fullName: updates.fullName ? updates.fullName.replace(/\s*\(أستاذ\)\s*/g, '') : undefined,
+          id,
+          updatedAt: serverTimestamp()
+        });
+        await setDoc(doc(db, 'referees', id), cleanUpdates, { merge: true });
+        clearPendingWrite('referees', id);
+      } catch (e) {
+        console.warn("Updated referee locally; Firestore sync pending:", e);
+      }
+    }
+
+    // Bidirectional sync to user profile (including refereeSpecialty, phone, and fullName)
+    if (matchedTeacherUser) {
+      try {
+        const cleanTeacherName = updates.fullName ? updates.fullName.replace(/\s*\(أستاذ\)\s*/g, '').trim() : undefined;
+        await this.updateUserProfile(matchedTeacherUser.id, {
+          ...(updates.phone ? { phone: updates.phone } : {}),
+          ...(cleanTeacherName ? { fullName: cleanTeacherName } : {}),
+          ...(updates.specialty !== undefined ? { refereeSpecialty: Array.isArray(updates.specialty) ? updates.specialty : [updates.specialty] } : {})
+        });
       } catch (err) {
         console.warn("Error syncing referee update to user profile:", err);
       }
     }
+    window.dispatchEvent(new CustomEvent('refereesUpdated'));
   },
 
   async deleteReferee(id: string): Promise<void> {
-    const list = getLocal<Referee>('referees', []);
-    setLocal('referees', list.filter(r => r.id !== id));
+    markRecentlyDeleted('referees', id);
+    const list = deduplicateById([...getLocal<Referee>('taourirt_referees_data', []), ...getLocal<Referee>('referees', [])]);
+    const filtered = list.filter(r => r.id !== id);
+    setLocal('taourirt_referees_data', filtered);
+    setLocal('referees', filtered);
     try {
       await deleteDoc(doc(db, 'referees', id));
     } catch (e) {
       console.warn("Deleted referee locally:", e);
     }
+
+    // If this referee was auto-derived from a teacher's refereeSpecialty, clear refereeSpecialty so they don't reappear
+    try {
+      const users = await this.getUsers();
+      const matchedTeacher = users.find(u => u.id === id);
+      if (matchedTeacher && matchedTeacher.refereeSpecialty) {
+        await this.updateUserProfile(matchedTeacher.id, { refereeSpecialty: [] });
+      }
+    } catch (e) {
+      console.warn("Could not clear teacher refereeSpecialty on referee delete:", e);
+    }
+    window.dispatchEvent(new CustomEvent('refereesUpdated'));
   },
 
   // USERS / TEACHERS
@@ -2230,81 +2465,24 @@ export const DataService = {
       return null;
     };
 
-    // 1. Load from local cache first
-    try {
-      const localUsersRaw = localStorage.getItem('local_registered_users');
-      if (localUsersRaw) {
-        const localUsers = JSON.parse(localUsersRaw) as any[];
-        localUsers.forEach(u => {
-          if (u && (u.id || u.email || u.leaseNumber || u.fullName)) {
-            const matchedKey = findMatchingKey(u);
-            const userObj: User = {
-              id: u.id || matchedKey || u.email || u.leaseNumber,
-              fullName: u.fullName || u.name || 'أستاذ',
-              email: u.email || '',
-              role: u.role || 'TEACHER',
-              directorateId: u.directorateId || activeDirId,
-              workLocation: u.workLocation || '',
-              leaseNumber: u.leaseNumber || '',
-              phone: u.phone || '',
-              isTechCommitteeHead: !!u.isTechCommitteeHead,
-              techCommitteeSports: Array.isArray(u.techCommitteeSports) ? u.techCommitteeSports : [],
-              isTechCommitteeMember: !!u.isTechCommitteeMember,
-              techCommitteeSportsMemberOf: Array.isArray(u.techCommitteeSportsMemberOf) ? u.techCommitteeSportsMemberOf : [],
-              ...u
-            };
+    let firestoreSucceeded = false;
+    let firestoreWasEmpty = true;
 
-            if (matchedKey) {
-              const existing = usersMap.get(matchedKey)!;
-              // Prefer verified or newer profile
-              const preferNew = u.schoolAccessVerified && !existing.schoolAccessVerified;
-              const merged: User = {
-                ...existing,
-                ...userObj,
-                workLocation: preferNew ? u.workLocation : (existing.workLocation || u.workLocation),
-                schoolId: preferNew ? u.schoolId : (existing.schoolId || u.schoolId),
-                schoolAccessVerified: existing.schoolAccessVerified || u.schoolAccessVerified || false
-              };
-              const targetKey = preferNew ? u.id : matchedKey;
-              usersMap.set(targetKey, merged);
-              if (matchedKey !== targetKey) usersMap.delete(matchedKey);
-            } else {
-              usersMap.set(userObj.id, userObj);
-            }
-          }
-        });
-      }
-    } catch {}
-
-    // 2. Also check demo user profile
-    try {
-      const demoRaw = localStorage.getItem('demo_user_profile');
-      if (demoRaw) {
-        const demo = JSON.parse(demoRaw);
-        if (demo && demo.id) {
-          const existing = usersMap.get(demo.id);
-          usersMap.set(demo.id, {
-            ...existing,
-            ...demo,
-            id: demo.id,
-            role: demo.role || existing?.role || 'TEACHER'
-          });
-        }
-      }
-    } catch {}
-
-    // 3. Load from Firestore and merge
+    // 1. Load from Firestore first so deleted users never resurrect from local cache
     try {
       const snap = await getDocs(collection(db, 'users'));
+      firestoreSucceeded = true;
+      firestoreWasEmpty = snap.empty;
       if (!snap.empty) {
         snap.docs.forEach(d => {
-          const data = d.data() as any;
           const docId = d.id;
+          if (isRecentlyDeleted('users', docId)) return;
+          const data = d.data() as any;
           const matchedKey = findMatchingKey({ id: docId, ...data });
 
           if (matchedKey) {
             const existing = usersMap.get(matchedKey)!;
-            const preferData = data.schoolAccessVerified && !existing.schoolAccessVerified;
+            const preferData = !docId.startsWith('mgr_') || (data.schoolAccessVerified && !existing.schoolAccessVerified);
             const merged: User = {
               ...existing,
               ...data,
@@ -2312,8 +2490,8 @@ export const DataService = {
               role: data.role || existing.role || 'TEACHER',
               fullName: data.fullName || data.name || existing.fullName || 'أستاذ',
               directorateId: data.directorateId || existing.directorateId || activeDirId,
-              workLocation: preferData ? data.workLocation : (existing.workLocation || data.workLocation || ''),
-              schoolId: preferData ? data.schoolId : (existing.schoolId || data.schoolId || ''),
+              workLocation: preferData ? (data.workLocation || existing.workLocation || '') : (existing.workLocation || data.workLocation || ''),
+              schoolId: preferData ? (data.schoolId || existing.schoolId || '') : (existing.schoolId || data.schoolId || ''),
               leaseNumber: data.leaseNumber || existing.leaseNumber || '',
               phone: data.phone || existing.phone || '',
               schoolAccessVerified: existing.schoolAccessVerified || data.schoolAccessVerified || false,
@@ -2349,6 +2527,72 @@ export const DataService = {
     } catch (e) {
       console.warn("Firestore fetch users error, falling back to cached list:", e);
     }
+
+    // 2. Merge local cache ONLY when offline, empty cloud, or pending write
+    try {
+      const localUsersRaw = localStorage.getItem('local_registered_users');
+      if (localUsersRaw) {
+        const localUsers = JSON.parse(localUsersRaw) as any[];
+        localUsers.forEach(u => {
+          if (u && (u.id || u.email || u.leaseNumber || u.fullName)) {
+            const uid = String(u.id || u.email || u.leaseNumber || '');
+            if (uid && isRecentlyDeleted('users', uid)) return;
+            if (firestoreSucceeded && !firestoreWasEmpty && !(uid && isPendingWrite('users', uid))) return;
+
+            const matchedKey = findMatchingKey(u);
+            const userObj: User = {
+              id: u.id || matchedKey || u.email || u.leaseNumber,
+              fullName: u.fullName || u.name || 'أستاذ',
+              email: u.email || '',
+              role: u.role || 'TEACHER',
+              directorateId: u.directorateId || activeDirId,
+              workLocation: u.workLocation || '',
+              leaseNumber: u.leaseNumber || '',
+              phone: u.phone || '',
+              isTechCommitteeHead: !!u.isTechCommitteeHead,
+              techCommitteeSports: Array.isArray(u.techCommitteeSports) ? u.techCommitteeSports : [],
+              isTechCommitteeMember: !!u.isTechCommitteeMember,
+              techCommitteeSportsMemberOf: Array.isArray(u.techCommitteeSportsMemberOf) ? u.techCommitteeSportsMemberOf : [],
+              ...u
+            };
+
+            if (matchedKey) {
+              const existing = usersMap.get(matchedKey)!;
+              const preferNew = (uid && isPendingWrite('users', uid)) || (u.schoolAccessVerified && !existing.schoolAccessVerified);
+              const merged: User = {
+                ...existing,
+                ...(preferNew ? userObj : {}),
+                workLocation: preferNew ? (u.workLocation || existing.workLocation) : (existing.workLocation || u.workLocation),
+                schoolId: preferNew ? (u.schoolId || existing.schoolId) : (existing.schoolId || u.schoolId),
+                schoolAccessVerified: existing.schoolAccessVerified || u.schoolAccessVerified || false
+              };
+              const targetKey = preferNew ? userObj.id : matchedKey;
+              usersMap.set(targetKey, merged);
+              if (matchedKey !== targetKey) usersMap.delete(matchedKey);
+            } else {
+              usersMap.set(userObj.id, userObj);
+            }
+          }
+        });
+      }
+    } catch {}
+
+    // 3. Also check demo user profile
+    try {
+      const demoRaw = localStorage.getItem('demo_user_profile');
+      if (demoRaw) {
+        const demo = JSON.parse(demoRaw);
+        if (demo && demo.id && !isRecentlyDeleted('users', String(demo.id))) {
+          const existing = usersMap.get(demo.id);
+          usersMap.set(demo.id, {
+            ...existing,
+            ...demo,
+            id: demo.id,
+            role: demo.role || existing?.role || 'TEACHER'
+          });
+        }
+      }
+    } catch {}
 
     const mergedUsers = Array.from(usersMap.values()).map(u => fixTeacherFieldJumble(u));
     try {
@@ -2503,16 +2747,19 @@ export const DataService = {
     } catch {}
 
     // 3. Sync full document to Firestore
-    try {
-      if (userId) {
-        await setDoc(doc(db, 'users', userId), {
+    const targetDocId = fullUserRecord.id || userId;
+    if (targetDocId) {
+      markPendingWrite('users', targetDocId);
+      try {
+        await setDoc(doc(db, 'users', targetDocId), stripUndefinedDeep({
           ...fullUserRecord,
-          id: userId,
+          id: targetDocId,
           updatedAt: serverTimestamp()
-        }, { merge: true });
+        }), { merge: true });
+        clearPendingWrite('users', targetDocId);
+      } catch (e) {
+        console.warn("Firestore user profile update error:", e);
       }
-    } catch (e) {
-      console.warn("Firestore user profile update error:", e);
     }
 
     try {
@@ -2555,11 +2802,11 @@ export const DataService = {
               return prev && (prev.phone !== s.phone || prev.teacherName !== s.teacherName);
             });
             for (const ms of matched) {
-              await updateDoc(doc(db, 'schools', ms.id), {
+              await setDoc(doc(db, 'schools', ms.id), stripUndefinedDeep({
                 teacherName: ms.teacherName,
                 phone: ms.phone,
                 updatedAt: Timestamp.now()
-              }).catch(() => {});
+              }), { merge: true }).catch(() => {});
             }
           } catch (e) {
             console.warn("Error syncing teacher phone to schools Firestore:", e);
@@ -2567,10 +2814,10 @@ export const DataService = {
         }
       }
 
-      // Synchronize changes to Referees list (e.g. Othmani Khalid / عثماني خالد and all teacher referees)
+      // Synchronize changes to Referees list
       if (profileData.phone || profileData.fullName || profileData.refereeSpecialty) {
         const norm = (s?: string) => (s || '').replace(/[\s\-\_\.]/g, '').replace(/[أإآ]/g, 'ا').replace(/ة/g, 'ه').replace(/ى/g, 'ي').toLowerCase();
-        const refList = getLocal<Referee>('referees', []);
+        const refList = deduplicateById([...getLocal<Referee>('taourirt_referees_data', []), ...getLocal<Referee>('referees', [])]);
         let refChanged = false;
         const targetName = profileData.fullName;
         
@@ -2595,6 +2842,7 @@ export const DataService = {
         });
 
         if (refChanged) {
+          setLocal('taourirt_referees_data', updatedRefList);
           setLocal('referees', updatedRefList);
           try {
             const matched = updatedRefList.filter(r => {
@@ -2603,11 +2851,11 @@ export const DataService = {
               return matchId || matchName;
             });
             for (const mr of matched) {
-              await updateDoc(doc(db, 'referees', mr.id), {
+              await setDoc(doc(db, 'referees', mr.id), stripUndefinedDeep({
                 ...(profileData.phone ? { phone: profileData.phone } : {}),
                 ...(profileData.fullName ? { fullName: profileData.fullName } : {}),
                 updatedAt: Timestamp.now()
-              }).catch(() => {});
+              }), { merge: true }).catch(() => {});
             }
           } catch (e) {
             console.warn("Error syncing referee phone to Firestore:", e);
@@ -2620,6 +2868,7 @@ export const DataService = {
   },
 
   async deleteUser(userId: string): Promise<void> {
+    markRecentlyDeleted('users', userId);
     try {
       await deleteDoc(doc(db, 'users', userId));
     } catch (e) {
@@ -2636,6 +2885,7 @@ export const DataService = {
     } catch (e) {
       console.warn("Local storage delete user error:", e);
     }
+    window.dispatchEvent(new CustomEvent('userDataChanged'));
   },
 
   async deleteAllTeachers(): Promise<void> {
@@ -2643,7 +2893,6 @@ export const DataService = {
     
     // 1. Delete from Firestore
     try {
-      // Find all users with role TEACHER in this directorate
       const q = query(
         collection(db, 'users'), 
         where('role', '==', 'TEACHER'),
@@ -2654,6 +2903,7 @@ export const DataService = {
       if (!snap.empty) {
         const batch = writeBatch(db);
         snap.docs.forEach((d) => {
+          markRecentlyDeleted('users', d.id);
           batch.delete(d.ref);
         });
         await batch.commit();
@@ -2667,6 +2917,11 @@ export const DataService = {
       const localUsersRaw = localStorage.getItem('local_registered_users');
       if (localUsersRaw) {
         const users = JSON.parse(localUsersRaw) as User[];
+        users.forEach(u => {
+          if (u.role === 'TEACHER' && (u.directorateId || 'taourirt') === activeDirId && u.id) {
+            markRecentlyDeleted('users', u.id);
+          }
+        });
         const updated = users.filter(u => 
           !(u.role === 'TEACHER' && (u.directorateId || 'taourirt') === activeDirId)
         );
@@ -2675,6 +2930,7 @@ export const DataService = {
     } catch (e) {
       console.warn("Local storage delete all teachers error:", e);
     }
+    window.dispatchEvent(new CustomEvent('userDataChanged'));
   },
 
   // DIRECTORATE TRANSFER WORKFLOW FOR TEACHERS
@@ -3290,18 +3546,22 @@ export const DataService = {
     let allStudents: Student[] = [];
     try {
       const snap = await getDocs(collection(db, 'students'));
+      const localList = getLocal<Student>('taourirt_students_data', []).filter(s => s && !isRecentlyDeleted('students', s.id));
+      const pendingLocal = localList.filter(s => isPendingWrite('students', s.id));
+
       if (!snap.empty) {
-        const firestoreList = snap.docs.map(d => ({ id: d.id, ...d.data(), directorateId: d.data().directorateId || 'taourirt' } as Student));
-        const localList = getLocal<Student>('taourirt_students_data', []);
-        // Prioritize localList first so newer local updates are not overwritten by stale Firestore fetches
-        allStudents = deduplicateById([...localList, ...firestoreList]);
+        const firestoreList = snap.docs
+          .filter(d => !isRecentlyDeleted('students', d.id))
+          .map(d => ({ id: d.id, ...d.data(), directorateId: d.data().directorateId || 'taourirt' } as Student));
+        allStudents = deduplicateById([...pendingLocal, ...firestoreList]);
         setLocal('taourirt_students_data', allStudents);
       } else {
-        allStudents = getLocal<Student>('taourirt_students_data', []);
+        allStudents = deduplicateById(pendingLocal);
+        setLocal('taourirt_students_data', allStudents);
       }
     } catch (e) {
       console.warn("Firestore fetch students error, using local storage:", e);
-      allStudents = getLocal<Student>('taourirt_students_data', []);
+      allStudents = getLocal<Student>('taourirt_students_data', []).filter(s => s && !isRecentlyDeleted('students', s.id));
     }
     const cleanList = deduplicateById(allStudents);
     if (all === true || !activeDirId || activeDirId === 'all') {
@@ -3313,16 +3573,14 @@ export const DataService = {
   subscribeToStudents(callback: (students: Student[]) => void): () => void {
     try {
       const unsubscribe = onSnapshot(collection(db, 'students'), (snap) => {
-        if (!snap.empty) {
-          const firestoreList = snap.docs.map(d => ({ id: d.id, ...d.data() } as Student));
-          const localList = getLocal<Student>('taourirt_students_data', []);
-          // Prioritize localList first so newer local updates are not overwritten by stale Firestore snapshots
-          const merged = deduplicateById([...localList, ...firestoreList]);
-          setLocal('taourirt_students_data', merged);
-          callback(merged);
-        } else {
-          callback(getLocal<Student>('taourirt_students_data', []));
-        }
+        const localList = getLocal<Student>('taourirt_students_data', []).filter(s => s && !isRecentlyDeleted('students', s.id));
+        const pendingLocal = localList.filter(s => isPendingWrite('students', s.id));
+        const firestoreList = snap.docs
+          .filter(d => !isRecentlyDeleted('students', d.id))
+          .map(d => ({ id: d.id, ...d.data() } as Student));
+        const merged = deduplicateById([...pendingLocal, ...firestoreList]);
+        setLocal('taourirt_students_data', merged);
+        callback(merged);
       }, (err) => {
         console.warn("Real-time students listener error:", err);
       });
@@ -3339,36 +3597,33 @@ export const DataService = {
       ...student,
       directorateId: (student as any).directorateId || activeDirId
     };
+    const studentId = `stud-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
     const newStudent: Student = {
       ...studentWithDir,
-      id: `stud-${Date.now()}`,
+      id: studentId,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     } as any;
 
     const localList = getLocal<Student>('taourirt_students_data', []);
-    setLocal('taourirt_students_data', [newStudent, ...localList]);
+    setLocal('taourirt_students_data', [newStudent, ...localList.filter(s => s.id !== studentId)]);
+    markPendingWrite('students', studentId);
 
     try {
-      // Safely filter undefined fields so Firestore does not reject the payload
-      const firestorePayload: any = {};
-      Object.keys(studentWithDir).forEach(key => {
-        const val = (studentWithDir as any)[key];
-        if (val !== undefined) {
-          firestorePayload[key] = val;
-        }
-      });
-
-      await setDoc(doc(db, 'students', newStudent.id), {
-        ...firestorePayload,
-        id: newStudent.id,
+      const cleanPayload = stripUndefinedDeep({
+        ...studentWithDir,
+        id: studentId,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp()
       });
+
+      await setDoc(doc(db, 'students', studentId), cleanPayload);
+      clearPendingWrite('students', studentId);
     } catch (e) {
       console.warn("Student saved locally; Firestore sync pending:", e);
     }
 
+    window.dispatchEvent(new CustomEvent('studentsUpdated'));
     return newStudent;
   },
 
@@ -3390,40 +3645,52 @@ export const DataService = {
         updatedAt: new Date().toISOString()
       } as any;
       createdStudents.push(newStudent);
+      markPendingWrite('students', newStudent.id);
     }
 
     const localList = getLocal<Student>('taourirt_students_data', []);
-    setLocal('taourirt_students_data', [...createdStudents, ...localList]);
+    setLocal('taourirt_students_data', deduplicateById([...createdStudents, ...localList]));
 
     try {
-      const batch = writeBatch(db);
+      let batch = writeBatch(db);
+      let opCount = 0;
+      let batchIds: string[] = [];
+
       for (const newStudent of createdStudents) {
         const studentRef = doc(db, 'students', newStudent.id);
-        
-        // Clean undefined properties
-        const cleanPayload: any = {};
-        Object.keys(newStudent).forEach(key => {
-          const val = (newStudent as any)[key];
-          if (val !== undefined) {
-            cleanPayload[key] = val;
-          }
-        });
-
-        batch.set(studentRef, {
-          ...cleanPayload,
+        const cleanPayload = stripUndefinedDeep({
+          ...newStudent,
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp()
         });
+
+        batch.set(studentRef, cleanPayload, { merge: true });
+        batchIds.push(newStudent.id);
+        opCount++;
+
+        if (opCount >= 450) {
+          await batch.commit();
+          batchIds.forEach(id => clearPendingWrite('students', id));
+          batch = writeBatch(db);
+          opCount = 0;
+          batchIds = [];
+        }
       }
-      await batch.commit();
+
+      if (opCount > 0) {
+        await batch.commit();
+        batchIds.forEach(id => clearPendingWrite('students', id));
+      }
     } catch (e) {
       console.warn("Bulk students saved locally; Firestore sync pending:", e);
     }
 
+    window.dispatchEvent(new CustomEvent('studentsUpdated'));
     return createdStudents;
   },
 
   async deleteStudent(id: string): Promise<void> {
+    markRecentlyDeleted('students', id);
     const localList = getLocal<Student>('taourirt_students_data', []);
     setLocal('taourirt_students_data', localList.filter(s => s.id !== id));
 
@@ -3432,30 +3699,31 @@ export const DataService = {
     } catch (e) {
       console.warn("Deleted student locally:", e);
     }
+    window.dispatchEvent(new CustomEvent('studentsUpdated'));
   },
 
   async updateStudent(id: string, student: Partial<Student>): Promise<void> {
     const localList = getLocal<Student>('taourirt_students_data', []);
-    const updated = localList.map(s => s.id === id ? { ...s, ...student, updatedAt: new Date().toISOString() } : s);
+    const existsLocally = localList.some(s => s.id === id);
+    const updated = existsLocally
+      ? localList.map(s => s.id === id ? { ...s, ...student, updatedAt: new Date().toISOString() } : s)
+      : [{ ...(student as Student), id, updatedAt: new Date().toISOString() }, ...localList];
     setLocal('taourirt_students_data', updated);
+    markPendingWrite('students', id);
 
     try {
-      // Safely filter undefined fields so Firestore does not reject the update
-      const firestorePayload: any = {};
-      Object.keys(student).forEach(key => {
-        const val = (student as any)[key];
-        if (val !== undefined) {
-          firestorePayload[key] = val;
-        }
-      });
-
-      await updateDoc(doc(db, 'students', id), {
-        ...firestorePayload,
+      const cleanPayload = stripUndefinedDeep({
+        ...student,
+        id,
         updatedAt: serverTimestamp()
       });
+
+      await setDoc(doc(db, 'students', id), cleanPayload, { merge: true });
+      clearPendingWrite('students', id);
     } catch (e) {
       console.warn("Updated student locally; Firestore sync pending:", e);
     }
+    window.dispatchEvent(new CustomEvent('studentsUpdated'));
   },
 
   async updateBibNumbersBulk(items: Array<{ id: string; bibNumber: string | number }>): Promise<void> {
@@ -3482,11 +3750,11 @@ export const DataService = {
       await Promise.all(
         items.map(async (item) => {
           try {
-            await updateDoc(doc(db, 'students', item.id), {
+            await setDoc(doc(db, 'students', item.id), {
               bibNumber: String(item.bibNumber),
               crossCountryBibNumber: String(item.bibNumber),
               updatedAt: serverTimestamp()
-            });
+            }, { merge: true });
           } catch (err) {
             // ignore individual doc fail
           }
@@ -3495,6 +3763,7 @@ export const DataService = {
     } catch (e) {
       console.warn("Synced bib numbers locally; Firestore background sync:", e);
     }
+    window.dispatchEvent(new CustomEvent('studentsUpdated'));
   },
 
   // NOTIFICATIONS SYSTEM
@@ -3752,11 +4021,16 @@ export const DataService = {
   async getDirectorates(): Promise<Directorate[]> {
     try {
       const snap = await getDocs(collection(db, 'directorates'));
+      const localList = getLocal<Directorate>(STORAGE_KEYS.DIRECTORATES, INITIAL_DIRECTORATES).filter(d => d && !isRecentlyDeleted('directorates', d.id));
+      const pendingLocal = localList.filter(d => isPendingWrite('directorates', d.id));
       if (!snap.empty) {
-        const firestoreList = snap.docs.map(d => ({ id: d.id, ...d.data() } as Directorate));
-        return deduplicateById(firestoreList);
+        const firestoreList = snap.docs
+          .filter(d => !isRecentlyDeleted('directorates', d.id))
+          .map(d => ({ id: d.id, ...d.data() } as Directorate));
+        const merged = deduplicateById([...pendingLocal, ...firestoreList]);
+        setLocal(STORAGE_KEYS.DIRECTORATES, merged);
+        return merged;
       } else {
-        // AUTO-SEED: If new database, seed with initial directorates
         console.log("Seeding initial directorates to new Firestore...");
         for (const dir of INITIAL_DIRECTORATES) {
           await this.addDirectorate(dir);
@@ -3766,7 +4040,7 @@ export const DataService = {
     } catch (e) {
       console.warn("Firestore directorates fetch error, falling back to cache:", e);
     }
-    const localList = getLocal<Directorate>(STORAGE_KEYS.DIRECTORATES, INITIAL_DIRECTORATES);
+    const localList = getLocal<Directorate>(STORAGE_KEYS.DIRECTORATES, INITIAL_DIRECTORATES).filter(d => d && !isRecentlyDeleted('directorates', d.id));
     return deduplicateById(localList);
   },
 
@@ -3784,12 +4058,15 @@ export const DataService = {
     const localList = getLocal<Directorate>(STORAGE_KEYS.DIRECTORATES, INITIAL_DIRECTORATES);
     const updated = [newDir, ...localList.filter(d => d.id !== tempId)];
     setLocal(STORAGE_KEYS.DIRECTORATES, updated);
+    markPendingWrite('directorates', tempId);
 
     try {
-      await setDoc(doc(db, 'directorates', tempId), {
+      const cleanPayload = stripUndefinedDeep({
         ...newDir,
         createdAt: Timestamp.now()
       });
+      await setDoc(doc(db, 'directorates', tempId), cleanPayload, { merge: true });
+      clearPendingWrite('directorates', tempId);
     } catch (e) {
       console.warn("Directorate saved locally; Firestore sync error:", e);
     }
@@ -3800,18 +4077,21 @@ export const DataService = {
 
   async updateDirectorate(id: string, updates: Partial<Directorate>): Promise<void> {
     const localList = getLocal<Directorate>(STORAGE_KEYS.DIRECTORATES, INITIAL_DIRECTORATES);
-    const cleanUpdates = {
+    const cleanUpdates = stripUndefinedDeep({
       ...updates,
       ...(updates.adminEmails ? { adminEmails: updates.adminEmails.map(e => e.trim().toLowerCase()).filter(Boolean) } : {})
-    };
+    });
     const updated = localList.map(d => d.id === id ? { ...d, ...cleanUpdates } : d);
     setLocal(STORAGE_KEYS.DIRECTORATES, updated);
+    markPendingWrite('directorates', id);
 
     try {
-      await updateDoc(doc(db, 'directorates', id), {
+      await setDoc(doc(db, 'directorates', id), {
         ...cleanUpdates,
+        id,
         updatedAt: serverTimestamp()
-      });
+      }, { merge: true });
+      clearPendingWrite('directorates', id);
     } catch (e) {
       console.warn("Directorate updated locally:", e);
     }
@@ -3820,6 +4100,7 @@ export const DataService = {
   },
 
   async deleteDirectorate(id: string): Promise<void> {
+    markRecentlyDeleted('directorates', id);
     const localList = getLocal<Directorate>(STORAGE_KEYS.DIRECTORATES, INITIAL_DIRECTORATES);
     const updated = localList.filter(d => d.id !== id);
     setLocal(STORAGE_KEYS.DIRECTORATES, updated);
@@ -4562,63 +4843,57 @@ export const DataService = {
       ]);
 
       let schoolsCount = 0;
-      const localList = getLocal<School>(STORAGE_KEYS.SCHOOLS, []).filter(s => s && s.name && !s.name.includes('الكندي') && !s.name.includes('غير محدد') && s.name.trim() !== 'ثانوية المغرب العربي التأهيلية');
-      if (schoolsSnap && !schoolsSnap.empty) {
-        const firestoreSchools = schoolsSnap.docs
-          .map(d => ({ id: d.id, ...d.data() } as School))
-          .filter(s => s && s.name && !s.name.includes('الكندي') && !s.name.includes('غير محدد') && s.name.trim() !== 'ثانوية المغرب العربي التأهيلية');
-        
-        // Find any local schools that were not in Firestore yet and persist them to Firestore
-        const localPending = localList.filter(ls => 
-          ls && ls.name && 
-          !firestoreSchools.some(fs => fs.id === ls.id || fs.name.trim().toLowerCase() === ls.name.trim().toLowerCase())
-        );
+      const localSchools = getLocal<School>(STORAGE_KEYS.SCHOOLS, []).filter(
+        s => s && s.name && !s.name.includes('غير محدد') && !isRecentlyDeleted('schools', s.id)
+      );
+      const pendingLocalSchools = localSchools.filter(ls => isPendingWrite('schools', ls.id));
 
-        if (localPending.length > 0) {
-          localPending.forEach(ls => {
+      if (schoolsSnap) {
+        const firestoreSchools = schoolsSnap.docs
+          .filter(d => !isRecentlyDeleted('schools', d.id))
+          .map(d => ({ id: d.id, ...d.data() } as School))
+          .filter(s => s && s.name && !s.name.includes('غير محدد'));
+
+        // Persist any genuinely pending local writes to Firestore
+        if (pendingLocalSchools.length > 0) {
+          for (const ls of pendingLocalSchools) {
             const docRef = ls.id ? doc(db, 'schools', ls.id) : doc(collection(db, 'schools'));
             const sanitized = sanitizeFirestorePayload({
               ...ls,
               id: docRef.id,
-              createdAt: serverTimestamp()
+              updatedAt: serverTimestamp()
             });
-            setDoc(docRef, sanitized, { merge: true }).catch(err => console.warn("Failed to persist local school during sync:", err));
-          });
+            setDoc(docRef, sanitized, { merge: true })
+              .then(() => clearPendingWrite('schools', docRef.id))
+              .catch(err => console.warn("Failed to persist pending local school during sync:", err));
+          }
         }
 
-        const merged = deduplicateById([...firestoreSchools, ...localList]);
+        const merged = deduplicateById([...pendingLocalSchools, ...firestoreSchools]);
         setLocal(STORAGE_KEYS.SCHOOLS, merged);
         schoolsCount = merged.length;
       } else {
-        if (localList.length > 0) {
-          localList.forEach(ls => {
-            const docRef = ls.id ? doc(db, 'schools', ls.id) : doc(collection(db, 'schools'));
-            const sanitized = sanitizeFirestorePayload({
-              ...ls,
-              id: docRef.id,
-              createdAt: serverTimestamp()
-            });
-            setDoc(docRef, sanitized, { merge: true }).catch(err => console.warn("Failed to persist local school during sync to empty cloud:", err));
-          });
-        }
-        setLocal(STORAGE_KEYS.SCHOOLS, localList);
-        schoolsCount = localList.length;
+        schoolsCount = localSchools.length;
       }
 
       let tournamentsCount = 0;
-      if (tournamentsSnap && !tournamentsSnap.empty) {
-        const firestoreTournaments = tournamentsSnap.docs.map(d => {
-          const data = d.data();
-          return {
-            id: d.id,
-            ...data,
-            startDate: data.startDate?.toDate ? data.startDate.toDate() : data.startDate,
-            endDate: data.endDate?.toDate ? data.endDate.toDate() : data.endDate,
-            registrationDeadline: data.registrationDeadline?.toDate ? data.registrationDeadline.toDate() : data.registrationDeadline,
-          } as Tournament;
-        });
-        const localList = getLocal<Tournament>(STORAGE_KEYS.TOURNAMENTS, []);
-        const merged = deduplicateById([...firestoreTournaments, ...localList]);
+      if (tournamentsSnap) {
+        const firestoreTournaments = tournamentsSnap.docs
+          .filter(d => !isRecentlyDeleted('tournaments', d.id))
+          .map(d => {
+            const data = d.data();
+            return {
+              id: d.id,
+              ...data,
+              startDate: data.startDate?.toDate ? data.startDate.toDate() : data.startDate,
+              endDate: data.endDate?.toDate ? data.endDate.toDate() : data.endDate,
+              registrationDeadline: data.registrationDeadline?.toDate ? data.registrationDeadline.toDate() : data.registrationDeadline,
+            } as Tournament;
+          });
+        const pendingLocal = getLocal<Tournament>(STORAGE_KEYS.TOURNAMENTS, []).filter(
+          t => t && !isRecentlyDeleted('tournaments', t.id) && isPendingWrite('tournaments', t.id)
+        );
+        const merged = deduplicateById([...pendingLocal, ...firestoreTournaments]);
         setLocal(STORAGE_KEYS.TOURNAMENTS, merged);
         tournamentsCount = merged.length;
       } else {
@@ -4627,10 +4902,14 @@ export const DataService = {
       }
 
       let studentsCount = 0;
-      if (studentsSnap && !studentsSnap.empty) {
-        const firestoreStudents = studentsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Student));
-        const localList = getLocal<Student>('taourirt_students_data', []);
-        const merged = deduplicateById([...localList, ...firestoreStudents]);
+      if (studentsSnap) {
+        const firestoreStudents = studentsSnap.docs
+          .filter(d => !isRecentlyDeleted('students', d.id))
+          .map(d => ({ id: d.id, ...d.data() } as Student));
+        const pendingLocal = getLocal<Student>('taourirt_students_data', []).filter(
+          s => s && !isRecentlyDeleted('students', s.id) && isPendingWrite('students', s.id)
+        );
+        const merged = deduplicateById([...pendingLocal, ...firestoreStudents]);
         setLocal('taourirt_students_data', merged);
         studentsCount = merged.length;
       } else {
@@ -4639,10 +4918,14 @@ export const DataService = {
       }
 
       let matchesCount = 0;
-      if (matchesSnap && !matchesSnap.empty) {
-        const firestoreMatches = matchesSnap.docs.map(d => ({ id: d.id, ...d.data() } as Match));
-        const localList = getLocal<Match>(STORAGE_KEYS.MATCHES, INITIAL_MATCHES);
-        const merged = deduplicateById([...firestoreMatches, ...localList]);
+      if (matchesSnap) {
+        const firestoreMatches = matchesSnap.docs
+          .filter(d => !isRecentlyDeleted('matches', d.id))
+          .map(d => ({ id: d.id, ...d.data() } as Match));
+        const pendingLocal = getLocal<Match>(STORAGE_KEYS.MATCHES, []).filter(
+          m => m && !isRecentlyDeleted('matches', m.id) && isPendingWrite('matches', m.id)
+        );
+        const merged = deduplicateById([...pendingLocal, ...firestoreMatches]);
         setLocal(STORAGE_KEYS.MATCHES, merged);
         matchesCount = merged.length;
       } else {
@@ -4651,29 +4934,44 @@ export const DataService = {
       }
 
       let venuesCount = 0;
-      if (venuesSnap && !venuesSnap.empty) {
-        const firestoreVenues = venuesSnap.docs.map(d => ({ id: d.id, ...d.data() } as Venue));
-        const localList = getLocal<Venue>(STORAGE_KEYS.VENUES, INITIAL_VENUES);
-        const merged = deduplicateById([...firestoreVenues, ...localList]);
+      if (venuesSnap) {
+        const firestoreVenues = venuesSnap.docs
+          .filter(d => !isRecentlyDeleted('venues', d.id))
+          .map(d => ({ id: d.id, ...d.data() } as Venue));
+        const pendingLocal = getLocal<Venue>(STORAGE_KEYS.VENUES, []).filter(
+          v => v && !isRecentlyDeleted('venues', v.id) && isPendingWrite('venues', v.id)
+        );
+        const baseVenues = venuesSnap.empty && pendingLocal.length === 0 ? INITIAL_VENUES.filter(v => !isRecentlyDeleted('venues', v.id)) : firestoreVenues;
+        const merged = deduplicateById([...pendingLocal, ...baseVenues]);
         setLocal(STORAGE_KEYS.VENUES, merged);
         venuesCount = merged.length;
       }
 
       let refereesCount = 0;
-      if (refereesSnap && !refereesSnap.empty) {
-        const firestoreReferees = refereesSnap.docs.map(d => ({ id: d.id, ...d.data() } as Referee));
-        const localList = getLocal<Referee>('taourirt_referees_data', []);
-        const merged = deduplicateById([...firestoreReferees, ...localList]);
+      if (refereesSnap) {
+        const firestoreReferees = refereesSnap.docs
+          .filter(d => !isRecentlyDeleted('referees', d.id))
+          .map(d => ({ id: d.id, ...d.data() } as Referee));
+        const pendingLocal = deduplicateById([
+          ...getLocal<Referee>('taourirt_referees_data', []),
+          ...getLocal<Referee>('referees', [])
+        ]).filter(r => r && !isRecentlyDeleted('referees', r.id) && isPendingWrite('referees', r.id));
+        const merged = deduplicateById([...pendingLocal, ...firestoreReferees]);
         setLocal('taourirt_referees_data', merged);
+        setLocal('referees', merged);
         refereesCount = merged.length;
       }
 
       let directoratesCount = 0;
       if (directoratesSnap && !directoratesSnap.empty) {
-        const firestoreDirs = directoratesSnap.docs.map(d => ({ id: d.id, ...d.data() } as Directorate));
-        const localList = getLocal<Directorate>('app_directorates_data', INITIAL_DIRECTORATES);
-        const merged = deduplicateById([...firestoreDirs, ...localList]);
-        setLocal('app_directorates_data', merged);
+        const firestoreDirs = directoratesSnap.docs
+          .filter(d => !isRecentlyDeleted('directorates', d.id))
+          .map(d => ({ id: d.id, ...d.data() } as Directorate));
+        const pendingLocal = getLocal<Directorate>(STORAGE_KEYS.DIRECTORATES, []).filter(
+          d => d && !isRecentlyDeleted('directorates', d.id) && isPendingWrite('directorates', d.id)
+        );
+        const merged = deduplicateById([...pendingLocal, ...firestoreDirs]);
+        setLocal(STORAGE_KEYS.DIRECTORATES, merged);
         directoratesCount = merged.length;
       }
 
@@ -4766,18 +5064,26 @@ export const DataService = {
   // --- SCHOOL TOURNAMENT PARTICIPATION CONFIRMATIONS ---
   async getSchoolConfirmations(targetDirectorateId?: string): Promise<SchoolTournamentConfirmation[]> {
     try {
-      const activeDirId = targetDirectorateId || (localStorage.getItem('user_directorate_id') || 'taourirt');
+      const activeDirId = targetDirectorateId || this.getActiveDirectorateId() || 'taourirt';
       const snap = await getDocs(collection(db, 'school_confirmations'));
       let list: SchoolTournamentConfirmation[] = [];
       snap.forEach(docSnap => {
-        list.push({ id: docSnap.id, ...docSnap.data() } as SchoolTournamentConfirmation);
+        if (!isRecentlyDeleted('school_confirmations', docSnap.id)) {
+          list.push({ id: docSnap.id, ...docSnap.data() } as SchoolTournamentConfirmation);
+        }
       });
-      list = deduplicateById(list);
+      const pendingLocal = getLocal<SchoolTournamentConfirmation>(STORAGE_KEYS.CONFIRMATIONS, []).filter(
+        c => c && !isRecentlyDeleted('school_confirmations', c.id) && isPendingWrite('school_confirmations', c.id)
+      );
+      list = deduplicateById([...pendingLocal, ...list]);
       setLocal(STORAGE_KEYS.CONFIRMATIONS, list);
+      if (activeDirId === 'all') return list;
       return list.filter(c => !activeDirId || !c.directorateId || c.directorateId === activeDirId);
     } catch (e) {
       console.warn('Error fetching school confirmations from Firestore, using local storage:', e);
-      const local = getLocal<SchoolTournamentConfirmation>(STORAGE_KEYS.CONFIRMATIONS, []);
+      const local = getLocal<SchoolTournamentConfirmation>(STORAGE_KEYS.CONFIRMATIONS, []).filter(
+        c => c && !isRecentlyDeleted('school_confirmations', c.id)
+      );
       return local;
     }
   },
@@ -4807,7 +5113,6 @@ export const DataService = {
   }): Promise<SchoolTournamentConfirmation> {
     const confirmationId = `${data.sportId}_${data.schoolId}`;
 
-    // Normalize exact selected branches if provided, otherwise synthesize from flat arrays
     let normalizedBranches: ConfirmedBranchTuple[] = [];
     if (Array.isArray(data.selectedBranches) && data.selectedBranches.length > 0) {
       const seen = new Set<string>();
@@ -4843,6 +5148,7 @@ export const DataService = {
     const derivedCategories = Array.from(new Set(normalizedBranches.map(b => b.category)));
     const derivedGenders = Array.from(new Set(normalizedBranches.map(b => b.gender)));
     const derivedAffiliations = Array.from(new Set(normalizedBranches.map(b => b.affiliationType)));
+    const resolvedDir = data.directorateId || this.getActiveDirectorateId() || 'taourirt';
 
     const payload: SchoolTournamentConfirmation = {
       ...data,
@@ -4853,38 +5159,53 @@ export const DataService = {
       id: confirmationId,
       status: 'confirmed',
       confirmedAt: new Date().toISOString(),
-      directorateId: data.directorateId || (localStorage.getItem('user_directorate_id') || 'taourirt'),
+      directorateId: resolvedDir === 'all' ? 'taourirt' : resolvedDir,
       seasonId: data.seasonId || '2026/2027'
     };
 
-    // Update local storage immediately
     const current = getLocal<SchoolTournamentConfirmation>(STORAGE_KEYS.CONFIRMATIONS, []);
     const updated = deduplicateById([payload, ...current.filter(c => c.id !== confirmationId)]);
     setLocal(STORAGE_KEYS.CONFIRMATIONS, updated);
+    markPendingWrite('school_confirmations', confirmationId);
 
-    // Save to Firestore
     try {
-      const cleanPayload = sanitizeFirestorePayload(payload);
+      const cleanPayload = stripUndefinedDeep(payload);
       await setDoc(doc(db, 'school_confirmations', confirmationId), cleanPayload, { merge: true });
+      clearPendingWrite('school_confirmations', confirmationId);
     } catch (err) {
       console.error('Error writing school confirmation to Firestore:', err);
     }
 
-    // Trigger local update event
     window.dispatchEvent(new CustomEvent('schoolConfirmationsUpdated', { detail: payload }));
     return payload;
   },
 
-  async cancelSchoolConfirmation(sportId: string, schoolId: string): Promise<void> {
+  async cancelSchoolConfirmation(sportId: string, schoolId: string, schoolName?: string): Promise<void> {
     const confirmationId = `${sportId}_${schoolId}`;
-    // Update local storage
+    const cleanTargetName = (schoolName || schoolId || '').trim().toLowerCase();
+
     const current = getLocal<SchoolTournamentConfirmation>(STORAGE_KEYS.CONFIRMATIONS, []);
-    const updated = current.filter(c => c.id !== confirmationId && !(c.sportId === sportId && c.schoolId === schoolId));
+    const matchedIds = new Set<string>([confirmationId]);
+    current.forEach(c => {
+      if (c.sportId === sportId) {
+        if (
+          c.id === confirmationId ||
+          c.schoolId === schoolId ||
+          (cleanTargetName && c.schoolName && c.schoolName.trim().toLowerCase() === cleanTargetName)
+        ) {
+          matchedIds.add(c.id);
+        }
+      }
+    });
+
+    matchedIds.forEach(id => markRecentlyDeleted('school_confirmations', id));
+    const updated = current.filter(c => !matchedIds.has(c.id));
     setLocal(STORAGE_KEYS.CONFIRMATIONS, updated);
 
-    // Remove from Firestore
     try {
-      await deleteDoc(doc(db, 'school_confirmations', confirmationId));
+      await Promise.all(
+        Array.from(matchedIds).map(id => deleteDoc(doc(db, 'school_confirmations', id)).catch(() => {}))
+      );
     } catch (err) {
       console.error('Error deleting school confirmation from Firestore:', err);
     }
@@ -4893,26 +5214,46 @@ export const DataService = {
   },
 
   subscribeToSchoolConfirmations(callback: (confirmations: SchoolTournamentConfirmation[]) => void): () => void {
-    const activeDirId = localStorage.getItem('user_directorate_id') || 'taourirt';
-    
-    // Initial emit from local
-    callback(getLocal<SchoolTournamentConfirmation>(STORAGE_KEYS.CONFIRMATIONS, []));
+    const emitCurrent = () => {
+      const activeDirId = this.getActiveDirectorateId() || 'taourirt';
+      const list = getLocal<SchoolTournamentConfirmation>(STORAGE_KEYS.CONFIRMATIONS, []).filter(
+        c => c && !isRecentlyDeleted('school_confirmations', c.id)
+      );
+      if (activeDirId === 'all') {
+        callback(list);
+      } else {
+        callback(list.filter(c => !activeDirId || !c.directorateId || c.directorateId === activeDirId));
+      }
+    };
+
+    emitCurrent();
 
     const handleCustomEvent = () => {
-      callback(getLocal<SchoolTournamentConfirmation>(STORAGE_KEYS.CONFIRMATIONS, []));
+      emitCurrent();
     };
     window.addEventListener('schoolConfirmationsUpdated', handleCustomEvent);
+    window.addEventListener('directorateChanged', handleCustomEvent);
 
     try {
       const q = query(collection(db, 'school_confirmations'));
       const unsubscribe = onSnapshot(q, (snapshot) => {
+        const activeDirId = this.getActiveDirectorateId() || 'taourirt';
         const list: SchoolTournamentConfirmation[] = [];
         snapshot.forEach(docSnap => {
-          list.push({ id: docSnap.id, ...docSnap.data() } as SchoolTournamentConfirmation);
+          if (!isRecentlyDeleted('school_confirmations', docSnap.id)) {
+            list.push({ id: docSnap.id, ...docSnap.data() } as SchoolTournamentConfirmation);
+          }
         });
-        const clean = deduplicateById(list);
+        const pendingLocal = getLocal<SchoolTournamentConfirmation>(STORAGE_KEYS.CONFIRMATIONS, []).filter(
+          c => c && !isRecentlyDeleted('school_confirmations', c.id) && isPendingWrite('school_confirmations', c.id)
+        );
+        const clean = deduplicateById([...pendingLocal, ...list]);
         setLocal(STORAGE_KEYS.CONFIRMATIONS, clean);
-        callback(clean.filter(c => !activeDirId || !c.directorateId || c.directorateId === activeDirId));
+        if (activeDirId === 'all') {
+          callback(clean);
+        } else {
+          callback(clean.filter(c => !activeDirId || !c.directorateId || c.directorateId === activeDirId));
+        }
       }, (err) => {
         console.warn('school_confirmations onSnapshot error, keeping local:', err);
       });
@@ -4920,10 +5261,12 @@ export const DataService = {
       return () => {
         unsubscribe();
         window.removeEventListener('schoolConfirmationsUpdated', handleCustomEvent);
+        window.removeEventListener('directorateChanged', handleCustomEvent);
       };
     } catch (err) {
       return () => {
         window.removeEventListener('schoolConfirmationsUpdated', handleCustomEvent);
+        window.removeEventListener('directorateChanged', handleCustomEvent);
       };
     }
   },
@@ -4941,6 +5284,7 @@ export const DataService = {
     const normCat = data.ageCategory ? normalizeCategoryKey(data.ageCategory) : undefined;
     const cleanSchool = data.schoolName.trim();
     const id = `${data.sportId}_${data.tournamentId || 'branch'}_${normCat || 'all'}_${data.gender || 'all'}_${data.affiliationType || 'all'}_${cleanSchool}`;
+    const resolvedDir = this.getActiveDirectorateId() || 'taourirt';
     
     const record: SchoolWithdrawalRecord = {
       id,
@@ -4953,21 +5297,19 @@ export const DataService = {
       affiliationType: data.affiliationType,
       withdrawnAt: new Date().toISOString(),
       withdrawnBy: data.withdrawnBy,
-      directorateId: localStorage.getItem('user_directorate_id') || 'taourirt'
+      directorateId: resolvedDir === 'all' ? 'taourirt' : resolvedDir
     };
 
     const current = getLocal<SchoolWithdrawalRecord>(STORAGE_KEYS.WITHDRAWALS, []);
     const updated = deduplicateById([record, ...current]);
     setLocal(STORAGE_KEYS.WITHDRAWALS, updated);
 
-    // Save to Firestore if available
     try {
-      await setDoc(doc(db, 'school_withdrawals', id), record, { merge: true });
+      await setDoc(doc(db, 'school_withdrawals', id), stripUndefinedDeep(record), { merge: true });
     } catch (err) {
       console.warn('Error saving withdrawal to Firestore:', err);
     }
 
-    // Update or cancel exact branch confirmation for this sport/school if it exists
     try {
       const confirmations = getLocal<SchoolTournamentConfirmation>(STORAGE_KEYS.CONFIRMATIONS, []);
       const matchedConf = confirmations.find(c => 
@@ -4980,7 +5322,7 @@ export const DataService = {
       );
       if (matchedConf) {
         if (matchedConf.tournamentId && data.tournamentId && matchedConf.tournamentId === data.tournamentId && (!matchedConf.selectedBranches || matchedConf.selectedBranches.length <= 1)) {
-          await this.cancelSchoolConfirmation(data.sportId, matchedConf.schoolId || matchedConf.schoolName);
+          await this.cancelSchoolConfirmation(data.sportId, matchedConf.schoolId || matchedConf.schoolName, matchedConf.schoolName);
         } else {
           const currentBranches = getEffectiveConfirmedBranches(matchedConf, false);
           const remainingBranches = currentBranches.filter(b => {
@@ -4991,7 +5333,7 @@ export const DataService = {
           });
 
           if (remainingBranches.length === 0) {
-            await this.cancelSchoolConfirmation(data.sportId, matchedConf.schoolId || matchedConf.schoolName);
+            await this.cancelSchoolConfirmation(data.sportId, matchedConf.schoolId || matchedConf.schoolName, matchedConf.schoolName);
           } else {
             const updatedConf: SchoolTournamentConfirmation = {
               ...matchedConf,
@@ -5003,7 +5345,7 @@ export const DataService = {
             const updatedConfs = confirmations.map(c => c.id === matchedConf.id ? updatedConf : c);
             setLocal(STORAGE_KEYS.CONFIRMATIONS, updatedConfs);
             try {
-              await setDoc(doc(db, 'school_confirmations', matchedConf.id), sanitizeFirestorePayload(updatedConf), { merge: true });
+              await setDoc(doc(db, 'school_confirmations', matchedConf.id), stripUndefinedDeep(updatedConf), { merge: true });
             } catch (e) {
               console.warn(e);
             }
@@ -5037,20 +5379,14 @@ export const DataService = {
     const targetSport = params.sportId;
 
     return withdrawals.some(w => {
-      // 1. School identity check
       const wName = (w.schoolName || '').trim().toLowerCase();
       const wId = (w.schoolId || '').trim().toLowerCase();
       const matchSchool = (cleanName && (wName === cleanName || wName.includes(cleanName) || cleanName.includes(wName))) ||
                           (cleanId && (wId === cleanId || wId === cleanName));
       if (!matchSchool) return false;
 
-      // 2. Tournament ID direct match
       if (targetTournId && w.tournamentId && w.tournamentId === targetTournId) return true;
-
-      // 3. Sport match
       if (targetSport && w.sportId && w.sportId !== targetSport) return false;
-
-      // 4. Branch match (Category, Gender, Affiliation)
       if (normCat && w.ageCategory && w.ageCategory !== normCat) return false;
       if (targetGen && targetGen !== 'Both' && targetGen !== 'Mixed' && w.gender && w.gender !== 'Both' && w.gender !== 'Mixed' && w.gender.toLowerCase() !== targetGen.toLowerCase()) return false;
       if (targetAff && w.affiliationType && w.affiliationType !== targetAff) return false;
@@ -5062,14 +5398,19 @@ export const DataService = {
   async cancelSchoolWithdrawal(sportId: string, schoolNameOrId: string, tournamentId?: string): Promise<void> {
     const clean = schoolNameOrId.trim().toLowerCase();
     const current = getLocal<SchoolWithdrawalRecord>(STORAGE_KEYS.WITHDRAWALS, []);
+    const removedIds: string[] = [];
     const updated = current.filter(w => {
       const matchSchool = (w.schoolName && w.schoolName.toLowerCase() === clean) || (w.schoolId && w.schoolId.toLowerCase() === clean);
       if (!matchSchool) return true;
       if (w.sportId !== sportId) return true;
       if (tournamentId && w.tournamentId && w.tournamentId !== tournamentId) return true;
+      if (w.id) removedIds.push(w.id);
       return false;
     });
     setLocal(STORAGE_KEYS.WITHDRAWALS, updated);
+    if (removedIds.length > 0) {
+      await Promise.all(removedIds.map(id => deleteDoc(doc(db, 'school_withdrawals', id)).catch(() => {})));
+    }
     window.dispatchEvent(new CustomEvent('schoolWithdrawalsUpdated'));
   }
 };

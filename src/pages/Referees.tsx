@@ -15,6 +15,7 @@ import {
   LayoutGrid,
   GraduationCap
 } from 'lucide-react';
+import { ConfirmDeleteModal } from '../components/ConfirmDeleteModal';
 import toast from 'react-hot-toast';
 
 export const Referees: React.FC = () => {
@@ -61,18 +62,24 @@ export const Referees: React.FC = () => {
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingRef, setEditingRef] = useState<Referee | null>(null);
+  const [refereeToDelete, setRefereeToDelete] = useState<Referee | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
   
   const [formData, setFormData] = useState<{ fullName: string; phone: string; specialty: string[] }>({ fullName: '', phone: '', specialty: [] });
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
     loadReferees();
-    const handleDirChange = () => {
+    const handleRefresh = () => {
       loadReferees();
     };
-    window.addEventListener('directorateChanged', handleDirChange);
+    window.addEventListener('directorateChanged', handleRefresh);
+    window.addEventListener('refereesUpdated', handleRefresh);
+    window.addEventListener('userDataChanged', handleRefresh);
     return () => {
-      window.removeEventListener('directorateChanged', handleDirChange);
+      window.removeEventListener('directorateChanged', handleRefresh);
+      window.removeEventListener('refereesUpdated', handleRefresh);
+      window.removeEventListener('userDataChanged', handleRefresh);
     };
   }, []);
 
@@ -81,7 +88,9 @@ export const Referees: React.FC = () => {
     try {
       const activeDirId = DataService.getActiveDirectorateId();
       const data = await DataService.getReferees();
-      const dirReferees = deduplicateById(data.filter(r => (r.directorateId || 'taourirt') === activeDirId));
+      const dirReferees = deduplicateById(
+        data.filter(r => activeDirId === 'all' || (r.directorateId || 'taourirt') === activeDirId)
+      );
       setReferees(dirReferees);
     } catch (error) {
       console.error('Error loading referees:', error);
@@ -95,13 +104,13 @@ export const Referees: React.FC = () => {
     if (referee) {
       setEditingRef(referee);
       setFormData({
-        fullName: referee.fullName,
-        phone: referee.phone,
-        specialty: referee.specialty || []
+        fullName: referee.fullName.replace(/\s*\(أستاذ\)\s*/g, '').trim(),
+        phone: referee.phone === 'غير محدد' ? '' : referee.phone,
+        specialty: Array.isArray(referee.specialty) ? referee.specialty : (referee.specialty ? [referee.specialty] : [])
       });
     } else {
       setEditingRef(null);
-      setFormData({ fullName: '', phone: '', specialty: [] });
+      setFormData({ fullName: '', phone: '', specialty: selectedSport ? [selectedSport] : [] });
     }
     setIsModalOpen(true);
   };
@@ -126,11 +135,14 @@ export const Referees: React.FC = () => {
         toast.success('تم تحديث بيانات الحكم بنجاح');
       } else {
         const activeDirId = DataService.getActiveDirectorateId();
-        await DataService.addReferee({ ...formData, isActive: true, directorateId: activeDirId });
+        await DataService.addReferee({ ...formData, isActive: true, directorateId: activeDirId === 'all' ? 'taourirt' : activeDirId });
+        if (selectedSport && !formData.specialty.includes(selectedSport)) {
+          setSelectedSport('');
+        }
         toast.success('تمت إضافة الحكم بنجاح');
       }
       handleCloseModal();
-      loadReferees();
+      await loadReferees();
     } catch (error) {
       console.error('Submit referee error:', error);
       toast.error('حدث خطأ أثناء حفظ البيانات');
@@ -139,15 +151,22 @@ export const Referees: React.FC = () => {
     }
   };
 
-  const handleDelete = async (id: string) => {
-    if (window.confirm('هل أنت متأكد من حذف هذا الحكم؟')) {
-      try {
-        await DataService.deleteReferee(id);
-        toast.success('تم الحذف بنجاح');
-        loadReferees();
-      } catch (e) {
-        toast.error('تعذر الحذف');
-      }
+  const handleDelete = (ref: Referee) => {
+    setRefereeToDelete(ref);
+  };
+
+  const handleConfirmDeleteReferee = async () => {
+    if (!refereeToDelete) return;
+    setIsDeleting(true);
+    try {
+      await DataService.deleteReferee(refereeToDelete.id);
+      toast.success('تم حذف الحكم بنجاح');
+      setRefereeToDelete(null);
+      await loadReferees();
+    } catch (e) {
+      toast.error('تعذر الحذف');
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -338,26 +357,22 @@ export const Referees: React.FC = () => {
                         </a>
                       </td>
                       <td className="p-3.5 text-center">
-                        {!ref.isTeacher ? (
-                          <div className="flex items-center justify-center gap-1">
-                            <button
-                              onClick={() => handleOpenModal(ref)}
-                              className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
-                              title="تعديل"
-                            >
-                              <Edit2 className="h-4 w-4" />
-                            </button>
-                            <button
-                              onClick={() => handleDelete(ref.id)}
-                              className="p-1.5 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
-                              title="حذف"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </button>
-                          </div>
-                        ) : (
-                          <span className="text-[10px] text-slate-400 font-bold">تلقائي من الأساتذة</span>
-                        )}
+                        <div className="flex items-center justify-center gap-1">
+                          <button
+                            onClick={() => handleOpenModal(ref)}
+                            className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
+                            title="تعديل"
+                          >
+                            <Edit2 className="h-4 w-4" />
+                          </button>
+                          <button
+                            onClick={() => handleDelete(ref)}
+                            className="p-1.5 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
+                            title="حذف"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );
@@ -400,16 +415,12 @@ export const Referees: React.FC = () => {
                     </div>
                   </div>
                   <div className="flex items-center gap-1">
-                    {!ref.isTeacher && (
-                      <>
-                        <button onClick={() => handleOpenModal(ref)} className="p-1.5 text-slate-400 hover:text-blue-600 bg-slate-50 hover:bg-blue-50 rounded transition-colors" title="تعديل">
-                          <Edit2 className="h-3.5 w-3.5" />
-                        </button>
-                        <button onClick={() => handleDelete(ref.id)} className="p-1.5 text-slate-400 hover:text-red-600 bg-slate-50 hover:bg-red-50 rounded transition-colors" title="حذف">
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
-                      </>
-                    )}
+                    <button onClick={() => handleOpenModal(ref)} className="p-1.5 text-slate-400 hover:text-blue-600 bg-slate-50 hover:bg-blue-50 rounded transition-colors cursor-pointer" title="تعديل">
+                      <Edit2 className="h-3.5 w-3.5" />
+                    </button>
+                    <button onClick={() => handleDelete(ref)} className="p-1.5 text-slate-400 hover:text-red-600 bg-slate-50 hover:bg-red-50 rounded transition-colors cursor-pointer" title="حذف">
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
                   </div>
                 </div>
                 
@@ -516,6 +527,16 @@ export const Referees: React.FC = () => {
           </div>
         </div>
       )}
+
+      <ConfirmDeleteModal
+        isOpen={!!refereeToDelete}
+        onClose={() => setRefereeToDelete(null)}
+        onConfirm={handleConfirmDeleteReferee}
+        title="حذف الحكم"
+        message="هل أنت متأكد من رغبتك في حذف هذا الحكم من لائحة الحكام؟"
+        itemName={refereeToDelete?.fullName}
+        isDeleting={isDeleting}
+      />
     </div>
   );
 };

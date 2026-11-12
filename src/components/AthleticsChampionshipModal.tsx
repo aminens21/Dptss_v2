@@ -187,6 +187,8 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
   const [editingDiscipline, setEditingDiscipline] = useState<AthleticsDisciplineDef | null>(null);
   const [participantToDelete, setParticipantToDelete] = useState<AthleticsParticipantRecord | null>(null);
   const [memberToDelete, setMemberToDelete] = useState<{ teacherName: string; teacherId: string } | null>(null);
+  const [resultIdToDelete, setResultIdToDelete] = useState<string | null>(null);
+  const [isResetAttendanceConfirmOpen, setIsResetAttendanceConfirmOpen] = useState(false);
 
   // School Participant Management State
   const [selectedSchoolForView, setSelectedSchoolForView] = useState<string>('');
@@ -976,11 +978,15 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
       toast.error('لا تملك صلاحية حذف هذه النتائج');
       return;
     }
-    if (window.confirm('هل أنت متأكد من رغبتك في حذف هذه النتائج بشكل نهائي؟')) {
-      AthleticsService.deleteEventResult(resultId);
-      setResults(AthleticsService.getAllResults());
-      toast.success('تم حذف نتائج المسابقة بنجاح');
-    }
+    setResultIdToDelete(resultId);
+  };
+
+  const handleConfirmDeleteEventResult = () => {
+    if (!resultIdToDelete) return;
+    AthleticsService.deleteEventResult(resultIdToDelete);
+    setResults(AthleticsService.getAllResults());
+    setResultIdToDelete(null);
+    toast.success('تم حذف نتائج المسابقة بنجاح');
   };
 
   const handleEditEventResult = (res: AthleticsEventResult) => {
@@ -1108,11 +1114,16 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
 
   const handleResetAttendance = () => {
     if (!currentEventKey) return;
-    if (window.confirm('هل أنت متأكد من إعادة ضبط غرفة المناداة لهذا السباق؟')) {
+    setIsResetAttendanceConfirmOpen(true);
+  };
+
+  const handleConfirmResetAttendance = () => {
+    if (currentEventKey) {
       AthleticsService.clearAttendanceForEvent(currentEventKey);
       setAttendanceMap({});
       toast.success('تمت إعادة ضبط المناداة بنجاح 🔄');
     }
+    setIsResetAttendanceConfirmOpen(false);
   };
 
   const handleAudioCall = (studentName: string, bibNumber: string) => {
@@ -7148,6 +7159,22 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
           }}
         />
       )}
+
+      <ConfirmDeleteModal
+        isOpen={!!resultIdToDelete}
+        onClose={() => setResultIdToDelete(null)}
+        onConfirm={handleConfirmDeleteEventResult}
+        title="حذف نتائج المسابقة"
+        message="هل أنت متأكد من رغبتك في حذف نتائج هذه المسابقة بشكل نهائي؟"
+      />
+
+      <ConfirmDeleteModal
+        isOpen={isResetAttendanceConfirmOpen}
+        onClose={() => setIsResetAttendanceConfirmOpen(false)}
+        onConfirm={handleConfirmResetAttendance}
+        title="إعادة ضبط غرفة المناداة"
+        message="هل أنت متأكد من رغبتك في إعادة ضبط لائحة المناداة والحضور لهذا السباق؟"
+      />
     </div>
   );
 };

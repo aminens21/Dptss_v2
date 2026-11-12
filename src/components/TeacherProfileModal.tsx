@@ -147,7 +147,6 @@ export const TeacherProfileModal: React.FC = () => {
   const filteredSchools = schools.filter(s =>
     s &&
     s.name &&
-    !s.name.includes('الكندي') &&
     !s.name.includes('غير محدد') &&
     (s.directorateId === activeDirId || (!s.directorateId && activeDirId === 'taourirt')) &&
     s.type === selectedCycleType

@@ -176,7 +176,6 @@ export const Schools: React.FC = () => {
       const filtered = updatedSchools.filter(s => 
         s && 
         s.name && 
-        !s.name.includes('الكندي') && 
         !s.name.includes('غير محدد') && 
         (isAllDirs || s.directorateId === activeDirId || (!s.directorateId && activeDirId === 'taourirt'))
       );
@@ -205,7 +204,6 @@ export const Schools: React.FC = () => {
       const dirSchools = list.filter(s => 
         s && 
         s.name && 
-        !s.name.includes('الكندي') && 
         !s.name.includes('غير محدد') && 
         (isAllDirs || s.directorateId === activeDirId || (!s.directorateId && activeDirId === 'taourirt'))
       );
@@ -242,13 +240,23 @@ export const Schools: React.FC = () => {
         setEditingSchool(null);
       } else {
         const created = await DataService.addSchool(fullSchoolData);
+        // Reset any active filters that would hide the newly added school
+        if (typeFilter !== 'ALL' && typeFilter !== created.type) {
+          setTypeFilter('ALL');
+        }
+        if (communeFilter !== 'ALL' && communeFilter !== created.commune) {
+          setCommuneFilter('ALL');
+        }
+        if (selectedSport !== 'ALL') {
+          setSelectedSport('ALL');
+        }
+        if (selectedSchoolFilter !== 'ALL') {
+          setSelectedSchoolFilter('ALL');
+        }
         setSchools(prev => deduplicateById<School>([created, ...prev]));
         toast.success('تمت إضافة المؤسسة التعليمية بنجاح ومزامنتها في السحابة', { id: toastId });
       }
       setIsModalOpen(false);
-      setTimeout(() => {
-        loadSchools();
-      }, 300);
     } catch (e) {
       console.error(e);
       toast.error('حدث خطأ أثناء حفظ المؤسسة', { id: toastId });

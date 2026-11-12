@@ -69,15 +69,21 @@ export const Venues: React.FC = () => {
     return 'ALL';
   }, [userProfile]);
 
-  // Set initial selected sport to user preferred specialty upon login/data load
-  useEffect(() => {
-    if (preferredSportId && preferredSportId !== 'ALL') {
-      setSelectedSport(preferredSportId);
-    }
-  }, [preferredSportId]);
-
   useEffect(() => {
     loadData();
+    const unsubVenues = DataService.subscribeToVenues((vList) => {
+      setVenues(vList);
+    });
+    const handleRefresh = () => {
+      loadData();
+    };
+    window.addEventListener('venuesUpdated', handleRefresh);
+    window.addEventListener('directorateChanged', handleRefresh);
+    return () => {
+      unsubVenues();
+      window.removeEventListener('venuesUpdated', handleRefresh);
+      window.removeEventListener('directorateChanged', handleRefresh);
+    };
   }, []);
 
   const loadData = async () => {
@@ -106,7 +112,11 @@ export const Venues: React.FC = () => {
         setEditingVenue(null);
       } else {
         const created = await DataService.addVenue(venueData);
-        setVenues(prev => [created, ...prev]);
+        setVenues(prev => [created, ...prev.filter(v => v.id !== created.id)]);
+        setSelectedSport('ALL');
+        if (cityFilter !== 'ALL' && cityFilter !== created.city) {
+          setCityFilter('ALL');
+        }
         toast.success('تمت إضافة مركز التباري بنجاح');
       }
     } catch (e) {

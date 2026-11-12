@@ -220,10 +220,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             };
 
             // Migrate/Save under the new auth uid in Firestore so it's linked to their Auth account
-            if (docId !== user.uid) {
+            if (docId !== user.uid || (isSuperAdmin && data.role !== 'CENTRAL_ADMIN')) {
               try {
+                const cleanDoc: Record<string, any> = {};
+                Object.entries(profile).forEach(([k, v]) => {
+                  if (v !== undefined) cleanDoc[k] = v;
+                });
                 await setDoc(doc(db, 'users', user.uid), {
-                  ...profile,
+                  ...cleanDoc,
                   updatedAt: serverTimestamp()
                 }, { merge: true });
               } catch (saveErr) {
@@ -238,16 +242,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               DataService.setActiveDirectorateId(profile.directorateId);
             }
           } else {
-            // Check if there is a pre-registered manager account in Firestore
+            // Check if there is a pre-registered manager account or school coordinator in Firestore
             const managerDocId = `mgr_${cleanUserEmail.replace(/[^a-z0-9]/g, '_')}`;
+            let mgrFound = false;
             let detectedRole: Role = isSuperAdmin ? 'CENTRAL_ADMIN' : (managedDirectorate ? 'CENTRAL_ADMIN' : 'TEACHER');
             let detectedName = user.displayName || (isSuperAdmin ? 'المسير المركزي الرئيسي' : user.email?.split('@')[0] || 'مستخدم');
             let detectedSportId: string | undefined = undefined;
             let detectedTournamentId: string | undefined = undefined;
+            let detectedWorkLocation: string | undefined = undefined;
+            let detectedSchoolId: string | undefined = undefined;
 
             try {
               const mgrDoc = await getDoc(doc(db, 'users', managerDocId));
               if (mgrDoc.exists()) {
+                mgrFound = true;
                 const mgrData = mgrDoc.data();
                 detectedRole = 'SPORT_MANAGER';
                 if (mgrData.fullName) detectedName = mgrData.fullName;
@@ -258,57 +266,91 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               console.warn("Manager lookup warning:", mgrErr);
             }
 
-            const initialDirectorateId = managedDirectorate?.id || 'taourirt';
-            const initialDirectorateName = managedDirectorate?.name || 'المديرية الإقليمية بتاوريرت';
-
-            const newProfile: User = {
-              id: user.uid,
-              fullName: detectedName,
-              email: cleanUserEmail,
-              role: detectedRole,
-              sportId: detectedSportId,
-              assignedTournamentId: detectedTournamentId,
-              directorateId: initialDirectorateId,
-              directorateName: initialDirectorateName,
-              isSuperAdmin,
-              isActive: true,
-              createdAt: new Date(),
-              updatedAt: new Date(),
-            };
-
-            // Save to Firestore
-            try {
-              await setDoc(doc(db, 'users', user.uid), {
-                ...newProfile,
-                createdAt: serverTimestamp(),
-                updatedAt: serverTimestamp()
-              });
-            } catch (saveErr) {
-              console.warn("Could not save new user document to Firestore:", saveErr);
+            let schoolCoordinatorFound = false;
+            let matchedSchoolDirId: string | undefined = undefined;
+            if (!isSuperAdmin && !managedDirectorate && !mgrFound) {
+              try {
+                const allSchools = await DataService.getSchools();
+                const matchedSchool = allSchools.find(s =>
+                  ((s as any).email && isFlexibleEmailMatch((s as any).email, cleanUserEmail)) ||
+                  ((s as any).coordinatorEmail && isFlexibleEmailMatch((s as any).coordinatorEmail, cleanUserEmail))
+                );
+                if (matchedSchool) {
+                  schoolCoordinatorFound = true;
+                  detectedWorkLocation = matchedSchool.name;
+                  detectedSchoolId = matchedSchool.id;
+                  matchedSchoolDirId = matchedSchool.directorateId;
+                }
+              } catch (sErr) {
+                console.warn("School coordinator lookup warning:", sErr);
+              }
             }
 
-            setUserProfile(newProfile);
+            // CRITICAL: Only auto-create Firestore user profile if authorized (SuperAdmin, Directorate Admin, Pre-registered Manager, or School Coordinator)
+            if (isSuperAdmin || !!managedDirectorate || mgrFound || schoolCoordinatorFound) {
+              const initialDirectorateId = managedDirectorate?.id || matchedSchoolDirId || 'taourirt';
+              const initialDirectorateName = managedDirectorate?.name || 'المديرية الإقليمية بتاوريرت';
 
-            // Automatically set the active directorate in localStorage for non-super admins to their assigned directorate
-            if (!isSuperAdmin && newProfile.directorateId) {
-              DataService.setActiveDirectorateId(newProfile.directorateId);
+              const newProfile: User = {
+                id: user.uid,
+                fullName: detectedName,
+                email: cleanUserEmail,
+                role: detectedRole,
+                ...(detectedSportId ? { sportId: detectedSportId } : {}),
+                ...(detectedTournamentId ? { assignedTournamentId: detectedTournamentId } : {}),
+                ...(detectedWorkLocation ? { workLocation: detectedWorkLocation } : {}),
+                ...(detectedSchoolId ? { schoolId: detectedSchoolId } : {}),
+                directorateId: initialDirectorateId,
+                directorateName: initialDirectorateName,
+                isSuperAdmin,
+                isActive: true,
+                createdAt: new Date(),
+                updatedAt: new Date(),
+              };
+
+              try {
+                const cleanDoc: Record<string, any> = {};
+                Object.entries(newProfile).forEach(([k, v]) => {
+                  if (v !== undefined) cleanDoc[k] = v;
+                });
+                await setDoc(doc(db, 'users', user.uid), {
+                  ...cleanDoc,
+                  createdAt: serverTimestamp(),
+                  updatedAt: serverTimestamp()
+                }, { merge: true });
+              } catch (saveErr) {
+                console.warn("Could not save authorized user document to Firestore:", saveErr);
+              }
+
+              setUserProfile(newProfile);
+
+              if (!isSuperAdmin && newProfile.directorateId) {
+                DataService.setActiveDirectorateId(newProfile.directorateId);
+              }
+            } else {
+              // Unregistered email: do NOT create a Firestore user profile (Login.tsx will sign out and notify)
+              setUserProfile(null);
             }
           }
         } catch (error) {
           console.error("Error fetching user profile:", error);
           const isSuper = isSuperAdminEmail(cleanUserEmail);
-          setUserProfile({
-            id: user.uid,
-            fullName: isSuper ? 'المسير المركزي الرئيسي' : (user.displayName || user.email || 'مستخدم'),
-            email: cleanUserEmail,
-            role: isSuper ? 'CENTRAL_ADMIN' : 'TEACHER',
-            isSuperAdmin: isSuper,
-            directorateId: 'taourirt',
-            directorateName: 'المديرية الإقليمية بتاوريرت',
-            isActive: true,
-            createdAt: new Date(),
-            updatedAt: new Date(),
-          });
+          if (isSuper) {
+            setUserProfile({
+              id: user.uid,
+              fullName: 'المسير المركزي الرئيسي',
+              email: cleanUserEmail,
+              role: 'CENTRAL_ADMIN',
+              isSuperAdmin: true,
+              directorateId: 'taourirt',
+              directorateName: 'المديرية الإقليمية بتاوريرت',
+              isActive: true,
+              createdAt: new Date(),
+              updatedAt: new Date(),
+            });
+          } else {
+            setUserProfile(null);
+          }
         }
       } else {
         if (!localStorage.getItem('demo_user_profile')) {

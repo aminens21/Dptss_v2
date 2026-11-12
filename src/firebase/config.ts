@@ -14,8 +14,8 @@ export const auth = getAuth(app);
 
 const databaseId = (firebaseConfig as any).firestoreDatabaseId || undefined;
 
-// Suppress non-fatal retry logs and network noise
-setLogLevel('silent');
+// Suppress non-fatal retry logs while preserving genuine write/permission errors
+setLogLevel('error');
 
 // Robust Firestore initialization:
 // Enables auto/forced long polling to safely and instantly connect across preview iframes and proxies.
@@ -39,6 +39,3 @@ try {
 }
 
 export const db = firestoreDb;
-
-
-
