@@ -35,25 +35,32 @@ export function deduplicateById<T extends { id?: string }>(items: T[]): T[] {
   return result;
 }
 
-// Helper to recursively sanitize payloads for Firestore (removes/replaces undefined with null)
+// Helper to recursively sanitize payloads for Firestore (removes/replaces undefined with empty string, preserves FieldValues)
 export function sanitizeFirestorePayload<T>(obj: T): T {
   if (obj === null || obj === undefined) {
-    return null as any;
+    return "" as any;
+  }
+  // DO NOT mutate FieldValues, Timestamps, Dates, or primitives!
+  if (
+    typeof obj !== 'object' ||
+    obj instanceof Date ||
+    (obj as any)?._methodName !== undefined ||
+    (obj as any)?.toMillis !== undefined ||
+    (obj as any)?.seconds !== undefined
+  ) {
+    return obj;
   }
   if (Array.isArray(obj)) {
     return obj.map(item => sanitizeFirestorePayload(item)) as any;
   }
-  if (typeof obj === 'object') {
-    const cleaned: any = {};
-    for (const key in obj) {
-      if (Object.prototype.hasOwnProperty.call(obj, key)) {
-        const val = obj[key];
-        cleaned[key] = val === undefined ? null : sanitizeFirestorePayload(val);
-      }
+  const cleaned: any = {};
+  for (const key in obj) {
+    if (Object.prototype.hasOwnProperty.call(obj, key)) {
+      const val = obj[key];
+      cleaned[key] = val === undefined || val === null ? "" : sanitizeFirestorePayload(val);
     }
-    return cleaned as any;
   }
-  return obj;
+  return cleaned as any;
 }
 
 // Local storage helpers with automatic deduplication and self-healing
@@ -1497,14 +1504,53 @@ export const DataService = {
           return { ...s, accessCode };
         });
 
-        setLocal(STORAGE_KEYS.SCHOOLS, listWithCodes);
-        if (all === true || !activeDirId || activeDirId === 'all') {
-          return listWithCodes;
+        // CRITICAL FIX: Merge with local storage schools so that freshly added schools
+        // are NEVER lost or overwritten before Firestore completes replication
+        const localList = getLocal<School>(STORAGE_KEYS.SCHOOLS, []);
+        const localPending = localList.filter(ls => 
+          ls && ls.name && 
+          !listWithCodes.some(fs => fs.id === ls.id || fs.name.trim().toLowerCase() === ls.name.trim().toLowerCase()) &&
+          !ls.name.includes('الكندي') && !ls.name.includes('غير محدد') && ls.name.trim() !== 'ثانوية المغرب العربي التأهيلية'
+        );
+
+        if (localPending.length > 0) {
+          localPending.forEach(ls => {
+            const docRef = ls.id ? doc(db, 'schools', ls.id) : doc(collection(db, 'schools'));
+            const sanitized = sanitizeFirestorePayload({
+              ...ls,
+              id: docRef.id,
+              directorateId: ls.directorateId || activeDirId,
+              createdAt: serverTimestamp()
+            });
+            setDoc(docRef, sanitized, { merge: true }).catch(err => console.warn("Failed to background-persist local school:", err));
+          });
         }
-        return listWithCodes.filter(s => (s.directorateId || 'taourirt') === activeDirId);
+
+        const combinedList = deduplicateById<School>([...listWithCodes, ...localPending]);
+        setLocal(STORAGE_KEYS.SCHOOLS, combinedList);
+        if (all === true || !activeDirId || activeDirId === 'all') {
+          return combinedList;
+        }
+        return combinedList.filter(s => (s.directorateId || 'taourirt') === activeDirId);
       } else {
-        // If Firestore is empty, we return an empty list instead of auto-seeding
-        // This allows the user to have a clean database after "Delete All"
+        // If Firestore is empty, check if we have local schools to upload before wiping
+        const localList = getLocal<School>(STORAGE_KEYS.SCHOOLS, []);
+        const filtered = localList.filter(s => s && s.name && !s.name.includes('الكندي') && !s.name.includes('غير محدد') && s.name.trim() !== 'ثانوية المغرب العربي التأهيلية');
+        if (filtered.length > 0) {
+          filtered.forEach(ls => {
+            const docRef = ls.id ? doc(db, 'schools', ls.id) : doc(collection(db, 'schools'));
+            const sanitized = sanitizeFirestorePayload({
+              ...ls,
+              id: docRef.id,
+              directorateId: ls.directorateId || activeDirId,
+              createdAt: serverTimestamp()
+            });
+            setDoc(docRef, sanitized, { merge: true }).catch(err => console.warn("Background upload of local school failed:", err));
+          });
+          return (all === true || !activeDirId || activeDirId === 'all') 
+            ? filtered 
+            : filtered.filter(s => (s.directorateId || 'taourirt') === activeDirId);
+        }
         setLocal(STORAGE_KEYS.SCHOOLS, []);
         return [];
       }
@@ -1524,7 +1570,7 @@ export const DataService = {
     try {
       const unsubscribe = onSnapshot(collection(db, 'schools'), (snap) => {
         const firestoreList = snap.docs
-          .map(d => ({ id: d.id, ...d.data() } as School))
+          .map(d => ({ id: d.id, ...d.data(), directorateId: d.data().directorateId || 'taourirt' } as School))
           .filter(s => s && s.name && !s.name.includes('الكندي') && !s.name.includes('غير محدد') && s.name.trim() !== 'ثانوية المغرب العربي التأهيلية');
         
         // Auto-heal accessCode for legacy schools in real-time
@@ -1541,8 +1587,16 @@ export const DataService = {
           return { ...s, accessCode };
         });
 
-        setLocal(STORAGE_KEYS.SCHOOLS, listWithCodes);
-        callback(listWithCodes);
+        const localList = getLocal<School>(STORAGE_KEYS.SCHOOLS, []);
+        const localPending = localList.filter(ls => 
+          ls && ls.name && 
+          !listWithCodes.some(fs => fs.id === ls.id || fs.name.trim().toLowerCase() === ls.name.trim().toLowerCase()) &&
+          !ls.name.includes('الكندي') && !ls.name.includes('غير محدد') && ls.name.trim() !== 'ثانوية المغرب العربي التأهيلية'
+        );
+
+        const combined = deduplicateById<School>([...listWithCodes, ...localPending]);
+        setLocal(STORAGE_KEYS.SCHOOLS, combined);
+        callback(combined);
       }, (err) => {
         console.warn("Real-time schools listener error:", err);
       });
@@ -1671,38 +1725,72 @@ export const DataService = {
   },
 
   async addSchool(school: Omit<School, 'id'>): Promise<School> {
-    const activeDirId = this.getActiveDirectorateId();
-    const accessCode = school.accessCode || generateSecureAccessCode();
-    const schoolWithDir = {
+    const activeDirId = this.getActiveDirectorateId() || 'taourirt';
+    const accessCode = (school.accessCode && school.accessCode.trim().length === 6)
+      ? school.accessCode.trim()
+      : generateSecureAccessCode();
+    const cleanName = school.name?.trim() || '';
+    
+    // Auto-generate Firestore doc reference or unique ID
+    const newDocRef = doc(collection(db, 'schools'));
+    const realId = newDocRef.id;
+
+    const schoolWithDir: School = {
       ...school,
+      id: realId,
+      name: cleanName,
+      type: school.type || 'تأهيلي',
+      commune: school.commune || 'تاوريرت المركز',
       accessCode,
-      directorateId: school.directorateId || activeDirId
+      directorateId: school.directorateId || (activeDirId === 'all' ? 'taourirt' : activeDirId),
+      coordinatorName: school.coordinatorName || school.teacherName || '',
+      teacherName: school.coordinatorName || school.teacherName || '',
+      phone: school.phone || '',
+      principalName: school.principalName || '',
+      principalPhone: school.principalPhone || ''
     };
-    const tempId = `sch-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
-    const newSchool: School = {
-      ...schoolWithDir,
-      id: tempId
-    };
+
+    // Update local state immediately
     const localList = getLocal<School>(STORAGE_KEYS.SCHOOLS, []);
-    const filtered = localList.filter(s => s.id !== tempId && s.name?.trim() !== 'ثانوية المغرب العربي التأهيلية');
-    const updated = [newSchool, ...filtered];
+    const filtered = localList.filter(s => s.id !== realId && s.name?.trim() !== 'ثانوية المغرب العربي التأهيلية');
+    const updated = [schoolWithDir, ...filtered];
     setLocal(STORAGE_KEYS.SCHOOLS, updated);
 
-    try {
-      const docRef = await addDoc(collection(db, 'schools'), {
-        ...schoolWithDir,
-        createdAt: Timestamp.now()
-      });
-      const realId = docRef.id;
-      newSchool.id = realId;
+    // Save to Firestore using setDoc with explicit clean payload
+    const firestoreDocData: Record<string, any> = {
+      id: realId,
+      name: cleanName,
+      type: schoolWithDir.type,
+      commune: schoolWithDir.commune,
+      directorateId: schoolWithDir.directorateId,
+      accessCode: schoolWithDir.accessCode,
+      coordinatorName: schoolWithDir.coordinatorName || '',
+      teacherName: schoolWithDir.teacherName || '',
+      phone: schoolWithDir.phone || '',
+      principalName: schoolWithDir.principalName || '',
+      principalPhone: schoolWithDir.principalPhone || '',
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    };
 
-      const currentList = getLocal<School>(STORAGE_KEYS.SCHOOLS, []);
-      const synced = currentList.map(s => s.id === tempId ? { ...s, id: realId } : s).filter(s => s.name?.trim() !== 'ثانوية المغرب العربي التأهيلية');
-      setLocal(STORAGE_KEYS.SCHOOLS, synced);
+    try {
+      await setDoc(newDocRef, firestoreDocData);
     } catch (e) {
-      console.warn("Saved school locally:", e);
+      console.warn("Primary Firestore school save failed, retrying fallback:", e);
+      try {
+        await setDoc(newDocRef, {
+          ...firestoreDocData,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        });
+      } catch (errFallback) {
+        console.error("Critical: Firestore school save fallback failed:", errFallback);
+      }
     }
-    return newSchool;
+
+    // Trigger global refresh event
+    window.dispatchEvent(new CustomEvent('schoolsUpdated'));
+    return schoolWithDir;
   },
 
   async updateSchool(id: string, updates: Partial<School>): Promise<void> {
@@ -1711,13 +1799,31 @@ export const DataService = {
     setLocal(STORAGE_KEYS.SCHOOLS, updated);
 
     try {
-      await updateDoc(doc(db, 'schools', id), {
-        ...updates,
-        updatedAt: Timestamp.now()
+      const cleanUpdates: Record<string, any> = {};
+      Object.entries(updates).forEach(([k, v]) => {
+        if (v !== undefined && v !== null) {
+          cleanUpdates[k] = v;
+        }
       });
+      cleanUpdates.updatedAt = serverTimestamp();
+      await setDoc(doc(db, 'schools', id), cleanUpdates, { merge: true });
     } catch (e) {
-      console.warn("Updated school locally:", e);
+      console.warn("Primary Firestore school update failed, retrying fallback:", e);
+      try {
+        const cleanUpdates: Record<string, any> = {};
+        Object.entries(updates).forEach(([k, v]) => {
+          if (v !== undefined && v !== null) {
+            cleanUpdates[k] = v;
+          }
+        });
+        cleanUpdates.updatedAt = new Date().toISOString();
+        await setDoc(doc(db, 'schools', id), cleanUpdates, { merge: true });
+      } catch (err2) {
+        console.error("Critical: Firestore school update fallback failed:", err2);
+      }
     }
+
+    window.dispatchEvent(new CustomEvent('schoolsUpdated'));
   },
 
   async deleteSchool(id: string): Promise<void> {
@@ -1728,8 +1834,10 @@ export const DataService = {
     try {
       await deleteDoc(doc(db, 'schools', id));
     } catch (e) {
-      console.warn("Deleted school locally:", e);
+      console.error("Error deleting school from Firestore:", e);
     }
+
+    window.dispatchEvent(new CustomEvent('schoolsUpdated'));
   },
 
   async deleteAllSchools(): Promise<void> {
@@ -4454,14 +4562,46 @@ export const DataService = {
       ]);
 
       let schoolsCount = 0;
+      const localList = getLocal<School>(STORAGE_KEYS.SCHOOLS, []).filter(s => s && s.name && !s.name.includes('الكندي') && !s.name.includes('غير محدد') && s.name.trim() !== 'ثانوية المغرب العربي التأهيلية');
       if (schoolsSnap && !schoolsSnap.empty) {
-        const firestoreSchools = schoolsSnap.docs.map(d => ({ id: d.id, ...d.data() } as School));
-        const localList = getLocal<School>(STORAGE_KEYS.SCHOOLS, INITIAL_SCHOOLS);
+        const firestoreSchools = schoolsSnap.docs
+          .map(d => ({ id: d.id, ...d.data() } as School))
+          .filter(s => s && s.name && !s.name.includes('الكندي') && !s.name.includes('غير محدد') && s.name.trim() !== 'ثانوية المغرب العربي التأهيلية');
+        
+        // Find any local schools that were not in Firestore yet and persist them to Firestore
+        const localPending = localList.filter(ls => 
+          ls && ls.name && 
+          !firestoreSchools.some(fs => fs.id === ls.id || fs.name.trim().toLowerCase() === ls.name.trim().toLowerCase())
+        );
+
+        if (localPending.length > 0) {
+          localPending.forEach(ls => {
+            const docRef = ls.id ? doc(db, 'schools', ls.id) : doc(collection(db, 'schools'));
+            const sanitized = sanitizeFirestorePayload({
+              ...ls,
+              id: docRef.id,
+              createdAt: serverTimestamp()
+            });
+            setDoc(docRef, sanitized, { merge: true }).catch(err => console.warn("Failed to persist local school during sync:", err));
+          });
+        }
+
         const merged = deduplicateById([...firestoreSchools, ...localList]);
         setLocal(STORAGE_KEYS.SCHOOLS, merged);
         schoolsCount = merged.length;
       } else {
-        const localList = getLocal<School>(STORAGE_KEYS.SCHOOLS, INITIAL_SCHOOLS);
+        if (localList.length > 0) {
+          localList.forEach(ls => {
+            const docRef = ls.id ? doc(db, 'schools', ls.id) : doc(collection(db, 'schools'));
+            const sanitized = sanitizeFirestorePayload({
+              ...ls,
+              id: docRef.id,
+              createdAt: serverTimestamp()
+            });
+            setDoc(docRef, sanitized, { merge: true }).catch(err => console.warn("Failed to persist local school during sync to empty cloud:", err));
+          });
+        }
+        setLocal(STORAGE_KEYS.SCHOOLS, localList);
         schoolsCount = localList.length;
       }
 

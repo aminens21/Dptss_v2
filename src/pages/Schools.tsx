@@ -168,18 +168,35 @@ export const Schools: React.FC = () => {
     };
     window.addEventListener('directorateChanged', handleRefresh);
     window.addEventListener('schoolsUpdated', handleRefresh);
+    
+    // Subscribe to live schools updates from Firestore
+    const unsubscribe = DataService.subscribeToSchools((updatedSchools) => {
+      const activeDirId = DataService.getActiveDirectorateId() || 'taourirt';
+      const isAllDirs = !activeDirId || activeDirId === 'all';
+      const filtered = updatedSchools.filter(s => 
+        s && 
+        s.name && 
+        !s.name.includes('الكندي') && 
+        !s.name.includes('غير محدد') && 
+        (isAllDirs || s.directorateId === activeDirId || (!s.directorateId && activeDirId === 'taourirt'))
+      );
+      setSchools(deduplicateById<School>(filtered));
+    });
+
     return () => {
       window.removeEventListener('directorateChanged', handleRefresh);
       window.removeEventListener('schoolsUpdated', handleRefresh);
+      unsubscribe();
     };
   }, []);
 
   const loadSchools = async () => {
     setLoading(true);
     try {
-      const activeDirId = DataService.getActiveDirectorateId();
+      const activeDirId = DataService.getActiveDirectorateId() || 'taourirt';
+      const isAllDirs = !activeDirId || activeDirId === 'all';
       const [list, mList, studList, activeDir] = await Promise.all([
-        DataService.getSchools(),
+        DataService.getSchools(isAllDirs ? 'all' : activeDirId, isAllDirs),
         DataService.getMatches(),
         DataService.getStudents(),
         DataService.getActiveDirectorate()
@@ -190,10 +207,10 @@ export const Schools: React.FC = () => {
         s.name && 
         !s.name.includes('الكندي') && 
         !s.name.includes('غير محدد') && 
-        (s.directorateId === activeDirId || (!s.directorateId && activeDirId === 'taourirt'))
+        (isAllDirs || s.directorateId === activeDirId || (!s.directorateId && activeDirId === 'taourirt'))
       );
-      const dirMatches = mList.filter(m => (m.directorateId || 'taourirt') === activeDirId);
-      const dirStudents = studList.filter(st => (st.directorateId || 'taourirt') === activeDirId);
+      const dirMatches = mList.filter(m => isAllDirs || (m.directorateId || 'taourirt') === activeDirId);
+      const dirStudents = studList.filter(st => isAllDirs || (st.directorateId || 'taourirt') === activeDirId);
 
       setActiveDirObj(activeDir);
       setSchools(deduplicateById<School>(dirSchools));
@@ -212,21 +229,29 @@ export const Schools: React.FC = () => {
       toast.error('عذراً، لا يحق لك تعديل بيانات هذه المؤسسة التعليمية.');
       return;
     }
+    const toastId = toast.loading('جاري حفظ المؤسسة التعليمية في السحابة...');
     try {
-      const activeDirId = DataService.getActiveDirectorateId();
-      const fullSchoolData = { ...schoolData, directorateId: activeDirId };
+      const activeDirId = DataService.getActiveDirectorateId() || 'taourirt';
+      const effectiveDirId = activeDirId === 'all' ? 'taourirt' : activeDirId;
+      const fullSchoolData = { ...schoolData, directorateId: effectiveDirId };
+
       if (editingSchool) {
         await DataService.updateSchool(editingSchool.id, fullSchoolData);
         setSchools(prev => deduplicateById<School>(prev.map(s => s.id === editingSchool.id ? { ...s, ...fullSchoolData } : s)));
-        toast.success('تم تحديث بيانات المؤسسة بنجاح');
+        toast.success('تم تحديث بيانات المؤسسة بنجاح', { id: toastId });
         setEditingSchool(null);
       } else {
         const created = await DataService.addSchool(fullSchoolData);
         setSchools(prev => deduplicateById<School>([created, ...prev]));
-        toast.success('تمت إضافة المؤسسة التعليمية بنجاح');
+        toast.success('تمت إضافة المؤسسة التعليمية بنجاح ومزامنتها في السحابة', { id: toastId });
       }
+      setIsModalOpen(false);
+      setTimeout(() => {
+        loadSchools();
+      }, 300);
     } catch (e) {
-      toast.error('حدث خطأ أثناء حفظ المؤسسة');
+      console.error(e);
+      toast.error('حدث خطأ أثناء حفظ المؤسسة', { id: toastId });
     }
   };
 

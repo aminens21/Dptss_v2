@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { School, Directorate } from '../types';
 import { DataService } from '../lib/dataService';
 import { X, School as SchoolIcon, MapPin, User, Phone, PhoneCall, Layers, KeyRound } from 'lucide-react';
+import toast from 'react-hot-toast';
 
 interface CreateSchoolModalProps {
   isOpen: boolean;
@@ -60,7 +61,7 @@ export const CreateSchoolModal: React.FC<CreateSchoolModalProps> = ({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) {
-      alert('يرجى إدخال اسم المؤسسة التعليمية');
+      toast.error('يرجى إدخال اسم المؤسسة التعليمية');
       return;
     }
 
