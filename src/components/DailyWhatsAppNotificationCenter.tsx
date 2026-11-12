@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { Match, School, Tournament, Venue, Referee, User } from '../types';
-import { SPORTS_MAP, DataService } from '../lib/dataService';
+import { SPORTS_MAP, DataService, normalizeDateToYmd } from '../lib/dataService';
 import { useAuth } from '../contexts/AuthContext';
 import {
   generateTeacherWhatsAppMessage,
@@ -328,14 +328,7 @@ export const DailyWhatsAppNotificationCenter: React.FC<DailyWhatsAppNotification
       }
 
       // Date normalization
-      let dateString = '';
-      if (typeof m.date === 'string') {
-        dateString = m.date.split('T')[0];
-      } else if (m.date?.toDate) {
-        dateString = m.date.toDate().toISOString().split('T')[0];
-      } else if (m.date) {
-        dateString = new Date(m.date).toISOString().split('T')[0];
-      }
+      const dateString = normalizeDateToYmd(m.date);
 
       // Build List of all Stakeholders for this match
       const stakeholders: MatchStakeholder[] = [

@@ -4,7 +4,7 @@ import { Match, School, Venue, CrossCountryCategoryResult, AthleticsCategoryResu
 import { CROSS_COUNTRY_CATEGORIES } from '../lib/crossCountryConfig';
 import { AthleticsService } from '../lib/athleticsService';
 import { MapPin, Trophy, Goal, Users, Award, Calendar, ChevronDown, X, Medal, Sparkles, Filter, Activity, Building2, Search, CheckCircle2, Clock } from 'lucide-react';
-import { cn, formatMatchDate } from '../lib/utils';
+import { cn, formatMatchDate, parseDateToTimestampMs } from '../lib/utils';
 import toast from 'react-hot-toast';
 
 export const PublicResults: React.FC = () => {
@@ -157,7 +157,7 @@ export const PublicResults: React.FC = () => {
 
         return true;
       })
-      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      .sort((a, b) => parseDateToTimestampMs(b.date) - parseDateToTimestampMs(a.date));
   }, [matches, selectedSportId, statusFilter, searchQuery, sportsConfig, tournaments, schools, venues]);
 
   // Match statistics

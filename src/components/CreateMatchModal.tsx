@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { Match, School, Venue, Tournament, Referee, Student } from '../types';
 import { X, CalendarDays, Clock, MapPin, Trophy, AlertTriangle, AlertCircle, Calendar, ArrowRight, ShieldCheck, Lock, Users, Tag, UserCheck, Plus, Building, Info, CheckCircle2 } from 'lucide-react';
-import { SPORTS_MAP, AGE_CATEGORIES, GENDER_MAP, DataService, getAgeCategoriesForSeason, normalizeCategoryKey } from '../lib/dataService';
+import { SPORTS_MAP, AGE_CATEGORIES, GENDER_MAP, DataService, getAgeCategoriesForSeason, normalizeCategoryKey, normalizeDateToYmd } from '../lib/dataService';
 import toast from 'react-hot-toast';
 
 interface CreateMatchModalProps {
@@ -133,13 +133,8 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
       if (editingMatch.gender) setGender(editingMatch.gender);
       
       if (editingMatch.date) {
-        if (typeof editingMatch.date === 'string') {
-          setDate(editingMatch.date.split('T')[0]);
-        } else if ((editingMatch.date as any).toDate) {
-          setDate((editingMatch.date as any).toDate().toISOString().split('T')[0]);
-        } else if (editingMatch.date instanceof Date) {
-          setDate(editingMatch.date.toISOString().split('T')[0]);
-        }
+        const parsedYmd = normalizeDateToYmd(editingMatch.date);
+        if (parsedYmd) setDate(parsedYmd);
       }
       
       setStartTime(editingMatch.startTime);
@@ -215,16 +210,7 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
       if (editingMatch && m.id === editingMatch.id) return false;
 
       // Check date equality (YYYY-MM-DD)
-      let matchDateStr = '';
-      if (m.date) {
-        if (typeof m.date === 'string') {
-          matchDateStr = m.date.split('T')[0];
-        } else if (m.date.toDate) {
-          matchDateStr = m.date.toDate().toISOString().split('T')[0];
-        } else if (m.date instanceof Date) {
-          matchDateStr = m.date.toISOString().split('T')[0];
-        }
-      }
+      const matchDateStr = normalizeDateToYmd(m.date);
       if (matchDateStr !== date) return false;
 
       // Same day, check if time difference is less than 60 minutes
@@ -442,7 +428,7 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
         team2Id,
         ageCategory,
         gender,
-        date: new Date(date),
+        date: normalizeDateToYmd(date) || date,
         startTime,
         venueId,
         referees: cleanReferees,

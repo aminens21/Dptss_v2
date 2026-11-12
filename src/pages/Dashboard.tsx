@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { formatMatchDate } from '../lib/utils';
+import { formatMatchDate, parseDateToTimestampMs } from '../lib/utils';
 import { DataService, deduplicateById, normalizeCategoryKey, isTeacherLevelAllowedForTournament } from '../lib/dataService';
 import { Match, Tournament, School, Venue, Referee, User } from '../types';
 import {
@@ -181,7 +181,7 @@ export const Dashboard: React.FC = () => {
             (userProfile.fullName && userProfile.fullName.includes(r))
           ))
         ).filter(m => m.status !== 'Completed')
-         .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+         .sort((a, b) => parseDateToTimestampMs(a.date) - parseDateToTimestampMs(b.date));
         setTeacherMatches(tMatches);
       }
 

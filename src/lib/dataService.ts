@@ -3,7 +3,8 @@ import { INITIAL_TOURNAMENTS, INITIAL_MATCHES, INITIAL_SCHOOLS, INITIAL_VENUES, 
 import { INITIAL_CROSS_COUNTRY_RESULTS } from './crossCountryConfig';
 import { db } from '../firebase/config';
 import { collection, getDocs, addDoc, doc, getDoc, updateDoc, setDoc, deleteDoc, Timestamp, serverTimestamp, query, where, onSnapshot, writeBatch } from 'firebase/firestore';
-import { isFlexibleEmailMatch, fixTeacherFieldJumble, normalizeArabicName } from './utils';
+import { isFlexibleEmailMatch, fixTeacherFieldJumble, normalizeArabicName, normalizeDateToYmd, formatMatchDate } from './utils';
+export { normalizeDateToYmd };
 
 const STORAGE_KEYS = {
   TOURNAMENTS: 'taourirt_tournaments_data',
@@ -33,6 +34,20 @@ export function deduplicateById<T extends { id?: string }>(items: T[]): T[] {
     }
   }
   return result;
+}
+
+export function normalizeMatchRecord(m: Match): Match {
+  const s1 = m.score1 ?? m.team1Score;
+  const s2 = m.score2 ?? m.team2Score;
+  return {
+    ...m,
+    date: normalizeDateToYmd(m.date),
+    directorateId: m.directorateId || 'taourirt',
+    score1: s1,
+    score2: s2,
+    team1Score: s1,
+    team2Score: s2
+  };
 }
 
 // Helper to recursively sanitize payloads for Firestore (removes/replaces undefined with empty string, preserves FieldValues)
@@ -1408,18 +1423,6 @@ export const DataService = {
   // MATCHES
   async getMatches(targetDirectorateId?: string, all?: boolean): Promise<Match[]> {
     const activeDirId = targetDirectorateId || this.getActiveDirectorateId();
-    const normalizeMatch = (m: Match): Match => {
-      const s1 = m.score1 ?? m.team1Score;
-      const s2 = m.score2 ?? m.team2Score;
-      return {
-        ...m,
-        directorateId: m.directorateId || 'taourirt',
-        score1: s1,
-        score2: s2,
-        team1Score: s1,
-        team2Score: s2
-      };
-    };
 
     let allMatches: Match[] = [];
     let fetchedFromCloud = false;
@@ -1429,17 +1432,17 @@ export const DataService = {
       if (!snap.empty) {
         const firestoreList = snap.docs
           .filter(d => !isRecentlyDeleted('matches', d.id))
-          .map(d => normalizeMatch({ id: d.id, ...d.data() } as Match));
+          .map(d => normalizeMatchRecord({ id: d.id, ...d.data() } as Match));
         const filtered = firestoreList.filter(m => m.id !== 'mat-1' && m.id !== 'mat-2' && m.id !== 'mat-3');
-        const localPending = getLocal<Match>(STORAGE_KEYS.MATCHES, []).filter(
-          lm => lm && lm.id && isPendingWrite('matches', lm.id) && !isRecentlyDeleted('matches', lm.id)
-        );
+        const localPending = getLocal<Match>(STORAGE_KEYS.MATCHES, [])
+          .filter(lm => lm && lm.id && isPendingWrite('matches', lm.id) && !isRecentlyDeleted('matches', lm.id))
+          .map(normalizeMatchRecord);
         allMatches = deduplicateById([...localPending, ...filtered]);
         setLocal(STORAGE_KEYS.MATCHES, allMatches);
       } else {
-        const localPending = getLocal<Match>(STORAGE_KEYS.MATCHES, []).filter(
-          lm => lm && lm.id && isPendingWrite('matches', lm.id) && !isRecentlyDeleted('matches', lm.id)
-        );
+        const localPending = getLocal<Match>(STORAGE_KEYS.MATCHES, [])
+          .filter(lm => lm && lm.id && isPendingWrite('matches', lm.id) && !isRecentlyDeleted('matches', lm.id))
+          .map(normalizeMatchRecord);
         allMatches = deduplicateById(localPending);
         setLocal(STORAGE_KEYS.MATCHES, allMatches);
       }
@@ -1449,11 +1452,10 @@ export const DataService = {
 
     if (!fetchedFromCloud && allMatches.length === 0) {
       const initialFallback = (all === true || activeDirId === 'taourirt') ? INITIAL_MATCHES : [];
-      const localList = getLocal<Match>(STORAGE_KEYS.MATCHES, initialFallback).map(normalizeMatch);
+      const rawLocalList = getLocal<Match>(STORAGE_KEYS.MATCHES, initialFallback);
+      const localList = rawLocalList.map(normalizeMatchRecord);
       const cleaned = localList.filter(m => m.id !== 'mat-1' && m.id !== 'mat-2' && m.id !== 'mat-3' && !isRecentlyDeleted('matches', m.id));
-      if (cleaned.length !== localList.length) {
-        setLocal(STORAGE_KEYS.MATCHES, cleaned);
-      }
+      setLocal(STORAGE_KEYS.MATCHES, cleaned);
       allMatches = deduplicateById(cleaned);
     }
 
@@ -1469,15 +1471,17 @@ export const DataService = {
     const docRef = doc(collection(db, 'matches'));
     const realId = docRef.id;
 
+    const normalizedDate = normalizeDateToYmd(match.date);
     const matchWithDir = {
       ...match,
+      date: normalizedDate,
       directorateId: match.directorateId || (activeDirId === 'all' ? 'taourirt' : activeDirId)
     };
-    const newMatch: Match = {
+    const newMatch: Match = normalizeMatchRecord({
       ...matchWithDir,
       id: realId
-    };
-    const localList = getLocal<Match>(STORAGE_KEYS.MATCHES, []);
+    } as Match);
+    const localList = getLocal<Match>(STORAGE_KEYS.MATCHES, []).map(normalizeMatchRecord);
     const filtered = localList.filter(m => m.id !== realId);
     setLocal(STORAGE_KEYS.MATCHES, [newMatch, ...filtered]);
     markPendingWrite('matches', realId);
@@ -1507,13 +1511,17 @@ export const DataService = {
   },
 
   async updateMatch(matchId: string, matchData: Partial<Match>): Promise<void> {
-    const localList = getLocal<Match>(STORAGE_KEYS.MATCHES, []);
-    const updated = localList.map(m => m.id === matchId ? { ...m, ...matchData } : m);
+    const normalizedPatch: Partial<Match> = {
+      ...matchData,
+      ...(matchData.date !== undefined ? { date: normalizeDateToYmd(matchData.date) } : {})
+    };
+    const localList = getLocal<Match>(STORAGE_KEYS.MATCHES, []).map(normalizeMatchRecord);
+    const updated = localList.map(m => m.id === matchId ? normalizeMatchRecord({ ...m, ...normalizedPatch }) : m);
     setLocal(STORAGE_KEYS.MATCHES, updated);
     markPendingWrite('matches', matchId);
 
     try {
-      const { id, ...dataToUpdate } = matchData as any;
+      const { id, ...dataToUpdate } = normalizedPatch as any;
       const cleanData = stripUndefinedDeep(dataToUpdate);
       await setDoc(doc(db, 'matches', matchId), {
         ...cleanData,
@@ -1802,11 +1810,11 @@ export const DataService = {
       const unsubscribe = onSnapshot(collection(db, 'matches'), (snap) => {
         const firestoreList = snap.docs
           .filter(d => !isRecentlyDeleted('matches', d.id))
-          .map(d => ({ id: d.id, ...d.data() } as Match));
+          .map(d => normalizeMatchRecord({ id: d.id, ...d.data() } as Match));
         const filtered = firestoreList.filter(m => m.id !== 'mat-1' && m.id !== 'mat-2' && m.id !== 'mat-3');
-        const localPending = getLocal<Match>(STORAGE_KEYS.MATCHES, []).filter(
-          lm => lm && lm.id && isPendingWrite('matches', lm.id) && !isRecentlyDeleted('matches', lm.id)
-        );
+        const localPending = getLocal<Match>(STORAGE_KEYS.MATCHES, [])
+          .filter(lm => lm && lm.id && isPendingWrite('matches', lm.id) && !isRecentlyDeleted('matches', lm.id))
+          .map(normalizeMatchRecord);
         const deduped = deduplicateById([...localPending, ...filtered]);
         setLocal(STORAGE_KEYS.MATCHES, deduped);
         callback(deduped);
@@ -3841,12 +3849,13 @@ export const DataService = {
       let title = '';
       let body = '';
       
+      const formattedDate = match.date ? formatMatchDate(match.date) : '';
       if (type === 'create') {
         title = `🏆 برمجة مباراة جديدة: ${sportName}`;
-        body = `تمت برمجة مباراة جديدة في ${sportName} بين ${s1Name} و ${s2Name} يوم ${match.date ? (typeof match.date === 'string' ? match.date : new Date(match.date.seconds * 1000).toLocaleDateString('ar-MA')) : ''} على الساعة ${match.startTime}.`;
+        body = `تمت برمجة مباراة جديدة في ${sportName} بين ${s1Name} و ${s2Name} يوم ${formattedDate} على الساعة ${match.startTime}.`;
       } else if (type === 'update') {
         title = `📅 تعديل مباراة: ${sportName}`;
-        body = `تم تحديث تفاصيل أو موعد المباراة بين ${s1Name} و ${s2Name} في منافسات ${sportName}. الموعد الجديد: يوم ${match.date ? (typeof match.date === 'string' ? match.date : new Date(match.date.seconds * 1000).toLocaleDateString('ar-MA')) : ''} في تمام الساعة ${match.startTime}.`;
+        body = `تم تحديث تفاصيل أو موعد المباراة بين ${s1Name} و ${s2Name} في منافسات ${sportName}. الموعد الجديد: يوم ${formattedDate} في تمام الساعة ${match.startTime}.`;
       } else if (type === 'result') {
         title = `⚽ نتيجة مباراة: ${sportName}`;
         const scoreText = match.score1 !== undefined && match.score2 !== undefined ? `(${match.score1} - ${match.score2})` : '';
@@ -4921,15 +4930,16 @@ export const DataService = {
       if (matchesSnap) {
         const firestoreMatches = matchesSnap.docs
           .filter(d => !isRecentlyDeleted('matches', d.id))
-          .map(d => ({ id: d.id, ...d.data() } as Match));
-        const pendingLocal = getLocal<Match>(STORAGE_KEYS.MATCHES, []).filter(
-          m => m && !isRecentlyDeleted('matches', m.id) && isPendingWrite('matches', m.id)
-        );
+          .map(d => normalizeMatchRecord({ id: d.id, ...d.data() } as Match));
+        const pendingLocal = getLocal<Match>(STORAGE_KEYS.MATCHES, [])
+          .filter(m => m && !isRecentlyDeleted('matches', m.id) && isPendingWrite('matches', m.id))
+          .map(normalizeMatchRecord);
         const merged = deduplicateById([...pendingLocal, ...firestoreMatches]);
         setLocal(STORAGE_KEYS.MATCHES, merged);
         matchesCount = merged.length;
       } else {
-        const localList = getLocal<Match>(STORAGE_KEYS.MATCHES, INITIAL_MATCHES);
+        const localList = getLocal<Match>(STORAGE_KEYS.MATCHES, INITIAL_MATCHES).map(normalizeMatchRecord);
+        setLocal(STORAGE_KEYS.MATCHES, localList);
         matchesCount = localList.length;
       }
 

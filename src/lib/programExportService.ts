@@ -1,5 +1,5 @@
 import { Tournament, Match, School, Sport } from '../types';
-import { SPORTS_MAP } from './dataService';
+import { SPORTS_MAP, normalizeDateToYmd } from './dataService';
 import toast from 'react-hot-toast';
 
 export interface CalendarExportEvent {
@@ -252,9 +252,7 @@ export function buildAllCalendarEvents(
     if (t.scope === 'national' || t.name.includes('وطني') || t.name.includes('الوطنية')) sc = 'national';
     else if (t.scope === 'regional' || t.name.includes('جهوي') || t.name.includes('الجهوية')) sc = 'regional';
 
-    const dateStr = typeof t.startDate === 'string'
-      ? t.startDate.split('T')[0]
-      : (t.startDate as any)?.toDate?.()?.toISOString()?.split('T')[0] || '';
+    const dateStr = normalizeDateToYmd(t.startDate);
 
     if (dateStr) {
       list.push({
@@ -280,10 +278,7 @@ export function buildAllCalendarEvents(
   matches.forEach(m => {
     if (!m.date) return;
     const sp = SPORTS_MAP[m.sportId || 'football'] || { name: 'كرة القدم', icon: '⚽' };
-    let dateStr = '';
-    if (typeof m.date === 'string') dateStr = m.date.split('T')[0];
-    else if ((m.date as any)?.toDate) dateStr = (m.date as any).toDate().toISOString().split('T')[0];
-    else if (m.date instanceof Date) dateStr = m.date.toISOString().split('T')[0];
+    const dateStr = normalizeDateToYmd(m.date);
 
     if (dateStr) {
       const school1 = schools.find(s => s.id === m.team1Id)?.name || 'فريق 1';

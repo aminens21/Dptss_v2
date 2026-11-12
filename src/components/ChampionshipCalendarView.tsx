@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { Tournament, Match, School, User, Venue } from '../types';
-import { SPORTS_MAP } from '../lib/dataService';
+import { SPORTS_MAP, normalizeDateToYmd } from '../lib/dataService';
 import { SPORTS_CONFIG } from '../config/sportsConfig';
 import { ProgramExportModal } from './ProgramExportModal';
 import {
@@ -408,9 +408,7 @@ export const ChampionshipCalendarView: React.FC<ChampionshipCalendarViewProps> =
       else if (t.name.includes('وطني') || t.name.includes('الوطنية')) sc = 'national';
       else if (t.name.includes('جهوي') || t.name.includes('الجهوية')) sc = 'regional';
 
-      const dateStr = typeof t.startDate === 'string'
-        ? t.startDate.split('T')[0]
-        : (t.startDate as any)?.toDate?.()?.toISOString()?.split('T')[0] || '';
+      const dateStr = normalizeDateToYmd(t.startDate);
 
       if (dateStr) {
         list.push({
@@ -438,10 +436,7 @@ export const ChampionshipCalendarView: React.FC<ChampionshipCalendarViewProps> =
     matches.forEach(m => {
       if (!m.date) return;
       const sp = SPORTS_MAP[m.sportId || 'football'] || { name: 'كرة القدم', icon: '⚽' };
-      let dateStr = '';
-      if (typeof m.date === 'string') dateStr = m.date.split('T')[0];
-      else if ((m.date as any)?.toDate) dateStr = (m.date as any).toDate().toISOString().split('T')[0];
-      else if (m.date instanceof Date) dateStr = m.date.toISOString().split('T')[0];
+      const dateStr = normalizeDateToYmd(m.date);
 
       if (dateStr) {
         const school1 = schools.find(s => s.id === m.team1Id)?.name || 'فريق 1';

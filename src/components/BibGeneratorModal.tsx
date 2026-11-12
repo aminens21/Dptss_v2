@@ -31,7 +31,7 @@ import QRCode from 'qrcode';
 import jsPDF from 'jspdf';
 import { Student, School } from '../types';
 import { CROSS_COUNTRY_CATEGORIES, CrossCountryCategoryDef } from '../lib/crossCountryConfig';
-import { DataService } from '../lib/dataService';
+import { DataService, normalizeDateToYmd } from '../lib/dataService';
 import { printBibsAsNativeText, pregenerateQrsForBibs } from '../lib/crossCountryBibPdfService';
 import toast from 'react-hot-toast';
 
@@ -211,8 +211,9 @@ export const BibGeneratorModal: React.FC<BibGeneratorModalProps> = ({
     }
 
     // 4. Fallback to birth year / date
+    const normalizedBirthYmd = normalizeDateToYmd(student.birthDate);
     const bYear = (student as any).birthYear ? parseInt(String((student as any).birthYear)) : (
-      student.birthDate ? parseInt(student.birthDate.split('-')[0]) : null
+      normalizedBirthYmd ? parseInt(normalizedBirthYmd.split('-')[0]) : null
     );
     if (bYear && !isNaN(bYear)) {
       if (bYear >= 2015) return CROSS_COUNTRY_CATEGORIES.find(c => c.category === 'U12' && c.gender === targetGender);
@@ -249,8 +250,8 @@ export const BibGeneratorModal: React.FC<BibGeneratorModalProps> = ({
         bibNumber,
         fullName: student.fullName || student.name || `متسابق ${idx + 1}`,
         massarNumber: student.massarNumber || student.nationalId || `${150000 + idx}`,
-        birthDate: student.birthDate || ((student as any).birthYear ? `01/01/${(student as any).birthYear}` : '2012/01/01'),
-        birthYear: (student as any).birthYear || (student.birthDate ? student.birthDate.split('-')[0] : '2012'),
+        birthDate: normalizeDateToYmd(student.birthDate) || ((student as any).birthYear ? `01/01/${(student as any).birthYear}` : '2012/01/01'),
+        birthYear: (student as any).birthYear || (normalizeDateToYmd(student.birthDate) ? normalizeDateToYmd(student.birthDate).split('-')[0] : '2012'),
         schoolName,
         commune,
         directorateName,

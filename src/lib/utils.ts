@@ -5,37 +5,89 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+export function normalizeDateToYmd(dateVal: any): string {
+  if (!dateVal) return '';
+  try {
+    if (typeof dateVal === 'string') {
+      const trimmed = dateVal.trim();
+      if (!trimmed) return '';
+      const isoMatch = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})/);
+      if (isoMatch) {
+        return `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`;
+      }
+      const dmyMatch = trimmed.match(/^(\d{2})\/(\d{2})\/(\d{4})/);
+      if (dmyMatch) {
+        return `${dmyMatch[3]}-${dmyMatch[2]}-${dmyMatch[1]}`;
+      }
+      const parsed = new Date(trimmed);
+      if (!isNaN(parsed.getTime())) {
+        return parsed.toISOString().split('T')[0];
+      }
+      return '';
+    }
+
+    let d: Date | null = null;
+    if (typeof dateVal === 'object') {
+      if (typeof dateVal.toDate === 'function') {
+        d = dateVal.toDate();
+      } else if (typeof dateVal.seconds === 'number') {
+        d = new Date(dateVal.seconds * 1000);
+      } else if (typeof dateVal._seconds === 'number') {
+        d = new Date(dateVal._seconds * 1000);
+      } else if (dateVal instanceof Date) {
+        d = dateVal;
+      }
+    } else if (typeof dateVal === 'number') {
+      d = new Date(dateVal);
+    }
+
+    if (d && !isNaN(d.getTime())) {
+      return d.toISOString().split('T')[0];
+    }
+    return '';
+  } catch {
+    return '';
+  }
+}
+
+export function parseDateToTimestampMs(dateVal: any): number {
+  const ymd = normalizeDateToYmd(dateVal);
+  if (!ymd) return 0;
+  const t = new Date(ymd).getTime();
+  return isNaN(t) ? 0 : t;
+}
+
 export function formatMatchDate(dateVal: any): string {
   if (!dateVal) return '--';
   let d: Date;
 
   try {
+    const ymd = normalizeDateToYmd(dateVal);
+    if (ymd) {
+      const [yearStr, monthStr, dayStr] = ymd.split('-');
+      return `${dayStr}/${monthStr}/${yearStr}`;
+    }
+
     if (typeof dateVal === 'string') {
-      const match = dateVal.match(/^(\d{4})-(\d{2})-(\d{2})/);
-      if (match) {
-        const year = parseInt(match[1], 10);
-        const month = parseInt(match[2], 10);
-        const day = parseInt(match[3], 10);
-        d = new Date(year, month - 1, day);
-      } else {
-        d = new Date(dateVal);
-      }
+      d = new Date(dateVal);
     } else if (dateVal && typeof dateVal === 'object') {
       if (typeof dateVal.toDate === 'function') {
         d = dateVal.toDate();
-      } else if (dateVal.seconds !== undefined) {
+      } else if (typeof dateVal.seconds === 'number') {
         d = new Date(dateVal.seconds * 1000);
+      } else if (typeof dateVal._seconds === 'number') {
+        d = new Date(dateVal._seconds * 1000);
       } else if (dateVal instanceof Date) {
         d = dateVal;
       } else {
-        d = new Date(dateVal);
+        return '--';
       }
     } else {
       d = new Date(dateVal);
     }
 
     if (isNaN(d.getTime())) {
-      return String(dateVal);
+      return '--';
     }
 
     const day = String(d.getDate()).padStart(2, '0');
@@ -43,7 +95,7 @@ export function formatMatchDate(dateVal: any): string {
     const year = d.getFullYear();
     return `${day}/${month}/${year}`;
   } catch (error) {
-    return String(dateVal);
+    return '--';
   }
 }
 

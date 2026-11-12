@@ -62,7 +62,7 @@ import { AppLogo } from '../components/AppLogo';
 import { SportsIntroAnimation } from '../components/SportsIntroAnimation';
 import { CrossCountryPodiumView } from '../components/CrossCountryPodiumView';
 import toast from 'react-hot-toast';
-import { cn, isFlexibleEmailMatch } from '../lib/utils';
+import { cn, isFlexibleEmailMatch, normalizeDateToYmd } from '../lib/utils';
 
 export const Login: React.FC = () => {
   const { currentUser, userProfile, loading, updateProfileState } = useAuth();
@@ -183,26 +183,11 @@ export const Login: React.FC = () => {
     }));
   };
 
-  // Helper to safely compare dates regardless of their format (string, Firestore Timestamp, or Date object)
+  // Helper to safely compare dates regardless of their format (string, Firestore Timestamp, serialized Timestamp, or Date object)
   const safeDateCompare = (dateVal: any, targetYmd: string) => {
-    if (!dateVal) return false;
-    try {
-      let ymd = '';
-      if (typeof dateVal === 'string') {
-        ymd = dateVal;
-      } else if (dateVal && typeof dateVal.toDate === 'function') {
-        ymd = dateVal.toDate().toISOString().split('T')[0];
-      } else if (dateVal && dateVal.seconds !== undefined) {
-        ymd = new Date(dateVal.seconds * 1000).toISOString().split('T')[0];
-      } else if (dateVal instanceof Date) {
-        ymd = dateVal.toISOString().split('T')[0];
-      } else {
-        ymd = String(dateVal);
-      }
-      return ymd.startsWith(targetYmd);
-    } catch (e) {
-      return false;
-    }
+    if (!dateVal || !targetYmd) return false;
+    const ymd = normalizeDateToYmd(dateVal);
+    return Boolean(ymd && ymd.startsWith(targetYmd));
   };
 
   // Date Bar state & Scroll Ref
@@ -1415,8 +1400,9 @@ export const Login: React.FC = () => {
 
     const set = new Set<string>();
     sportRelevantMatches.forEach(m => {
-      if (m.date && m.date.startsWith(`${year}-${monthStr}`)) {
-        set.add(m.date);
+      const ymd = normalizeDateToYmd(m?.date);
+      if (ymd && ymd.startsWith(`${year}-${monthStr}`)) {
+        set.add(ymd);
       }
     });
     const monthDatesWithMatches = Array.from(set).sort();
