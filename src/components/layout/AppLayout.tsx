@@ -36,6 +36,7 @@ import {
   AlertTriangle,
   RotateCw,
   RefreshCw,
+  CloudOff,
   Wifi,
   Award,
   Wrench,
@@ -47,6 +48,10 @@ import { cn } from '../../lib/utils';
 import toast from 'react-hot-toast';
 import { TeacherProfileModal } from '../TeacherProfileModal';
 import { DataService } from '../../lib/dataService';
+import {
+  syncPendingLocalImportsToCloud,
+  getPendingCloudSyncCount
+} from '../../lib/excelParticipationsImportService';
 import { RoleKey, RoleSidebarPermissions, Directorate, School } from '../../types';
 import { useNotifications } from '../../contexts/NotificationContext';
 import { PWAInstallButton } from '../PWAInstallButton';
@@ -72,6 +77,7 @@ export const AppLayout: React.FC = () => {
   const [isDirectorateMenuOpen, setIsDirectorateMenuOpen] = useState(false);
   const [pendingDirectorate, setPendingDirectorate] = useState<Directorate | null>(null);
   const [isSyncingData, setIsSyncingData] = useState(false);
+  const [isCloudSyncPaused, setIsCloudSyncPaused] = useState<boolean>(() => DataService.isCloudSyncPaused());
   const directorateMenuRef = useRef<HTMLDivElement>(null);
   const [isAboutModalOpen, setIsAboutModalOpen] = useState(false);
 
@@ -179,13 +185,15 @@ export const AppLayout: React.FC = () => {
       const officialSchoolId = matchedSchool.id;
       const effectiveDirId = matchedSchool.directorateId || userProfile.directorateId || 'taourirt';
 
-      await setDoc(doc(db, 'users', currentUser.uid), {
-        workLocation: officialSchoolName,
-        schoolId: officialSchoolId,
-        directorateId: effectiveDirId,
-        schoolAccessVerified: true,
-        updatedAt: serverTimestamp()
-      }, { merge: true });
+      if (!DataService.isCloudSyncPaused()) {
+        await setDoc(doc(db, 'users', currentUser.uid), {
+          workLocation: officialSchoolName,
+          schoolId: officialSchoolId,
+          directorateId: effectiveDirId,
+          schoolAccessVerified: true,
+          updatedAt: serverTimestamp()
+        }, { merge: true }).catch(() => {});
+      }
 
       // Automatically purge duplicate second teacher record from Excel import with typo school name
       try {
@@ -223,10 +231,13 @@ export const AppLayout: React.FC = () => {
   };
 
   const handleSyncData = async (silent = true) => {
-    if (isSyncingData) return;
+    if (isSyncingData || DataService.isCloudSyncPaused()) return;
     setIsSyncingData(true);
     try {
       await DataService.syncAllDataFromCloud();
+      if (!silent) {
+        toast.success('تمت مزامنة البيانات بنجاح');
+      }
     } catch (err) {
       console.error('Silent sync error:', err);
     } finally {
@@ -234,13 +245,70 @@ export const AppLayout: React.FC = () => {
     }
   };
 
-  // Automatic background silent sync every 60 seconds
+  const handleToggleCloudSync = () => {
+    const nextPaused = !isCloudSyncPaused;
+    setIsCloudSyncPaused(nextPaused);
+
+    if (nextPaused) {
+      // Turn OFF sync immediately
+      setIsSyncingData(false);
+      DataService.setCloudSyncPaused(true).catch(() => {});
+      toast('تم توقيف المزامنة السحابية', {
+        icon: '⏸️',
+        duration: 2500
+      });
+    } else {
+      // Turn ON sync immediately and sync in background without blocking or reverting the button
+      DataService.setCloudSyncPaused(false)
+        .then(async () => {
+          if (DataService.isCloudSyncPaused()) return;
+          setIsSyncingData(true);
+          try {
+            if (getPendingCloudSyncCount() > 0) {
+              await syncPendingLocalImportsToCloud().catch(() => {});
+            }
+            if (!DataService.isCloudSyncPaused()) {
+              await DataService.syncAllDataFromCloud().catch(() => {});
+            }
+          } finally {
+            setIsSyncingData(false);
+          }
+        })
+        .catch(() => {});
+      toast.success('تم تشغيل المزامنة السحابية', {
+        duration: 2500
+      });
+    }
+  };
+
+  // Sync local button state across tabs/components
   useEffect(() => {
+    const syncStateFromEvent = () => {
+      const paused = DataService.isCloudSyncPaused();
+      setIsCloudSyncPaused(paused);
+      if (paused) {
+        setIsSyncingData(false);
+      }
+    };
+    window.addEventListener('cloudSyncPausedChanged', syncStateFromEvent);
+    window.addEventListener('storage', syncStateFromEvent);
+
+    return () => {
+      window.removeEventListener('cloudSyncPausedChanged', syncStateFromEvent);
+      window.removeEventListener('storage', syncStateFromEvent);
+    };
+  }, []);
+
+  // Automatic background silent sync every 60 seconds ONLY when Cloud Sync is NOT paused
+  useEffect(() => {
+    if (isCloudSyncPaused) return;
     const timer = setInterval(() => {
-      handleSyncData(true);
+      if (!DataService.isCloudSyncPaused()) {
+        handleSyncData(true);
+      }
     }, 60000);
     return () => clearInterval(timer);
-  }, []);
+  }, [isCloudSyncPaused]);
 
   const [rolePermissions, setRolePermissions] = useState<RoleSidebarPermissions>({
     CENTRAL_ADMIN: ['/dashboard', '/tournaments', '/schools', '/teachers', '/tech-committee', '/referees', '/matches', '/helper-apps', '/posters-certificates', '/statistics', '/directorates', '/sports-config'],
@@ -594,11 +662,11 @@ export const AppLayout: React.FC = () => {
                 type="button"
                 onClick={async () => {
                   try {
-                    if (currentUser) {
+                    if (currentUser && !DataService.isCloudSyncPaused()) {
                       await setDoc(doc(db, 'users', currentUser.uid), {
                         schoolAccessVerified: true,
                         updatedAt: serverTimestamp()
-                      }, { merge: true });
+                      }, { merge: true }).catch(() => {});
                     }
                   } catch (err) {}
                   updateProfileState({ schoolAccessVerified: true });
@@ -1080,16 +1148,32 @@ export const AppLayout: React.FC = () => {
               )}
             </div>
 
-            {/* Sync Button (مزامنة البيانات صامتاً بين الأجهزة) */}
+            {/* Sync ON/OFF Toggle Button (تشغيل وتوقيف المزامنة بالضغط) */}
             <button
               type="button"
-              onClick={() => handleSyncData(true)}
-              disabled={isSyncingData}
-              title="مزامنة تلقائية وصامتة خلف الشاشة (Internet Sync)"
-              className="p-2 bg-emerald-50 hover:bg-emerald-100/90 text-emerald-800 border border-emerald-300 rounded-full transition-all cursor-pointer shadow-2xs hover:shadow-xs disabled:opacity-60 flex items-center justify-center shrink-0"
-              aria-label="مزامنة صامتة"
+              onClick={handleToggleCloudSync}
+              title={
+                isCloudSyncPaused
+                  ? 'المزامنة متوقفة — اضغط لتشغيل المزامنة'
+                  : 'المزامنة مشغلة — اضغط لتوقيف المزامنة'
+              }
+              className={cn(
+                'p-2 rounded-full transition-all cursor-pointer shadow-2xs hover:shadow-xs flex items-center justify-center gap-1.5 shrink-0 border select-none',
+                isCloudSyncPaused
+                  ? 'px-2.5 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-800 border-rose-300 dark:bg-rose-950/60 dark:hover:bg-rose-900/70 dark:text-rose-200 dark:border-rose-700'
+                  : 'bg-emerald-50 hover:bg-emerald-100/90 text-emerald-800 border-emerald-300 dark:bg-emerald-950/40 dark:hover:bg-emerald-900/50 dark:text-emerald-300 dark:border-emerald-700'
+              )}
+              aria-label={isCloudSyncPaused ? 'تشغيل المزامنة' : 'توقيف المزامنة'}
+              aria-pressed={!isCloudSyncPaused}
             >
-              <RefreshCw className={`w-4 h-4 text-emerald-600 ${isSyncingData ? 'animate-spin' : ''}`} />
+              {isCloudSyncPaused ? (
+                <>
+                  <CloudOff className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0" />
+                  <span className="hidden sm:inline text-[11px] font-black whitespace-nowrap">المزامنة متوقفة</span>
+                </>
+              ) : (
+                <RefreshCw className={`w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0 ${isSyncingData ? 'animate-spin' : ''}`} />
+              )}
             </button>
 
             {/* Statistics Quick Button */}

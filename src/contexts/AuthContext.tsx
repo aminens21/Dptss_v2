@@ -149,28 +149,35 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             (d.adminEmails || []).some(ae => isFlexibleEmailMatch(ae, cleanUserEmail))
           );
 
-          let userDoc = await getDoc(doc(db, 'users', user.uid));
           let matchedData: any = null;
           let docId = user.uid;
 
-          if (userDoc.exists()) {
-            matchedData = userDoc.data();
-          } else {
-            // Check if there is another user document with matching email in Firestore
+          if (!DataService.isCloudSyncPaused()) {
             try {
-              const snap = await getDocs(collection(db, 'users'));
-              if (!snap.empty) {
-                const foundDoc = snap.docs.find(d => {
-                  const data = d.data();
-                  return data.email && isFlexibleEmailMatch(data.email, cleanUserEmail);
-                });
-                if (foundDoc) {
-                  matchedData = foundDoc.data();
-                  docId = foundDoc.id;
+              const userDoc = await Promise.race([
+                getDoc(doc(db, 'users', user.uid)),
+                new Promise<null>((_, reject) => setTimeout(() => reject(new Error('AUTH_TIMEOUT')), 2500))
+              ]);
+              if (userDoc && userDoc.exists()) {
+                matchedData = userDoc.data();
+              } else {
+                const snap = await Promise.race([
+                  getDocs(collection(db, 'users')),
+                  new Promise<null>((_, reject) => setTimeout(() => reject(new Error('AUTH_TIMEOUT')), 2500))
+                ]);
+                if (snap && !snap.empty) {
+                  const foundDoc = snap.docs.find(d => {
+                    const data = d.data();
+                    return data.email && isFlexibleEmailMatch(data.email, cleanUserEmail);
+                  });
+                  if (foundDoc) {
+                    matchedData = foundDoc.data();
+                    docId = foundDoc.id;
+                  }
                 }
               }
             } catch (err) {
-              console.warn("Error querying users by email:", err);
+              console.warn("Auth cloud user lookup skipped/timed out, using local cache:", err);
             }
           }
 
@@ -220,16 +227,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             };
 
             // Migrate/Save under the new auth uid in Firestore so it's linked to their Auth account
-            if (docId !== user.uid || (isSuperAdmin && data.role !== 'CENTRAL_ADMIN')) {
+            if (!DataService.isCloudSyncPaused() && (docId !== user.uid || (isSuperAdmin && data.role !== 'CENTRAL_ADMIN'))) {
               try {
                 const cleanDoc: Record<string, any> = {};
                 Object.entries(profile).forEach(([k, v]) => {
                   if (v !== undefined) cleanDoc[k] = v;
                 });
-                await setDoc(doc(db, 'users', user.uid), {
-                  ...cleanDoc,
-                  updatedAt: serverTimestamp()
-                }, { merge: true });
+                await Promise.race([
+                  setDoc(doc(db, 'users', user.uid), {
+                    ...cleanDoc,
+                    updatedAt: serverTimestamp()
+                  }, { merge: true }),
+                  new Promise<void>((resolve) => setTimeout(resolve, 2500))
+                ]);
               } catch (saveErr) {
                 console.warn("Could not migrate pre-registered user to user.uid:", saveErr);
               }
@@ -252,18 +262,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             let detectedWorkLocation: string | undefined = undefined;
             let detectedSchoolId: string | undefined = undefined;
 
-            try {
-              const mgrDoc = await getDoc(doc(db, 'users', managerDocId));
-              if (mgrDoc.exists()) {
-                mgrFound = true;
-                const mgrData = mgrDoc.data();
-                detectedRole = 'SPORT_MANAGER';
-                if (mgrData.fullName) detectedName = mgrData.fullName;
-                if (mgrData.sportId) detectedSportId = mgrData.sportId;
-                if (mgrData.assignedTournamentId) detectedTournamentId = mgrData.assignedTournamentId;
+            if (!DataService.isCloudSyncPaused()) {
+              try {
+                const mgrDoc = await Promise.race([
+                  getDoc(doc(db, 'users', managerDocId)),
+                  new Promise<null>((_, reject) => setTimeout(() => reject(new Error('AUTH_TIMEOUT')), 2500))
+                ]);
+                if (mgrDoc && mgrDoc.exists()) {
+                  mgrFound = true;
+                  const mgrData = mgrDoc.data();
+                  detectedRole = 'SPORT_MANAGER';
+                  if (mgrData.fullName) detectedName = mgrData.fullName;
+                  if (mgrData.sportId) detectedSportId = mgrData.sportId;
+                  if (mgrData.assignedTournamentId) detectedTournamentId = mgrData.assignedTournamentId;
+                }
+              } catch (mgrErr) {
+                console.warn("Manager lookup warning:", mgrErr);
               }
-            } catch (mgrErr) {
-              console.warn("Manager lookup warning:", mgrErr);
             }
 
             let schoolCoordinatorFound = false;
@@ -308,18 +323,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 updatedAt: new Date(),
               };
 
-              try {
-                const cleanDoc: Record<string, any> = {};
-                Object.entries(newProfile).forEach(([k, v]) => {
-                  if (v !== undefined) cleanDoc[k] = v;
-                });
-                await setDoc(doc(db, 'users', user.uid), {
-                  ...cleanDoc,
-                  createdAt: serverTimestamp(),
-                  updatedAt: serverTimestamp()
-                }, { merge: true });
-              } catch (saveErr) {
-                console.warn("Could not save authorized user document to Firestore:", saveErr);
+              if (!DataService.isCloudSyncPaused()) {
+                try {
+                  const cleanDoc: Record<string, any> = {};
+                  Object.entries(newProfile).forEach(([k, v]) => {
+                    if (v !== undefined) cleanDoc[k] = v;
+                  });
+                  await Promise.race([
+                    setDoc(doc(db, 'users', user.uid), {
+                      ...cleanDoc,
+                      createdAt: serverTimestamp(),
+                      updatedAt: serverTimestamp()
+                    }, { merge: true }),
+                    new Promise<void>((resolve) => setTimeout(resolve, 2500))
+                  ]);
+                } catch (saveErr) {
+                  console.warn("Could not save authorized user document to Firestore:", saveErr);
+                }
               }
 
               setUserProfile(newProfile);
@@ -433,12 +453,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setIsDirectoratePromptOpen(false);
 
     // Save to Firestore if real user
-    if (currentUser?.uid && !isDemo) {
+    if (currentUser?.uid && !isDemo && !DataService.isCloudSyncPaused()) {
       try {
-        await setDoc(doc(db, 'users', currentUser.uid), {
-          ...updated,
-          updatedAt: serverTimestamp()
-        }, { merge: true });
+        await Promise.race([
+          setDoc(doc(db, 'users', currentUser.uid), {
+            ...updated,
+            updatedAt: serverTimestamp()
+          }, { merge: true }),
+          new Promise<void>((resolve) => setTimeout(resolve, 2500))
+        ]);
       } catch (err) {
         console.warn("Error updating user directorate in Firestore:", err);
       }

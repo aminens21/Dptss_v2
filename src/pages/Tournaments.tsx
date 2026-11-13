@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { DataService, SPORTS_MAP, getAgeCategoriesForSeason, deduplicateById, getCategoryGenderLabel, isClubTournament, normalizeCategoryKey, getTournamentLevelAr, isTeacherLevelAllowedForTournament, getCustomCategoryName, getCustomCategoryDetails } from '../lib/dataService';
@@ -27,7 +27,10 @@ import {
   Medal,
   Download,
   Palette,
-  Shuffle
+  Shuffle,
+  FileSpreadsheet,
+  UploadCloud,
+  RefreshCw
 } from 'lucide-react';
 import { CreateTournamentModal } from '../components/CreateTournamentModal';
 import { EditTournamentModal } from '../components/EditTournamentModal';
@@ -39,6 +42,8 @@ import { EditTournamentScheduleModal } from '../components/EditTournamentSchedul
 import { ProgramExportModal } from '../components/ProgramExportModal';
 import { ElectronicDrawModal, TEAM_SPORTS_IDS } from '../components/ElectronicDrawModal';
 import { DemoDataModal } from '../components/DemoDataModal';
+import { ImportParticipationsExcelModal } from '../components/ImportParticipationsExcelModal';
+import { getPendingCloudSyncCount, syncPendingLocalImportsToCloud } from '../lib/excelParticipationsImportService';
 import { ConfirmParticipationModal } from '../components/ConfirmParticipationModal';
 import { ConfirmedParticipationBadge } from '../components/ConfirmedParticipationBadge';
 import { useSchoolConfirmations } from '../hooks/useSchoolConfirmations';
@@ -110,6 +115,9 @@ export const Tournaments: React.FC = () => {
   const [selectedSportForDraw, setSelectedSportForDraw] = useState<string | undefined>(undefined);
   const [selectedTournamentForDraw, setSelectedTournamentForDraw] = useState<string | undefined>(undefined);
   const [isDemoDataModalOpen, setIsDemoDataModalOpen] = useState(false);
+  const [isImportExcelModalOpen, setIsImportExcelModalOpen] = useState(false);
+  const [pendingCloudSyncCount, setPendingCloudSyncCount] = useState<number>(() => getPendingCloudSyncCount());
+  const [isSyncingPendingCloud, setIsSyncingPendingCloud] = useState(false);
 
   // Program Export Modal State
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
@@ -281,47 +289,58 @@ export const Tournaments: React.FC = () => {
     return false;
   };
 
+  const reloadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   useEffect(() => {
-    loadData();
-    const handleDirChange = () => {
-      loadData();
+    loadData(false);
+    const scheduleReload = () => {
+      if (reloadTimerRef.current) {
+        clearTimeout(reloadTimerRef.current);
+      }
+      reloadTimerRef.current = setTimeout(() => {
+        reloadTimerRef.current = null;
+        loadData(true);
+      }, 150);
     };
 
-    const unsubscribeTournaments = DataService.subscribeToTournaments(() => {
-      loadData();
-    });
+    const unsubscribeTournaments = DataService.subscribeToTournaments(scheduleReload);
+    const unsubscribeMatches = DataService.subscribeToMatches(scheduleReload);
+    const unsubscribeSchools = DataService.subscribeToSchools(scheduleReload);
+    const unsubscribeVenues = DataService.subscribeToVenues(scheduleReload);
+    const unsubscribeStudents = DataService.subscribeToStudents(scheduleReload);
+    const unsubscribeSportsConfig = DataService.subscribeToSportsConfig(scheduleReload);
 
-    const unsubscribeMatches = DataService.subscribeToMatches(() => {
-      loadData();
-    });
+    window.addEventListener('directorateChanged', scheduleReload);
+    window.addEventListener('tournamentDataChanged', scheduleReload);
+    window.addEventListener('matchesDataChanged', scheduleReload);
+    window.addEventListener('sportsConfigChanged', scheduleReload);
+    window.addEventListener('resultsChanged', scheduleReload);
+    const handlePendingQueueChange = () => {
+      setPendingCloudSyncCount(getPendingCloudSyncCount());
+    };
+    window.addEventListener('pendingCloudSyncUpdated', handlePendingQueueChange);
 
-    const unsubscribeSchools = DataService.subscribeToSchools(() => {
-      loadData();
-    });
+    // Automatically attempt to sync queued local imports ONLY if Cloud Sync is NOT paused by the user
+    if (getPendingCloudSyncCount() > 0 && !DataService.isCloudSyncPaused()) {
+      syncPendingLocalImportsToCloud().then(res => {
+        setPendingCloudSyncCount(res.remainingCount);
+        if (res.syncedCount > 0 && res.remainingCount === 0) {
+          toast.success(`تمت مزامنة جميع المعطيات المحفوظة محلياً (${res.syncedCount} سجل) مع السحابة تلقائياً!`);
+          loadData(true);
+        }
+      }).catch(() => {});
+    }
 
-    const unsubscribeVenues = DataService.subscribeToVenues(() => {
-      loadData();
-    });
-
-    const unsubscribeStudents = DataService.subscribeToStudents(() => {
-      loadData();
-    });
-
-    const unsubscribeSportsConfig = DataService.subscribeToSportsConfig(() => {
-      loadData();
-    });
-
-    window.addEventListener('directorateChanged', handleDirChange);
-    window.addEventListener('tournamentDataChanged', handleDirChange);
-    window.addEventListener('matchesDataChanged', handleDirChange);
-    window.addEventListener('sportsConfigChanged', handleDirChange);
-    window.addEventListener('resultsChanged', handleDirChange);
     return () => {
-      window.removeEventListener('directorateChanged', handleDirChange);
-      window.removeEventListener('tournamentDataChanged', handleDirChange);
-      window.removeEventListener('matchesDataChanged', handleDirChange);
-      window.removeEventListener('sportsConfigChanged', handleDirChange);
-      window.removeEventListener('resultsChanged', handleDirChange);
+      if (reloadTimerRef.current) {
+        clearTimeout(reloadTimerRef.current);
+      }
+      window.removeEventListener('pendingCloudSyncUpdated', handlePendingQueueChange);
+      window.removeEventListener('directorateChanged', scheduleReload);
+      window.removeEventListener('tournamentDataChanged', scheduleReload);
+      window.removeEventListener('matchesDataChanged', scheduleReload);
+      window.removeEventListener('sportsConfigChanged', scheduleReload);
+      window.removeEventListener('resultsChanged', scheduleReload);
       if (unsubscribeTournaments) unsubscribeTournaments();
       if (unsubscribeMatches) unsubscribeMatches();
       if (unsubscribeSchools) unsubscribeSchools();
@@ -331,11 +350,44 @@ export const Tournaments: React.FC = () => {
     };
   }, []);
 
-  const loadData = async () => {
-    setLoading(true);
+  const handleManualCloudSync = async () => {
+    if (isSyncingPendingCloud) return;
+    if (DataService.isCloudSyncPaused()) {
+      toast('المزامنة السحابية متوقفة حالياً — اضغط على زر المزامنة في الشريط العلوي لتشغيلها أولاً.', {
+        icon: '⏸️',
+        duration: 4000
+      });
+      return;
+    }
+    setIsSyncingPendingCloud(true);
+    try {
+      const res = await syncPendingLocalImportsToCloud();
+      setPendingCloudSyncCount(res.remainingCount);
+      if (res.quotaStillExceeded && res.syncedCount === 0) {
+        toast('لا تزال الحصة اليومية المجانية لـ Firestore مستنفدة اليوم — بياناتك محفوظة محلياً بأمان.', {
+          icon: '⏳',
+          duration: 5000
+        });
+      } else if (res.remainingCount === 0) {
+        toast.success(`تمت مزامنة جميع المحفوظات المحلية (${res.syncedCount} سجل) مع السحابة بنجاح!`);
+        await loadData(true);
+      } else {
+        toast.success(`تمت مزامنة ${res.syncedCount} سجل وبقي ${res.remainingCount} سجل.`);
+      }
+    } catch {
+      toast.error('تعذرت المزامنة حالياً، المعطيات محفوظة محلياً بأمان.');
+    } finally {
+      setIsSyncingPendingCloud(false);
+    }
+  };
+
+  const loadData = async (silent = true) => {
+    if (!silent) {
+      setLoading(true);
+    }
     try {
       const activeDirId = DataService.getActiveDirectorateId();
-      const [tournList, sportsList, season, allTeachers, studentsList, schoolsList, matchList, activeDir] = await Promise.all([
+      const [tournList, sportsList, season, allTeachersRaw, studentsList, schoolsList, matchList, activeDir] = await Promise.all([
         DataService.getTournaments(),
         DataService.getSportsConfig(),
         DataService.getActiveSeason(),
@@ -343,8 +395,11 @@ export const Tournaments: React.FC = () => {
         DataService.getStudents(),
         DataService.getSchools(),
         DataService.getMatches(),
-        DataService.getActiveDirectorate()
+        DataService.getActiveDirectorate().catch(() => null)
       ]);
+      const allTeachers = Array.isArray(allTeachersRaw)
+        ? allTeachersRaw.filter((u: any) => !u.role || u.role === 'TEACHER')
+        : [];
 
       const dirTeachers = allTeachers.filter(t => (t.directorateId || 'taourirt') === activeDirId);
       const dirStudents = studentsList.filter(st => (st.directorateId || 'taourirt') === activeDirId);
@@ -365,14 +420,19 @@ export const Tournaments: React.FC = () => {
       setAllStudents(deduplicateById(dirStudents));
       setSchools(deduplicateById(dirSchools));
       setMatches(deduplicateById(dirMatches));
-      if (season) {
+      if (season && typeof season === 'string') {
         setActiveSeason(season);
       }
+      setPendingCloudSyncCount(getPendingCloudSyncCount());
     } catch (e) {
       console.error(e);
-      toast.error('تعذر تحميل بيانات البطولات والرياضات');
+      if (!silent) {
+        toast.error('تعذر تحميل بيانات البطولات والرياضات');
+      }
     } finally {
-      setLoading(false);
+      if (!silent) {
+        setLoading(false);
+      }
     }
   };
 
@@ -853,7 +913,7 @@ export const Tournaments: React.FC = () => {
         // Filter by Status
         if (filterStatus === 'PROGRAMMED' && !isProgrammed) return false;
         if (filterStatus === 'UNPROGRAMMED' && isProgrammed) return false;
-        if (filterStatus === 'MY_SCHOOL' && !hasParticipations) return false;
+        if (filterStatus === 'MY_SCHOOL' && !hasParticipations && !isSchoolConfirmed(sport.id, teacherSchoolName)) return false;
 
         // Search filter
         if (search.trim()) {
@@ -1024,6 +1084,37 @@ export const Tournaments: React.FC = () => {
                 >
                   <Plus className="w-3.5 h-3.5" />
                   <span>إضافة بطولة جديدة</span>
+                </button>
+              )}
+
+              {/* Import Comprehensive Excel (Teachers, Schools & Participations G..P) */}
+              {activeBranch === 'provincial' && !isTeacherRole && userProfile?.role !== 'TEACHER' && (
+                <button
+                  type="button"
+                  onClick={() => setIsImportExcelModalOpen(true)}
+                  className="px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer bg-emerald-700 hover:bg-emerald-800 text-white shadow-xs flex items-center gap-1.5"
+                  title="استيراد ملف إكسيل شامل (الأساتذة، المؤسسات، ومشاركات البطولات من الأعمدة G إلى P مع الاحتفاظ بالمعطيات السابقة)"
+                >
+                  <FileSpreadsheet className="w-3.5 h-3.5" />
+                  <span>استيراد ملف المشاركات (Excel)</span>
+                </button>
+              )}
+
+              {/* Sync Locally Saved Excel Records to Cloud Tomorrow */}
+              {activeBranch === 'provincial' && !isTeacherRole && userProfile?.role !== 'TEACHER' && pendingCloudSyncCount > 0 && (
+                <button
+                  type="button"
+                  onClick={handleManualCloudSync}
+                  disabled={isSyncingPendingCloud}
+                  className="px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer bg-amber-600 hover:bg-amber-700 text-white shadow-xs flex items-center gap-1.5 disabled:opacity-60"
+                  title="مزامنة المعطيات المحفوظة محلياً مع قاعدة بيانات السحابة بعد تجدد الحصة اليومية"
+                >
+                  {isSyncingPendingCloud ? (
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <UploadCloud className="w-3.5 h-3.5" />
+                  )}
+                  <span className="tabular-nums">مزامنة المحفوظات المحلية ({pendingCloudSyncCount})</span>
                 </button>
               )}
 
@@ -1661,9 +1752,16 @@ export const Tournaments: React.FC = () => {
                          </div>
                        </div>
 
-                      <div className="flex items-center justify-between pt-1">
+                      <div className="flex items-center justify-between pt-1 border-t border-slate-200/60">
+                        <span className="text-slate-500">المؤسسات المؤكدة مشاركتها:</span>
+                        <strong className="text-blue-700 font-bold tabular-nums">
+                          {getConfirmedSchoolsForSport(sport.id).length} مؤسسة
+                        </strong>
+                      </div>
+
+                      <div className="flex items-center justify-between">
                         <span className="text-slate-500">إجمالي المسجلين بالإقليم:</span>
-                        <strong className="text-emerald-700 font-bold">{registeredCount} تلميذ(ة)</strong>
+                        <strong className="text-emerald-700 font-bold tabular-nums">{registeredCount} تلميذ(ة)</strong>
                       </div>
                     </div>
 
@@ -1936,6 +2034,19 @@ export const Tournaments: React.FC = () => {
         activeDirectorateName={activeDirObj?.name || 'المديرية الإقليمية'}
         activeSeason={activeSeason}
         onDataLoaded={loadData}
+      />
+
+      {/* Comprehensive Excel Import Modal (Teachers + Schools + Sport Participations G..P) */}
+      <ImportParticipationsExcelModal
+        isOpen={isImportExcelModalOpen}
+        onClose={() => setIsImportExcelModalOpen(false)}
+        directorateId={activeDirObj?.id || DataService.getActiveDirectorateId()}
+        directorateName={activeDirObj?.name || 'المديرية الإقليمية بتاوريرت'}
+        activeSeason={activeSeason}
+        onImportComplete={async () => {
+          await refreshConfirmations();
+          await loadData();
+        }}
       />
 
       {/* School Participation Confirmation Modal */}

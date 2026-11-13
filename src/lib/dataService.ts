@@ -2,9 +2,211 @@ import { Tournament, Match, School, Venue, User, Referee, Student, Sport, AppNot
 import { INITIAL_TOURNAMENTS, INITIAL_MATCHES, INITIAL_SCHOOLS, INITIAL_VENUES, INITIAL_DIRECTORATES } from './initialData';
 import { INITIAL_CROSS_COUNTRY_RESULTS } from './crossCountryConfig';
 import { db } from '../firebase/config';
-import { collection, getDocs, addDoc, doc, getDoc, updateDoc, setDoc, deleteDoc, Timestamp, serverTimestamp, query, where, onSnapshot, writeBatch } from 'firebase/firestore';
+import {
+  collection,
+  getDocs as fbGetDocs,
+  addDoc as fbAddDoc,
+  doc,
+  getDoc as fbGetDoc,
+  updateDoc as fbUpdateDoc,
+  setDoc as fbSetDoc,
+  deleteDoc as fbDeleteDoc,
+  Timestamp,
+  serverTimestamp,
+  query,
+  where,
+  onSnapshot as fbOnSnapshot,
+  writeBatch as fbWriteBatch,
+  disableNetwork,
+  enableNetwork
+} from 'firebase/firestore';
 import { isFlexibleEmailMatch, fixTeacherFieldJumble, normalizeArabicName, normalizeDateToYmd, formatMatchDate } from './utils';
 export { normalizeDateToYmd };
+
+const CLOUD_SYNC_PAUSED_KEY = 'app_cloud_sync_paused_v1';
+const EXCEL_CLOUD_SYNC_QUEUE_KEY = 'taourirt_excel_pending_cloud_sync_v1';
+
+interface ManagedSubscriptionEntry {
+  attach: () => void;
+  detach: () => void;
+}
+const activeManagedSubscriptions = new Set<ManagedSubscriptionEntry>();
+
+export function isCloudSyncPaused(): boolean {
+  try {
+    return localStorage.getItem(CLOUD_SYNC_PAUSED_KEY) === 'true';
+  } catch {
+    return false;
+  }
+}
+
+export async function setCloudSyncPaused(paused: boolean): Promise<void> {
+  try {
+    localStorage.setItem(CLOUD_SYNC_PAUSED_KEY, paused ? 'true' : 'false');
+  } catch {}
+
+  if (paused) {
+    activeManagedSubscriptions.forEach(entry => {
+      try {
+        entry.detach();
+      } catch {}
+    });
+    try {
+      await disableNetwork(db);
+    } catch {}
+  } else {
+    try {
+      await enableNetwork(db);
+    } catch {}
+    activeManagedSubscriptions.forEach(entry => {
+      try {
+        entry.attach();
+      } catch {}
+    });
+  }
+
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('cloudSyncPausedChanged', { detail: { paused } }));
+  }
+}
+
+// Enforce paused network state immediately on boot if previously paused by user
+if (typeof window !== 'undefined' && isCloudSyncPaused()) {
+  disableNetwork(db).catch(() => {});
+}
+
+function withCloudTimeout<T>(promise: Promise<T>, ms = 4000, label = 'FIRESTORE_TIMEOUT'): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(label)), ms);
+    promise
+      .then(val => {
+        clearTimeout(timer);
+        resolve(val);
+      })
+      .catch(err => {
+        clearTimeout(timer);
+        reject(err);
+      });
+  });
+}
+
+async function getDocs(queryRef: any): Promise<any> {
+  if (isCloudSyncPaused()) {
+    throw new Error('CLOUD_SYNC_PAUSED');
+  }
+  const snap: any = await withCloudTimeout(fbGetDocs(queryRef), 4000);
+  // Prevent stale/partial offline IndexedDB cache (during 429 Quota Exceeded) from overwriting localStorage
+  if (snap && snap.metadata?.fromCache) {
+    throw new Error('FIRESTORE_OFFLINE_CACHE');
+  }
+  return snap;
+}
+
+async function getDoc(docRef: any): Promise<any> {
+  if (isCloudSyncPaused()) {
+    throw new Error('CLOUD_SYNC_PAUSED');
+  }
+  const snap: any = await withCloudTimeout(fbGetDoc(docRef), 4000);
+  if (snap && snap.metadata?.fromCache) {
+    throw new Error('FIRESTORE_OFFLINE_CACHE');
+  }
+  return snap;
+}
+
+async function setDoc(docRef: any, data: any, options?: any): Promise<void> {
+  if (isCloudSyncPaused()) {
+    throw new Error('CLOUD_SYNC_PAUSED');
+  }
+  if (options !== undefined) {
+    await withCloudTimeout(fbSetDoc(docRef, data, options), 4500);
+  } else {
+    await withCloudTimeout(fbSetDoc(docRef, data), 4500);
+  }
+}
+
+async function addDoc(colRef: any, data: any): Promise<any> {
+  if (isCloudSyncPaused()) {
+    throw new Error('CLOUD_SYNC_PAUSED');
+  }
+  return withCloudTimeout(fbAddDoc(colRef, data), 4500);
+}
+
+async function updateDoc(docRef: any, data: any): Promise<void> {
+  if (isCloudSyncPaused()) {
+    throw new Error('CLOUD_SYNC_PAUSED');
+  }
+  await withCloudTimeout(fbUpdateDoc(docRef, data), 4500);
+}
+
+async function deleteDoc(docRef: any): Promise<void> {
+  if (isCloudSyncPaused()) {
+    throw new Error('CLOUD_SYNC_PAUSED');
+  }
+  await withCloudTimeout(fbDeleteDoc(docRef), 4500);
+}
+
+function writeBatch(dbInst: any) {
+  const rawBatch = fbWriteBatch(dbInst);
+  return {
+    set: (ref: any, data: any, options?: any) =>
+      options !== undefined ? rawBatch.set(ref, data, options) : rawBatch.set(ref, data),
+    update: (ref: any, data: any) => rawBatch.update(ref, data),
+    delete: (ref: any) => rawBatch.delete(ref),
+    commit: async () => {
+      if (isCloudSyncPaused()) {
+        throw new Error('CLOUD_SYNC_PAUSED');
+      }
+      await withCloudTimeout(rawBatch.commit(), 5000);
+    }
+  };
+}
+
+function onSnapshot(target: any, onNext: (snap: any) => void, onError?: (err: any) => void): () => void {
+  let innerUnsub: (() => void) | null = null;
+
+  const entry: ManagedSubscriptionEntry = {
+    attach: () => {
+      if (isCloudSyncPaused() || innerUnsub) return;
+      try {
+        innerUnsub = fbOnSnapshot(
+          target,
+          (snap: any) => {
+            if (isCloudSyncPaused()) return;
+            // Never allow stale/partial offline IndexedDB cache snapshots to overwrite localStorage
+            if (snap && snap.metadata?.fromCache) {
+              return;
+            }
+            onNext(snap);
+          },
+          (err: any) => {
+            if (isCloudSyncPaused()) return;
+            if (onError) onError(err);
+          }
+        );
+      } catch (err) {
+        if (onError && !isCloudSyncPaused()) onError(err);
+      }
+    },
+    detach: () => {
+      if (innerUnsub) {
+        try {
+          innerUnsub();
+        } catch {}
+        innerUnsub = null;
+      }
+    }
+  };
+
+  activeManagedSubscriptions.add(entry);
+  if (!isCloudSyncPaused()) {
+    entry.attach();
+  }
+
+  return () => {
+    entry.detach();
+    activeManagedSubscriptions.delete(entry);
+  };
+}
 
 const STORAGE_KEYS = {
   TOURNAMENTS: 'taourirt_tournaments_data',
@@ -145,8 +347,23 @@ function markPendingWrite(col: string, id?: string) {
   }
 }
 
+function isQueuedInExcelCloudSync(col: string, id?: string): boolean {
+  if (!id) return false;
+  try {
+    const raw = localStorage.getItem(EXCEL_CLOUD_SYNC_QUEUE_KEY);
+    if (!raw) return false;
+    const queue = JSON.parse(raw);
+    if (!Array.isArray(queue)) return false;
+    return queue.some((item: any) => item && item.col === col && item.id === id);
+  } catch {
+    return false;
+  }
+}
+
 function clearPendingWrite(col: string, id?: string) {
   if (!id) return;
+  // Never clear pending write protection while the record is still queued for tomorrow's Excel cloud sync
+  if (isQueuedInExcelCloudSync(col, id)) return;
   const map = readPendingWritesMap();
   if (Array.isArray(map[col]) && map[col].includes(id)) {
     map[col] = map[col].filter(x => x !== id);
@@ -156,6 +373,7 @@ function clearPendingWrite(col: string, id?: string) {
 
 function isPendingWrite(col: string, id?: string): boolean {
   if (!id) return false;
+  if (isQueuedInExcelCloudSync(col, id)) return true;
   const map = readPendingWritesMap();
   return Array.isArray(map[col]) && map[col].includes(id);
 }
@@ -801,6 +1019,8 @@ export const GENDER_MAP: Record<string, { name: string; icon: string; badgeClass
 };
 
 export const DataService = {
+  isCloudSyncPaused,
+  setCloudSyncPaused,
   getCustomCategoryName,
   getCustomCategoryDetails,
   // OFFICIAL LOGOS FOR PARTICIPATION LISTS
@@ -1651,8 +1871,9 @@ export const DataService = {
           !ls.name.includes('غير محدد')
         );
 
-        if (localPending.length > 0) {
+        if (localPending.length > 0 && !isCloudSyncPaused()) {
           localPending.forEach(ls => {
+            if (isQueuedInExcelCloudSync('schools', ls.id)) return;
             const docRef = doc(db, 'schools', ls.id);
             const sanitized = stripUndefinedDeep({
               ...ls,
@@ -1662,7 +1883,7 @@ export const DataService = {
             });
             setDoc(docRef, sanitized, { merge: true })
               .then(() => clearPendingWrite('schools', ls.id))
-              .catch(err => console.warn("Failed to background-persist pending school:", err));
+              .catch(() => {});
           });
         }
 
@@ -1681,8 +1902,9 @@ export const DataService = {
           !isRecentlyDeleted('schools', ls.id) &&
           !ls.name.includes('غير محدد')
         );
-        if (pendingOnly.length > 0) {
+        if (pendingOnly.length > 0 && !isCloudSyncPaused()) {
           pendingOnly.forEach(ls => {
+            if (isQueuedInExcelCloudSync('schools', ls.id)) return;
             const docRef = doc(db, 'schools', ls.id);
             const sanitized = stripUndefinedDeep({
               ...ls,
@@ -1693,7 +1915,7 @@ export const DataService = {
             });
             setDoc(docRef, sanitized, { merge: true })
               .then(() => clearPendingWrite('schools', ls.id))
-              .catch(err => console.warn("Background upload of pending school failed:", err));
+              .catch(() => {});
           });
         }
         setLocal(STORAGE_KEYS.SCHOOLS, pendingOnly);
@@ -1713,29 +1935,38 @@ export const DataService = {
   },
 
   subscribeToSchools(callback: (schools: School[]) => void): () => void {
+    const emitLocal = () => {
+      const localList = getLocal<School>(STORAGE_KEYS.SCHOOLS, []).filter(
+        s => s && s.name && !s.name.includes('غير محدد') && !isRecentlyDeleted('schools', s.id)
+      );
+      callback(localList);
+    };
+    const handleLocalUpdate = () => {
+      if (isCloudSyncPaused()) emitLocal();
+    };
+    window.addEventListener('schoolsUpdated', handleLocalUpdate);
+
     try {
+      if (isCloudSyncPaused()) emitLocal();
       const unsubscribe = onSnapshot(collection(db, 'schools'), (snap) => {
         const firestoreList = snap.docs
-          .filter(d => !isRecentlyDeleted('schools', d.id))
-          .map(d => ({ id: d.id, ...d.data(), directorateId: d.data().directorateId || 'taourirt' } as School))
-          .filter(s => s && s.name && !s.name.includes('غير محدد'));
-        
-        // Auto-heal accessCode for legacy schools in real-time
-        const listWithCodes = firestoreList.map(s => {
+          .filter((d: any) => !isRecentlyDeleted('schools', d.id))
+          .map((d: any) => ({ id: d.id, ...d.data(), directorateId: d.data().directorateId || 'taourirt' } as School))
+          .filter((s: School) => s && s.name && !s.name.includes('غير محدد'));
+
+        const listWithCodes = firestoreList.map((s: School) => {
           if (s.accessCode && s.accessCode.trim().length === 6) {
             return s;
           }
           const accessCode = generateSecureAccessCode();
-          if (s.id) {
-            setDoc(doc(db, 'schools', s.id), { accessCode }, { merge: true }).catch(err => 
-              console.warn(`Failed to auto-update school ${s.name} accessCode:`, err)
-            );
+          if (s.id && !isCloudSyncPaused()) {
+            setDoc(doc(db, 'schools', s.id), { accessCode }, { merge: true }).catch(() => {});
           }
           return { ...s, accessCode };
         });
 
         const localList = getLocal<School>(STORAGE_KEYS.SCHOOLS, []);
-        const localPending = localList.filter(ls => 
+        const localPending = localList.filter(ls =>
           ls && ls.id && ls.name &&
           isPendingWrite('schools', ls.id) &&
           !isRecentlyDeleted('schools', ls.id) &&
@@ -1748,18 +1979,35 @@ export const DataService = {
       }, (err) => {
         console.warn("Real-time schools listener error:", err);
       });
-      return unsubscribe;
+      return () => {
+        window.removeEventListener('schoolsUpdated', handleLocalUpdate);
+        unsubscribe();
+      };
     } catch (err) {
       console.warn("Failed to subscribe to schools:", err);
-      return () => {};
+      return () => {
+        window.removeEventListener('schoolsUpdated', handleLocalUpdate);
+      };
     }
   },
 
   subscribeToTournaments(callback: (tournaments: Tournament[]) => void): () => void {
+    const emitLocal = () => {
+      const localList = getLocal<Tournament>(STORAGE_KEYS.TOURNAMENTS, []).filter(
+        lt => lt && lt.id && !isRecentlyDeleted('tournaments', lt.id)
+      );
+      callback(localList);
+    };
+    const handleLocalUpdate = () => {
+      if (isCloudSyncPaused()) emitLocal();
+    };
+    window.addEventListener('tournamentsUpdated', handleLocalUpdate);
+
     try {
+      if (isCloudSyncPaused()) emitLocal();
       const unsubscribe = onSnapshot(collection(db, 'tournaments'), (snap) => {
         const tournsMap = new Map<string, Tournament>();
-        snap.docs.forEach(d => {
+        snap.docs.forEach((d: any) => {
           if (isRecentlyDeleted('tournaments', d.id)) return;
           const data = d.data();
           const firestoreTourn: Tournament = {
@@ -1798,20 +2046,37 @@ export const DataService = {
       }, (err) => {
         console.warn("Real-time tournaments listener error:", err);
       });
-      return unsubscribe;
+      return () => {
+        window.removeEventListener('tournamentsUpdated', handleLocalUpdate);
+        unsubscribe();
+      };
     } catch (err) {
       console.warn("Failed to subscribe to tournaments:", err);
-      return () => {};
+      return () => {
+        window.removeEventListener('tournamentsUpdated', handleLocalUpdate);
+      };
     }
   },
 
   subscribeToMatches(callback: (matches: Match[]) => void): () => void {
+    const emitLocal = () => {
+      const localList = getLocal<Match>(STORAGE_KEYS.MATCHES, [])
+        .filter(lm => lm && lm.id && !isRecentlyDeleted('matches', lm.id))
+        .map(normalizeMatchRecord);
+      callback(localList);
+    };
+    const handleLocalUpdate = () => {
+      if (isCloudSyncPaused()) emitLocal();
+    };
+    window.addEventListener('matchesUpdated', handleLocalUpdate);
+
     try {
+      if (isCloudSyncPaused()) emitLocal();
       const unsubscribe = onSnapshot(collection(db, 'matches'), (snap) => {
         const firestoreList = snap.docs
-          .filter(d => !isRecentlyDeleted('matches', d.id))
-          .map(d => normalizeMatchRecord({ id: d.id, ...d.data() } as Match));
-        const filtered = firestoreList.filter(m => m.id !== 'mat-1' && m.id !== 'mat-2' && m.id !== 'mat-3');
+          .filter((d: any) => !isRecentlyDeleted('matches', d.id))
+          .map((d: any) => normalizeMatchRecord({ id: d.id, ...d.data() } as Match));
+        const filtered = firestoreList.filter((m: Match) => m.id !== 'mat-1' && m.id !== 'mat-2' && m.id !== 'mat-3');
         const localPending = getLocal<Match>(STORAGE_KEYS.MATCHES, [])
           .filter(lm => lm && lm.id && isPendingWrite('matches', lm.id) && !isRecentlyDeleted('matches', lm.id))
           .map(normalizeMatchRecord);
@@ -1821,19 +2086,36 @@ export const DataService = {
       }, (err) => {
         console.warn("Real-time matches listener error:", err);
       });
-      return unsubscribe;
+      return () => {
+        window.removeEventListener('matchesUpdated', handleLocalUpdate);
+        unsubscribe();
+      };
     } catch (err) {
       console.warn("Failed to subscribe to matches:", err);
-      return () => {};
+      return () => {
+        window.removeEventListener('matchesUpdated', handleLocalUpdate);
+      };
     }
   },
 
   subscribeToVenues(callback: (venues: Venue[]) => void): () => void {
+    const emitLocal = () => {
+      const localList = getLocal<Venue>(STORAGE_KEYS.VENUES, INITIAL_VENUES).filter(
+        lv => lv && lv.id && !isRecentlyDeleted('venues', lv.id)
+      );
+      callback(localList);
+    };
+    const handleLocalUpdate = () => {
+      if (isCloudSyncPaused()) emitLocal();
+    };
+    window.addEventListener('venuesUpdated', handleLocalUpdate);
+
     try {
+      if (isCloudSyncPaused()) emitLocal();
       const unsubscribe = onSnapshot(collection(db, 'venues'), (snap) => {
         const firestoreList = snap.docs
-          .filter(d => !isRecentlyDeleted('venues', d.id))
-          .map(d => ({ id: d.id, ...d.data() } as Venue));
+          .filter((d: any) => !isRecentlyDeleted('venues', d.id))
+          .map((d: any) => ({ id: d.id, ...d.data() } as Venue));
         const localPending = getLocal<Venue>(STORAGE_KEYS.VENUES, []).filter(
           lv => lv && lv.id && isPendingWrite('venues', lv.id) && !isRecentlyDeleted('venues', lv.id)
         );
@@ -1843,48 +2125,79 @@ export const DataService = {
       }, (err) => {
         console.warn("Real-time venues listener error:", err);
       });
-      return unsubscribe;
+      return () => {
+        window.removeEventListener('venuesUpdated', handleLocalUpdate);
+        unsubscribe();
+      };
     } catch (err) {
       console.warn("Failed to subscribe to venues:", err);
-      return () => {};
+      return () => {
+        window.removeEventListener('venuesUpdated', handleLocalUpdate);
+      };
     }
   },
 
   subscribeToSportsConfig(callback: (sports: Sport[]) => void): () => void {
+    const emitLocal = () => {
+      callback(getLocal<Sport>('taourirt_sports_config', []));
+    };
+    const handleLocalUpdate = () => {
+      if (isCloudSyncPaused()) emitLocal();
+    };
+    window.addEventListener('sportsConfigChanged', handleLocalUpdate);
+
     try {
+      if (isCloudSyncPaused()) emitLocal();
       const unsubscribe = onSnapshot(collection(db, 'sports'), (snap) => {
         let fetchedSports: Sport[] = [];
         if (!snap.empty) {
-          fetchedSports = snap.docs.map(d => ({ id: d.id, ...d.data() } as Sport));
+          fetchedSports = snap.docs.map((d: any) => ({ id: d.id, ...d.data() } as Sport));
         }
-        
+
         const localSports = getLocal<Sport>('taourirt_sports_config', []);
         if (fetchedSports.length === 0) {
           fetchedSports = localSports;
         } else if (localSports.length > 0) {
-          fetchedSports = fetchedSports.map(f => {
-            const loc = localSports.find(l => l.id === f.id);
-            if (loc) {
-              return {
-                ...f,
+          const mergedMap = new Map<string, Sport>();
+          fetchedSports.forEach(f => mergedMap.set(f.id, f));
+          localSports.forEach(loc => {
+            if (!loc || !loc.id) return;
+            const remote = mergedMap.get(loc.id);
+            if (!remote) {
+              mergedMap.set(loc.id, loc);
+            } else if (isPendingWrite('sports', loc.id)) {
+              // Pending local changes (e.g. Excel import isProgrammed: true) ALWAYS win over stale remote
+              mergedMap.set(loc.id, {
+                ...remote,
                 ...loc,
-                ...f,
-                ageCategories: (f.ageCategories && f.ageCategories.length > 0) ? f.ageCategories : loc.ageCategories
-              };
+                isProgrammed: loc.isProgrammed ?? remote.isProgrammed,
+                ageCategories: Array.from(new Set([...(remote.ageCategories || []), ...(loc.ageCategories || [])]))
+              });
+            } else {
+              mergedMap.set(loc.id, {
+                ...loc,
+                ...remote,
+                ageCategories: (remote.ageCategories && remote.ageCategories.length > 0) ? remote.ageCategories : loc.ageCategories
+              });
             }
-            return f;
           });
+          fetchedSports = Array.from(mergedMap.values());
         }
-        
+
         setLocal('taourirt_sports_config', fetchedSports);
         callback(fetchedSports);
       }, (err) => {
         console.warn("Real-time sports listener error:", err);
       });
-      return unsubscribe;
+      return () => {
+        window.removeEventListener('sportsConfigChanged', handleLocalUpdate);
+        unsubscribe();
+      };
     } catch (err) {
       console.warn("Failed to subscribe to sports configuration:", err);
-      return () => {};
+      return () => {
+        window.removeEventListener('sportsConfigChanged', handleLocalUpdate);
+      };
     }
   },
 
@@ -3579,23 +3892,38 @@ export const DataService = {
   },
 
   subscribeToStudents(callback: (students: Student[]) => void): () => void {
+    const emitLocal = () => {
+      const localList = getLocal<Student>('taourirt_students_data', []).filter(s => s && !isRecentlyDeleted('students', s.id));
+      callback(localList);
+    };
+    const handleLocalUpdate = () => {
+      if (isCloudSyncPaused()) emitLocal();
+    };
+    window.addEventListener('studentsUpdated', handleLocalUpdate);
+
     try {
+      if (isCloudSyncPaused()) emitLocal();
       const unsubscribe = onSnapshot(collection(db, 'students'), (snap) => {
         const localList = getLocal<Student>('taourirt_students_data', []).filter(s => s && !isRecentlyDeleted('students', s.id));
         const pendingLocal = localList.filter(s => isPendingWrite('students', s.id));
         const firestoreList = snap.docs
-          .filter(d => !isRecentlyDeleted('students', d.id))
-          .map(d => ({ id: d.id, ...d.data() } as Student));
+          .filter((d: any) => !isRecentlyDeleted('students', d.id))
+          .map((d: any) => ({ id: d.id, ...d.data() } as Student));
         const merged = deduplicateById([...pendingLocal, ...firestoreList]);
         setLocal('taourirt_students_data', merged);
         callback(merged);
       }, (err) => {
         console.warn("Real-time students listener error:", err);
       });
-      return unsubscribe;
+      return () => {
+        window.removeEventListener('studentsUpdated', handleLocalUpdate);
+        unsubscribe();
+      };
     } catch (err) {
       console.warn("Failed to subscribe to students:", err);
-      return () => {};
+      return () => {
+        window.removeEventListener('studentsUpdated', handleLocalUpdate);
+      };
     }
   },
 
@@ -3945,44 +4273,117 @@ export const DataService = {
   },
 
   subscribeToReferees(callback: (referees: Referee[]) => void): () => void {
+    const emitLocal = () => {
+      const localRefs = deduplicateById([
+        ...getLocal<Referee>('taourirt_referees_data', []),
+        ...getLocal<Referee>('referees', [])
+      ]).filter(r => r && !isRecentlyDeleted('referees', r.id));
+      callback(localRefs);
+    };
+    const handleLocalUpdate = () => {
+      if (isCloudSyncPaused()) emitLocal();
+    };
+    window.addEventListener('refereesUpdated', handleLocalUpdate);
+
     try {
-      return onSnapshot(collection(db, 'referees'), (snap) => {
-        const referees = snap.docs.map(d => ({ id: d.id, ...d.data() } as Referee));
-        callback(referees);
+      if (isCloudSyncPaused()) emitLocal();
+      const unsub = onSnapshot(collection(db, 'referees'), (snap) => {
+        const firestoreRefs = snap.docs
+          .filter((d: any) => !isRecentlyDeleted('referees', d.id))
+          .map((d: any) => ({ id: d.id, ...d.data() } as Referee));
+        const pendingLocal = deduplicateById([
+          ...getLocal<Referee>('taourirt_referees_data', []),
+          ...getLocal<Referee>('referees', [])
+        ]).filter(r => r && !isRecentlyDeleted('referees', r.id) && isPendingWrite('referees', r.id));
+        const merged = deduplicateById([...pendingLocal, ...firestoreRefs]);
+        callback(merged);
       }, (error) => {
         console.warn("Firestore subscription error for referees:", error);
       });
+      return () => {
+        window.removeEventListener('refereesUpdated', handleLocalUpdate);
+        unsub();
+      };
     } catch (e) {
       console.warn("Error setting up onSnapshot for referees:", e);
-      return () => {};
+      return () => {
+        window.removeEventListener('refereesUpdated', handleLocalUpdate);
+      };
     }
   },
 
   subscribeToUsers(callback: (users: User[]) => void): () => void {
+    const emitLocal = () => {
+      const localUsers = getLocal<User>('local_registered_users', []).filter(
+        u => u && !isRecentlyDeleted('users', u.id)
+      );
+      callback(localUsers);
+    };
+    const handleLocalUpdate = () => {
+      if (isCloudSyncPaused()) emitLocal();
+    };
+    window.addEventListener('userDataChanged', handleLocalUpdate);
+
     try {
-      return onSnapshot(collection(db, 'users'), (snap) => {
-        const users = snap.docs.map(d => ({ id: d.id, ...d.data() } as User));
-        callback(users);
+      if (isCloudSyncPaused()) emitLocal();
+      const unsub = onSnapshot(collection(db, 'users'), (snap) => {
+        const firestoreUsers = snap.docs
+          .filter((d: any) => !isRecentlyDeleted('users', d.id))
+          .map((d: any) => ({ id: d.id, ...d.data() } as User));
+        const pendingLocal = getLocal<User>('local_registered_users', []).filter(
+          u => u && u.id && !isRecentlyDeleted('users', u.id) && isPendingWrite('users', u.id)
+        );
+        const merged = deduplicateById([...pendingLocal, ...firestoreUsers]);
+        callback(merged);
       }, (error) => {
         console.warn("Firestore subscription error for users:", error);
       });
+      return () => {
+        window.removeEventListener('userDataChanged', handleLocalUpdate);
+        unsub();
+      };
     } catch (e) {
       console.warn("Error setting up onSnapshot for users:", e);
-      return () => {};
+      return () => {
+        window.removeEventListener('userDataChanged', handleLocalUpdate);
+      };
     }
   },
 
   subscribeToDirectorates(callback: (dirs: Directorate[]) => void): () => void {
+    const emitLocal = () => {
+      const localDirs = getLocal<Directorate>(STORAGE_KEYS.DIRECTORATES, INITIAL_DIRECTORATES).filter(
+        d => d && !isRecentlyDeleted('directorates', d.id)
+      );
+      callback(localDirs);
+    };
+    const handleLocalUpdate = () => {
+      if (isCloudSyncPaused()) emitLocal();
+    };
+    window.addEventListener('directoratesListUpdated', handleLocalUpdate);
+
     try {
-      return onSnapshot(collection(db, 'directorates'), (snap) => {
-        const dirs = snap.docs.map(d => ({ id: d.id, ...d.data() } as Directorate));
-        callback(dirs);
+      if (isCloudSyncPaused()) emitLocal();
+      const unsub = onSnapshot(collection(db, 'directorates'), (snap) => {
+        const firestoreDirs = snap.docs
+          .filter((d: any) => !isRecentlyDeleted('directorates', d.id))
+          .map((d: any) => ({ id: d.id, ...d.data() } as Directorate));
+        const pendingLocal = getLocal<Directorate>(STORAGE_KEYS.DIRECTORATES, []).filter(
+          d => d && d.id && !isRecentlyDeleted('directorates', d.id) && isPendingWrite('directorates', d.id)
+        );
+        callback(deduplicateById([...pendingLocal, ...firestoreDirs]));
       }, (error) => {
         console.warn("Firestore subscription error for directorates:", error);
       });
+      return () => {
+        window.removeEventListener('directoratesListUpdated', handleLocalUpdate);
+        unsub();
+      };
     } catch (e) {
       console.warn("Error setting up onSnapshot for directorates:", e);
-      return () => {};
+      return () => {
+        window.removeEventListener('directoratesListUpdated', handleLocalUpdate);
+      };
     }
   },
 
@@ -4824,6 +5225,21 @@ export const DataService = {
     directoratesCount: number;
     timestamp: number;
   }> {
+    // Immediately abort cloud sync if user paused Cloud Sync so localStorage stays 100% untouched
+    if (isCloudSyncPaused()) {
+      return {
+        success: false,
+        schoolsCount: getLocal<School>(STORAGE_KEYS.SCHOOLS, []).length,
+        tournamentsCount: getLocal<Tournament>(STORAGE_KEYS.TOURNAMENTS, []).length,
+        studentsCount: getLocal<Student>('taourirt_students_data', []).length,
+        matchesCount: getLocal<Match>(STORAGE_KEYS.MATCHES, []).length,
+        venuesCount: getLocal<Venue>(STORAGE_KEYS.VENUES, []).length,
+        refereesCount: getLocal<Referee>('taourirt_referees_data', []).length,
+        directoratesCount: getLocal<Directorate>(STORAGE_KEYS.DIRECTORATES, []).length,
+        timestamp: Date.now()
+      };
+    }
+
     try {
       const [
         schoolsSnap,
@@ -4851,6 +5267,21 @@ export const DataService = {
         getDocs(collection(db, 'config')).catch(() => null)
       ]);
 
+      // If all primary queries failed (e.g. 429 Quota Exceeded or network offline), abort without firing noisy refresh events
+      if (!schoolsSnap && !tournamentsSnap && !studentsSnap && !matchesSnap) {
+        return {
+          success: false,
+          schoolsCount: getLocal<School>(STORAGE_KEYS.SCHOOLS, []).length,
+          tournamentsCount: getLocal<Tournament>(STORAGE_KEYS.TOURNAMENTS, []).length,
+          studentsCount: getLocal<Student>('taourirt_students_data', []).length,
+          matchesCount: getLocal<Match>(STORAGE_KEYS.MATCHES, []).length,
+          venuesCount: getLocal<Venue>(STORAGE_KEYS.VENUES, []).length,
+          refereesCount: getLocal<Referee>('taourirt_referees_data', []).length,
+          directoratesCount: getLocal<Directorate>(STORAGE_KEYS.DIRECTORATES, []).length,
+          timestamp: Date.now()
+        };
+      }
+
       let schoolsCount = 0;
       const localSchools = getLocal<School>(STORAGE_KEYS.SCHOOLS, []).filter(
         s => s && s.name && !s.name.includes('غير محدد') && !isRecentlyDeleted('schools', s.id)
@@ -4859,13 +5290,13 @@ export const DataService = {
 
       if (schoolsSnap) {
         const firestoreSchools = schoolsSnap.docs
-          .filter(d => !isRecentlyDeleted('schools', d.id))
-          .map(d => ({ id: d.id, ...d.data() } as School))
-          .filter(s => s && s.name && !s.name.includes('غير محدد'));
+          .filter((d: any) => !isRecentlyDeleted('schools', d.id))
+          .map((d: any) => ({ id: d.id, ...d.data() } as School))
+          .filter((s: School) => s && s.name && !s.name.includes('غير محدد'));
 
-        // Persist any genuinely pending local writes to Firestore
-        if (pendingLocalSchools.length > 0) {
+        if (pendingLocalSchools.length > 0 && !isCloudSyncPaused()) {
           for (const ls of pendingLocalSchools) {
+            if (isQueuedInExcelCloudSync('schools', ls.id)) continue;
             const docRef = ls.id ? doc(db, 'schools', ls.id) : doc(collection(db, 'schools'));
             const sanitized = sanitizeFirestorePayload({
               ...ls,
@@ -4874,7 +5305,7 @@ export const DataService = {
             });
             setDoc(docRef, sanitized, { merge: true })
               .then(() => clearPendingWrite('schools', docRef.id))
-              .catch(err => console.warn("Failed to persist pending local school during sync:", err));
+              .catch(() => {});
           }
         }
 
@@ -4986,9 +5417,10 @@ export const DataService = {
       }
 
       if (sportsSnap && !sportsSnap.empty) {
-        const firestoreSports = sportsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Sport));
+        const firestoreSports = sportsSnap.docs.map((d: any) => ({ id: d.id, ...d.data() } as Sport));
         const localList = getLocal<Sport>('taourirt_sports_config', []);
-        const merged = deduplicateById([...firestoreSports, ...localList]);
+        const pendingSports = localList.filter(ls => ls && ls.id && isPendingWrite('sports', ls.id));
+        const merged = deduplicateById([...pendingSports, ...firestoreSports, ...localList]);
         setLocal('taourirt_sports_config', merged);
       }
 

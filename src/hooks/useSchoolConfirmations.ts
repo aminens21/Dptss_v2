@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { SchoolTournamentConfirmation } from '../types';
 import { DataService } from '../lib/dataService';
+import { normalizeArabicName } from '../lib/utils';
 
 export function useSchoolConfirmations(targetDirectorateId?: string) {
   const [confirmations, setConfirmations] = useState<SchoolTournamentConfirmation[]>([]);
@@ -28,25 +29,32 @@ export function useSchoolConfirmations(targetDirectorateId?: string) {
     };
   }, [targetDirectorateId]);
 
+  const matchesSchoolIdentifier = useCallback((c: SchoolTournamentConfirmation, schoolIdentifier: string): boolean => {
+    const cleanId = schoolIdentifier.trim().toLowerCase();
+    const normId = normalizeArabicName(schoolIdentifier);
+    if ((c.schoolId || '').trim().toLowerCase() === cleanId) return true;
+    if ((c.schoolName || '').trim().toLowerCase() === cleanId) return true;
+    if (normId && c.schoolName && normalizeArabicName(c.schoolName) === normId) return true;
+    return false;
+  }, []);
+
   const isSchoolConfirmed = useCallback((sportId: string, schoolIdentifier?: string): boolean => {
     if (!sportId || !schoolIdentifier) return false;
-    const cleanId = schoolIdentifier.trim().toLowerCase();
-    return confirmations.some(c => 
+    return confirmations.some(c =>
       c.sportId === sportId &&
       c.status === 'confirmed' &&
-      (c.schoolId.toLowerCase() === cleanId || c.schoolName.toLowerCase() === cleanId)
+      matchesSchoolIdentifier(c, schoolIdentifier)
     );
-  }, [confirmations]);
+  }, [confirmations, matchesSchoolIdentifier]);
 
   const getConfirmation = useCallback((sportId: string, schoolIdentifier?: string): SchoolTournamentConfirmation | undefined => {
     if (!sportId || !schoolIdentifier) return undefined;
-    const cleanId = schoolIdentifier.trim().toLowerCase();
-    return confirmations.find(c => 
+    return confirmations.find(c =>
       c.sportId === sportId &&
       c.status === 'confirmed' &&
-      (c.schoolId.toLowerCase() === cleanId || c.schoolName.toLowerCase() === cleanId)
+      matchesSchoolIdentifier(c, schoolIdentifier)
     );
-  }, [confirmations]);
+  }, [confirmations, matchesSchoolIdentifier]);
 
   const getConfirmedSchoolsForSport = useCallback((sportId: string): SchoolTournamentConfirmation[] => {
     if (!sportId) return [];

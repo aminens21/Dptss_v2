@@ -143,7 +143,7 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
     }
   };
 
-  // 1. Subscribe to Firestore real-time notifications
+  // 1. Subscribe to Firestore real-time notifications (respecting Cloud Sync Pause)
   useEffect(() => {
     if (!userProfile) {
       setAllRawNotifications([]);
@@ -152,52 +152,81 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
       return;
     }
 
-    // Set up Firestore snapshot listener
-    const q = query(
-      collection(db, 'notifications'),
-      orderBy('createdAt', 'desc'),
-      limit(50)
-    );
+    let unsubscribeFirestore: (() => void) | null = null;
 
-    const unsubscribe = onSnapshot(
-      q,
-      (snapshot) => {
-        const fetched: AppNotification[] = [];
-        snapshot.forEach((doc) => {
-          const data = doc.data();
-          let createdAtStr = new Date().toISOString();
-          if (data.createdAt) {
-            if (typeof data.createdAt.toDate === 'function') {
-              createdAtStr = data.createdAt.toDate().toISOString();
-            } else if (data.createdAt.seconds) {
-              createdAtStr = new Date(data.createdAt.seconds * 1000).toISOString();
-            } else {
-              createdAtStr = new Date(data.createdAt).toISOString();
-            }
-          }
-          fetched.push({
-            id: doc.id,
-            title: data.title || '',
-            body: data.body || '',
-            sportId: data.sportId,
-            role: data.role,
-            userIds: data.userIds || [],
-            createdAt: createdAtStr,
-            readBy: data.readBy || [],
-          });
-        });
+    const setupSubscription = () => {
+      if (unsubscribeFirestore) {
+        try {
+          unsubscribeFirestore();
+        } catch {}
+        unsubscribeFirestore = null;
+      }
 
-        setAllRawNotifications(fetched);
-      },
-      (error) => {
-        console.warn('Real-time notifications Firestore error, loading fallback local storage:', error);
+      if (DataService.isCloudSyncPaused()) {
         DataService.getNotifications().then((localData) => {
           setAllRawNotifications(localData);
         });
+        return;
       }
-    );
 
-    return () => unsubscribe();
+      const q = query(
+        collection(db, 'notifications'),
+        orderBy('createdAt', 'desc'),
+        limit(50)
+      );
+
+      unsubscribeFirestore = onSnapshot(
+        q,
+        (snapshot) => {
+          if (DataService.isCloudSyncPaused()) return;
+          if (snapshot.empty && snapshot.metadata?.fromCache) return;
+          const fetched: AppNotification[] = [];
+          snapshot.forEach((doc) => {
+            const data = doc.data();
+            let createdAtStr = new Date().toISOString();
+            if (data.createdAt) {
+              if (typeof data.createdAt.toDate === 'function') {
+                createdAtStr = data.createdAt.toDate().toISOString();
+              } else if (data.createdAt.seconds) {
+                createdAtStr = new Date(data.createdAt.seconds * 1000).toISOString();
+              } else {
+                createdAtStr = new Date(data.createdAt).toISOString();
+              }
+            }
+            fetched.push({
+              id: doc.id,
+              title: data.title || '',
+              body: data.body || '',
+              sportId: data.sportId,
+              role: data.role,
+              userIds: data.userIds || [],
+              createdAt: createdAtStr,
+              readBy: data.readBy || [],
+            });
+          });
+
+          setAllRawNotifications(fetched);
+        },
+        (error) => {
+          console.warn('Real-time notifications Firestore error, loading fallback local storage:', error);
+          DataService.getNotifications().then((localData) => {
+            setAllRawNotifications(localData);
+          });
+        }
+      );
+    };
+
+    setupSubscription();
+    window.addEventListener('cloudSyncPausedChanged', setupSubscription);
+
+    return () => {
+      window.removeEventListener('cloudSyncPausedChanged', setupSubscription);
+      if (unsubscribeFirestore) {
+        try {
+          unsubscribeFirestore();
+        } catch {}
+      }
+    };
   }, [userProfile]);
 
   // 2. Filter notifications based on logged-in user profile & specialty
