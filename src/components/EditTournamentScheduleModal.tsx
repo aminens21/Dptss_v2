@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { Sport, Tournament } from '../types';
-import { DataService, SPORTS_MAP } from '../lib/dataService';
-import { X, Calendar, Clock, ShieldCheck, Check, MapPin, FileText, Activity, GraduationCap } from 'lucide-react';
+import { DataService, SPORTS_MAP, normalizeTournamentEducationSectors } from '../lib/dataService';
+import { X, Calendar, Clock, ShieldCheck, Check, MapPin, FileText, Activity, GraduationCap, Building2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 interface EditTournamentScheduleModalProps {
@@ -24,6 +24,7 @@ export const EditTournamentScheduleModal: React.FC<EditTournamentScheduleModalPr
   const [endDate, setEndDate] = useState('2026-03-30');
   const [deadlineDate, setDeadlineDate] = useState('2026-02-28T23:59');
   const [selectedLevels, setSelectedLevels] = useState<('Primary' | 'Middle' | 'High')[]>(['High']);
+  const [selectedEducationSectors, setSelectedEducationSectors] = useState<('public' | 'private')[]>(['public', 'private']);
   const [status, setStatus] = useState<Tournament['status']>('Scheduled');
   const [description, setDescription] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -85,6 +86,7 @@ export const EditTournamentScheduleModal: React.FC<EditTournamentScheduleModalPr
         } else {
           setSelectedLevels(['High']);
         }
+        setSelectedEducationSectors(normalizeTournamentEducationSectors(first));
       }
     }
   }, [sport, tournaments, isOpen]);
@@ -119,7 +121,8 @@ export const EditTournamentScheduleModal: React.FC<EditTournamentScheduleModalPr
         registrationDeadline: deadlineDate ? new Date(deadlineDate) : null,
         status: status,
         description: description.trim(),
-        level: selectedLevels.join(',')
+        level: selectedLevels.join(','),
+        educationSectors: selectedEducationSectors.length > 0 ? selectedEducationSectors : ['public', 'private']
       });
 
       toast.success(`تم تحديث تواريخ وضوابط بطولة ${sportName} بنجاح!`);
@@ -285,6 +288,43 @@ export const EditTournamentScheduleModal: React.FC<EditTournamentScheduleModalPr
                     </button>
                   );
                 })}
+              </div>
+
+              <div className="pt-3 mt-2 border-t border-slate-100 space-y-1.5">
+                <label className="text-[11px] font-bold text-slate-700 flex items-center gap-1.5">
+                  <Building2 className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>نوع التعليم المسموح له بالمشاركة (العمومي / الخصوصي):</span>
+                </label>
+                <div className="flex flex-wrap gap-2">
+                  {[
+                    { id: 'public', label: '🏛️ التعليم العمومي' },
+                    { id: 'private', label: '🏫 التعليم الخصوصي' }
+                  ].map((sec) => {
+                    const isSelected = selectedEducationSectors.includes(sec.id as 'public' | 'private');
+                    return (
+                      <button
+                        type="button"
+                        key={sec.id}
+                        onClick={() => {
+                          setSelectedEducationSectors(prev =>
+                            prev.includes(sec.id as 'public' | 'private')
+                              ? (prev.length > 1 ? prev.filter(x => x !== sec.id) : prev)
+                              : [...prev, sec.id as 'public' | 'private']
+                          );
+                        }}
+                        className={`flex-1 min-w-[130px] px-3 py-2 rounded-xl text-xs font-black text-center border transition-all cursor-pointer ${
+                          isSelected
+                            ? sec.id === 'private'
+                              ? 'bg-purple-600 border-purple-600 text-white shadow-3xs'
+                              : 'bg-emerald-600 border-emerald-600 text-white shadow-3xs'
+                            : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                        }`}
+                      >
+                        {sec.label}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
             </div>
           </div>

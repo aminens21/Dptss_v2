@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { School, Student, Sport, User, Tournament } from '../types';
-import { DataService, validateBirthDateForCategory, normalizeCategoryKey, getCategoryGenderLabel, getCategoryYearsLabel, isSchoolLevelAllowedForTournament, getTournamentLevelAr, isTeacherLevelAllowedForTournament } from '../lib/dataService';
+import { DataService, validateBirthDateForCategory, normalizeCategoryKey, getCategoryGenderLabel, getCategoryYearsLabel, isSchoolLevelAllowedForTournament, getTournamentLevelAr, isTeacherLevelAllowedForTournament, isSchoolSectorAllowedForTournament, getTournamentEducationSectorsAr, getSchoolEducationSector, schoolNamesMatch } from '../lib/dataService';
 import { AthleticsService } from '../lib/athleticsService';
 import { useAuth } from '../contexts/AuthContext';
 import * as XLSX from 'xlsx';
@@ -193,10 +193,22 @@ export const SportBulkRegisterModal: React.FC<SportBulkRegisterModalProps> = ({
       setSelectedSchoolId(schools[0].id);
     }
 
-    // Default coach info
-    setCoachName(userProfile?.fullName || '');
-    setCoachLeaseNumber(userProfile?.leaseNumber || '');
-    setCoachPhone(userProfile?.phone || '');
+    const targetSchoolInit = isTeacher ? (userProfile?.workLocation || '') : (preselectedSchoolName || '');
+    const isUserAtTarget = isTeacher || Boolean(
+      userProfile &&
+      targetSchoolInit &&
+      (schoolNamesMatch(userProfile.workLocation, targetSchoolInit) ||
+        schoolNamesMatch((userProfile as any).schoolName, targetSchoolInit))
+    );
+    if (isUserAtTarget) {
+      setCoachName(userProfile?.fullName || '');
+      setCoachLeaseNumber(userProfile?.leaseNumber || '');
+      setCoachPhone(userProfile?.phone || '');
+    } else {
+      setCoachName('');
+      setCoachLeaseNumber('');
+      setCoachPhone('');
+    }
   }, [isOpen, isTeacher, userProfile, schools, preselectedSchoolName]);
 
   // Resolved school object and name
@@ -633,18 +645,27 @@ export const SportBulkRegisterModal: React.FC<SportBulkRegisterModalProps> = ({
           (normalizeCategoryKey(t.ageCategory) === normCategory || normalizeCategoryKey(t.ageCategory) === 'جميع الفئات') &&
           (t.gender === selectedGender || t.gender === 'Mixed')
         );
-        if (relevantTournament && relevantTournament.level) {
-          const isAllowed = isSchoolLevelAllowedForTournament(activeSchoolObj.type, relevantTournament.level);
-          if (!isAllowed) {
-            toast.error(`عذراً، السلك التعليمي لمؤسسة "${activeSchoolObj.name}" (${activeSchoolObj.type}) غير مسموح له بالمشاركة في هذه البطولة المخصصة لـ (${getTournamentLevelAr(relevantTournament.level)})`);
-            setIsSubmitting(false);
-            return;
+        if (relevantTournament) {
+          if (relevantTournament.level) {
+            const isAllowed = isSchoolLevelAllowedForTournament(activeSchoolObj.type, relevantTournament.level);
+            if (!isAllowed) {
+              toast.error(`عذراً، السلك التعليمي لمؤسسة "${activeSchoolObj.name}" (${activeSchoolObj.type}) غير مسموح له بالمشاركة في هذه البطولة المخصصة لـ (${getTournamentLevelAr(relevantTournament.level)})`);
+              setIsSubmitting(false);
+              return;
+            }
+
+            // Check teacher cadre (extra safety)
+            if (userProfile?.teachingCadre && !isTeacherLevelAllowedForTournament(userProfile.teachingCadre, relevantTournament.level)) {
+              const cadreAr = userProfile.teachingCadre.includes('PRIMARY') ? 'ابتدائي' : userProfile.teachingCadre.includes('MIDDLE') ? 'إعدادي' : 'تأهيلي';
+              toast.error(`عذراً، بصفتك أستاذ سلك (${cadreAr})، لا يمكنك التسجيل في بطولة مخصصة لـ (${getTournamentLevelAr(relevantTournament.level)})`);
+              setIsSubmitting(false);
+              return;
+            }
           }
 
-          // Check teacher cadre (extra safety)
-          if (userProfile?.teachingCadre && !isTeacherLevelAllowedForTournament(userProfile.teachingCadre, relevantTournament.level)) {
-            const cadreAr = userProfile.teachingCadre.includes('PRIMARY') ? 'ابتدائي' : userProfile.teachingCadre.includes('MIDDLE') ? 'إعدادي' : 'تأهيلي';
-            toast.error(`عذراً، بصفتك أستاذ سلك (${cadreAr})، لا يمكنك التسجيل في بطولة مخصصة لـ (${getTournamentLevelAr(relevantTournament.level)})`);
+          if (!isSchoolSectorAllowedForTournament(activeSchoolObj, relevantTournament)) {
+            const schoolSecAr = getSchoolEducationSector(activeSchoolObj) === 'private' ? 'التعليم الخصوصي' : 'التعليم العمومي';
+            toast.error(`عذراً، مؤسسة "${activeSchoolObj.name}" (${schoolSecAr}) غير مسموح لها بالمشاركة في هذه البطولة المخصصة لـ (${getTournamentEducationSectorsAr(relevantTournament.educationSectors)})`);
             setIsSubmitting(false);
             return;
           }
@@ -655,6 +676,13 @@ export const SportBulkRegisterModal: React.FC<SportBulkRegisterModalProps> = ({
       const studentsToUpdate: Array<{ id: string; data: Partial<Student> }> = [];
       const studentIdsToDelete: string[] = [];
       const usedExistingIds = new Set<string>();
+      const isUserAtSchool = isTeacher || Boolean(
+        userProfile &&
+        schoolNameToUse &&
+        (schoolNamesMatch(userProfile.workLocation, schoolNameToUse) ||
+          schoolNamesMatch((userProfile as any).schoolName, schoolNameToUse) ||
+          (schoolIdToUse && userProfile.schoolId === schoolIdToUse))
+      );
 
       for (const slot of slots) {
         const isBlank = !slot.fullName.trim() && !slot.massarNumber.trim() && !slot.birthDate.trim();
@@ -676,9 +704,9 @@ export const SportBulkRegisterModal: React.FC<SportBulkRegisterModalProps> = ({
           schoolName: schoolNameToUse,
           sportId: sport.id,
           participationType: 'school_team',
-          coachName: coachName.trim() || userProfile?.fullName || undefined,
-          coachLeaseNumber: coachLeaseNumber.trim() || userProfile?.leaseNumber || undefined,
-          coachPhone: coachPhone.trim() || userProfile?.phone || undefined,
+          coachName: coachName.trim() || (isUserAtSchool ? userProfile?.fullName : undefined) || undefined,
+          coachLeaseNumber: coachLeaseNumber.trim() || (isUserAtSchool ? userProfile?.leaseNumber : undefined) || undefined,
+          coachPhone: coachPhone.trim() || (isUserAtSchool ? userProfile?.phone : undefined) || undefined,
           photoUrl: slot.photoUrl,
           ...(sport.id === 'athletics' ? { athleticsSpecialty: slot.athleticsSpecialty } : {})
         };

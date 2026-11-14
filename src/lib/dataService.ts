@@ -26,11 +26,16 @@ export { normalizeDateToYmd };
 
 /**
  * Determines whether a school record belongs to Private Education (التعليم الخصوصي)
- * based on its explicit type, flag, or official Moroccan school naming conventions.
+ * based on its explicit sector, flag, type, or official Moroccan school naming conventions.
  */
-export function isPrivateSchoolRecord(s?: { name?: string; type?: string; isPrivate?: boolean } | null): boolean {
+export function isPrivateSchoolRecord(
+  s?: { name?: string; type?: string; isPrivate?: boolean; educationSector?: 'public' | 'private' } | null
+): boolean {
   if (!s) return false;
-  if ((s as any).isPrivate === true) return true;
+  if (s.educationSector === 'private') return true;
+  if (s.educationSector === 'public') return false;
+  if (s.isPrivate === true) return true;
+  if (s.isPrivate === false) return false;
   const rawType = (s.type || '').trim().toLowerCase();
   const rawName = (s.name || '').trim();
   const lowerName = rawName.toLowerCase();
@@ -76,14 +81,43 @@ export function isPrivateSchoolRecord(s?: { name?: string; type?: string; isPriv
   return false;
 }
 
+export function getSchoolEducationSector(
+  s?: { name?: string; type?: string; isPrivate?: boolean; educationSector?: 'public' | 'private' } | null
+): 'public' | 'private' {
+  return isPrivateSchoolRecord(s) ? 'private' : 'public';
+}
+
+export function getSchoolEducationSectorAr(
+  s?: { name?: string; type?: string; isPrivate?: boolean; educationSector?: 'public' | 'private' } | 'public' | 'private' | null
+): string {
+  const sector = (s === 'public' || s === 'private') ? s : getSchoolEducationSector(s);
+  return sector === 'private' ? 'التعليم الخصوصي' : 'التعليم العمومي';
+}
+
 /**
  * Normalizes a school's cycle strictly into one of the 4 official categories:
  * 'خصوصي' | 'تأهيلي' | 'إعدادي' | 'ابتدائي'
  * Private schools are always placed exclusively in 'خصوصي' and excluded from public cycles.
  */
-export function normalizeSchoolCycleType(s?: { name?: string; type?: string; isPrivate?: boolean } | null): string {
+export function normalizeSchoolCycleType(
+  s?: { name?: string; type?: string; isPrivate?: boolean; educationSector?: 'public' | 'private' } | null
+): string {
   if (!s) return 'تأهيلي';
   if (isPrivateSchoolRecord(s)) return 'خصوصي';
+  const rawType = (s.type || '').trim();
+  const rawName = (s.name || '').trim();
+  if (rawType.includes('إعداد') || rawType.includes('اعداد')) return 'إعدادي';
+  if (rawType.includes('ابتدائ')) return 'ابتدائي';
+  if (rawType.includes('تأهيل') || rawType.includes('تاهيل')) return 'تأهيلي';
+  if (rawName.includes('إعدادي') || rawName.includes('اعدادي') || rawName.includes('إعدادية') || rawName.includes('اعدادية')) return 'إعدادي';
+  if (rawName.includes('ابتدائي') || rawName.includes('مدرسة') || rawName.includes('م.م') || rawName.includes('م/م') || rawName.includes('مجموعة مدارس')) return 'ابتدائي';
+  return 'تأهيلي';
+}
+
+export function normalizeSchoolPureCycleLabel(
+  s?: { name?: string; type?: string } | null
+): string {
+  if (!s) return 'تأهيلي';
   const rawType = (s.type || '').trim();
   const rawName = (s.name || '').trim();
   if (rawType.includes('إعداد') || rawType.includes('اعداد')) return 'إعدادي';
@@ -1010,6 +1044,329 @@ export function getTournamentLevelAr(level?: string): string {
     .join(' و ');
 }
 
+export function normalizeTournamentEducationSectors(
+  t?: { educationSectors?: ('public' | 'private')[] | string[] } | null
+): ('public' | 'private')[] {
+  if (t && Array.isArray(t.educationSectors) && t.educationSectors.length > 0) {
+    const valid = Array.from(
+      new Set(
+        t.educationSectors
+          .map(x => String(x || '').trim().toLowerCase())
+          .filter((x): x is 'public' | 'private' => x === 'public' || x === 'private')
+      )
+    );
+    if (valid.length > 0) return valid;
+  }
+  return ['public', 'private'];
+}
+
+export function isSchoolSectorAllowedForTournament(
+  schoolOrSector?: { name?: string; type?: string; isPrivate?: boolean; educationSector?: 'public' | 'private' } | 'public' | 'private' | null,
+  tournament?: { educationSectors?: ('public' | 'private')[] | string[] } | null
+): boolean {
+  if (!tournament || !Array.isArray(tournament.educationSectors) || tournament.educationSectors.length === 0) {
+    return true;
+  }
+  if (!schoolOrSector) return true;
+  const schoolSector: 'public' | 'private' =
+    (schoolOrSector === 'public' || schoolOrSector === 'private')
+      ? schoolOrSector
+      : getSchoolEducationSector(schoolOrSector);
+  const allowed = normalizeTournamentEducationSectors(tournament);
+  return allowed.includes(schoolSector);
+}
+
+export function getTournamentEducationSectorsAr(sectors?: ('public' | 'private')[] | string[]): string {
+  const norm = normalizeTournamentEducationSectors({ educationSectors: sectors });
+  const hasPublic = norm.includes('public');
+  const hasPrivate = norm.includes('private');
+  if (hasPublic && hasPrivate) return 'العمومي والخصوصي';
+  if (hasPrivate) return 'التعليم الخصوصي';
+  return 'التعليم العمومي';
+}
+
+export function isSchoolEligibleForTournament(params: {
+  school?: School | null;
+  teachingCadre?: string;
+  tournament?: Pick<Tournament, 'level' | 'educationSectors'> | null;
+}): boolean {
+  const { school, teachingCadre, tournament } = params;
+  if (!tournament) return true;
+  if (school && !isSchoolSectorAllowedForTournament(school, tournament)) {
+    return false;
+  }
+  if (school?.type) {
+    if (!isSchoolLevelAllowedForTournament(school.type, tournament.level)) {
+      return false;
+    }
+  } else if (teachingCadre) {
+    if (!isTeacherLevelAllowedForTournament(teachingCadre, tournament.level)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function normalizeArabicMatchText(value?: string | null): string {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[\u064B-\u065F\u0670\u0640]/g, '')
+    .replace(/[أإآٱ]/g, 'ا')
+    .replace(/ة/g, 'ه')
+    .replace(/ى/g, 'ي')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+export function schoolNamesMatch(a?: string | null, b?: string | null): boolean {
+  const cleanA = normalizeArabicMatchText(a);
+  const cleanB = normalizeArabicMatchText(b);
+  if (!cleanA || !cleanB) return false;
+  return cleanA === cleanB || cleanA.includes(cleanB) || cleanB.includes(cleanA);
+}
+
+function stripCoachHonorifics(name?: string | null): string {
+  let clean = normalizeArabicMatchText(name);
+  if (!clean) return '';
+  clean = clean
+    .replace(/^(?:الاستاذه|الاستاذ|استاذه|استاذ|ذ\.|ذ\/|ذ\s+|ا\.|ا\/|prof\.?|mr\.?|mme\.?)\s*/i, '')
+    .replace(/[.\-_/()]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return clean;
+}
+
+export function coachNamesMatch(a?: string | null, b?: string | null): boolean {
+  const cleanA = stripCoachHonorifics(a);
+  const cleanB = stripCoachHonorifics(b);
+  if (!cleanA || !cleanB) return false;
+  if (cleanA === cleanB || cleanA.includes(cleanB) || cleanB.includes(cleanA)) {
+    return true;
+  }
+  const compactA = normalizeArabicName(cleanA);
+  const compactB = normalizeArabicName(cleanB);
+  if (!compactA || !compactB) return false;
+  return compactA === compactB || (compactA.length >= 6 && compactB.length >= 6 && (compactA.includes(compactB) || compactB.includes(compactA)));
+}
+
+export interface ResolvedSchoolCoach {
+  fullName: string;
+  leaseNumber: string;
+  phone: string;
+  workLocation: string;
+  photoUrl?: string;
+  source: 'student' | 'confirmation' | 'teacher' | 'school' | 'currentUser' | 'none';
+}
+
+export function resolveSchoolCoach(params: {
+  schoolName?: string;
+  sportId?: string;
+  students?: Student[];
+  schools?: School[];
+  teachers?: User[];
+  confirmations?: SchoolTournamentConfirmation[];
+  currentUser?: User | null;
+}): ResolvedSchoolCoach {
+  const {
+    schoolName = '',
+    sportId,
+    students = [],
+    schools = [],
+    teachers = [],
+    confirmations = [],
+    currentUser
+  } = params;
+
+  const cleanSchool = schoolName.trim();
+  const matchedSchool = cleanSchool
+    ? schools.find(s => schoolNamesMatch(s.name, cleanSchool) || s.id === cleanSchool)
+    : undefined;
+
+  const currentUserInTeachers = currentUser
+    ? teachers.find(
+        u =>
+          (currentUser.id && u.id === currentUser.id) ||
+          (currentUser.email && u.email && isFlexibleEmailMatch(u.email, currentUser.email)) ||
+          (currentUser.leaseNumber && u.leaseNumber && u.leaseNumber.trim() === currentUser.leaseNumber.trim())
+      )
+    : undefined;
+
+  const effectiveCurrentUser = currentUser
+    ? {
+        ...currentUserInTeachers,
+        ...currentUser,
+        workLocation: currentUser.workLocation || currentUserInTeachers?.workLocation || '',
+        schoolId: currentUser.schoolId || currentUserInTeachers?.schoolId || '',
+        leaseNumber: currentUser.leaseNumber || currentUserInTeachers?.leaseNumber || '',
+        phone: currentUser.phone || currentUserInTeachers?.phone || '',
+        photoUrl:
+          (currentUser.photoUrl && currentUser.photoUrl.trim()) ||
+          (currentUserInTeachers?.photoUrl && currentUserInTeachers.photoUrl.trim()) ||
+          undefined
+      }
+    : null;
+
+  const isUserFromTargetSchool = Boolean(
+    effectiveCurrentUser &&
+      cleanSchool &&
+      (schoolNamesMatch(effectiveCurrentUser.workLocation, cleanSchool) ||
+        schoolNamesMatch((effectiveCurrentUser as any).schoolName, cleanSchool) ||
+        (matchedSchool?.id && effectiveCurrentUser.schoolId === matchedSchool.id))
+  );
+
+  const filterSchoolStudents = students.filter(st => {
+    if (!st) return false;
+    if (!cleanSchool) return true;
+    return (
+      schoolNamesMatch(st.schoolName, cleanSchool) ||
+      (matchedSchool?.id && st.schoolId === matchedSchool.id)
+    );
+  });
+
+  const enrichFromUsers = (
+    name: string,
+    lease?: string,
+    phone?: string,
+    userId?: string
+  ): { fullName: string; leaseNumber: string; phone: string; photoUrl?: string } => {
+    const cleanName = (name || '').trim();
+    const cleanLease = (lease || '').trim();
+    const cleanPhone = (phone || '').trim();
+
+    const findBestUser = (predicate: (u: User) => boolean): User | undefined => {
+      const matches = teachers.filter(predicate);
+      if (matches.length === 0) return undefined;
+      return matches.find(u => Boolean(u.photoUrl && u.photoUrl.trim())) || matches[0];
+    };
+
+    const matchedUser =
+      (userId ? findBestUser(u => u.id === userId) : undefined) ||
+      (cleanLease
+        ? findBestUser(u => Boolean(u.leaseNumber && u.leaseNumber.trim() === cleanLease))
+        : undefined) ||
+      (cleanName
+        ? findBestUser(
+            u =>
+              Boolean(u.fullName) &&
+              (!cleanSchool ||
+                !u.workLocation ||
+                schoolNamesMatch(u.workLocation, cleanSchool) ||
+                Boolean(matchedSchool?.id && u.schoolId === matchedSchool.id)) &&
+              coachNamesMatch(u.fullName, cleanName)
+          )
+        : undefined) ||
+      (cleanName
+        ? findBestUser(u => Boolean(u.fullName) && coachNamesMatch(u.fullName, cleanName))
+        : undefined);
+
+    const matchesCurrentUser = Boolean(
+      effectiveCurrentUser &&
+        ((userId && effectiveCurrentUser.id === userId) ||
+          (cleanLease &&
+            effectiveCurrentUser.leaseNumber &&
+            effectiveCurrentUser.leaseNumber.trim() === cleanLease) ||
+          (cleanName &&
+            effectiveCurrentUser.fullName &&
+            coachNamesMatch(effectiveCurrentUser.fullName, cleanName)))
+    );
+
+    const resolvedPhoto =
+      (matchedUser?.photoUrl && matchedUser.photoUrl.trim()) ||
+      (matchesCurrentUser && effectiveCurrentUser?.photoUrl ? effectiveCurrentUser.photoUrl : undefined);
+
+    return {
+      fullName: cleanName || matchedUser?.fullName?.trim() || '',
+      leaseNumber: cleanLease || matchedUser?.leaseNumber?.trim() || '',
+      phone: cleanPhone || matchedUser?.phone?.trim() || '',
+      photoUrl: resolvedPhoto || undefined
+    };
+  };
+
+  // 1. Explicit coach recorded on participating students of this school (prefer matching sport)
+  const sportStudentsWithCoach = filterSchoolStudents.filter(
+    s => s.coachName && s.coachName.trim() !== '' && (!sportId || s.sportId === sportId)
+  );
+  const anyStudentsWithCoach =
+    sportStudentsWithCoach.length > 0
+      ? sportStudentsWithCoach
+      : filterSchoolStudents.filter(s => s.coachName && s.coachName.trim() !== '');
+
+  if (anyStudentsWithCoach.length > 0) {
+    const first = anyStudentsWithCoach[0];
+    const enriched = enrichFromUsers(
+      first.coachName || '',
+      first.coachLeaseNumber,
+      first.coachPhone
+    );
+    if (enriched.fullName) {
+      return {
+        ...enriched,
+        workLocation: cleanSchool || matchedSchool?.name || '',
+        source: 'student'
+      };
+    }
+  }
+
+  // 2. Active confirmation record for this school (prefer matching sport, ensure confirmor isn't a supervisor from a different school)
+  const matchingConfs = confirmations.filter(
+    c =>
+      c &&
+      c.status === 'confirmed' &&
+      (schoolNamesMatch(c.schoolName, cleanSchool) ||
+        (matchedSchool?.id && c.schoolId === matchedSchool.id))
+  );
+  const isConfFromSchool = (c: SchoolTournamentConfirmation) => {
+    if (!c.teacherName?.trim()) return false;
+    if (c.teacherId && teachers.length > 0) {
+      const confUser = teachers.find(u => u.id === c.teacherId);
+      if (confUser?.workLocation && cleanSchool && !schoolNamesMatch(confUser.workLocation, cleanSchool)) {
+        return false;
+      }
+    }
+    return true;
+  };
+  const targetConf =
+    (sportId ? matchingConfs.find(c => c.sportId === sportId && isConfFromSchool(c)) : undefined) ||
+    matchingConfs.find(isConfFromSchool);
+
+  if (targetConf && targetConf.teacherName?.trim()) {
+    const enriched = enrichFromUsers(
+      targetConf.teacherName,
+      targetConf.teacherLeaseNumber,
+      targetConf.teacherPhone,
+      targetConf.teacherId
+    );
+    if (enriched.fullName) {
+      return {
+        ...enriched,
+        workLocation: cleanSchool || matchedSchool?.name || '',
+        source: 'confirmation'
+      };
+    }
+  }
+
+  // 3. Fallback to currentUser ONLY if currentUser actually belongs to target school
+  if (isUserFromTargetSchool && effectiveCurrentUser?.fullName?.trim()) {
+    return {
+      fullName: effectiveCurrentUser.fullName.trim(),
+      leaseNumber: (effectiveCurrentUser.leaseNumber || '').trim(),
+      phone: (effectiveCurrentUser.phone || '').trim(),
+      workLocation: cleanSchool || effectiveCurrentUser.workLocation || '',
+      photoUrl: effectiveCurrentUser.photoUrl || undefined,
+      source: 'currentUser'
+    };
+  }
+
+  return {
+    fullName: '',
+    leaseNumber: '',
+    phone: '',
+    workLocation: cleanSchool || matchedSchool?.name || '',
+    source: 'none'
+  };
+}
+
 
 export function getCategoryGenderLabel(category: any, gender?: string, season: string = '2026/2027', sportIdOrIsCc?: string | boolean): string {
   if (!category || typeof category !== 'string') return category || '';
@@ -1884,6 +2241,7 @@ export const DataService = {
       status?: Tournament['status'];
       description?: string;
       level?: string;
+      educationSectors?: ('public' | 'private')[];
     }
   ): Promise<void> {
     const localList = getLocal<Tournament>(STORAGE_KEYS.TOURNAMENTS, []);
@@ -1897,6 +2255,7 @@ export const DataService = {
           ...(dates.status !== undefined ? { status: dates.status } : {}),
           ...(dates.description !== undefined ? { description: dates.description } : {}),
           ...(dates.level !== undefined ? { level: dates.level } : {}),
+          ...(dates.educationSectors !== undefined ? { educationSectors: dates.educationSectors } : {}),
           updatedAt: new Date()
         };
       }
@@ -1923,6 +2282,7 @@ export const DataService = {
           if (dates.status !== undefined) updatePayload.status = dates.status;
           if (dates.description !== undefined) updatePayload.description = dates.description;
           if (dates.level !== undefined) updatePayload.level = dates.level;
+          if (dates.educationSectors !== undefined) updatePayload.educationSectors = dates.educationSectors;
           return setDoc(doc(db, 'tournaments', d.id), updatePayload, { merge: true });
         });
         await Promise.all(promises);
@@ -2583,11 +2943,14 @@ export const DataService = {
     const newDocRef = doc(collection(db, 'schools'));
     const realId = newDocRef.id;
 
+    const resolvedSector = getSchoolEducationSector(school);
     const schoolWithDir: School = {
       ...school,
       id: realId,
       name: cleanName,
-      type: school.type || 'تأهيلي',
+      type: school.type || (resolvedSector === 'private' ? 'خصوصي' : 'تأهيلي'),
+      educationSector: resolvedSector,
+      isPrivate: resolvedSector === 'private',
       commune: school.commune || 'تاوريرت المركز',
       accessCode,
       directorateId: school.directorateId || (activeDirId === 'all' ? 'taourirt' : activeDirId),
@@ -2608,6 +2971,8 @@ export const DataService = {
       id: realId,
       name: cleanName,
       type: schoolWithDir.type,
+      educationSector: resolvedSector,
+      isPrivate: resolvedSector === 'private',
       commune: schoolWithDir.commune,
       directorateId: schoolWithDir.directorateId,
       accessCode: schoolWithDir.accessCode,
@@ -2758,10 +3123,13 @@ export const DataService = {
         cleanItem[k] = v !== undefined ? v : "";
       });
 
-      const normalizedCycle = normalizeSchoolCycleType({ name: cleanName, type: item.type });
+      const resolvedSector = getSchoolEducationSector({ name: cleanName, type: item.type, educationSector: item.educationSector, isPrivate: item.isPrivate });
+      const normalizedCycle = normalizeSchoolPureCycleLabel({ name: cleanName, type: item.type });
       const itemWithDir = {
         ...cleanItem,
-        type: normalizedCycle,
+        type: item.type?.trim() ? (item.type.trim() === 'خصوصي' ? 'خصوصي' : normalizedCycle) : (resolvedSector === 'private' ? 'خصوصي' : normalizedCycle),
+        educationSector: resolvedSector,
+        isPrivate: resolvedSector === 'private',
         directorateId: item.directorateId || effectiveDirId,
         updatedAt: serverTimestamp()
       };
@@ -3250,6 +3618,9 @@ export const DataService = {
           if (matchedKey) {
             const existing = usersMap.get(matchedKey)!;
             const preferData = !docId.startsWith('mgr_') || (data.schoolAccessVerified && !existing.schoolAccessVerified);
+            const dataPhoto = typeof data.photoUrl === 'string' ? data.photoUrl.trim() : '';
+            const existingPhoto = typeof existing.photoUrl === 'string' ? existing.photoUrl.trim() : '';
+            const mergedPhoto = preferData ? (dataPhoto || existingPhoto) : (existingPhoto || dataPhoto);
             const merged: User = {
               ...existing,
               ...data,
@@ -3261,6 +3632,7 @@ export const DataService = {
               schoolId: preferData ? (data.schoolId || existing.schoolId || '') : (existing.schoolId || data.schoolId || ''),
               leaseNumber: data.leaseNumber || existing.leaseNumber || '',
               phone: data.phone || existing.phone || '',
+              photoUrl: mergedPhoto,
               schoolAccessVerified: existing.schoolAccessVerified || data.schoolAccessVerified || false,
               isTechCommitteeHead: data.isTechCommitteeHead !== undefined ? !!data.isTechCommitteeHead : !!existing.isTechCommitteeHead,
               techCommitteeSports: data.techCommitteeSports !== undefined ? data.techCommitteeSports : (existing.techCommitteeSports || []),
@@ -3326,11 +3698,14 @@ export const DataService = {
             if (matchedKey) {
               const existing = usersMap.get(matchedKey)!;
               const preferNew = (uid && isPendingWrite('users', uid)) || (u.schoolAccessVerified && !existing.schoolAccessVerified);
+              const uPhoto = typeof u.photoUrl === 'string' ? u.photoUrl.trim() : '';
+              const exPhoto = typeof existing.photoUrl === 'string' ? existing.photoUrl.trim() : '';
               const merged: User = {
                 ...existing,
                 ...(preferNew ? userObj : {}),
                 workLocation: preferNew ? (u.workLocation || existing.workLocation) : (existing.workLocation || u.workLocation),
                 schoolId: preferNew ? (u.schoolId || existing.schoolId) : (existing.schoolId || u.schoolId),
+                photoUrl: preferNew ? (uPhoto || exPhoto) : (exPhoto || uPhoto),
                 schoolAccessVerified: existing.schoolAccessVerified || u.schoolAccessVerified || false
               };
               const targetKey = preferNew ? userObj.id : matchedKey;
@@ -3351,11 +3726,14 @@ export const DataService = {
         const demo = JSON.parse(demoRaw);
         if (demo && demo.id && !isRecentlyDeleted('users', String(demo.id))) {
           const existing = usersMap.get(demo.id);
+          const dPhoto = typeof demo.photoUrl === 'string' ? demo.photoUrl.trim() : '';
+          const ePhoto = typeof existing?.photoUrl === 'string' ? existing.photoUrl.trim() : '';
           usersMap.set(demo.id, {
             ...existing,
             ...demo,
             id: demo.id,
-            role: demo.role || existing?.role || 'TEACHER'
+            role: demo.role || existing?.role || 'TEACHER',
+            photoUrl: dPhoto || ePhoto
           });
         }
       }
@@ -3417,6 +3795,7 @@ export const DataService = {
           leaseNumber: primaryUser.leaseNumber || dup.leaseNumber || '',
           phone: primaryUser.phone || dup.phone || '',
           email: primaryUser.email || dup.email || '',
+          photoUrl: (primaryUser.photoUrl && String(primaryUser.photoUrl).trim()) || (dup.photoUrl && String(dup.photoUrl).trim()) || '',
           schoolAccessVerified: primaryUser.schoolAccessVerified ?? dup.schoolAccessVerified ?? false
         };
 

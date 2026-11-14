@@ -59,7 +59,7 @@ export function generateParticipationFormHtml(options: ParticipationPdfOptions):
         ? 'منتمي لنادي' 
         : 'لا منتمي';
       const photoHtml = student.photoUrl
-        ? `<img src="${student.photoUrl}" style="width: 32px; height: 38px; object-fit: cover; border-radius: 3px; border: 1px solid #94a3b8; display: block; margin: 0 auto;" />`
+        ? `<img src="${student.photoUrl}" referrerpolicy="no-referrer" style="width: 32px; height: 38px; object-fit: cover; border-radius: 3px; border: 1px solid #94a3b8; display: block; margin: 0 auto;" />`
         : `<div style="width: 32px; height: 38px; border: 1px dashed #cbd5e1; border-radius: 3px; margin: 0 auto; display: flex; align-items: center; justify-content: center; font-size: 8px; color: #94a3b8;">صورة</div>`;
 
       return `
@@ -95,7 +95,7 @@ export function generateParticipationFormHtml(options: ParticipationPdfOptions):
   }).join('');
 
   const teacherPhotoHtml = teacher.photoUrl
-    ? `<img src="${teacher.photoUrl}" style="width: 44px; height: 52px; object-fit: cover; border-radius: 4px; border: 1px solid #64748b; display: block; margin: 0 auto;" />`
+    ? `<img src="${teacher.photoUrl}" referrerpolicy="no-referrer" style="width: 44px; height: 52px; object-fit: cover; border-radius: 4px; border: 1px solid #64748b; display: block; margin: 0 auto;" />`
     : `<div style="width: 44px; height: 52px; border: 1px dashed #94a3b8; border-radius: 4px; margin: 0 auto; display: flex; align-items: center; justify-content: center; font-size: 8px; color: #64748b; line-height: 1.1; text-align: center;">صورة<br/>المؤطر</div>`;
 
   return `

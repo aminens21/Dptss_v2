@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Sport, Student, School, Tournament } from '../types';
-import { DataService, getAgeCategoriesForSeason, SPORTS_MAP, getCategoryGenderLabel, validateBirthDateForCategory, normalizeCategoryKey, isSchoolLevelAllowedForTournament, getTournamentLevelAr, isTeacherLevelAllowedForTournament } from '../lib/dataService';
+import { DataService, getAgeCategoriesForSeason, SPORTS_MAP, getCategoryGenderLabel, validateBirthDateForCategory, normalizeCategoryKey, isSchoolLevelAllowedForTournament, getTournamentLevelAr, isTeacherLevelAllowedForTournament, isSchoolSectorAllowedForTournament, getTournamentEducationSectorsAr, getSchoolEducationSector, schoolNamesMatch } from '../lib/dataService';
 import { AthleticsService } from '../lib/athleticsService';
 import { useAuth } from '../contexts/AuthContext';
 import { X, GraduationCap, User, Calendar, Upload, AlertCircle, Lock, ShieldCheck, CheckCircle2, Camera } from 'lucide-react';
@@ -69,11 +69,24 @@ export const RegisterStudentModal: React.FC<RegisterStudentModalProps> = ({
       setBirthDate('');
       setPhoto('');
       setAthleticsSpecialty('');
-      setCoachName(userProfile?.fullName || '');
-      setCoachLeaseNumber(userProfile?.leaseNumber || '');
-      setCoachPhone(userProfile?.phone || '');
+      const targetSchoolForInit = preselectedSchoolName || '';
+      const isUserForTarget = Boolean(
+        userProfile &&
+        targetSchoolForInit &&
+        (schoolNamesMatch(userProfile.workLocation, targetSchoolForInit) ||
+          schoolNamesMatch((userProfile as any).schoolName, targetSchoolForInit))
+      );
+      if (isUserForTarget) {
+        setCoachName(userProfile?.fullName || '');
+        setCoachLeaseNumber(userProfile?.leaseNumber || '');
+        setCoachPhone(userProfile?.phone || '');
+      } else {
+        setCoachName('');
+        setCoachLeaseNumber('');
+        setCoachPhone('');
+      }
     }
-  }, [isOpen, preselectedCategory, preselectedGender, preselectedAffiliation, userProfile]);
+  }, [isOpen, preselectedCategory, preselectedGender, preselectedAffiliation, userProfile, preselectedSchoolName]);
 
   // Synchronize school auto-selection based on preselectedSchoolName or userProfile and schools list
   useEffect(() => {
@@ -300,24 +313,40 @@ export const RegisterStudentModal: React.FC<RegisterStudentModalProps> = ({
           (normalizeCategoryKey(t.ageCategory) === normCategory || normalizeCategoryKey(t.ageCategory) === 'جميع الفئات') &&
           (t.gender === gender || t.gender === 'Mixed')
         );
-        if (relevantTournament && relevantTournament.level) {
-          const isAllowed = isSchoolLevelAllowedForTournament(activeSchoolObj.type, relevantTournament.level);
-          if (!isAllowed) {
-            toast.error(`عذراً، السلك التعليمي لمؤسسة "${activeSchoolObj.name}" (${activeSchoolObj.type}) غير مسموح له بالمشاركة في هذه البطولة المخصصة لـ (${getTournamentLevelAr(relevantTournament.level)})`);
-            setIsSubmitting(false);
-            return;
+        if (relevantTournament) {
+          if (relevantTournament.level) {
+            const isAllowed = isSchoolLevelAllowedForTournament(activeSchoolObj.type, relevantTournament.level);
+            if (!isAllowed) {
+              toast.error(`عذراً، السلك التعليمي لمؤسسة "${activeSchoolObj.name}" (${activeSchoolObj.type}) غير مسموح له بالمشاركة في هذه البطولة المخصصة لـ (${getTournamentLevelAr(relevantTournament.level)})`);
+              setIsSubmitting(false);
+              return;
+            }
+
+            // Check teacher cadre (extra safety)
+            if (userProfile?.teachingCadre && !isTeacherLevelAllowedForTournament(userProfile.teachingCadre, relevantTournament.level)) {
+              const cadreAr = userProfile.teachingCadre.includes('PRIMARY') ? 'ابتدائي' : userProfile.teachingCadre.includes('MIDDLE') ? 'إعدادي' : 'تأهيلي';
+              toast.error(`عذراً، بصفتك أستاذ سلك (${cadreAr})، لا يمكنك التسجيل في بطولة مخصصة لـ (${getTournamentLevelAr(relevantTournament.level)})`);
+              setIsSubmitting(false);
+              return;
+            }
           }
 
-          // Check teacher cadre (extra safety)
-          if (userProfile?.teachingCadre && !isTeacherLevelAllowedForTournament(userProfile.teachingCadre, relevantTournament.level)) {
-            const cadreAr = userProfile.teachingCadre.includes('PRIMARY') ? 'ابتدائي' : userProfile.teachingCadre.includes('MIDDLE') ? 'إعدادي' : 'تأهيلي';
-            toast.error(`عذراً، بصفتك أستاذ سلك (${cadreAr})، لا يمكنك التسجيل في بطولة مخصصة لـ (${getTournamentLevelAr(relevantTournament.level)})`);
+          if (!isSchoolSectorAllowedForTournament(activeSchoolObj, relevantTournament)) {
+            const schoolSecAr = getSchoolEducationSector(activeSchoolObj) === 'private' ? 'التعليم الخصوصي' : 'التعليم العمومي';
+            toast.error(`عذراً، مؤسسة "${activeSchoolObj.name}" (${schoolSecAr}) غير مسموح لها بالمشاركة في هذه البطولة المخصصة لـ (${getTournamentEducationSectorsAr(relevantTournament.educationSectors)})`);
             setIsSubmitting(false);
             return;
           }
         }
       }
 
+      const isUserAtResolvedSchool = Boolean(
+        userProfile &&
+        resolvedSchoolName &&
+        (schoolNamesMatch(userProfile.workLocation, resolvedSchoolName) ||
+          schoolNamesMatch((userProfile as any).schoolName, resolvedSchoolName) ||
+          (resolvedSchoolId && userProfile.schoolId === resolvedSchoolId))
+      );
       const studentData: Omit<Student, 'id' | 'createdAt' | 'updatedAt'> = {
         fullName: fullName.trim(),
         massarNumber: massarNumber.trim() || undefined,
@@ -329,9 +358,9 @@ export const RegisterStudentModal: React.FC<RegisterStudentModalProps> = ({
         sportId: sport.id,
         photoUrl: photo || undefined,
         affiliationType,
-        coachName: (coachName.trim() || userProfile?.fullName || '').trim() || undefined,
-        coachLeaseNumber: (coachLeaseNumber.trim() || userProfile?.leaseNumber || '').trim() || undefined,
-        coachPhone: (coachPhone.trim() || userProfile?.phone || '').trim() || undefined,
+        coachName: (coachName.trim() || (isUserAtResolvedSchool ? userProfile?.fullName : '') || '').trim() || undefined,
+        coachLeaseNumber: (coachLeaseNumber.trim() || (isUserAtResolvedSchool ? userProfile?.leaseNumber : '') || '').trim() || undefined,
+        coachPhone: (coachPhone.trim() || (isUserAtResolvedSchool ? userProfile?.phone : '') || '').trim() || undefined,
         ...(sport.id === 'cross_country' ? {
           participationType,
           distance: category === 'U12' ? '1500م' : category === 'U15' ? '2000م' : category === 'U18' ? '3000م' : '4000م'

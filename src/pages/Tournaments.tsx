@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { DataService, SPORTS_MAP, getAgeCategoriesForSeason, deduplicateById, getCategoryGenderLabel, isClubTournament, normalizeCategoryKey, getTournamentLevelAr, isTeacherLevelAllowedForTournament, getCustomCategoryName, getCustomCategoryDetails } from '../lib/dataService';
+import { DataService, SPORTS_MAP, getAgeCategoriesForSeason, deduplicateById, getCategoryGenderLabel, isClubTournament, normalizeCategoryKey, getTournamentLevelAr, isTeacherLevelAllowedForTournament, getCustomCategoryName, getCustomCategoryDetails, isSchoolSectorAllowedForTournament, getTournamentEducationSectorsAr, normalizeTournamentEducationSectors, getSchoolEducationSector, schoolNamesMatch } from '../lib/dataService';
 import { Tournament, User, Student, School, Sport, Match, Directorate } from '../types';
 import { CountdownTimer } from '../components/CountdownTimer';
 import * as XLSX from 'xlsx';
@@ -391,14 +391,14 @@ export const Tournaments: React.FC = () => {
         DataService.getTournaments(),
         DataService.getSportsConfig(),
         DataService.getActiveSeason(),
-        DataService.getTeachers(),
+        DataService.getUsers(),
         DataService.getStudents(),
         DataService.getSchools(),
         DataService.getMatches(),
         DataService.getActiveDirectorate().catch(() => null)
       ]);
       const allTeachers = Array.isArray(allTeachersRaw)
-        ? allTeachersRaw.filter((u: any) => !u.role || u.role === 'TEACHER')
+        ? allTeachersRaw.filter((u: any) => !u.role || u.role === 'TEACHER' || u.role === 'TECH_HEAD' || u.role === 'SPORT_MANAGER' || u.isTechCommitteeHead || u.isTechCommitteeMember)
         : [];
 
       let resolvedTournaments = tournList;
@@ -542,6 +542,7 @@ export const Tournaments: React.FC = () => {
               endDate: item.endDate,
               registrationDeadline: item.registrationDeadline,
               level: item.level,
+              educationSectors: item.educationSectors,
               scope: item.scope,
               status: item.status,
               description: item.description,
@@ -726,26 +727,25 @@ export const Tournaments: React.FC = () => {
     const teacherSchoolName = userProfile?.workLocation;
 
     let teacherCadre = userProfile?.teachingCadre || currentTeacherProfile?.teachingCadre;
-    if (isTeacherRole && !teacherCadre) {
-      const teacherSchoolId = userProfile?.schoolId || currentTeacherProfile?.schoolId;
-      const teacherSchoolName = userProfile?.schoolName || currentTeacherProfile?.schoolName;
-      const userSchool = schools.find(s => 
-        (teacherSchoolId && s.id === teacherSchoolId) || 
-        (teacherSchoolName && s.name === teacherSchoolName)
-      );
-      if (userSchool?.type) {
-        teacherCadre = userSchool.type;
-      }
+    const teacherSchoolId = userProfile?.schoolId || currentTeacherProfile?.schoolId;
+    const teacherSchoolLookupName = userProfile?.workLocation || userProfile?.schoolName || currentTeacherProfile?.workLocation || currentTeacherProfile?.schoolName;
+    const teacherSchoolObj = schools.find(s =>
+      (teacherSchoolId && s.id === teacherSchoolId) ||
+      (teacherSchoolLookupName && schoolNamesMatch(s.name, teacherSchoolLookupName))
+    );
+    if (isTeacherRole && !teacherCadre && teacherSchoolObj?.type) {
+      teacherCadre = teacherSchoolObj.type;
     }
 
     return sportsConfig.map(sport => {
       let sportTournaments = tournaments.filter(t => t.sportId === sport.id && t.status !== 'Draft' && (t as any).isActive !== false);
       const isManagerOfSport = canManageSport(sport.id);
 
-      // For teachers (non-admins), strictly filter tournaments to ONLY those allowed for their teaching cadre
+      // For teachers (non-admins), filter tournaments to ONLY those allowed for their teaching cadre and school education sector
       if (isTeacherRole && !isManagerOfSport) {
         sportTournaments = sportTournaments.filter(t => 
-          isTeacherLevelAllowedForTournament(teacherCadre, t.level)
+          isTeacherLevelAllowedForTournament(teacherCadre, t.level) &&
+          (!teacherSchoolObj || isSchoolSectorAllowedForTournament(teacherSchoolObj, t))
         );
       }
       
@@ -843,27 +843,28 @@ export const Tournaments: React.FC = () => {
       (!t.directorateId || (t.directorateId || 'taourirt') === (activeDirObj?.id || 'taourirt'))
     );
 
-    // 2. Strict Cadre restriction for Teachers
-    if (isTeacherRole) {
+    // 2. Strict Cadre & Sector restriction for Teachers
+    if (isTeacherRole && !canManageSport(sport.id)) {
       let teacherCadre = userProfile?.teachingCadre || currentTeacherProfile?.teachingCadre;
-      if (!teacherCadre) {
-        const teacherSchoolId = userProfile?.schoolId || currentTeacherProfile?.schoolId;
-        const teacherSchoolName = userProfile?.schoolName || currentTeacherProfile?.schoolName;
-        const userSchool = schools.find(s => 
-          (teacherSchoolId && s.id === teacherSchoolId) || 
-          (teacherSchoolName && s.name === teacherSchoolName)
-        );
-        if (userSchool?.type) {
-          teacherCadre = userSchool.type;
-        }
+      const teacherSchoolId = userProfile?.schoolId || currentTeacherProfile?.schoolId;
+      const teacherSchoolLookupName = userProfile?.workLocation || userProfile?.schoolName || currentTeacherProfile?.workLocation || currentTeacherProfile?.schoolName;
+      const userSchool = schools.find(s => 
+        (teacherSchoolId && s.id === teacherSchoolId) || 
+        (teacherSchoolLookupName && schoolNamesMatch(s.name, teacherSchoolLookupName))
+      );
+      if (!teacherCadre && userSchool?.type) {
+        teacherCadre = userSchool.type;
       }
 
       if (sportTourns.length > 0) {
-        const isAnyAllowed = sportTourns.some(t => 
+        const isAnyLevelAllowed = sportTourns.some(t => 
           isTeacherLevelAllowedForTournament(teacherCadre, t.level)
         );
+        const isAnySectorAllowed = !userSchool || sportTourns.some(t =>
+          isSchoolSectorAllowedForTournament(userSchool, t)
+        );
 
-        if (!isAnyAllowed) {
+        if (!isAnyLevelAllowed) {
           const levelsSet = new Set<string>();
           sportTourns.forEach(t => {
             if (t.level) {
@@ -881,6 +882,21 @@ export const Tournaments: React.FC = () => {
           toast.error(
             `عذراً، هذه البطولة (${sport.name}) مخصصة لـ (${allowedLevelsAr}) فقط.\nبصفتك أستاذ سلك (${cadreAr})، لا يمكنك الولوج لتسجيل الفرق والمشاركين فيها.`,
             { duration: 6000, id: 'cadre-restriction-toast' }
+          );
+          return;
+        }
+
+        if (!isAnySectorAllowed && userSchool) {
+          const sectorsSet = new Set<'public' | 'private'>();
+          sportTourns.forEach(t => {
+            normalizeTournamentEducationSectors(t).forEach(sec => sectorsSet.add(sec));
+          });
+          const allowedSectorsAr = getTournamentEducationSectorsAr(Array.from(sectorsSet));
+          const schoolSecAr = getSchoolEducationSector(userSchool) === 'private' ? 'التعليم الخصوصي' : 'التعليم العمومي';
+
+          toast.error(
+            `عذراً، هذه البطولة (${sport.name}) مفتوحة فقط لمؤسسات (${allowedSectorsAr}).\nمؤسستكم مصنفة ضمن (${schoolSecAr})، ولا يحق لها المشاركة في هذه البطولة.`,
+            { duration: 6000, id: 'sector-restriction-toast' }
           );
           return;
         }
@@ -1253,6 +1269,11 @@ export const Tournaments: React.FC = () => {
                                   {getTournamentLevelAr(sportTournaments[0].level)}
                                 </span>
                               )}
+                              {sportTournaments[0] && (
+                                <span className="bg-purple-500/20 text-purple-200 border border-purple-400/30 text-[9px] font-extrabold px-2 py-0.5 rounded-full">
+                                  {getTournamentEducationSectorsAr(sportTournaments[0].educationSectors)}
+                                </span>
+                              )}
                             </div>
                             <span className="text-[10px] font-medium text-slate-300">الموسم {activeSeason}</span>
                           </div>
@@ -1557,6 +1578,15 @@ export const Tournaments: React.FC = () => {
                                 🎓 {getTournamentLevelAr(mainTourn.level)}
                               </span>
                             )}
+                            {mainTourn && (
+                              <span className={`text-[9px] font-extrabold px-1.5 py-0.2 rounded border shadow-3xs ${
+                                normalizeTournamentEducationSectors(mainTourn).length === 1 && normalizeTournamentEducationSectors(mainTourn)[0] === 'private'
+                                  ? 'bg-purple-50 text-purple-800 border-purple-200'
+                                  : 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                              }`}>
+                                {getTournamentEducationSectorsAr(mainTourn.educationSectors)}
+                              </span>
+                            )}
                           </div>
                           <span className="text-[10px] font-medium text-slate-400">الموسم {activeSeason}</span>
                         </div>
@@ -1685,7 +1715,11 @@ export const Tournaments: React.FC = () => {
                             }}
                           />
                           <button
-                            onClick={() => handleOpenSportModal(sport)}
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleOpenSportModal(sport);
+                            }}
                             className="flex-1 py-2.5 px-3 bg-blue-600 hover:bg-blue-700 text-white font-black text-xs rounded-xl flex items-center justify-center gap-1.5 transition-all shadow-3xs cursor-pointer"
                           >
                             <Users className="h-4 w-4" />
@@ -1707,7 +1741,11 @@ export const Tournaments: React.FC = () => {
                             <span>تأكيد مشاركة المؤسسة 📋</span>
                           </button>
                           <button
-                            onClick={() => handleOpenSportModal(sport)}
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleOpenSportModal(sport);
+                            }}
                             className="py-2.5 px-2.5 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold text-xs rounded-xl flex items-center justify-center gap-1 transition-colors cursor-pointer shrink-0"
                             title="استعراض تفاصيل البطولة"
                           >
@@ -1717,7 +1755,11 @@ export const Tournaments: React.FC = () => {
                       )
                     ) : (
                       <button
-                        onClick={() => handleOpenSportModal(sport)}
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleOpenSportModal(sport);
+                        }}
                         className="flex-1 py-2.5 px-3 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl flex items-center justify-center gap-1.5 transition-all shadow-3xs cursor-pointer"
                       >
                         <Layers className="h-4 w-4" />
@@ -1726,7 +1768,7 @@ export const Tournaments: React.FC = () => {
                     )}
 
                     {canManageThis && (
-                      <div className="flex items-center gap-1.5">
+                      <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
                         {TEAM_SPORTS_IDS.includes(sport.id) && (
                           <button
                             type="button"
@@ -1745,7 +1787,11 @@ export const Tournaments: React.FC = () => {
 
                         {isCentralAdmin && (
                           <button
-                            onClick={() => setSportToDeleteAll({ id: sport.id, name: sport.name })}
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSportToDeleteAll({ id: sport.id, name: sport.name });
+                            }}
                             title="مسح كافة بطولات هذه الرياضة وإعادتها لحالة غير مبرمجة"
                             className="p-2 text-red-500 hover:text-red-700 hover:bg-red-50 rounded-xl transition-colors cursor-pointer border border-red-200 bg-white flex items-center justify-center shrink-0"
                           >
@@ -1754,7 +1800,9 @@ export const Tournaments: React.FC = () => {
                         )}
 
                         <button
-                          onClick={() => {
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
                             handleOpenProgramModal(sport.id);
                           }}
                           title="تعديل وإعداد وبرمجة البطولة"
@@ -1815,6 +1863,7 @@ export const Tournaments: React.FC = () => {
         tournaments={tournaments}
         allStudents={allStudents}
         schools={schools}
+        teachers={teachers}
         techHead={teachers.find(tch => tch.isTechCommitteeHead && (tch.techCommitteeSports?.includes('cross_country') || tch.sportId === 'cross_country'))}
         activeSeason={activeSeason}
         canManage={canManageSport('cross_country')}

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { School, Directorate } from '../types';
-import { DataService } from '../lib/dataService';
-import { X, School as SchoolIcon, MapPin, User, Phone, PhoneCall, Layers, KeyRound } from 'lucide-react';
+import { DataService, getSchoolEducationSector, normalizeSchoolPureCycleLabel } from '../lib/dataService';
+import { X, School as SchoolIcon, Phone, PhoneCall, KeyRound, Building2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 interface CreateSchoolModalProps {
@@ -20,6 +20,9 @@ export const CreateSchoolModal: React.FC<CreateSchoolModalProps> = ({
   const [activeDir, setActiveDir] = useState<Directorate | null>(null);
   const [name, setName] = useState(initialData?.name || '');
   const [type, setType] = useState(initialData?.type || 'تأهيلي');
+  const [educationSector, setEducationSector] = useState<'public' | 'private'>(() =>
+    initialData ? getSchoolEducationSector(initialData) : 'public'
+  );
   const [commune, setCommune] = useState(initialData?.commune || 'تاوريرت المركز');
   const [teacherName, setTeacherName] = useState(initialData?.coordinatorName || initialData?.teacherName || '');
   const [phone, setPhone] = useState(initialData?.phone || '');
@@ -36,8 +39,15 @@ export const CreateSchoolModal: React.FC<CreateSchoolModalProps> = ({
   // Sync initialData when opening for edit
   useEffect(() => {
     if (initialData) {
+      const detectedSector = getSchoolEducationSector(initialData);
+      const rawType = (initialData.type || '').trim();
       setName(initialData.name);
-      setType(initialData.type);
+      setEducationSector(detectedSector);
+      setType(
+        rawType === 'خصوصي'
+          ? normalizeSchoolPureCycleLabel({ name: initialData.name, type: 'تأهيلي' })
+          : (rawType || 'تأهيلي')
+      );
       setCommune(initialData.commune);
       setTeacherName(initialData.coordinatorName || initialData.teacherName || '');
       setPhone(initialData.phone || '');
@@ -47,6 +57,7 @@ export const CreateSchoolModal: React.FC<CreateSchoolModalProps> = ({
     } else {
       setName('');
       setType('تأهيلي');
+      setEducationSector('public');
       setCommune(activeDir?.shortName || activeDir?.name || 'تاوريرت المركز');
       setTeacherName('');
       setPhone('');
@@ -70,6 +81,8 @@ export const CreateSchoolModal: React.FC<CreateSchoolModalProps> = ({
       await onSave({
         name: name.trim(),
         type,
+        educationSector,
+        isPrivate: educationSector === 'private',
         commune: commune.trim() || 'المركز',
         teacherName: teacherName.trim() || undefined,
         coordinatorName: teacherName.trim() || undefined,
@@ -131,12 +144,55 @@ export const CreateSchoolModal: React.FC<CreateSchoolModalProps> = ({
             />
           </div>
 
+          {/* Education Sector (عمومي / خصوصي) */}
+          <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
+            <label className="block text-xs font-bold text-slate-800 flex items-center gap-1.5">
+              <Building2 className="h-3.5 w-3.5 text-emerald-700" />
+              <span>نوع المؤسسة التعليمية (القطاع) *</span>
+            </label>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setEducationSector('public');
+                  if (type === 'خصوصي') setType('تأهيلي');
+                }}
+                className={`py-2 px-3 rounded-xl text-xs font-bold border transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                  educationSector === 'public'
+                    ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
+                    : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
+                }`}
+              >
+                <span>🏛️</span>
+                <span>التعليم العمومي</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setEducationSector('private')}
+                className={`py-2 px-3 rounded-xl text-xs font-bold border transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                  educationSector === 'private'
+                    ? 'bg-purple-600 text-white border-purple-600 shadow-xs'
+                    : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
+                }`}
+              >
+                <span>🏫</span>
+                <span>التعليم الخصوصي</span>
+              </button>
+            </div>
+          </div>
+
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-bold text-slate-700 mb-1">السلك التعليمي</label>
               <select
                 value={type}
-                onChange={(e) => setType(e.target.value)}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setType(val);
+                  if (val === 'خصوصي') {
+                    setEducationSector('private');
+                  }
+                }}
                 className="w-full text-sm sm:text-xs rounded-xl border border-slate-200 px-3 py-2 text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-2xs"
               >
                 <option value="تأهيلي">ثانوي تأهيلي</option>

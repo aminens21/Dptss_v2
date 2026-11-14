@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { DataService, SPORTS_MAP, AGE_CATEGORIES, getAgeCategoriesForSeason, getCategoryGenderLabel, isClubTournament, normalizeCategoryKey, validateBirthDateForCategory, isTeacherLevelAllowedForTournament, getEffectiveConfirmedBranches, formatBranchLabelAr, getGenderSpecificCategoryTitle } from '../lib/dataService';
+import { DataService, SPORTS_MAP, AGE_CATEGORIES, getAgeCategoriesForSeason, getCategoryGenderLabel, isClubTournament, normalizeCategoryKey, validateBirthDateForCategory, isTeacherLevelAllowedForTournament, getEffectiveConfirmedBranches, formatBranchLabelAr, getGenderSpecificCategoryTitle, isSchoolSectorAllowedForTournament, schoolNamesMatch } from '../lib/dataService';
 import { useSchoolConfirmations } from '../hooks/useSchoolConfirmations';
 import { Student, Sport, Tournament, School, Directorate } from '../types';
 import { ParticipationFormPdfModal } from '../components/ParticipationFormPdfModal';
@@ -70,11 +70,22 @@ export const TeacherTeams: React.FC = () => {
     return undefined;
   }, [userProfile, schools]);
 
+  const teacherSchoolObj = useMemo(() => {
+    const schoolLookup = userProfile?.workLocation || userProfile?.schoolName;
+    return (schools || []).find(s =>
+      (userProfile?.schoolId && s.id === userProfile.schoolId) ||
+      (schoolLookup && schoolNamesMatch(s.name, schoolLookup))
+    );
+  }, [schools, userProfile]);
+
   const teacherAllowedTournaments = useMemo(() => {
     const activeTourns = tournaments.filter(t => t.status !== 'Draft' && (t as any).isActive !== false);
     if (!isTeacherRole || canManage) return activeTourns;
-    return activeTourns.filter(t => isTeacherLevelAllowedForTournament(teacherCadre, t.level));
-  }, [tournaments, isTeacherRole, canManage, teacherCadre]);
+    return activeTourns.filter(t =>
+      isTeacherLevelAllowedForTournament(teacherCadre, t.level) &&
+      (!teacherSchoolObj || isSchoolSectorAllowedForTournament(teacherSchoolObj, t))
+    );
+  }, [tournaments, isTeacherRole, canManage, teacherCadre, teacherSchoolObj]);
 
   const isSportProgrammed = (s: Sport): boolean => {
     if (teacherAllowedTournaments.some(t => t.sportId === s.id)) return true;

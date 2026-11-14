@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { School, Student, User, Tournament } from '../types';
-import { DataService, validateBirthDateForCategory, normalizeCategoryKey, getCategoryGenderLabel, getCategoryYearsLabel, isSchoolLevelAllowedForTournament, getTournamentLevelAr } from '../lib/dataService';
+import { DataService, validateBirthDateForCategory, normalizeCategoryKey, getCategoryGenderLabel, getCategoryYearsLabel, isSchoolLevelAllowedForTournament, getTournamentLevelAr, isSchoolSectorAllowedForTournament, getTournamentEducationSectorsAr, getSchoolEducationSector, schoolNamesMatch } from '../lib/dataService';
 import { CROSS_COUNTRY_CATEGORIES, CrossCountryCategoryDef } from '../lib/crossCountryConfig';
 import { useAuth } from '../contexts/AuthContext';
 import * as XLSX from 'xlsx';
@@ -236,10 +236,22 @@ export const CrossCountryBulkRegisterModal: React.FC<CrossCountryBulkRegisterMod
       setSelectedSchoolId(schools[0].id);
     }
 
-    // Default coach info
-    setCoachName(userProfile?.fullName || '');
-    setCoachLeaseNumber(userProfile?.leaseNumber || '');
-    setCoachPhone(userProfile?.phone || '');
+    const targetSchoolInit = isTeacher ? (userProfile?.workLocation || '') : (preselectedSchoolName || '');
+    const isUserAtTarget = isTeacher || Boolean(
+      userProfile &&
+      targetSchoolInit &&
+      (schoolNamesMatch(userProfile.workLocation, targetSchoolInit) ||
+        schoolNamesMatch((userProfile as any).schoolName, targetSchoolInit))
+    );
+    if (isUserAtTarget) {
+      setCoachName(userProfile?.fullName || '');
+      setCoachLeaseNumber(userProfile?.leaseNumber || '');
+      setCoachPhone(userProfile?.phone || '');
+    } else {
+      setCoachName('');
+      setCoachLeaseNumber('');
+      setCoachPhone('');
+    }
   }, [isOpen, isTeacher, userProfile, schools, preselectedSchoolId, preselectedSchoolName]);
 
   // Resolved school object and name
@@ -582,9 +594,9 @@ export const CrossCountryBulkRegisterModal: React.FC<CrossCountryBulkRegisterMod
         'المسافة المقررة': activeRaceDef.distance,
         'تاريخ الازدياد': s.birthDate || '—',
         'المؤسسة التعليمية': resolvedSchoolName,
-        'الأستاذ المؤطر': coachName || userProfile?.fullName || '—',
-        'رقم تأجير المؤطر': coachLeaseNumber || userProfile?.leaseNumber || '—',
-        'هاتف المؤطر': coachPhone || userProfile?.phone || '—',
+        'الأستاذ المؤطر': coachName || (isTeacher || schoolNamesMatch(userProfile?.workLocation, resolvedSchoolName) ? userProfile?.fullName : '') || '—',
+        'رقم تأجير المؤطر': coachLeaseNumber || (isTeacher || schoolNamesMatch(userProfile?.workLocation, resolvedSchoolName) ? userProfile?.leaseNumber : '') || '—',
+        'هاتف المؤطر': coachPhone || (isTeacher || schoolNamesMatch(userProfile?.workLocation, resolvedSchoolName) ? userProfile?.phone : '') || '—',
         'الموسم الدراسي': currentSeason
       };
     });
@@ -882,10 +894,18 @@ export const CrossCountryBulkRegisterModal: React.FC<CrossCountryBulkRegisterMod
           normalizeCategoryKey(t.ageCategory) === normCategory &&
           (t.gender === activeRaceDef.gender || t.gender === 'Mixed')
         );
-        if (relevantTournament && relevantTournament.level) {
-          const isAllowed = isSchoolLevelAllowedForTournament(activeSchoolObj.type, relevantTournament.level);
-          if (!isAllowed) {
-            toast.error(`عذراً، السلك التعليمي لمؤسسة "${activeSchoolObj.name}" (${activeSchoolObj.type}) غير مسموح له بالمشاركة في هذه البطولة المخصصة لـ (${getTournamentLevelAr(relevantTournament.level)})`);
+        if (relevantTournament) {
+          if (relevantTournament.level) {
+            const isAllowed = isSchoolLevelAllowedForTournament(activeSchoolObj.type, relevantTournament.level);
+            if (!isAllowed) {
+              toast.error(`عذراً، السلك التعليمي لمؤسسة "${activeSchoolObj.name}" (${activeSchoolObj.type}) غير مسموح له بالمشاركة في هذه البطولة المخصصة لـ (${getTournamentLevelAr(relevantTournament.level)})`);
+              setIsSubmitting(false);
+              return;
+            }
+          }
+          if (!isSchoolSectorAllowedForTournament(activeSchoolObj, relevantTournament)) {
+            const schoolSecAr = getSchoolEducationSector(activeSchoolObj) === 'private' ? 'التعليم الخصوصي' : 'التعليم العمومي';
+            toast.error(`عذراً، مؤسسة "${activeSchoolObj.name}" (${schoolSecAr}) غير مسموح لها بالمشاركة في هذه البطولة المخصصة لـ (${getTournamentEducationSectorsAr(relevantTournament.educationSectors)})`);
             setIsSubmitting(false);
             return;
           }
@@ -895,6 +915,13 @@ export const CrossCountryBulkRegisterModal: React.FC<CrossCountryBulkRegisterMod
       // Split into slots that are existing updates vs new creations
       const studentsToCreate: Array<Omit<Student, 'id' | 'createdAt' | 'updatedAt'>> = [];
       const studentsToUpdate: Array<{ id: string; data: Partial<Student> }> = [];
+      const isUserAtSchool = isTeacher || Boolean(
+        userProfile &&
+        schoolNameToUse &&
+        (schoolNamesMatch(userProfile.workLocation, schoolNameToUse) ||
+          schoolNamesMatch((userProfile as any).schoolName, schoolNameToUse) ||
+          (schoolIdToUse && userProfile.schoolId === schoolIdToUse))
+      );
 
       for (const slot of filledSlots) {
         const payload: Omit<Student, 'id' | 'createdAt' | 'updatedAt'> = {
@@ -909,9 +936,9 @@ export const CrossCountryBulkRegisterModal: React.FC<CrossCountryBulkRegisterMod
           sportId: 'cross_country',
           participationType: slot.participationType,
           distance: activeRaceDef.distance,
-          coachName: coachName.trim() || userProfile?.fullName || undefined,
-          coachLeaseNumber: coachLeaseNumber.trim() || userProfile?.leaseNumber || undefined,
-          coachPhone: coachPhone.trim() || userProfile?.phone || undefined,
+          coachName: coachName.trim() || (isUserAtSchool ? userProfile?.fullName : undefined) || undefined,
+          coachLeaseNumber: coachLeaseNumber.trim() || (isUserAtSchool ? userProfile?.leaseNumber : undefined) || undefined,
+          coachPhone: coachPhone.trim() || (isUserAtSchool ? userProfile?.phone : undefined) || undefined,
           photoUrl: slot.photoUrl
         };
 

@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { Tournament, Sport, Directorate, TARGET_AFFILIATIONS, TargetAffiliationConfig } from '../types';
-import { AGE_CATEGORIES, DataService, getAgeCategoriesForSeason, SPORTS_MAP, getCategoryGenderLabel, normalizeCategoryKey, isTeamSport } from '../lib/dataService';
-import { X, Trophy, Calendar, Users, Target, Award, Sparkles, ShieldCheck, RefreshCw, Check, Clock, GraduationCap } from 'lucide-react';
+import { AGE_CATEGORIES, DataService, getAgeCategoriesForSeason, SPORTS_MAP, getCategoryGenderLabel, normalizeCategoryKey, isTeamSport, normalizeTournamentEducationSectors } from '../lib/dataService';
+import { X, Trophy, Calendar, Users, Target, Award, Sparkles, ShieldCheck, RefreshCw, Check, Clock, GraduationCap, Building2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 interface CreateTournamentModalProps {
@@ -23,6 +23,7 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
   const [name, setName] = useState('');
   const [sportId, setSportId] = useState('football');
   const [selectedLevels, setSelectedLevels] = useState<('Primary' | 'Middle' | 'High')[]>(['High']);
+  const [selectedEducationSectors, setSelectedEducationSectors] = useState<('public' | 'private')[]>(['public', 'private']);
   
   // Custom states for multi-select categories and gender combinations
   const [selectedCategories, setSelectedCategories] = useState<string[]>(['U15']);
@@ -216,6 +217,7 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
           const lvls = sample.level.split(',').map((l: string) => l.trim()).filter(Boolean) as ('Primary' | 'Middle' | 'High')[];
           if (lvls.length > 0) setSelectedLevels(lvls);
         }
+        setSelectedEducationSectors(normalizeTournamentEducationSectors(sample));
 
         const existingCats = Array.from(new Set(
           sportTourns
@@ -263,6 +265,7 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
         }
         setGenderSelection('Both');
         setSelectedAffiliations(['non_club', 'club_affiliated']);
+        setSelectedEducationSectors(['public', 'private']);
       }
     });
 
@@ -343,6 +346,7 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
               ageCategory: catId,
               gender: gen,
               level: selectedLevels && selectedLevels.length > 0 ? selectedLevels.join(',') : (catId === 'U12' ? 'Primary' : catId === 'U15' ? 'Middle' : (catId === 'U18' || catId === 'U20') ? 'High' : 'Primary,Middle,High'),
+              educationSectors: selectedEducationSectors.length > 0 ? selectedEducationSectors : ['public', 'private'],
               scope,
               affiliationType: affId,
               targetAffiliations: [affId],
@@ -375,7 +379,8 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
           registrationDeadline: registrationDeadline ? new Date(registrationDeadline) : null,
           status,
           description: description.trim(),
-          level: selectedLevels.join(',')
+          level: selectedLevels.join(','),
+          educationSectors: selectedEducationSectors.length > 0 ? selectedEducationSectors : ['public', 'private']
         });
       } catch (err) {
         console.warn("Could not updateSportDates:", err);
@@ -389,6 +394,7 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
       setDescription('');
       setSelectedCategories(['U15']);
       setSelectedLevels(['High']);
+      setSelectedEducationSectors(['public', 'private']);
       setGenderSelection('Both');
       setSelectedAffiliations(availableAffiliations.map(a => a.id));
       onClose();
@@ -861,6 +867,53 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
                   </button>
                 );
               })}
+            </div>
+
+            {/* Education Sector Selection (العمومي / الخصوصي) directly under Educational Cycles */}
+            <div className="pt-2.5 mt-2.5 border-t border-emerald-200/70 space-y-1.5">
+              <div className="flex items-center justify-between gap-2">
+                <label className="text-[11px] font-bold text-emerald-950 flex items-center gap-1.5">
+                  <Building2 className="w-3.5 h-3.5 text-emerald-700" />
+                  <span>نوع التعليم المسموح له بالمشاركة *</span>
+                </label>
+                <span className="text-[10px] text-emerald-800 font-semibold">
+                  العمومي / الخصوصي
+                </span>
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {[
+                  { id: 'public', label: 'التعليم العمومي', icon: '🏛️' },
+                  { id: 'private', label: 'التعليم الخصوصي', icon: '🏫' }
+                ].map((sec) => {
+                  const isSelected = selectedEducationSectors.includes(sec.id as 'public' | 'private');
+                  return (
+                    <button
+                      type="button"
+                      key={sec.id}
+                      onClick={() => {
+                        setSelectedEducationSectors(prev =>
+                          prev.includes(sec.id as 'public' | 'private')
+                            ? (prev.length > 1 ? prev.filter(x => x !== sec.id) : prev)
+                            : [...prev, sec.id as 'public' | 'private']
+                        );
+                      }}
+                      className={`px-3.5 py-1.5 rounded-xl text-xs font-bold border transition-all cursor-pointer flex items-center gap-1.5 ${
+                        isSelected
+                          ? sec.id === 'private'
+                            ? 'bg-purple-600 border-purple-600 text-white shadow-3xs'
+                            : 'bg-emerald-700 border-emerald-700 text-white shadow-3xs'
+                          : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                      }`}
+                    >
+                      <span>{sec.icon}</span>
+                      <span>{sec.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+              <p className="text-[10px] text-emerald-800/90 leading-relaxed">
+                عند اختيار القطاع (عمومي أو خصوصي)، يحق للمؤسسات التابعة له وللأسلاك المحددة أعلاه فقط تأكيد المشاركة والتسجيل في هذه البطولة.
+              </p>
             </div>
           </div>
 

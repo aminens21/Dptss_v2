@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { formatMatchDate, parseDateToTimestampMs } from '../lib/utils';
-import { DataService, deduplicateById, normalizeCategoryKey, isTeacherLevelAllowedForTournament } from '../lib/dataService';
+import { DataService, deduplicateById, normalizeCategoryKey, isTeacherLevelAllowedForTournament, isSchoolSectorAllowedForTournament, schoolNamesMatch } from '../lib/dataService';
 import { Match, Tournament, School, Venue, Referee, User } from '../types';
 import {
   Trophy,
@@ -154,10 +154,16 @@ export const Dashboard: React.FC = () => {
       if (userProfile?.role === 'TEACHER') {
         displaySchoolsCount = 1;
         const teacherCadre = userProfile.teachingCadre;
+        const teacherSchoolObj = dirSchools.find(s =>
+          (userProfile.schoolId && s.id === userProfile.schoolId) ||
+          (userProfile.workLocation && schoolNamesMatch(s.name, userProfile.workLocation)) ||
+          ((userProfile as any).schoolName && schoolNamesMatch(s.name, (userProfile as any).schoolName))
+        );
         const activeTeacherTourns = dirTournaments.filter(t => 
           t.status !== 'Draft' && 
           (t as any).isActive !== false &&
-          (!teacherCadre || isTeacherLevelAllowedForTournament(teacherCadre, t.level))
+          (!teacherCadre || isTeacherLevelAllowedForTournament(teacherCadre, t.level)) &&
+          (!teacherSchoolObj || isSchoolSectorAllowedForTournament(teacherSchoolObj, t))
         );
         displayTournamentsCount = activeTeacherTourns.length;
       }

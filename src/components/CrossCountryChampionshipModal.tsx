@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { Tournament, Student, School, User, Sport } from '../types';
-import { DataService, SPORTS_MAP, getAgeCategoriesForSeason, validateBirthDateForCategory } from '../lib/dataService';
+import { DataService, SPORTS_MAP, getAgeCategoriesForSeason, validateBirthDateForCategory, resolveSchoolCoach, schoolNamesMatch } from '../lib/dataService';
 import { useAuth } from '../contexts/AuthContext';
 import { useRolePermissions } from '../hooks/useRolePermissions';
 import {
@@ -55,6 +55,7 @@ interface CrossCountryChampionshipModalProps {
   tournaments: Tournament[];
   allStudents: Student[];
   schools: School[];
+  teachers?: User[];
   techHead?: User;
   activeSeason: string;
   canManage?: boolean;
@@ -70,6 +71,7 @@ export const CrossCountryChampionshipModal: React.FC<CrossCountryChampionshipMod
   tournaments,
   allStudents,
   schools,
+  teachers: propTeachers = [],
   techHead,
   activeSeason,
   canManage = false,
@@ -82,6 +84,8 @@ export const CrossCountryChampionshipModal: React.FC<CrossCountryChampionshipMod
   const { canDo } = useRolePermissions();
   const isTeacherRole = propIsTeacherRole !== undefined ? propIsTeacherRole : userProfile?.role === 'TEACHER';
   const teacherSchoolName = propTeacherSchoolName !== undefined ? propTeacherSchoolName : (userProfile?.workLocation || '');
+  const [loadedTeachers, setLoadedTeachers] = useState<User[]>([]);
+  const effectiveTeachers = propTeachers.length > 0 ? propTeachers : loadedTeachers;
 
   const [selectedCatId, setSelectedCatId] = useState<string>('u15_male');
   const activeCategory = useMemo(() => {
@@ -101,7 +105,7 @@ export const CrossCountryChampionshipModal: React.FC<CrossCountryChampionshipMod
 
   // School Participation Confirmation State
   const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
-  const { isSchoolConfirmed, getConfirmation, refreshConfirmations } = useSchoolConfirmations();
+  const { confirmations, isSchoolConfirmed, getConfirmation, refreshConfirmations } = useSchoolConfirmations();
   const effectiveSchoolName = teacherSchoolName || userProfile?.schoolName || userProfile?.workLocation || '';
   const isSchoolCurrentlyConfirmed = isSchoolConfirmed('cross_country', effectiveSchoolName);
   const currentConfirmationRecord = getConfirmation('cross_country', effectiveSchoolName);
@@ -157,10 +161,15 @@ export const CrossCountryChampionshipModal: React.FC<CrossCountryChampionshipMod
   // Refresh data on open
   useEffect(() => {
     if (!isOpen) return;
+    if (propTeachers.length === 0) {
+      DataService.getUsers().then(users => {
+        if (users) setLoadedTeachers(users);
+      }).catch(() => {});
+    }
     if (onRefreshData) {
       onRefreshData();
     }
-  }, [isOpen]);
+  }, [isOpen, propTeachers.length]);
 
   // Local students state to allow immediate optimistic updates
   const [localStudents, setLocalStudents] = useState<Student[]>(allStudents);
@@ -234,11 +243,27 @@ export const CrossCountryChampionshipModal: React.FC<CrossCountryChampionshipMod
       setEditParticipationType(editingStudent.participationType || 'school_team');
       setEditPhoto(editingStudent.photoUrl || '');
       setEditAffiliationType(editingStudent.affiliationType || 'non_club');
-      setEditCoachName(editingStudent.coachName || (isTeacherRole && userProfile?.fullName ? userProfile.fullName : ''));
-      setEditCoachLease(editingStudent.coachLeaseNumber || (isTeacherRole && userProfile?.leaseNumber ? userProfile.leaseNumber : ''));
-      setEditCoachPhone(editingStudent.coachPhone || (isTeacherRole && userProfile?.phone ? userProfile.phone : ''));
+      const isUserAtEditedSchool = Boolean(
+        editingStudent.schoolName &&
+        userProfile &&
+        (schoolNamesMatch(userProfile.workLocation, editingStudent.schoolName) ||
+          schoolNamesMatch((userProfile as any).schoolName, editingStudent.schoolName) ||
+          (editingStudent.schoolId && userProfile.schoolId === editingStudent.schoolId))
+      );
+      const fallbackCoach = resolveSchoolCoach({
+        schoolName: editingStudent.schoolName,
+        sportId: 'cross_country',
+        students: localStudents.filter(s => s.sportId === 'cross_country' && schoolNamesMatch(s.schoolName, editingStudent.schoolName)),
+        schools,
+        teachers: effectiveTeachers,
+        confirmations,
+        currentUser: userProfile
+      });
+      setEditCoachName(editingStudent.coachName || fallbackCoach.fullName || (isUserAtEditedSchool && userProfile?.fullName ? userProfile.fullName : ''));
+      setEditCoachLease(editingStudent.coachLeaseNumber || fallbackCoach.leaseNumber || (isUserAtEditedSchool && userProfile?.leaseNumber ? userProfile.leaseNumber : ''));
+      setEditCoachPhone(editingStudent.coachPhone || fallbackCoach.phone || (isUserAtEditedSchool && userProfile?.phone ? userProfile.phone : ''));
     }
-  }, [editingStudent, isTeacherRole, userProfile, activeCategory]);
+  }, [editingStudent, userProfile, activeCategory, schools, effectiveTeachers, confirmations]);
 
   const handleEditPhotoFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -309,6 +334,13 @@ export const CrossCountryChampionshipModal: React.FC<CrossCountryChampionshipMod
     setIsSavingEditStudent(true);
     const toastId = toast.loading('جاري حفظ التعديلات...');
     try {
+      const isUserAtEditedSchool = Boolean(
+        editingStudent.schoolName &&
+        userProfile &&
+        (schoolNamesMatch(userProfile.workLocation, editingStudent.schoolName) ||
+          schoolNamesMatch((userProfile as any).schoolName, editingStudent.schoolName) ||
+          (editingStudent.schoolId && userProfile.schoolId === editingStudent.schoolId))
+      );
       const updates: Partial<Student> = {
         fullName: editFullName.trim(),
         massarNumber: cleanMassar,
@@ -318,9 +350,9 @@ export const CrossCountryChampionshipModal: React.FC<CrossCountryChampionshipMod
         participationType: editParticipationType,
         photoUrl: editPhoto || undefined,
         affiliationType: editAffiliationType,
-        coachName: (editCoachName.trim() || userProfile?.fullName || '').trim() || undefined,
-        coachLeaseNumber: (editCoachLease.trim() || userProfile?.leaseNumber || '').trim() || undefined,
-        coachPhone: (editCoachPhone.trim() || userProfile?.phone || '').trim() || undefined,
+        coachName: (editCoachName.trim() || (isUserAtEditedSchool ? userProfile?.fullName : '') || '').trim() || undefined,
+        coachLeaseNumber: (editCoachLease.trim() || (isUserAtEditedSchool ? userProfile?.leaseNumber : '') || '').trim() || undefined,
+        coachPhone: (editCoachPhone.trim() || (isUserAtEditedSchool ? userProfile?.phone : '') || '').trim() || undefined,
       };
       await DataService.updateStudent(editingStudent.id, updates);
       setLocalStudents(prev => prev.map(s => s.id === editingStudent.id ? { ...s, ...updates } : s));
@@ -1241,16 +1273,37 @@ export const CrossCountryChampionshipModal: React.FC<CrossCountryChampionshipMod
         }}
       />
 
-      {isPdfModalOpen && filterSchool !== 'ALL' && (
-        <ParticipationFormPdfModal
-          isOpen={isPdfModalOpen}
-          onClose={() => setIsPdfModalOpen(false)}
-          sport={ccSportObject}
-          schoolName={filterSchool}
-          students={ccStudents.filter(s => s.schoolId === filterSchool || s.schoolName === filterSchool)}
-          season={activeSeason}
-        />
-      )}
+      {isPdfModalOpen && filterSchool !== 'ALL' && (() => {
+        const pdfStudents = ccStudents.filter(s => s.schoolId === filterSchool || schoolNamesMatch(s.schoolName, filterSchool));
+        const pdfSchoolObj = schools.find(sc => sc.id === filterSchool || schoolNamesMatch(sc.name, filterSchool));
+        const resolvedPdfSchoolName = pdfSchoolObj?.name || filterSchool;
+        const resolvedPdfCoach = resolveSchoolCoach({
+          schoolName: resolvedPdfSchoolName,
+          sportId: 'cross_country',
+          students: pdfStudents,
+          schools,
+          teachers: effectiveTeachers,
+          confirmations,
+          currentUser: userProfile
+        });
+        return (
+          <ParticipationFormPdfModal
+            isOpen={isPdfModalOpen}
+            onClose={() => setIsPdfModalOpen(false)}
+            sport={ccSportObject}
+            schoolName={resolvedPdfSchoolName}
+            students={pdfStudents}
+            teacher={resolvedPdfCoach.fullName ? {
+              fullName: resolvedPdfCoach.fullName,
+              workLocation: resolvedPdfCoach.workLocation,
+              leaseNumber: resolvedPdfCoach.leaseNumber,
+              phone: resolvedPdfCoach.phone,
+              photoUrl: resolvedPdfCoach.photoUrl
+            } : undefined}
+            season={activeSeason}
+          />
+        );
+      })()}
 
       {/* Confirmation Modal for Edit */}
       {studentToEditConfirm && (

@@ -821,7 +821,7 @@ export const Login: React.FC = () => {
           role: matchedTeacher.role || 'TEACHER',
           directorateId: effectiveDirId,
           directorateName: effectiveDirName,
-          photoUrl: googleUser.photoURL || matchedTeacher.photoUrl || '',
+          photoUrl: (matchedTeacher.photoUrl && matchedTeacher.photoUrl.trim()) || googleUser.photoURL || '',
           isActive: true
         };
 

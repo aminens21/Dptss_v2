@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { Tournament, Sport } from '../types';
-import { DataService, SPORTS_MAP, getAgeCategoriesForSeason } from '../lib/dataService';
-import { X, Trophy, Calendar, Clock, User, ShieldCheck, Check, Save } from 'lucide-react';
+import { DataService, SPORTS_MAP, getAgeCategoriesForSeason, normalizeTournamentEducationSectors } from '../lib/dataService';
+import { X, Trophy, Calendar, Clock, User, ShieldCheck, Check, Save, Building2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 interface EditTournamentModalProps {
@@ -24,6 +24,7 @@ export const EditTournamentModal: React.FC<EditTournamentModalProps> = ({
   const [gender, setGender] = useState<'Male' | 'Female' | 'Mixed'>('Male');
   const [affiliationType, setAffiliationType] = useState<'non_club' | 'club_affiliated' | 'open'>('non_club');
   const [selectedLevels, setSelectedLevels] = useState<('Primary' | 'Middle' | 'High')[]>(['High']);
+  const [selectedEducationSectors, setSelectedEducationSectors] = useState<('public' | 'private')[]>(['public', 'private']);
   const [scope, setScope] = useState('Provincial');
   const [status, setStatus] = useState<Tournament['status']>('Scheduled');
   const [startDate, setStartDate] = useState('');
@@ -82,6 +83,7 @@ export const EditTournamentModal: React.FC<EditTournamentModalProps> = ({
       } else {
         setSelectedLevels(['High']);
       }
+      setSelectedEducationSectors(normalizeTournamentEducationSectors(tournament));
 
       setScope(tournament.scope || 'Provincial');
       setStatus(tournament.status || 'Scheduled');
@@ -111,7 +113,8 @@ export const EditTournamentModal: React.FC<EditTournamentModalProps> = ({
         ageCategory,
         gender,
         affiliationType,
-        level: ageCategory === 'U12' ? 'Primary' : ageCategory === 'U15' ? 'Middle' : (ageCategory === 'U18' || ageCategory === 'U20') ? 'High' : 'Primary,Middle,High',
+        level: selectedLevels.length > 0 ? selectedLevels.join(',') : (ageCategory === 'U12' ? 'Primary' : ageCategory === 'U15' ? 'Middle' : (ageCategory === 'U18' || ageCategory === 'U20') ? 'High' : 'Primary,Middle,High'),
+        educationSectors: selectedEducationSectors.length > 0 ? selectedEducationSectors : ['public', 'private'],
         scope,
         status,
         startDate: startDate ? new Date(startDate) : tournament.startDate,
@@ -255,6 +258,79 @@ export const EditTournamentModal: React.FC<EditTournamentModalProps> = ({
                 <option value="Completed">🏆 منتهية</option>
                 <option value="Draft">⚪ مسودة</option>
               </select>
+            </div>
+          </div>
+
+          {/* School Levels & Education Sector */}
+          <div className="p-3 bg-emerald-50/60 dark:bg-emerald-950/30 rounded-xl border border-emerald-200 dark:border-emerald-800 space-y-2.5">
+            <div>
+              <label className="block text-xs font-bold text-emerald-950 dark:text-emerald-200 mb-1.5">الأسلاك التعليمية المسموح لها بالمشاركة</label>
+              <div className="flex flex-wrap gap-1.5">
+                {[
+                  { id: 'Primary', label: 'ابتدائي' },
+                  { id: 'Middle', label: 'إعدادي' },
+                  { id: 'High', label: 'تأهيلي' }
+                ].map((item) => {
+                  const isSelected = selectedLevels.includes(item.id as any);
+                  return (
+                    <button
+                      type="button"
+                      key={item.id}
+                      onClick={() => {
+                        setSelectedLevels(prev =>
+                          prev.includes(item.id as any)
+                            ? (prev.length > 1 ? prev.filter(x => x !== item.id) : prev)
+                            : [...prev, item.id as any]
+                        );
+                      }}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
+                        isSelected
+                          ? 'bg-emerald-600 border-emerald-600 text-white'
+                          : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                      }`}
+                    >
+                      {item.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="pt-2 border-t border-emerald-200/70 dark:border-emerald-800">
+              <label className="block text-[11px] font-bold text-emerald-950 dark:text-emerald-200 mb-1.5 flex items-center gap-1.5">
+                <Building2 className="w-3.5 h-3.5 text-emerald-700" />
+                <span>نوع التعليم (العمومي / الخصوصي)</span>
+              </label>
+              <div className="flex flex-wrap gap-1.5">
+                {[
+                  { id: 'public', label: '🏛️ التعليم العمومي' },
+                  { id: 'private', label: '🏫 التعليم الخصوصي' }
+                ].map((sec) => {
+                  const isSelected = selectedEducationSectors.includes(sec.id as 'public' | 'private');
+                  return (
+                    <button
+                      type="button"
+                      key={sec.id}
+                      onClick={() => {
+                        setSelectedEducationSectors(prev =>
+                          prev.includes(sec.id as 'public' | 'private')
+                            ? (prev.length > 1 ? prev.filter(x => x !== sec.id) : prev)
+                            : [...prev, sec.id as 'public' | 'private']
+                        );
+                      }}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
+                        isSelected
+                          ? sec.id === 'private'
+                            ? 'bg-purple-600 border-purple-600 text-white'
+                            : 'bg-emerald-700 border-emerald-700 text-white'
+                          : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                      }`}
+                    >
+                      {sec.label}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           </div>
 

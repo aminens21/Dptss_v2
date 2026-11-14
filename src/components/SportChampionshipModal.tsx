@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { Tournament, Student, School, User, Sport, Match } from '../types';
-import { SPORTS_MAP, getAgeCategoriesForSeason, normalizeCategoryKey, DataService, getCategoryYearsLabel, isTeacherLevelAllowedForTournament, getTournamentLevelAr, doesConfirmationMatchBranch, getEffectiveConfirmedBranches, formatBranchLabelAr } from '../lib/dataService';
+import { SPORTS_MAP, getAgeCategoriesForSeason, normalizeCategoryKey, DataService, getCategoryYearsLabel, isTeacherLevelAllowedForTournament, getTournamentLevelAr, doesConfirmationMatchBranch, getEffectiveConfirmedBranches, formatBranchLabelAr, isSchoolSectorAllowedForTournament, getTournamentEducationSectorsAr, getSchoolEducationSector, resolveSchoolCoach, schoolNamesMatch } from '../lib/dataService';
 import { useAuth, isSuperAdminEmail } from '../contexts/AuthContext';
 import { AppLogo } from './AppLogo';
 import { CountdownTimer } from './CountdownTimer';
@@ -157,7 +157,7 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
 
   // School Confirmation State
   const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
-  const { isSchoolConfirmed, getConfirmation, getConfirmedSchoolsForSport, refreshConfirmations } = useSchoolConfirmations();
+  const { confirmations, isSchoolConfirmed, getConfirmation, getConfirmedSchoolsForSport, refreshConfirmations } = useSchoolConfirmations();
   const effectiveSchoolName = teacherSchoolName || userProfile?.schoolName || userProfile?.workLocation || '';
   const isSchoolCurrentlyConfirmed = sport ? isSchoolConfirmed(sport.id, effectiveSchoolName) : false;
   const currentConfirmationRecord = sport ? getConfirmation(sport.id, effectiveSchoolName) : undefined;
@@ -213,11 +213,27 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
       setEditAffiliationType(editingStudent.affiliationType || 'non_club');
       setEditAthleticsSpecialty(editingStudent.athleticsSpecialty || '');
       setEditPhoto(editingStudent.photoUrl || '');
-      setEditCoachName(editingStudent.coachName || (isTeacherRole && userProfile?.fullName ? userProfile.fullName : ''));
-      setEditCoachLease(editingStudent.coachLeaseNumber || (isTeacherRole && userProfile?.leaseNumber ? userProfile.leaseNumber : ''));
-      setEditCoachPhone(editingStudent.coachPhone || (isTeacherRole && userProfile?.phone ? userProfile.phone : ''));
+      const isUserAtEditedSchool = Boolean(
+        editingStudent.schoolName &&
+        userProfile &&
+        (schoolNamesMatch(userProfile.workLocation, editingStudent.schoolName) ||
+          schoolNamesMatch((userProfile as any).schoolName, editingStudent.schoolName) ||
+          (editingStudent.schoolId && userProfile.schoolId === editingStudent.schoolId))
+      );
+      const fallbackCoach = resolveSchoolCoach({
+        schoolName: editingStudent.schoolName,
+        sportId: sport?.id,
+        students: sportStudents.filter(s => schoolNamesMatch(s.schoolName, editingStudent.schoolName)),
+        schools,
+        teachers,
+        confirmations,
+        currentUser: userProfile
+      });
+      setEditCoachName(editingStudent.coachName || fallbackCoach.fullName || (isUserAtEditedSchool && userProfile?.fullName ? userProfile.fullName : ''));
+      setEditCoachLease(editingStudent.coachLeaseNumber || fallbackCoach.leaseNumber || (isUserAtEditedSchool && userProfile?.leaseNumber ? userProfile.leaseNumber : ''));
+      setEditCoachPhone(editingStudent.coachPhone || fallbackCoach.phone || (isUserAtEditedSchool && userProfile?.phone ? userProfile.phone : ''));
     }
-  }, [editingStudent, isTeacherRole, userProfile]);
+  }, [editingStudent, userProfile, schools, teachers, confirmations, sport?.id]);
 
   const handleEditPhotoFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -410,6 +426,13 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
     setIsSavingEditStudent(true);
     const toastId = toast.loading('جاري حفظ التعديلات...');
     try {
+      const isUserAtEditedSchool = Boolean(
+        editingStudent.schoolName &&
+        userProfile &&
+        (schoolNamesMatch(userProfile.workLocation, editingStudent.schoolName) ||
+          schoolNamesMatch((userProfile as any).schoolName, editingStudent.schoolName) ||
+          (editingStudent.schoolId && userProfile.schoolId === editingStudent.schoolId))
+      );
       const updates: Partial<Student> = {
         fullName: editFullName.trim(),
         massarNumber: editMassarNumber.trim() || undefined,
@@ -418,9 +441,9 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
         category: editCategory,
         affiliationType: editAffiliationType,
         photoUrl: editPhoto || undefined,
-        coachName: (editCoachName.trim() || userProfile?.fullName || '').trim() || undefined,
-        coachLeaseNumber: (editCoachLease.trim() || userProfile?.leaseNumber || '').trim() || undefined,
-        coachPhone: (editCoachPhone.trim() || userProfile?.phone || '').trim() || undefined,
+        coachName: (editCoachName.trim() || (isUserAtEditedSchool ? userProfile?.fullName : '') || '').trim() || undefined,
+        coachLeaseNumber: (editCoachLease.trim() || (isUserAtEditedSchool ? userProfile?.leaseNumber : '') || '').trim() || undefined,
+        coachPhone: (editCoachPhone.trim() || (isUserAtEditedSchool ? userProfile?.phone : '') || '').trim() || undefined,
         ...(sport?.id === 'athletics' ? { athleticsSpecialty: editAthleticsSpecialty.trim() || undefined } : {})
       };
       await DataService.updateStudent(editingStudent.id, updates);
@@ -585,15 +608,24 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
     return `البطولة الإقليمية المدرسية لـ ${sport?.name || ''}`;
   }, [sport?.name]);
 
-  // Check if teacher level is allowed for this sport (at least one tournament matches their cadre)
+  const teacherSchoolObj = useMemo(() => {
+    if (!effectiveSchoolName) return undefined;
+    return (schools || []).find(s =>
+      (userProfile?.schoolId && s.id === userProfile.schoolId) ||
+      schoolNamesMatch(s.name, effectiveSchoolName)
+    );
+  }, [schools, userProfile?.schoolId, effectiveSchoolName]);
+
+  // Check if teacher level & school education sector are allowed for this sport
   const isTeacherAllowedForSport = useMemo(() => {
     if (!isTeacherRole || !userProfile || !sportTournaments.length) return true;
     if (canManage) return true; // Admins/Managers always allowed
-    
-    return sportTournaments.some(t => 
-      isTeacherLevelAllowedForTournament(userProfile.teachingCadre, t.level)
+
+    return sportTournaments.some(t =>
+      isTeacherLevelAllowedForTournament(userProfile.teachingCadre, t.level) &&
+      isSchoolSectorAllowedForTournament(teacherSchoolObj, t)
     );
-  }, [isTeacherRole, userProfile, sportTournaments, canManage]);
+  }, [isTeacherRole, userProfile, sportTournaments, canManage, teacherSchoolObj]);
 
   const teacherCadreAr = useMemo(() => {
     if (!userProfile?.teachingCadre) return '';
@@ -616,10 +648,11 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
 
   const allowedTournamentsForTeacher = useMemo(() => {
     if (!isTeacherRole || canManage) return tournaments;
-    return tournaments.filter(t => 
-      isTeacherLevelAllowedForTournament(userProfile?.teachingCadre, t.level)
+    return tournaments.filter(t =>
+      isTeacherLevelAllowedForTournament(userProfile?.teachingCadre, t.level) &&
+      isSchoolSectorAllowedForTournament(teacherSchoolObj, t)
     );
-  }, [tournaments, isTeacherRole, canManage, userProfile?.teachingCadre]);
+  }, [tournaments, isTeacherRole, canManage, userProfile?.teachingCadre, teacherSchoolObj]);
 
   const hasNonClubTournaments = useMemo(() => {
     return sportTournaments.some(t => (t.affiliationType || 'non_club') === 'non_club');
@@ -633,14 +666,34 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
     return sportTournaments.some(t => t.affiliationType === 'open' || (t.name && (t.name.includes('مفتوحة') || t.name.includes('المفتوحة'))));
   }, [sportTournaments]);
 
-  // Set default category on open or when sport changes + auto guard for teacher cadre
+  // Set default category on open or when sport changes + auto guard for teacher cadre/sector
   useEffect(() => {
     if (isOpen) {
       if (isTeacherRole && !canManage && !isTeacherAllowedForSport) {
-        toast.error(
-          `عذراً، هذه البطولة مخصصة لـ (${allowedSportLevelsAr || 'أسلاك أخرى'}) فقط.\nبصفتك أستاذ سلك (${teacherCadreAr || 'غير مطابق'}), لا يمكنك الولوج لتسجيل الفرق والمشاركين بها.`,
-          { id: 'modal-cadre-blocked' }
+        const levelMatchExists = sportTournaments.some(t =>
+          isTeacherLevelAllowedForTournament(userProfile?.teachingCadre, t.level)
         );
+        if (levelMatchExists && teacherSchoolObj) {
+          const allowedSecs = Array.from(
+            new Set<'public' | 'private'>(
+              sportTournaments.flatMap(t =>
+                Array.isArray(t.educationSectors) && t.educationSectors.length > 0
+                  ? t.educationSectors
+                  : (['public', 'private'] as ('public' | 'private')[])
+              )
+            )
+          );
+          const schoolSecAr = getSchoolEducationSector(teacherSchoolObj) === 'private' ? 'التعليم الخصوصي' : 'التعليم العمومي';
+          toast.error(
+            `عذراً، هذه البطولة مخصصة لـ (${getTournamentEducationSectorsAr(allowedSecs)}) فقط.\nمؤسستك مصنفة ضمن (${schoolSecAr}) ولا يمكنك الولوج لتسجيل الفرق بها.`,
+            { id: 'modal-cadre-blocked' }
+          );
+        } else {
+          toast.error(
+            `عذراً، هذه البطولة مخصصة لـ (${allowedSportLevelsAr || 'أسلاك أخرى'}) فقط.\nبصفتك أستاذ سلك (${teacherCadreAr || 'غير مطابق'}), لا يمكنك الولوج لتسجيل الفرق والمشاركين بها.`,
+            { id: 'modal-cadre-blocked' }
+          );
+        }
         onClose();
         return;
       }
@@ -735,6 +788,34 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
       (s.affiliationType || 'non_club') === (activeBranchModal || selectedAffiliation)
     );
   }, [sport, sportStudents, currentSchoolForPdf, activeBranchModal, selectedAffiliation]);
+
+  const resolvedSelectedSchoolCoach = useMemo(() => {
+    if (!selectedSchoolNameForView) return null;
+    const schoolStuds = sportStudents.filter(s => schoolNamesMatch(s.schoolName, selectedSchoolNameForView));
+    return resolveSchoolCoach({
+      schoolName: selectedSchoolNameForView,
+      sportId: sport?.id,
+      students: schoolStuds,
+      schools,
+      teachers,
+      confirmations,
+      currentUser: userProfile
+    });
+  }, [selectedSchoolNameForView, sportStudents, sport?.id, schools, teachers, confirmations, userProfile]);
+
+  const resolvedPdfSchoolCoach = useMemo(() => {
+    if (!currentSchoolForPdf) return null;
+    const schoolStuds = sportStudents.filter(s => schoolNamesMatch(s.schoolName, currentSchoolForPdf));
+    return resolveSchoolCoach({
+      schoolName: currentSchoolForPdf,
+      sportId: sport?.id,
+      students: schoolStuds,
+      schools,
+      teachers,
+      confirmations,
+      currentUser: userProfile
+    });
+  }, [currentSchoolForPdf, sportStudents, sport?.id, schools, teachers, confirmations, userProfile]);
 
   // Filter students by active category tab & gender & search & affiliationType
   const filteredStudents = sportStudents.filter(s => {
@@ -2500,24 +2581,27 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
                   {/* Coach info bar */}
                   {(() => {
                     const explicitCoaches = Array.from(new Set(schoolStudents.map(s => s.coachName).filter(Boolean))) as string[];
-                    const isSchoolMatchingTeacher = isTeacherRole && userProfile?.workLocation && (
-                      !selectedSchoolNameForView ||
-                      userProfile.workLocation.trim().toLowerCase() === selectedSchoolNameForView.trim().toLowerCase() ||
-                      userProfile.workLocation.includes(selectedSchoolNameForView) ||
-                      selectedSchoolNameForView.includes(userProfile.workLocation)
-                    );
-                    const isDefaultFromUser = explicitCoaches.length === 0 && (isSchoolMatchingTeacher || isTeacherRole) && !!userProfile?.fullName;
                     const displayedCoaches = explicitCoaches.length > 0
                       ? explicitCoaches
-                      : (isDefaultFromUser && userProfile?.fullName ? [userProfile.fullName] : []);
-                    const displayedCoachLease = schoolStudents.find(s => s.coachLeaseNumber)?.coachLeaseNumber || (isDefaultFromUser ? userProfile?.leaseNumber : '');
-                    const displayedCoachPhone = schoolStudents.find(s => s.coachPhone)?.coachPhone || (isDefaultFromUser ? userProfile?.phone : '');
+                      : (resolvedSelectedSchoolCoach?.fullName ? [resolvedSelectedSchoolCoach.fullName] : []);
+                    const displayedCoachLease = schoolStudents.find(s => s.coachLeaseNumber)?.coachLeaseNumber || resolvedSelectedSchoolCoach?.leaseNumber || '';
+                    const displayedCoachPhone = schoolStudents.find(s => s.coachPhone)?.coachPhone || resolvedSelectedSchoolCoach?.phone || '';
+                    const isDefaultFromUser = explicitCoaches.length === 0 && resolvedSelectedSchoolCoach?.source === 'currentUser';
 
                     return (
                       <div className="bg-gradient-to-r from-indigo-50/90 to-blue-50/90 p-3.5 rounded-2xl border border-indigo-100 flex flex-wrap items-center justify-between gap-3 shadow-3xs">
                         <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 rounded-xl bg-indigo-600 text-white flex items-center justify-center font-bold shadow-xs shrink-0 text-lg">
-                            👨‍🏫
+                          <div className="w-10 h-10 rounded-xl bg-indigo-600 text-white flex items-center justify-center font-bold shadow-xs shrink-0 text-lg overflow-hidden border border-indigo-200">
+                            {resolvedSelectedSchoolCoach?.photoUrl ? (
+                              <img
+                                src={resolvedSelectedSchoolCoach.photoUrl}
+                                alt={resolvedSelectedSchoolCoach.fullName || 'المؤطر'}
+                                className="w-full h-full object-cover"
+                                referrerPolicy="no-referrer"
+                              />
+                            ) : (
+                              <span>👨‍🏫</span>
+                            )}
                           </div>
                           <div>
                             <span className="text-[10px] font-black text-indigo-700 block">الأستاذ(ة) المؤطر(ة) للمؤسسة:</span>
@@ -2553,9 +2637,9 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
                             type="button"
                             onClick={() => {
                               const firstCoach = schoolStudents.find(s => s.coachName);
-                              setCoachNameInput(firstCoach?.coachName || (isDefaultFromUser && userProfile?.fullName ? userProfile.fullName : ''));
-                              setCoachLeaseInput(firstCoach?.coachLeaseNumber || (isDefaultFromUser && userProfile?.leaseNumber ? userProfile.leaseNumber : ''));
-                              setCoachPhoneInput(firstCoach?.coachPhone || (isDefaultFromUser && userProfile?.phone ? userProfile.phone : ''));
+                              setCoachNameInput(firstCoach?.coachName || resolvedSelectedSchoolCoach?.fullName || '');
+                              setCoachLeaseInput(firstCoach?.coachLeaseNumber || resolvedSelectedSchoolCoach?.leaseNumber || '');
+                              setCoachPhoneInput(firstCoach?.coachPhone || resolvedSelectedSchoolCoach?.phone || '');
                               setCoachCategoryTarget('ALL');
                               setIsCoachModalOpen(true);
                             }}
@@ -2911,6 +2995,13 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
           schoolName={currentSchoolForPdf}
           students={sportStudents.filter(s => s.schoolName === currentSchoolForPdf)}
           season={activeSeason}
+          teacher={resolvedPdfSchoolCoach ? {
+            fullName: resolvedPdfSchoolCoach.fullName,
+            workLocation: resolvedPdfSchoolCoach.workLocation,
+            leaseNumber: resolvedPdfSchoolCoach.leaseNumber,
+            phone: resolvedPdfSchoolCoach.phone,
+            photoUrl: resolvedPdfSchoolCoach.photoUrl
+          } : undefined}
           preselectedCategory={pdfPreselectedCat}
           preselectedGender={pdfPreselectedGender}
           preselectedAffiliation={activeBranchModal || 'ALL'}
@@ -3172,7 +3263,7 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
                     value={editCoachName}
                     onChange={(e) => setEditCoachName(e.target.value)}
                     className="w-full px-3 py-2 bg-white border border-indigo-200 rounded-xl text-xs font-bold text-slate-900 focus:outline-hidden focus:border-indigo-600"
-                    placeholder={userProfile?.fullName || 'اسم المؤطر'}
+                    placeholder="اسم المؤطر"
                   />
                 </div>
                 <div className="grid grid-cols-2 gap-2">
@@ -3183,7 +3274,7 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
                       value={editCoachLease}
                       onChange={(e) => setEditCoachLease(e.target.value)}
                       className="w-full px-3 py-2 bg-white border border-indigo-200 rounded-xl text-xs font-mono font-bold text-slate-900 focus:outline-hidden focus:border-indigo-600"
-                      placeholder={userProfile?.leaseNumber || 'رقم التأجير'}
+                      placeholder="رقم التأجير"
                     />
                   </div>
                   <div>
@@ -3193,7 +3284,7 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
                       value={editCoachPhone}
                       onChange={(e) => setEditCoachPhone(e.target.value)}
                       className="w-full px-3 py-2 bg-white border border-indigo-200 rounded-xl text-xs font-mono font-bold text-slate-900 focus:outline-hidden focus:border-indigo-600"
-                      placeholder={userProfile?.phone || '06...'}
+                      placeholder="06..."
                     />
                   </div>
                 </div>

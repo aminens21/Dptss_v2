@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { DataService, SPORTS_MAP, AGE_CATEGORIES, deduplicateById, generateSecureAccessCode, getEffectiveConfirmedBranches, formatBranchLabelAr, normalizeCategoryKey, ConfirmedBranchTuple, normalizeSchoolCycleType } from '../lib/dataService';
+import { DataService, SPORTS_MAP, AGE_CATEGORIES, deduplicateById, generateSecureAccessCode, getEffectiveConfirmedBranches, formatBranchLabelAr, normalizeCategoryKey, ConfirmedBranchTuple, normalizeSchoolCycleType, getSchoolEducationSector, normalizeSchoolPureCycleLabel } from '../lib/dataService';
 import { School, Match, Directorate } from '../types';
 import { useSchoolConfirmations } from '../hooks/useSchoolConfirmations';
 import * as XLSX from 'xlsx';
@@ -418,7 +418,28 @@ export const Schools: React.FC = () => {
           'تأهيلي'
         ).toString().trim();
 
-        const normalizedType = normalizeSchoolCycleType({ name: schoolName, type: rawType });
+        const rawSector = (
+          row['نوع التعليم (عمومي / خصوصي)'] ||
+          row['القطاع (عمومي / خصوصي)'] ||
+          row['نوع التعليم'] ||
+          row['القطاع'] ||
+          row['educationSector'] ||
+          ''
+        ).toString().trim().toLowerCase();
+
+        const explicitSector: 'public' | 'private' | undefined =
+          (rawSector.includes('خصوص') || rawSector.includes('خاص') || rawSector === 'private')
+            ? 'private'
+            : (rawSector.includes('عموم') || rawSector === 'public')
+            ? 'public'
+            : undefined;
+
+        const resolvedSector = getSchoolEducationSector({
+          name: schoolName,
+          type: rawType,
+          educationSector: explicitSector
+        });
+        const pureCycle = rawType === 'خصوصي' ? 'خصوصي' : normalizeSchoolPureCycleLabel({ name: schoolName, type: rawType });
 
         const commune = (
           row['الجماعة / الدائرة'] ||
@@ -465,7 +486,9 @@ export const Schools: React.FC = () => {
 
         parsedSchools.push({
           name: schoolName,
-          type: normalizedType,
+          type: pureCycle,
+          educationSector: resolvedSector,
+          isPrivate: resolvedSector === 'private',
           commune: commune || 'تاوريرت المركز',
           teacherName: coordinatorName,
           coordinatorName: coordinatorName,
@@ -1380,19 +1403,32 @@ export const Schools: React.FC = () => {
                         </div>
                         <div>
                           {(() => {
+                            const sector = getSchoolEducationSector(s);
                             const cyc = normalizeSchoolCycleType(s);
+                            const pureCyc = s.type && s.type !== 'خصوصي' ? normalizeSchoolPureCycleLabel(s) : null;
                             return (
-                              <span className={`inline-block text-[10px] font-bold px-2.5 py-0.5 rounded-lg border ${
-                                cyc === 'خصوصي'
-                                  ? 'bg-purple-50 text-purple-700 border-purple-200'
-                                  : cyc === 'تأهيلي'
-                                  ? 'bg-blue-50 text-blue-700 border-blue-200'
-                                  : cyc === 'إعدادي'
-                                  ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                                  : 'bg-amber-50 text-amber-700 border-amber-200'
-                              }`}>
-                                {cyc === 'خصوصي' ? 'التعليم الخصوصي' : cyc === 'تأهيلي' ? 'ثانوي تأهيلي' : cyc === 'إعدادي' ? 'ثانوي إعدادي' : 'ابتدائي'}
-                              </span>
+                              <div className="flex items-center gap-1 flex-wrap">
+                                <span className={`inline-block text-[10px] font-bold px-2.5 py-0.5 rounded-lg border ${
+                                  cyc === 'خصوصي'
+                                    ? 'bg-purple-50 text-purple-700 border-purple-200'
+                                    : cyc === 'تأهيلي'
+                                    ? 'bg-blue-50 text-blue-700 border-blue-200'
+                                    : cyc === 'إعدادي'
+                                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                    : 'bg-amber-50 text-amber-700 border-amber-200'
+                                }`}>
+                                  {cyc === 'خصوصي' ? 'التعليم الخصوصي' : cyc === 'تأهيلي' ? 'ثانوي تأهيلي' : cyc === 'إعدادي' ? 'ثانوي إعدادي' : 'ابتدائي'}
+                                </span>
+                                {sector === 'private' && pureCyc ? (
+                                  <span className="inline-block text-[9.5px] font-bold px-2 py-0.5 rounded-lg border bg-slate-50 text-slate-700 border-slate-200">
+                                    {pureCyc === 'تأهيلي' ? 'ثانوي تأهيلي' : pureCyc === 'إعدادي' ? 'ثانوي إعدادي' : 'ابتدائي'}
+                                  </span>
+                                ) : sector === 'public' ? (
+                                  <span className="inline-block text-[9.5px] font-bold px-2 py-0.5 rounded-lg border bg-slate-50 text-slate-600 border-slate-200">
+                                    عمومي
+                                  </span>
+                                ) : null}
+                              </div>
                             );
                           })()}
                           <h3 className="text-sm md:text-base font-black text-slate-900 leading-tight mt-1">
@@ -1748,6 +1784,7 @@ export const Schools: React.FC = () => {
                     </h3>
                     {(() => {
                       const cyc = normalizeSchoolCycleType(selectedSchoolForDetails);
+                      const sector = getSchoolEducationSector(selectedSchoolForDetails);
                       return (
                         <span className={`text-[10px] font-black px-2 py-0.5 rounded-full border ${
                           cyc === 'خصوصي' ? 'bg-purple-500/20 text-purple-200 border-purple-400/40' :
@@ -1755,7 +1792,7 @@ export const Schools: React.FC = () => {
                           cyc === 'إعدادي' ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' :
                           'bg-amber-500/20 text-amber-300 border-amber-500/30'
                         }`}>
-                          {cyc === 'خصوصي' ? 'التعليم الخصوصي' : cyc === 'تأهيلي' ? 'ثانوي تأهيلي' : cyc === 'إعدادي' ? 'ثانوي إعدادي' : 'ابتدائي'}
+                          {cyc === 'خصوصي' ? 'التعليم الخصوصي' : cyc === 'تأهيلي' ? 'ثانوي تأهيلي' : cyc === 'إعدادي' ? 'ثانوي إعدادي' : 'ابتدائي'} ({sector === 'private' ? 'خصوصي' : 'عمومي'})
                         </span>
                       );
                     })()}

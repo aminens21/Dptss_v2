@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
-import { Student, School, User, Sport, Directorate } from '../types';
-import { SPORTS_MAP, getAgeCategoriesForSeason, getCategoryGenderLabel, DataService, OfficialLogos } from '../lib/dataService';
+import { Student, School, User, Sport, Directorate, SchoolTournamentConfirmation } from '../types';
+import { SPORTS_MAP, getAgeCategoriesForSeason, getCategoryGenderLabel, DataService, OfficialLogos, resolveSchoolCoach, schoolNamesMatch, coachNamesMatch } from '../lib/dataService';
+import { isFlexibleEmailMatch } from '../lib/utils';
 import { downloadParticipationFormPdf, ParticipationPdfOptions } from '../lib/participationPdfService';
 import { useAuth } from '../contexts/AuthContext';
 import {
@@ -61,6 +62,8 @@ export const ParticipationFormPdfModal: React.FC<ParticipationFormPdfModalProps>
 }) => {
   const { userProfile } = useAuth();
   const [allUsersList, setAllUsersList] = useState<User[]>([]);
+  const [schoolsList, setSchoolsList] = useState<School[]>([]);
+  const [confirmationsList, setConfirmationsList] = useState<SchoolTournamentConfirmation[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<string>(preselectedCategory);
   const [selectedGender, setSelectedGender] = useState<'Male' | 'Female' | 'ALL'>(preselectedGender);
   const [selectedAffiliation, setSelectedAffiliation] = useState<'non_club' | 'club_affiliated' | 'ALL'>(preselectedAffiliation);
@@ -68,6 +71,7 @@ export const ParticipationFormPdfModal: React.FC<ParticipationFormPdfModalProps>
   const [isGenerating, setIsGenerating] = useState(false);
   const [zoomLevel, setZoomLevel] = useState<number>(window.innerWidth < 640 ? 0.5 : 1);
   const printAreaRef = useRef<HTMLDivElement>(null);
+  const hasManualCoachEditRef = useRef(false);
 
   const availableCoaches = useMemo(() => {
     const names = new Set<string>();
@@ -89,20 +93,84 @@ export const ParticipationFormPdfModal: React.FC<ParticipationFormPdfModalProps>
     });
   }, [students, selectedCategory, selectedGender, selectedAffiliation, selectedCoachFilter]);
 
+  const matchedSchoolObj = useMemo(() => {
+    if (!schoolName || schoolsList.length === 0) return undefined;
+    return schoolsList.find(s => schoolNamesMatch(s.name, schoolName) || s.id === schoolName);
+  }, [schoolsList, schoolName]);
+
+  const mergedCurrentUser = useMemo(() => {
+    if (!userProfile) return null;
+    const matchedInUsers = allUsersList.find(
+      u =>
+        (userProfile.id && u.id === userProfile.id) ||
+        (userProfile.email && u.email && isFlexibleEmailMatch(u.email, userProfile.email)) ||
+        (userProfile.leaseNumber && u.leaseNumber && u.leaseNumber.trim() === userProfile.leaseNumber.trim())
+    );
+    if (!matchedInUsers) return userProfile;
+    return {
+      ...matchedInUsers,
+      ...userProfile,
+      workLocation: userProfile.workLocation || matchedInUsers.workLocation || '',
+      schoolId: userProfile.schoolId || matchedInUsers.schoolId || '',
+      leaseNumber: userProfile.leaseNumber || matchedInUsers.leaseNumber || '',
+      phone: userProfile.phone || matchedInUsers.phone || '',
+      photoUrl:
+        (userProfile.photoUrl && userProfile.photoUrl.trim()) ||
+        (matchedInUsers.photoUrl && matchedInUsers.photoUrl.trim()) ||
+        ''
+    };
+  }, [userProfile, allUsersList]);
+
+  const isUserAtTargetSchool = useMemo(() => {
+    if (!mergedCurrentUser || !schoolName) return false;
+    return Boolean(
+      schoolNamesMatch(mergedCurrentUser.workLocation, schoolName) ||
+      schoolNamesMatch((mergedCurrentUser as any).schoolName, schoolName) ||
+      (matchedSchoolObj?.id && mergedCurrentUser.schoolId === matchedSchoolObj.id)
+    );
+  }, [mergedCurrentUser, schoolName, matchedSchoolObj]);
+
+  const resolvedCoach = useMemo(() => {
+    return resolveSchoolCoach({
+      schoolName,
+      sportId: sport?.id,
+      students,
+      schools: schoolsList,
+      teachers: allUsersList,
+      confirmations: confirmationsList,
+      currentUser: mergedCurrentUser
+    });
+  }, [schoolName, sport?.id, students, schoolsList, allUsersList, confirmationsList, mergedCurrentUser]);
+
   // Derive the best matching coach for the selected filter / category / gender
   const activeCoachFromStudents = useMemo(() => {
-    // 1. Look in filtered students first
     const fromFiltered = filteredStudents.find(s => s.coachName && s.coachName.trim() !== '');
-    // 2. Look in all students
     const fromAll = students.find(s => s.coachName && s.coachName.trim() !== '');
 
-    // Each field falls back gracefully to logged-in teacher profile
-    const name = fromFiltered?.coachName?.trim() || fromAll?.coachName?.trim() || teacher?.fullName || userProfile?.fullName || '';
-    const lease = fromFiltered?.coachLeaseNumber?.trim() || fromAll?.coachLeaseNumber?.trim() || teacher?.leaseNumber || userProfile?.leaseNumber || '';
-    const phone = fromFiltered?.coachPhone?.trim() || fromAll?.coachPhone?.trim() || teacher?.phone || userProfile?.phone || '';
+    const name =
+      fromFiltered?.coachName?.trim() ||
+      fromAll?.coachName?.trim() ||
+      teacher?.fullName?.trim() ||
+      resolvedCoach.fullName ||
+      (isUserAtTargetSchool ? mergedCurrentUser?.fullName?.trim() : '') ||
+      '';
+    const lease =
+      fromFiltered?.coachLeaseNumber?.trim() ||
+      fromAll?.coachLeaseNumber?.trim() ||
+      teacher?.leaseNumber?.trim() ||
+      resolvedCoach.leaseNumber ||
+      (isUserAtTargetSchool ? mergedCurrentUser?.leaseNumber?.trim() : '') ||
+      '';
+    const phone =
+      fromFiltered?.coachPhone?.trim() ||
+      fromAll?.coachPhone?.trim() ||
+      teacher?.phone?.trim() ||
+      resolvedCoach.phone ||
+      (isUserAtTargetSchool ? mergedCurrentUser?.phone?.trim() : '') ||
+      '';
 
     return { name, lease, phone };
-  }, [filteredStudents, students, teacher, userProfile]);
+  }, [filteredStudents, students, teacher, resolvedCoach, isUserAtTargetSchool, mergedCurrentUser]);
 
   const [localCoachName, setLocalCoachName] = useState(activeCoachFromStudents.name);
   const [localCoachLease, setLocalCoachLease] = useState(activeCoachFromStudents.lease);
@@ -121,28 +189,40 @@ export const ParticipationFormPdfModal: React.FC<ParticipationFormPdfModalProps>
       DataService.getUsers().then(users => {
         if (users) setAllUsersList(users);
       }).catch(err => console.error('Failed to load users for coach photo matching:', err));
+      DataService.getSchools().then(schools => {
+        if (schools) setSchoolsList(schools);
+      }).catch(err => console.error('Failed to load schools for coach resolving:', err));
+      DataService.getSchoolConfirmations().then(confs => {
+        if (confs) setConfirmationsList(confs);
+      }).catch(err => console.error('Failed to load confirmations for coach resolving:', err));
     }
   }, [isOpen]);
 
-  // Synchronize initial coach details only when modal opens
+  // Synchronize initial coach details when modal opens and keep updating until user edits manually
   useEffect(() => {
     if (isOpen && !prevIsOpenRef.current) {
+      hasManualCoachEditRef.current = false;
       setLocalCoachName(activeCoachFromStudents.name);
       setLocalCoachLease(activeCoachFromStudents.lease);
       setLocalCoachPhone(activeCoachFromStudents.phone);
       setLocalCoachPhoto('');
+    } else if (isOpen && !hasManualCoachEditRef.current) {
+      setLocalCoachName(activeCoachFromStudents.name);
+      setLocalCoachLease(activeCoachFromStudents.lease);
+      setLocalCoachPhone(activeCoachFromStudents.phone);
     }
     prevIsOpenRef.current = isOpen;
   }, [isOpen, activeCoachFromStudents.name, activeCoachFromStudents.lease, activeCoachFromStudents.phone]);
 
   const handleCoachFilterChange = (cName: string) => {
+    hasManualCoachEditRef.current = false;
     setSelectedCoachFilter(cName);
     if (cName !== 'ALL') {
       const matchStud = students.find(s => s.coachName === cName);
       if (matchStud) {
-        setLocalCoachName(matchStud.coachName || teacher?.fullName || userProfile?.fullName || '');
-        setLocalCoachLease(matchStud.coachLeaseNumber || teacher?.leaseNumber || userProfile?.leaseNumber || '');
-        setLocalCoachPhone(matchStud.coachPhone || teacher?.phone || userProfile?.phone || '');
+        setLocalCoachName(matchStud.coachName || teacher?.fullName || resolvedCoach.fullName || '');
+        setLocalCoachLease(matchStud.coachLeaseNumber || teacher?.leaseNumber || resolvedCoach.leaseNumber || '');
+        setLocalCoachPhone(matchStud.coachPhone || teacher?.phone || resolvedCoach.phone || '');
       }
     } else {
       setLocalCoachName(activeCoachFromStudents.name);
@@ -151,40 +231,68 @@ export const ParticipationFormPdfModal: React.FC<ParticipationFormPdfModalProps>
     }
   };
 
-  // Robustly resolve effective coach photo
+  // Robustly resolve effective coach photo WITHOUT ever attributing current supervisor's photo to another school
   const effectiveCoachPhoto = useMemo(() => {
     if (localCoachPhoto && localCoachPhoto.trim() !== '') return localCoachPhoto;
     if (teacher?.photoUrl && teacher.photoUrl.trim() !== '') return teacher.photoUrl;
 
-    // Search in loaded users list
+    // Search in loaded users list by lease first (prefer records that actually have a photo)
     if (localCoachLease && localCoachLease.trim() !== '') {
-      const matchByLease = allUsersList.find(u => u.leaseNumber && u.leaseNumber.trim() === localCoachLease.trim());
+      const cleanLease = localCoachLease.trim();
+      const matchByLease = allUsersList.find(
+        u => Boolean(u.photoUrl && u.photoUrl.trim()) && u.leaseNumber && u.leaseNumber.trim() === cleanLease
+      );
       if (matchByLease?.photoUrl) return matchByLease.photoUrl;
     }
 
+    // Search in loaded users list by name (prefer users stationed at this school with a photo)
     if (localCoachName && localCoachName.trim() !== '') {
-      const cleanTargetName = localCoachName.trim().toLowerCase();
-      const matchByName = allUsersList.find(u => {
-        const uName = (u.fullName || '').trim().toLowerCase();
-        return uName === cleanTargetName || uName.includes(cleanTargetName) || cleanTargetName.includes(uName);
+      const matchAtSchool = allUsersList.find(u => {
+        if (!u.fullName || !(u.photoUrl && u.photoUrl.trim())) return false;
+        const atSchool =
+          schoolNamesMatch(u.workLocation, schoolName) ||
+          schoolNamesMatch((u as any).schoolName, schoolName) ||
+          Boolean(matchedSchoolObj?.id && u.schoolId === matchedSchoolObj.id);
+        return atSchool && coachNamesMatch(u.fullName, localCoachName);
       });
+      if (matchAtSchool?.photoUrl) return matchAtSchool.photoUrl;
+
+      const matchByName = allUsersList.find(
+        u => Boolean(u.fullName && u.photoUrl && u.photoUrl.trim()) && coachNamesMatch(u.fullName, localCoachName)
+      );
       if (matchByName?.photoUrl) return matchByName.photoUrl;
     }
 
-    // Match with current user profile
-    if (userProfile?.photoUrl) {
-      const uLease = (userProfile.leaseNumber || '').trim();
-      const uName = (userProfile.fullName || '').trim().toLowerCase();
-      const cLease = (localCoachLease || '').trim();
-      const cName = (localCoachName || '').trim().toLowerCase();
+    if (resolvedCoach.photoUrl && resolvedCoach.photoUrl.trim() !== '') return resolvedCoach.photoUrl;
 
-      if ((cLease && uLease && cLease === uLease) || (cName && uName && (cName === uName || cName.includes(uName) || uName.includes(cName))) || (!cLease && !cName)) {
-        return userProfile.photoUrl;
+    // Match with current user profile ONLY if lease/name matches or user actually works at this school
+    if (mergedCurrentUser?.photoUrl && mergedCurrentUser.photoUrl.trim() !== '') {
+      const uLease = (mergedCurrentUser.leaseNumber || '').trim();
+      const cLease = (localCoachLease || '').trim();
+      const cName = (localCoachName || '').trim();
+
+      if (
+        (cLease && uLease && cLease === uLease) ||
+        (cName && mergedCurrentUser.fullName && coachNamesMatch(mergedCurrentUser.fullName, cName)) ||
+        (!cLease && !cName && isUserAtTargetSchool)
+      ) {
+        return mergedCurrentUser.photoUrl;
       }
     }
 
-    return userProfile?.photoUrl || undefined;
-  }, [localCoachPhoto, teacher, localCoachLease, localCoachName, allUsersList, userProfile]);
+    return undefined;
+  }, [
+    localCoachPhoto,
+    teacher,
+    localCoachLease,
+    localCoachName,
+    allUsersList,
+    resolvedCoach.photoUrl,
+    mergedCurrentUser,
+    schoolName,
+    matchedSchoolObj,
+    isUserAtTargetSchool
+  ]);
 
   const handleCoachPhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -466,7 +574,10 @@ export const ParticipationFormPdfModal: React.FC<ParticipationFormPdfModalProps>
                 placeholder="اسم المؤطر"
                 className="px-2.5 py-1.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-xs font-bold text-slate-800 dark:text-slate-100 w-36 sm:w-44 focus:ring-1 focus:ring-blue-500"
                 value={localCoachName}
-                onChange={(e) => setLocalCoachName(e.target.value)}
+                onChange={(e) => {
+                  hasManualCoachEditRef.current = true;
+                  setLocalCoachName(e.target.value);
+                }}
               />
             </div>
 
@@ -477,7 +588,10 @@ export const ParticipationFormPdfModal: React.FC<ParticipationFormPdfModalProps>
                 placeholder="رقم التأجير"
                 className="px-2 py-1.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-xs font-bold text-slate-800 dark:text-slate-100 w-28 font-mono focus:ring-1 focus:ring-blue-500"
                 value={localCoachLease}
-                onChange={(e) => setLocalCoachLease(e.target.value)}
+                onChange={(e) => {
+                  hasManualCoachEditRef.current = true;
+                  setLocalCoachLease(e.target.value);
+                }}
               />
             </div>
 
@@ -488,7 +602,10 @@ export const ParticipationFormPdfModal: React.FC<ParticipationFormPdfModalProps>
                 placeholder="رقم الهاتف"
                 className="px-2 py-1.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-xs font-bold text-slate-800 dark:text-slate-100 w-28 font-mono focus:ring-1 focus:ring-blue-500"
                 value={localCoachPhone}
-                onChange={(e) => setLocalCoachPhone(e.target.value)}
+                onChange={(e) => {
+                  hasManualCoachEditRef.current = true;
+                  setLocalCoachPhone(e.target.value);
+                }}
               />
             </div>
 

@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { Sport, Tournament, SchoolTournamentConfirmation, TARGET_AFFILIATIONS } from '../types';
+import { Sport, Tournament, School, SchoolTournamentConfirmation, TARGET_AFFILIATIONS } from '../types';
 import {
   DataService,
   ConfirmedBranchTuple,
@@ -8,7 +8,11 @@ import {
   getGenderSpecificCategoryTitle,
   getCustomCategoryName,
   getCategoryShortName,
-  normalizeCategoryKey
+  normalizeCategoryKey,
+  isSchoolSectorAllowedForTournament,
+  getSchoolEducationSector,
+  getTournamentEducationSectorsAr,
+  schoolNamesMatch
 } from '../lib/dataService';
 import { CountdownTimer } from './CountdownTimer';
 import { ConfirmedParticipationBadge } from './ConfirmedParticipationBadge';
@@ -78,14 +82,24 @@ export const ConfirmParticipationModal: React.FC<ConfirmParticipationModalProps>
   const [isEditingExisting, setIsEditingExisting] = useState(false);
   const [confirmCancelStep, setConfirmCancelStep] = useState(false);
   const [loadedTournaments, setLoadedTournaments] = useState<Tournament[]>([]);
+  const [loadedSchools, setLoadedSchools] = useState<School[]>([]);
 
   useEffect(() => {
     if (!isOpen) return;
+    let mounted = true;
+    DataService.getSchools().then(list => {
+      if (mounted) {
+        setLoadedSchools(list || []);
+      }
+    }).catch(() => {});
+
     if (propTournaments && propTournaments.length > 0) {
       setLoadedTournaments(propTournaments);
-      return;
+      return () => {
+        mounted = false;
+      };
     }
-    let mounted = true;
+
     DataService.getTournaments().then(list => {
       if (mounted) {
         setLoadedTournaments((list || []).filter(t => t.sportId === sport.id && t.status !== 'Archived' && t.status !== 'Draft'));
@@ -100,6 +114,32 @@ export const ConfirmParticipationModal: React.FC<ConfirmParticipationModalProps>
     const source = propTournaments && propTournaments.length > 0 ? propTournaments : loadedTournaments;
     return source.filter(t => t.sportId === sport.id && t.status !== 'Archived' && t.status !== 'Draft');
   }, [propTournaments, loadedTournaments, sport.id]);
+
+  const matchedSchool = useMemo(() => {
+    if (!loadedSchools.length) return undefined;
+    return loadedSchools.find(
+      s => (schoolId && s.id === schoolId) || (schoolName && schoolNamesMatch(s.name, schoolName))
+    );
+  }, [loadedSchools, schoolId, schoolName]);
+
+  const isSectorAllowed = useMemo(() => {
+    if (!matchedSchool || activeSportTournaments.length === 0) return true;
+    return activeSportTournaments.some(t => isSchoolSectorAllowedForTournament(matchedSchool, t));
+  }, [matchedSchool, activeSportTournaments]);
+
+  const allowedSectorsText = useMemo(() => {
+    const sectorsSet = new Set<'public' | 'private'>();
+    activeSportTournaments.forEach(t => {
+      if (Array.isArray(t.educationSectors) && t.educationSectors.length > 0) {
+        t.educationSectors.forEach(sec => sectorsSet.add(sec));
+      } else {
+        sectorsSet.add('public');
+        sectorsSet.add('private');
+      }
+    });
+    if (sectorsSet.size === 0) return 'التعليم العمومي والخصوصي';
+    return getTournamentEducationSectorsAr(Array.from(sectorsSet));
+  }, [activeSportTournaments]);
 
   // Available categories for this sport
   const availableCategories = useMemo(() => {
@@ -318,6 +358,12 @@ export const ConfirmParticipationModal: React.FC<ConfirmParticipationModalProps>
 
     if (isDeadlinePassed) {
       toast.error('عذراً، لقد انتهى أجل التسجيل وتأكيد المشاركة في هذه البطولة');
+      return;
+    }
+
+    if (!isSectorAllowed && matchedSchool) {
+      const schoolSecAr = getSchoolEducationSector(matchedSchool) === 'private' ? 'التعليم الخصوصي' : 'التعليم العمومي';
+      toast.error(`عذراً، مؤسسة "${matchedSchool.name}" (${schoolSecAr}) غير مسموح لها بالمشاركة في هذه البطولة المخصصة لـ (${allowedSectorsText})`);
       return;
     }
 
@@ -779,6 +825,19 @@ export const ConfirmParticipationModal: React.FC<ConfirmParticipationModalProps>
               </div>
             </div>
           )}
+
+          {/* Sector ineligible warning */}
+          {!isSectorAllowed && matchedSchool && (
+            <div className="p-3.5 bg-rose-50 border-2 border-rose-300 rounded-2xl text-rose-900 font-bold text-xs flex items-center gap-2.5 shadow-xs">
+              <AlertCircle className="w-5 h-5 text-rose-600 shrink-0" />
+              <div>
+                <div className="font-black text-xs text-rose-950">نوع التعليم غير مسموح له بالمشاركة في هذه البطولة</div>
+                <div className="text-[11px] text-rose-800 mt-0.5">
+                  مؤسسة «{matchedSchool.name}» تنتمي إلى <strong>{getSchoolEducationSector(matchedSchool) === 'private' ? 'التعليم الخصوصي' : 'التعليم العمومي'}</strong>، بينما هذه البطولة مبرمجة حصرياً لـ <strong>({allowedSectorsText})</strong>.
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Footer actions */}
@@ -857,7 +916,7 @@ export const ConfirmParticipationModal: React.FC<ConfirmParticipationModalProps>
             ) : (
               <button
                 type="button"
-                disabled={isSubmitting || isDeadlinePassed || selectedBranches.length === 0}
+                disabled={isSubmitting || isDeadlinePassed || !isSectorAllowed || selectedBranches.length === 0}
                 onClick={handleConfirm}
                 className="w-full sm:w-auto px-6 py-2.5 bg-gradient-to-r from-emerald-600 to-emerald-700 hover:from-emerald-500 hover:to-emerald-600 disabled:opacity-50 text-white rounded-xl font-black text-xs shadow-md shadow-emerald-700/20 transition-all cursor-pointer flex items-center justify-center gap-2 active:scale-98"
               >

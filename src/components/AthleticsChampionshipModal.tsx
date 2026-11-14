@@ -71,7 +71,7 @@ import {
   AthleticsAttendanceRecord
 } from '../lib/athleticsConfig';
 import { AthleticsService } from '../lib/athleticsService';
-import { canUserApproveSportResult } from '../lib/dataService';
+import { canUserApproveSportResult, resolveSchoolCoach, schoolNamesMatch } from '../lib/dataService';
 import { User, School, Student } from '../types';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
 import { AthleticsBibGeneratorModal } from './AthleticsBibGeneratorModal';
@@ -201,7 +201,7 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
 
   // School Participation Confirmation State
   const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
-  const { isSchoolConfirmed, getConfirmation, refreshConfirmations } = useSchoolConfirmations();
+  const { confirmations, isSchoolConfirmed, getConfirmation, refreshConfirmations } = useSchoolConfirmations();
 
   // School Participant Add/Edit Form State
   const [isSchoolRegModalOpen, setIsSchoolRegModalOpen] = useState(false);
@@ -747,6 +747,32 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
       setSelectedSchoolForView(detectedTeacherSchool);
     }
   }, [detectedTeacherSchool, selectedSchoolForView]);
+
+  const targetActiveAthleticsSchool = useMemo(() => {
+    if (isTeacher) return detectedTeacherSchool || '';
+    if (selectedSchoolForView && selectedSchoolForView !== 'ALL') return selectedSchoolForView;
+    return '';
+  }, [isTeacher, detectedTeacherSchool, selectedSchoolForView]);
+
+  const resolvedAthleticsCoach = useMemo(() => {
+    if (!targetActiveAthleticsSchool) return null;
+    const schoolParts = participants.filter(p => schoolNamesMatch(p.schoolName, targetActiveAthleticsSchool));
+    const fakeStudents = schoolParts.map(p => ({
+      schoolName: p.schoolName,
+      coachName: p.coachName,
+      coachPhone: p.coachPhone,
+      sportId: 'athletics'
+    } as any));
+    return resolveSchoolCoach({
+      schoolName: targetActiveAthleticsSchool,
+      sportId: 'athletics',
+      students: fakeStudents,
+      schools,
+      teachers,
+      confirmations,
+      currentUser
+    });
+  }, [targetActiveAthleticsSchool, participants, schools, teachers, confirmations, currentUser]);
 
   // Filtered Participants for School View
   const currentSchoolParticipants = useMemo(() => {
@@ -1694,8 +1720,8 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
     setRegPhoto('');
     const nextBib = String(participants.length + 101);
     setRegBibNumber(nextBib);
-    setRegCoachName(currentUser?.fullName || '');
-    setRegCoachPhone(currentUser?.phone || '');
+    setRegCoachName(resolvedAthleticsCoach?.fullName || '');
+    setRegCoachPhone(resolvedAthleticsCoach?.phone || '');
     setIsSchoolRegModalOpen(true);
   };
 
@@ -1710,8 +1736,16 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
     setRegDiscipline1(p.disciplineId);
     setRegDiscipline2(p.secondDisciplineId || '');
     setRegBibNumber(p.bibNumber);
-    setRegCoachName(p.coachName || currentUser?.fullName || '');
-    setRegCoachPhone(p.coachPhone || currentUser?.phone || '');
+    const fallbackCoach = resolveSchoolCoach({
+      schoolName: p.schoolName,
+      sportId: 'athletics',
+      schools,
+      teachers,
+      confirmations,
+      currentUser
+    });
+    setRegCoachName(p.coachName || fallbackCoach.fullName || '');
+    setRegCoachPhone(p.coachPhone || fallbackCoach.phone || '');
     setRegPhoto(p.photo || '');
     setIsSchoolRegModalOpen(true);
   };
@@ -1890,6 +1924,14 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
       const exportData = currentSchoolParticipants.map((p, idx) => {
         const disc1 = disciplines.find(d => d.id === p.disciplineId);
         const disc2 = p.secondDisciplineId ? disciplines.find(d => d.id === p.secondDisciplineId) : null;
+        const schoolCoachFallback = resolveSchoolCoach({
+          schoolName: p.schoolName,
+          sportId: 'athletics',
+          schools,
+          teachers,
+          confirmations,
+          currentUser
+        });
         return {
           'الرقم الترتيبي': idx + 1,
           'الاسم والنسب الكامل': p.studentName,
@@ -1902,8 +1944,8 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
           'رقم الصدرية': p.bibNumber,
           'الصفة الرياضية': p.affiliationType === 'club_affiliated' ? 'منتمي لنادي' : 'مدرسي',
           'المؤسسة التعليمية': p.schoolName,
-          'الأستاذ المؤطر': p.coachName || currentUser?.fullName || '---',
-          'هاتف المؤطر': p.coachPhone || currentUser?.phone || '---'
+          'الأستاذ المؤطر': p.coachName || schoolCoachFallback.fullName || '---',
+          'هاتف المؤطر': p.coachPhone || schoolCoachFallback.phone || '---'
         };
       });
 
@@ -2463,12 +2505,19 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                       <div className="flex items-center gap-3 text-xs text-slate-300 flex-wrap">
                         <span className="flex items-center gap-1">
                           <UserIcon className="w-3.5 h-3.5 text-amber-400" />
-                          <span>الأستاذ المؤطر: <strong>{currentUser?.fullName || 'ذ. التربية البدنية'}</strong></span>
+                          <span>
+                            الأستاذ المؤطر:{' '}
+                            <strong>
+                              {targetActiveAthleticsSchool
+                                ? (resolvedAthleticsCoach?.fullName || 'لم يُعيّن بعد')
+                                : 'حسب كل مؤسسة'}
+                            </strong>
+                          </span>
                         </span>
-                        {currentUser?.phone && (
+                        {targetActiveAthleticsSchool && resolvedAthleticsCoach?.phone && (
                           <span className="flex items-center gap-1 text-slate-400">
                             <Phone className="w-3.5 h-3.5 text-blue-400" />
-                            <span dir="ltr">{currentUser.phone}</span>
+                            <span dir="ltr">{resolvedAthleticsCoach.phone}</span>
                           </span>
                         )}
                         <span className="text-slate-400">• المديرية: {directorateName}</span>
@@ -5666,13 +5715,17 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                 <div>
                   <span className="text-slate-500 font-bold block text-[10px]">الأستاذ المؤطر:</span>
                   <span className="font-extrabold text-slate-900">
-                    {currentUser?.fullName || 'ذ. التربية البدنية'}
+                    {targetActiveAthleticsSchool
+                      ? (resolvedAthleticsCoach?.fullName || 'غير محدد')
+                      : 'حسب المؤسسة'}
                   </span>
                 </div>
                 <div>
                   <span className="text-slate-500 font-bold block text-[10px]">رقم الهاتف:</span>
                   <span className="font-mono font-bold text-slate-800" dir="ltr">
-                    {currentUser?.phone || '06XXXXXXXX'}
+                    {targetActiveAthleticsSchool
+                      ? (resolvedAthleticsCoach?.phone || '---')
+                      : '---'}
                   </span>
                 </div>
                 <div>

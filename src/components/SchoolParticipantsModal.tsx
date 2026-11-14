@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { School, Student, Tournament, Sport, SchoolTournamentConfirmation } from '../types';
-import { DataService, SPORTS_MAP, AGE_CATEGORIES, getCategoryGenderLabel, deduplicateById, normalizeCategoryKey, getEffectiveConfirmedBranches, formatBranchLabelAr } from '../lib/dataService';
+import { School, Student, Tournament, Sport, SchoolTournamentConfirmation, User as UserType } from '../types';
+import { DataService, SPORTS_MAP, AGE_CATEGORIES, getCategoryGenderLabel, deduplicateById, normalizeCategoryKey, getEffectiveConfirmedBranches, formatBranchLabelAr, resolveSchoolCoach } from '../lib/dataService';
 import { useNavigate } from 'react-router-dom';
 import * as XLSX from 'xlsx';
 import { cn } from '../lib/utils';
@@ -56,6 +56,7 @@ export const SchoolParticipantsModal: React.FC<SchoolParticipantsModalProps> = (
   const [tournaments, setTournaments] = useState<Tournament[]>([]);
   const [confirmations, setConfirmations] = useState<SchoolTournamentConfirmation[]>([]);
   const [sportsConfig, setSportsConfig] = useState<Sport[]>([]);
+  const [usersList, setUsersList] = useState<UserType[]>([]);
   const [activeSeason, setActiveSeason] = useState<string>('2026/2027');
   const [loadingTournaments, setLoadingTournaments] = useState(false);
 
@@ -391,6 +392,10 @@ export const SchoolParticipantsModal: React.FC<SchoolParticipantsModalProps> = (
       DataService.getActiveSeason().then(season => {
         if (season) setActiveSeason(season);
       });
+
+      DataService.getUsers().then(users => {
+        if (users) setUsersList(users);
+      }).catch(() => {});
 
       return () => {
         unsubscribeTournaments();
@@ -1516,21 +1521,45 @@ export const SchoolParticipantsModal: React.FC<SchoolParticipantsModalProps> = (
       )}
 
       {/* Official PDF Participation Form Modal */}
-      {pdfTargetSport && (
-        <ParticipationFormPdfModal
-          isOpen={isPdfModalOpen}
-          onClose={() => setIsPdfModalOpen(false)}
-          sport={pdfTargetSport}
-          schoolName={school.name}
-          directorateName="المديرية الإقليمية بتاوريرت"
-          teacher={{
-            fullName: school.teacherName,
-            phone: school.phone
-          }}
-          students={pdfStudents.length > 0 ? pdfStudents : schoolStudents}
-          preselectedCategory={selectedPdfCategory}
-        />
-      )}
+      {pdfTargetSport && (() => {
+        const targetStudents = pdfStudents.length > 0 ? pdfStudents : schoolStudents;
+        const resolvedCoach = resolveSchoolCoach({
+          schoolName: school.name,
+          sportId: pdfTargetSport.id,
+          students: targetStudents,
+          schools: [school],
+          teachers: usersList,
+          confirmations,
+          currentUser: userProfile
+        });
+        const cleanSchoolTeacherName = school.teacherName && school.teacherName !== 'غير محدد' ? school.teacherName.trim() : '';
+        const teacherProp = resolvedCoach.fullName
+          ? {
+              fullName: resolvedCoach.fullName,
+              workLocation: resolvedCoach.workLocation,
+              leaseNumber: resolvedCoach.leaseNumber,
+              phone: resolvedCoach.phone,
+              photoUrl: resolvedCoach.photoUrl
+            }
+          : cleanSchoolTeacherName
+            ? {
+                fullName: cleanSchoolTeacherName,
+                phone: school.phone
+              }
+            : undefined;
+        return (
+          <ParticipationFormPdfModal
+            isOpen={isPdfModalOpen}
+            onClose={() => setIsPdfModalOpen(false)}
+            sport={pdfTargetSport}
+            schoolName={school.name}
+            directorateName="المديرية الإقليمية بتاوريرت"
+            teacher={teacherProp}
+            students={targetStudents}
+            preselectedCategory={selectedPdfCategory}
+          />
+        );
+      })()}
     </>
   );
 };

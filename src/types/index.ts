@@ -148,6 +148,7 @@ export interface Tournament {
   category?: string; // alias for ageCategory
   gender: 'Male' | 'Female' | 'Mixed';
   level: 'Primary' | 'Middle' | 'High' | string;
+  educationSectors?: ('public' | 'private')[]; // القطاعات التعليمية المسموح لها بالمشاركة (التعليم العمومي / التعليم الخصوصي)
   scope: 'Provincial' | 'Regional' | 'National' | string;
   affiliationType?: AffiliationType; // فئة الانتماء والتصنيف المستهدف
   targetAffiliations?: string[];
@@ -176,6 +177,8 @@ export interface School {
   id: string;
   name: string;
   type: string;
+  educationSector?: 'public' | 'private'; // نوع التعليم: عمومي (public) أو خصوصي (private)
+  isPrivate?: boolean;
   commune: string;
   teacherName: string; // اسم المنسق (أو الأستاذ المنسق)
   coordinatorName?: string; // اسم منسق مادة التربية البدنية بالمؤسسة

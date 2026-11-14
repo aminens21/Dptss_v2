@@ -209,7 +209,33 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           }
 
           if (matchedData) {
-            const data = matchedData as User;
+            let data = matchedData as User;
+
+            // Enrich any missing fields (especially photoUrl or tech committee flags) from merged user directory
+            if (!data.photoUrl || !data.workLocation || !data.leaseNumber || !data.phone) {
+              try {
+                const allUsers = await DataService.getUsers();
+                const dirMatch = allUsers.find(u =>
+                  (u.id && (u.id === user.uid || u.id === docId)) ||
+                  (u.email && isFlexibleEmailMatch(u.email, cleanUserEmail)) ||
+                  (data.leaseNumber && u.leaseNumber && u.leaseNumber.trim() === data.leaseNumber.trim())
+                );
+                if (dirMatch) {
+                  data = {
+                    ...dirMatch,
+                    ...data,
+                    workLocation: data.workLocation || dirMatch.workLocation || '',
+                    schoolId: data.schoolId || dirMatch.schoolId || '',
+                    leaseNumber: data.leaseNumber || dirMatch.leaseNumber || '',
+                    phone: data.phone || dirMatch.phone || '',
+                    photoUrl: (data.photoUrl && String(data.photoUrl).trim()) || (dirMatch.photoUrl && String(dirMatch.photoUrl).trim()) || '',
+                    isTechCommitteeHead: data.isTechCommitteeHead ?? dirMatch.isTechCommitteeHead,
+                    techCommitteeSports: (data.techCommitteeSports && data.techCommitteeSports.length > 0) ? data.techCommitteeSports : dirMatch.techCommitteeSports
+                  };
+                }
+              } catch {}
+            }
+
             let role: Role = data.role || 'TEACHER';
             if (isSuperAdmin) {
               role = 'CENTRAL_ADMIN';
