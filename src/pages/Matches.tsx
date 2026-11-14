@@ -118,24 +118,74 @@ export const Matches: React.FC = () => {
   const [isDeletingSportResults, setIsDeletingSportResults] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
 
+  // Matching teacher profile from database to ensure real-time permission sync
+  const currentTeacherProfile = useMemo(() => {
+    if (!userProfile) return null;
+    return teachers.find(t =>
+      (t.id && t.id === userProfile.id) ||
+      (t.email && userProfile.email && t.email.toLowerCase() === userProfile.email.toLowerCase()) ||
+      (t.leaseNumber && userProfile.leaseNumber && t.leaseNumber === userProfile.leaseNumber)
+    ) || null;
+  }, [teachers, userProfile]);
+
+  const effectiveUserProfile = useMemo(() => {
+    if (!userProfile) return null;
+    return currentTeacherProfile ? { ...userProfile, ...currentTeacherProfile } : userProfile;
+  }, [userProfile, currentTeacherProfile]);
+
   // Role flags
-  const isTeacher = userProfile?.role === 'TEACHER' && !userProfile?.isTechCommitteeHead;
-  const isCentralAdmin = userProfile?.role === 'CENTRAL_ADMIN';
-  const isSportManager = userProfile?.role === 'SPORT_MANAGER';
-  const isTechCommitteeHead = userProfile?.isTechCommitteeHead === true;
+  const isSuperAdmin = userProfile?.isSuperAdmin === true || currentTeacherProfile?.isSuperAdmin === true || userProfile?.role === 'SUPER_ADMIN';
+  const effectiveRole = currentTeacherProfile?.role || userProfile?.role;
+  const isCentralAdmin = effectiveRole === 'CENTRAL_ADMIN' || isSuperAdmin;
+  const isSportManager = effectiveRole === 'SPORT_MANAGER';
+  const isTechCommitteeHead =
+    userProfile?.isTechCommitteeHead === true ||
+    currentTeacherProfile?.isTechCommitteeHead === true ||
+    effectiveRole === 'TECH_HEAD' ||
+    (effectiveRole as string) === 'TECH_COMMITTEE_HEAD';
+  const isTeacher = effectiveRole === 'TEACHER' && !isTechCommitteeHead && !isCentralAdmin && !isSportManager;
 
   const canCreate = isCentralAdmin || isSportManager || isTechCommitteeHead;
 
   // Manager specialty sport ID
   const managerSportId = useMemo(() => {
-    if (userProfile?.role !== 'SPORT_MANAGER') return undefined;
-    if (userProfile.sportId) return userProfile.sportId;
+    if (effectiveRole !== 'SPORT_MANAGER') return undefined;
+    if (userProfile?.sportId) return userProfile.sportId;
+    if (currentTeacherProfile?.sportId) return currentTeacherProfile.sportId;
     const assignedTourn = tournaments.find(t =>
-      (t.managerEmail && t.managerEmail.toLowerCase() === userProfile.email?.toLowerCase()) ||
-      (t.managerName && t.managerName === userProfile.fullName)
+      (t.managerEmail && userProfile?.email && t.managerEmail.toLowerCase() === userProfile.email.toLowerCase()) ||
+      (t.managerName && userProfile?.fullName && t.managerName === userProfile.fullName)
     );
     return assignedTourn?.sportId || 'basketball';
-  }, [userProfile, tournaments]);
+  }, [userProfile, currentTeacherProfile, effectiveRole, tournaments]);
+
+  // Allowed sports for Technical Committee Head / Sport Manager (null = unrestricted for Central/Super Admin)
+  const techCommitteeAllowedSports = useMemo<string[] | null>(() => {
+    if (isCentralAdmin) return null;
+    const set = new Set<string>();
+    userProfile?.techCommitteeSports?.forEach(id => id && set.add(id));
+    currentTeacherProfile?.techCommitteeSports?.forEach(id => id && set.add(id));
+    if (userProfile?.sportId) set.add(userProfile.sportId);
+    if (currentTeacherProfile?.sportId) set.add(currentTeacherProfile.sportId);
+    if (managerSportId) set.add(managerSportId);
+    tournaments.forEach(t => {
+      const emailMatch = t.managerEmail && userProfile?.email && t.managerEmail.toLowerCase() === userProfile.email.toLowerCase();
+      const nameMatch = t.managerName && userProfile?.fullName && t.managerName.trim() === userProfile.fullName.trim();
+      if ((emailMatch || nameMatch) && t.sportId) {
+        set.add(t.sportId);
+      }
+    });
+    return Array.from(set);
+  }, [isCentralAdmin, userProfile, currentTeacherProfile, managerSportId, tournaments]);
+
+  const canManageSport = (sportId?: string) => {
+    if (isCentralAdmin) return true;
+    if (!sportId) return false;
+    if (isTechCommitteeHead || isSportManager) {
+      return techCommitteeAllowedSports !== null && techCommitteeAllowedSports.includes(sportId);
+    }
+    return false;
+  };
 
   // Load initial data
   const loadData = async () => {
@@ -828,7 +878,11 @@ export const Matches: React.FC = () => {
               <button
                 onClick={() => {
                   setEditingMatch(null);
-                  setCreateMatchInitialSportId(undefined);
+                  setCreateMatchInitialSportId(
+                    techCommitteeAllowedSports && techCommitteeAllowedSports.length > 0
+                      ? techCommitteeAllowedSports[0]
+                      : undefined
+                  );
                   setIsCreateMatchOpen(true);
                 }}
                 className="flex-1 sm:flex-none inline-flex items-center justify-center gap-1.5 rounded-2xl bg-blue-600 dark:bg-blue-700 px-3.5 py-2 text-[11px] sm:text-xs font-black text-white shadow-xs hover:bg-blue-700 dark:hover:bg-blue-600 transition-colors cursor-pointer whitespace-nowrap"
@@ -851,13 +905,20 @@ export const Matches: React.FC = () => {
           activeSeason={activeSeason}
           userProfile={userProfile}
           onOpenMatchDetail={(match) => {
-            if (canCreate) {
+            if (canManageSport(match.sportId)) {
               setEditingMatch(match);
               setIsCreateMatchOpen(true);
+            } else if (canCreate) {
+              toast.error('يمكنك تعديل وبرمجة المباريات الخاصة برياضتك المسندة فقط');
             }
           }}
           onOpenCreateMatch={canCreate ? () => {
             setEditingMatch(null);
+            setCreateMatchInitialSportId(
+              techCommitteeAllowedSports && techCommitteeAllowedSports.length > 0
+                ? techCommitteeAllowedSports[0]
+                : undefined
+            );
             setIsCreateMatchOpen(true);
           } : undefined}
         />
@@ -1149,8 +1210,8 @@ export const Matches: React.FC = () => {
                   hasBothClasses,
                   isClub
                 } = item;
-                const isManagerSpecialty = managerSportId === sport.id;
-                const canManageThisSport = isCentralAdmin || isTechCommitteeHead || (isSportManager && isManagerSpecialty);
+                const isManagerSpecialty = (managerSportId === sport.id) || (techCommitteeAllowedSports !== null && techCommitteeAllowedSports.includes(sport.id));
+                const canManageThisSport = canManageSport(sport.id);
 
                 // 1. Cross Country Championship Card (Identical dark gradient styling as in Tournaments.tsx)
                 if (sport.id === 'cross_country' && isProgrammed) {
@@ -1627,9 +1688,10 @@ export const Matches: React.FC = () => {
         schools={schools}
         venues={venues}
         students={students}
+        teachers={teachers}
         crossCountryResults={crossCountryResults}
         onUpdateCrossCountryResult={handleSaveCrossCountryResult}
-        userProfile={userProfile}
+        userProfile={effectiveUserProfile}
         activeSeason={activeSeason}
         onEditScore={(match) => {
           setSelectedMatchForScore(match);
@@ -1667,7 +1729,10 @@ export const Matches: React.FC = () => {
         schools={schools}
         venues={venues}
         students={students}
+        teachers={teachers}
+        matches={matches}
         managerSportId={managerSportId}
+        allowedSportIds={techCommitteeAllowedSports}
         initialSportId={createMatchInitialSportId}
         initialAffiliation={createMatchInitialAffiliation}
         onSave={handleSaveMatch}
@@ -1731,7 +1796,7 @@ export const Matches: React.FC = () => {
 
       {/* CONFIRM DELETE SPORT TOURNAMENT RESULTS MODAL */}
       {sportToDeleteResults && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-200" dir="rtl">
+        <div className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-200" dir="rtl">
           <div 
             className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-lg w-full p-6 shadow-2xl space-y-5 animate-in zoom-in-95 duration-200"
             onClick={(e) => e.stopPropagation()}
@@ -1863,7 +1928,7 @@ export const Matches: React.FC = () => {
           setIsDrawModalOpen(false);
           setSelectedSportForDraw(undefined);
         }}
-        currentUser={userProfile}
+        currentUser={effectiveUserProfile}
         initialSportId={selectedSportForDraw}
         onMatchesCreated={loadData}
       />

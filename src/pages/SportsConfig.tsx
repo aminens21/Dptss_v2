@@ -468,9 +468,9 @@ export const SportsConfig: React.FC = () => {
   const [newSportCustomCategories, setNewSportCustomCategories] = useState<CustomAgeCategory[]>([]);
   const [newSportStudentLimit, setNewSportStudentLimit] = useState<string>('');
   const [newSportCategoryStudentLimits, setNewSportCategoryStudentLimits] = useState<Record<string, number>>({});
-  const [newSportTargetAffiliations, setNewSportTargetAffiliations] = useState<string[]>([
-    'non_club', 'espoir_non_club', 'sports_tracks', 'espoir_club'
-  ]);
+  const [newSportTargetAffiliations, setNewSportTargetAffiliations] = useState<string[]>(() =>
+    TARGET_AFFILIATIONS.map(t => t.id)
+  );
   const [newSportIsProgrammed, setNewSportIsProgrammed] = useState<boolean>(true);
   const [isSubmittingSport, setIsSubmittingSport] = useState(false);
 
@@ -1803,9 +1803,15 @@ export const SportsConfig: React.FC = () => {
                     </p>
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 pt-1">
                       {TARGET_AFFILIATIONS.map((aff) => {
-                        const currentAffs = sport.targetAffiliations && sport.targetAffiliations.length > 0
+                        const rawAffs = sport.targetAffiliations && sport.targetAffiliations.length > 0
                           ? sport.targetAffiliations
-                          : ['non_club', 'espoir_non_club', 'sports_tracks', 'espoir_club'];
+                          : TARGET_AFFILIATIONS.map(t => t.id);
+                        const normalizedAffs = Array.from(new Set(
+                          rawAffs.map(id => (id === 'club_affiliated' || id === 'espoir_club') ? 'club_affiliated' : 'non_club')
+                        ));
+                        const currentAffs = rawAffs.some(id => ['espoir_non_club', 'sports_tracks', 'espoir_club'].includes(id))
+                          ? TARGET_AFFILIATIONS.map(t => t.id)
+                          : normalizedAffs;
                         const isChecked = currentAffs.includes(aff.id);
                         return (
                           <label
@@ -1821,7 +1827,7 @@ export const SportsConfig: React.FC = () => {
                               checked={isChecked}
                               onChange={() => {
                                 const updated = isChecked
-                                  ? currentAffs.filter(id => id !== aff.id)
+                                  ? (currentAffs.length > 1 ? currentAffs.filter(id => id !== aff.id) : currentAffs)
                                   : [...currentAffs, aff.id];
                                 setSportsList(prev => prev.map(s => s.id === sport.id ? { ...s, targetAffiliations: updated } : s));
                               }}

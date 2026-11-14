@@ -37,6 +37,7 @@ import { AppLogo } from './AppLogo';
 import { SportSilhouette } from './SportSilhouettes';
 import { Tournament, Directorate, Sport } from '../types';
 import { SPORTS_MAP, OfficialLogos } from '../lib/dataService';
+import { prepareFontEmbedCss } from '../lib/fontExportHelper';
 
 interface TournamentPosterModalProps {
   isOpen: boolean;
@@ -364,22 +365,27 @@ export const TournamentPosterModal: React.FC<TournamentPosterModalProps> = ({
     }
   };
 
+  const resolvedFontCss = POSTER_FONTS.find(f => f.id === selectedFont)?.css || "'Cairo', sans-serif";
+
   // Export as PNG (Pure Poster Card Only - No Preview Canvas or Shadow)
   const handleDownloadImage = async () => {
     if (!posterRef.current) return;
     setIsExporting(true);
     const toastId = toast.loading('جاري توليد وتحميل الملصق بدقة عالية (PNG)...');
     try {
+      const fontEmbedCSS = await prepareFontEmbedCss(selectedFont);
       await new Promise(resolve => setTimeout(resolve, 150));
       const dataUrl = await toPng(posterRef.current, {
         pixelRatio: 3,
         cacheBust: true,
         quality: 1.0,
+        ...(fontEmbedCSS ? { fontEmbedCSS } : {}),
         style: {
           transform: 'none',
           boxShadow: 'none',
           borderRadius: '0px',
-          margin: '0px'
+          margin: '0px',
+          fontFamily: resolvedFontCss
         }
       });
 
@@ -403,16 +409,19 @@ export const TournamentPosterModal: React.FC<TournamentPosterModalProps> = ({
     setIsExporting(true);
     const toastId = toast.loading('جاري توليد وتحميل ملف PDF للملصق...');
     try {
+      const fontEmbedCSS = await prepareFontEmbedCss(selectedFont);
       await new Promise(resolve => setTimeout(resolve, 150));
       const dataUrl = await toPng(posterRef.current, {
         pixelRatio: 3,
         cacheBust: true,
         quality: 1.0,
+        ...(fontEmbedCSS ? { fontEmbedCSS } : {}),
         style: {
           transform: 'none',
           boxShadow: 'none',
           borderRadius: '0px',
-          margin: '0px'
+          margin: '0px',
+          fontFamily: resolvedFontCss
         }
       });
 
@@ -441,15 +450,18 @@ export const TournamentPosterModal: React.FC<TournamentPosterModalProps> = ({
     setIsExporting(true);
     const toastId = toast.loading('جاري نسخ صورة الملصق إلى الحافظة...');
     try {
+      const fontEmbedCSS = await prepareFontEmbedCss(selectedFont);
       const blob = await toBlob(posterRef.current, {
         pixelRatio: 2.5,
         cacheBust: true,
         quality: 1.0,
+        ...(fontEmbedCSS ? { fontEmbedCSS } : {}),
         style: {
           transform: 'none',
           boxShadow: 'none',
           borderRadius: '0px',
-          margin: '0px'
+          margin: '0px',
+          fontFamily: resolvedFontCss
         }
       });
       if (blob && navigator.clipboard && (window as any).ClipboardItem) {
@@ -475,16 +487,19 @@ export const TournamentPosterModal: React.FC<TournamentPosterModalProps> = ({
     if (!posterRef.current) return;
     const toastId = toast.loading('جاري تجهيز الملصق للطباعة بجودة عالية...');
     try {
+      const fontEmbedCSS = await prepareFontEmbedCss(selectedFont);
       await new Promise(resolve => setTimeout(resolve, 150));
       const dataUrl = await toPng(posterRef.current, {
         pixelRatio: 3,
         cacheBust: true,
         quality: 1.0,
+        ...(fontEmbedCSS ? { fontEmbedCSS } : {}),
         style: {
           transform: 'none',
           boxShadow: 'none',
           borderRadius: '0px',
-          margin: '0px'
+          margin: '0px',
+          fontFamily: resolvedFontCss
         }
       });
 

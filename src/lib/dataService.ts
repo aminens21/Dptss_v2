@@ -1436,6 +1436,187 @@ export const DataService = {
     }
   },
 
+  /**
+   * Automatically restore missing 'club_affiliated' (المنتمين للأندية) tournament branches
+   * for any programmed sports in the active directorate & season that currently only have 'non_club' branches.
+   */
+  async ensureClubAffiliatedBranchesForProgrammedSports(
+    targetDirectorateId?: string,
+    targetSeasonId?: string,
+    forceCheck: boolean = false
+  ): Promise<number> {
+    const activeDirId = targetDirectorateId || this.getActiveDirectorateId();
+    const effectiveDirId = (!activeDirId || activeDirId === 'all') ? 'taourirt' : activeDirId;
+    const activeSeason = targetSeasonId || (await this.getActiveSeason());
+    const flagKey = `taourirt_restored_club_affiliated_v2_${effectiveDirId}_${activeSeason}`;
+
+    if (!forceCheck) {
+      try {
+        if (localStorage.getItem(flagKey) === 'true') {
+          return 0;
+        }
+      } catch {}
+    }
+
+    const allTournaments = await this.getTournaments(undefined, true);
+    const dirTournaments = allTournaments.filter(
+      t =>
+        (t.directorateId || 'taourirt') === effectiveDirId &&
+        (!t.seasonId || t.seasonId === activeSeason) &&
+        t.status !== 'Draft' &&
+        t.status !== 'Archived'
+    );
+
+    if (dirTournaments.length === 0) {
+      try {
+        localStorage.setItem(flagKey, 'true');
+      } catch {}
+      return 0;
+    }
+
+    // Group active tournaments by sportId
+    const bySport = new Map<string, Tournament[]>();
+    dirTournaments.forEach(t => {
+      if (!t.sportId) return;
+      if (!bySport.has(t.sportId)) bySport.set(t.sportId, []);
+      bySport.get(t.sportId)!.push(t);
+    });
+
+    const newlyCreated: Tournament[] = [];
+    const currentLocal = getLocal<Tournament>(STORAGE_KEYS.TOURNAMENTS, []);
+
+    for (const [sportId, sportTourns] of bySport.entries()) {
+      // Cross country uses 'open' or dedicated branches; only restore if it has non_club without open/club_affiliated
+      const hasOpen = sportTourns.some(t => t.affiliationType === 'open');
+      if (sportId === 'cross_country' && hasOpen) {
+        continue;
+      }
+
+      const existingClubKeys = new Set<string>();
+      sportTourns.forEach(t => {
+        if (t.affiliationType === 'club_affiliated') {
+          existingClubKeys.add(`${normalizeCategoryKey(t.ageCategory)}__${t.gender}`);
+        }
+      });
+
+      const nonClubBranches = sportTourns.filter(
+        t => !t.affiliationType || t.affiliationType === 'non_club'
+      );
+
+      for (const refTourn of nonClubBranches) {
+        const normCat = normalizeCategoryKey(refTourn.ageCategory || 'U15');
+        const key = `${normCat}__${refTourn.gender}`;
+        if (existingClubKeys.has(key)) continue;
+
+        // Avoid duplicating inside same pass
+        existingClubKeys.add(key);
+
+        const docRef = doc(collection(db, 'tournaments'));
+        const realId = docRef.id;
+        const genLabel =
+          refTourn.gender === 'Female' ? 'إناث' : refTourn.gender === 'Male' ? 'ذكور' : 'مختلط';
+        const sportLabel = SPORTS_MAP[sportId]?.name || refTourn.sportName || sportId;
+
+        const clubTournament: Tournament = {
+          id: realId,
+          name: `بطولة المنتمين للأندية ${normCat} ${genLabel}`,
+          seasonId: refTourn.seasonId || activeSeason,
+          sportId,
+          sportName: sportLabel,
+          ageCategory: normCat,
+          gender: refTourn.gender,
+          level: refTourn.level || 'Primary,Middle,High',
+          scope: refTourn.scope || 'Provincial',
+          affiliationType: 'club_affiliated',
+          targetAffiliations: ['club_affiliated'],
+          categoryStudentLimits: refTourn.categoryStudentLimits,
+          startDate: refTourn.startDate || new Date(),
+          endDate: refTourn.endDate || new Date(),
+          registrationDeadline: refTourn.registrationDeadline || refTourn.endDate || new Date(),
+          status: refTourn.status || 'Scheduled',
+          description: `بطولة مدرسية رسمية (المنتمين للأندية والجمعيات الرياضية) (${sportLabel})`,
+          directorateId: effectiveDirId,
+          createdAt: new Date(),
+          updatedAt: new Date()
+        };
+
+        newlyCreated.push(clubTournament);
+        markPendingWrite('tournaments', realId);
+      }
+    }
+
+    if (newlyCreated.length > 0) {
+      const mergedLocal = deduplicateById([...newlyCreated, ...currentLocal]);
+      setLocal(STORAGE_KEYS.TOURNAMENTS, mergedLocal);
+
+      // Ensure local sportsConfig also includes 'club_affiliated' in targetAffiliations for programmed sports
+      try {
+        const sportsLocal = getLocal<Sport>('taourirt_sports_config', []);
+        const restoredSportIds = new Set(newlyCreated.map(t => t.sportId));
+        const updatedSportsLocal = sportsLocal.map(s => {
+          if (!restoredSportIds.has(s.id)) return s;
+          const prevAffs = Array.isArray(s.targetAffiliations) ? s.targetAffiliations : [];
+          const nextAffs = Array.from(
+            new Set([
+              ...prevAffs.filter(id => id === 'non_club' || id === 'club_affiliated'),
+              'non_club',
+              'club_affiliated'
+            ])
+          );
+          return { ...s, targetAffiliations: nextAffs };
+        });
+        setLocal('taourirt_sports_config', updatedSportsLocal);
+      } catch {}
+
+      if (!isCloudSyncPaused()) {
+        const batch = writeBatch(db);
+        newlyCreated.forEach(item => {
+          const firestorePayload = stripUndefinedDeep({
+            ...item,
+            startDate:
+              item.startDate instanceof Date
+                ? Timestamp.fromDate(item.startDate)
+                : item.startDate
+                ? Timestamp.fromDate(new Date(item.startDate))
+                : null,
+            endDate:
+              item.endDate instanceof Date
+                ? Timestamp.fromDate(item.endDate)
+                : item.endDate
+                ? Timestamp.fromDate(new Date(item.endDate))
+                : null,
+            registrationDeadline:
+              item.registrationDeadline instanceof Date
+                ? Timestamp.fromDate(item.registrationDeadline)
+                : item.registrationDeadline
+                ? Timestamp.fromDate(new Date(item.registrationDeadline))
+                : null,
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp()
+          });
+          batch.set(doc(db, 'tournaments', item.id), firestorePayload);
+        });
+        try {
+          await batch.commit();
+          newlyCreated.forEach(item => clearPendingWrite('tournaments', item.id));
+        } catch (err) {
+          console.warn('Restored club_affiliated branches locally; Firestore sync pending:', err);
+        }
+      }
+    }
+
+    try {
+      localStorage.setItem(flagKey, 'true');
+    } catch {}
+
+    if (newlyCreated.length > 0 && typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('tournamentDataChanged'));
+      window.dispatchEvent(new CustomEvent('tournamentsUpdated'));
+    }
+
+    return newlyCreated.length;
+  },
+
   async updateTournament(id: string, updates: Partial<Tournament>): Promise<void> {
     const localList = getLocal<Tournament>(STORAGE_KEYS.TOURNAMENTS, []);
     const existing = localList.find(t => t.id === id);
@@ -3666,9 +3847,31 @@ export const DataService = {
         });
       }
 
+      // Normalize targetAffiliations so legacy IDs map cleanly to 'non_club' and 'club_affiliated'
+      const rawAffs = Array.isArray(s.targetAffiliations) ? s.targetAffiliations : [];
+      let normalizedAffs: string[] = ['non_club', 'club_affiliated'];
+      if (rawAffs.length > 0) {
+        const hasLegacy = rawAffs.some(id =>
+          ['espoir_non_club', 'sports_tracks', 'espoir_club'].includes(id)
+        );
+        const mapped = Array.from(
+          new Set(
+            rawAffs.map(id =>
+              id === 'club_affiliated' || id === 'espoir_club' ? 'club_affiliated' : 'non_club'
+            )
+          )
+        );
+        normalizedAffs = hasLegacy
+          ? ['non_club', 'club_affiliated']
+          : mapped.length > 0
+          ? mapped
+          : ['non_club', 'club_affiliated'];
+      }
+
       return {
         ...s,
         ageCategories: validCats,
+        targetAffiliations: normalizedAffs,
         customAgeCategories: cleanedCustom.length > 0 ? cleanedCustom : undefined,
         categoryStudentLimits: Object.keys(cleanCategoryLimits).length > 0 ? cleanCategoryLimits : undefined
       };
@@ -3717,7 +3920,7 @@ export const DataService = {
       customAgeCategories: sport.customAgeCategories || [],
       studentLimit: sport.studentLimit !== undefined ? sport.studentLimit : 0,
       categoryStudentLimits: sport.categoryStudentLimits || {},
-      targetAffiliations: sport.targetAffiliations || ['non_club', 'espoir_non_club', 'sports_tracks', 'espoir_club'],
+      targetAffiliations: sport.targetAffiliations || ['non_club', 'club_affiliated'],
       athleticsSpecialties: sport.athleticsSpecialties || [],
       isCustom: true,
       createdAt: new Date().toISOString()
@@ -4785,57 +4988,325 @@ export const DataService = {
    * Reset or delete all results of a specific sport for the active directorate and season
    */
   async deleteSportResults(sportId: string, deleteMatchesCompletely: boolean = false): Promise<void> {
+    if (deleteMatchesCompletely) {
+      await this.clearScheduledMatchesByScope({ sportId });
+    } else {
+      await this.resetMatchResultsByScope({ sportId });
+    }
+  },
+
+  /**
+   * Reset match scores & results (keeping scheduled fixtures intact) with optional sport/tournament & role scoping.
+   */
+  async resetMatchResultsByScope(options: {
+    allowedSportIds?: string[] | null;
+    sportId?: string;
+    tournamentId?: string;
+  } = {}): Promise<{ resetMatchesCount: number; resetCrossCountry: boolean; resetAthletics: boolean }> {
     const activeDirId = this.getActiveDirectorateId();
     const effectiveDirId = (!activeDirId || activeDirId === 'all') ? 'taourirt' : activeDirId;
+    const { allowedSportIds, sportId, tournamentId } = options;
 
-    if (sportId === 'cross_country') {
-      const ccResults = await this.getCrossCountryResults();
+    // Enforce allowedSportIds guard when role is scoped (e.g. Technical Committee Head)
+    if (sportId && Array.isArray(allowedSportIds) && !allowedSportIds.includes(sportId)) {
+      throw new Error('UNAUTHORIZED_SPORT_RESET');
+    }
+
+    let targetTournamentObj: Tournament | undefined;
+    if (tournamentId) {
+      const allTourns = await this.getTournaments();
+      targetTournamentObj = allTourns.find(t => t.id === tournamentId);
+      if (
+        targetTournamentObj &&
+        Array.isArray(allowedSportIds) &&
+        !allowedSportIds.includes(targetTournamentObj.sportId)
+      ) {
+        throw new Error('UNAUTHORIZED_SPORT_RESET');
+      }
+    }
+
+    const matchesToInspect = await this.getMatches();
+    const targetMatchIds = new Set<string>();
+
+    matchesToInspect.forEach(m => {
+      if (Array.isArray(allowedSportIds) && !allowedSportIds.includes(m.sportId)) {
+        return;
+      }
+      if (sportId && m.sportId !== sportId) {
+        return;
+      }
+      if (tournamentId) {
+        const directMatch = m.tournamentId === tournamentId;
+        const metaMatch =
+          targetTournamentObj &&
+          m.sportId === targetTournamentObj.sportId &&
+          normalizeCategoryKey(m.ageCategory) === normalizeCategoryKey(targetTournamentObj.ageCategory) &&
+          (m.gender === targetTournamentObj.gender || targetTournamentObj.gender === 'Mixed') &&
+          ((m as any).affiliationType || 'non_club') === (targetTournamentObj.affiliationType || 'non_club');
+        if (!directMatch && !metaMatch) {
+          return;
+        }
+      }
+      targetMatchIds.add(m.id);
+    });
+
+    if (targetMatchIds.size > 0) {
+      const allCached = getLocal<Match>(STORAGE_KEYS.MATCHES, []).map(normalizeMatchRecord);
+      const updatedAll = allCached.map(m => {
+        if (!targetMatchIds.has(m.id)) return m;
+        const cleaned = { ...m } as any;
+        cleaned.score1 = 0;
+        cleaned.score2 = 0;
+        cleaned.team1Score = 0;
+        cleaned.team2Score = 0;
+        cleaned.status = 'Scheduled';
+        delete cleaned.penalty1;
+        delete cleaned.penalty2;
+        delete cleaned.team1Penalties;
+        delete cleaned.team2Penalties;
+        delete cleaned.winnerId;
+        delete cleaned.scorers;
+        delete cleaned.matchSheet;
+        return cleaned as Match;
+      });
+      setLocal(STORAGE_KEYS.MATCHES, updatedAll);
+      targetMatchIds.forEach(id => markPendingWrite('matches', id));
+
+      if (!isCloudSyncPaused()) {
+        const idsArray = Array.from(targetMatchIds);
+        for (let i = 0; i < idsArray.length; i += 400) {
+          const chunk = idsArray.slice(i, i + 400);
+          const batch = writeBatch(db);
+          chunk.forEach(id => {
+            batch.set(
+              doc(db, 'matches', id),
+              {
+                id,
+                score1: 0,
+                score2: 0,
+                team1Score: 0,
+                team2Score: 0,
+                status: 'Scheduled',
+                penalty1: null,
+                penalty2: null,
+                team1Penalties: null,
+                team2Penalties: null,
+                winnerId: '',
+                scorers: '',
+                matchSheet: null,
+                updatedAt: serverTimestamp()
+              },
+              { merge: true }
+            );
+          });
+          try {
+            await batch.commit();
+            chunk.forEach(id => clearPendingWrite('matches', id));
+          } catch (e) {
+            console.warn('Reset match scores saved locally; Firestore sync pending:', e);
+          }
+        }
+      }
+    }
+
+    // Check if Cross Country results are within scope
+    const effectiveSportIdForSpecial = targetTournamentObj?.sportId || sportId;
+    const isCrossCountryInScope = effectiveSportIdForSpecial
+      ? effectiveSportIdForSpecial === 'cross_country'
+      : !Array.isArray(allowedSportIds) || allowedSportIds.includes('cross_country');
+
+    let resetCrossCountry = false;
+    if (isCrossCountryInScope) {
+      const ccResults = await this.getCrossCountryResults(effectiveDirId);
       const resetMap: Record<string, CrossCountryCategoryResult> = {};
-      
+      let modifiedAnyCC = false;
+
       for (const [key, val] of Object.entries(ccResults)) {
         const catVal = (val || {}) as CrossCountryCategoryResult;
-        resetMap[key] = {
-          ...catVal,
-          podium: [],
-          status: 'setup',
-          updatedAt: new Date().toISOString()
-        };
-        // Also update Firestore
-        try {
-          const docId = `${effectiveDirId}_${key}`;
-          await setDoc(doc(db, 'cross_country_results', docId), {
-            ...resetMap[key],
+        const matchesSpecificTournament =
+          !targetTournamentObj ||
+          ((!targetTournamentObj.affiliationType ||
+            targetTournamentObj.affiliationType === 'open' ||
+            (catVal.affiliationType || 'non_club') === targetTournamentObj.affiliationType) &&
+            (!targetTournamentObj.ageCategory ||
+              targetTournamentObj.ageCategory.includes('جميع') ||
+              normalizeCategoryKey(catVal.category) === normalizeCategoryKey(targetTournamentObj.ageCategory)) &&
+            (targetTournamentObj.gender === 'Mixed' || catVal.gender === targetTournamentObj.gender));
+
+        if (matchesSpecificTournament) {
+          if (catVal.podium && catVal.podium.length > 0) modifiedAnyCC = true;
+          resetMap[key] = {
+            ...catVal,
             podium: [],
             status: 'setup',
-            updatedAt: serverTimestamp()
-          }, { merge: true });
-        } catch (e) {
-          console.warn(`Error resetting cross country doc for ${key}:`, e);
+            updatedAt: new Date().toISOString()
+          };
+          if (!isCloudSyncPaused()) {
+            try {
+              const docId = `${effectiveDirId}_${key}`;
+              await setDoc(
+                doc(db, 'cross_country_results', docId),
+                {
+                  ...resetMap[key],
+                  podium: [],
+                  status: 'setup',
+                  updatedAt: serverTimestamp()
+                },
+                { merge: true }
+              );
+            } catch (e) {
+              console.warn(`Error resetting cross country doc for ${key}:`, e);
+            }
+          }
+        } else {
+          resetMap[key] = catVal;
         }
       }
 
       const cacheKey = `taourirt_cc_results_${effectiveDirId}`;
       localStorage.setItem(cacheKey, JSON.stringify(resetMap));
       this._notifyCCUpdate({ categoryId: 'all', podium: [] } as any);
-    } else {
-      const allMatches = await this.getMatches();
-      const sportMatches = allMatches.filter(m => m.sportId === sportId);
+      resetCrossCountry = modifiedAnyCC;
+    }
 
-      for (const m of sportMatches) {
-        if (deleteMatchesCompletely) {
-          await this.deleteMatch(m.id);
-        } else {
-          // Reset match scores and completed status to SCHEDULED
-          await this.updateMatchScore(m.id, null as any, null as any, 'SCHEDULED', {
-            matchSheet: null,
-            team1Score: null,
-            team2Score: null,
-            team1Penalties: null,
-            team2Penalties: null
+    // Check if Athletics results are within scope
+    const isAthleticsInScope = effectiveSportIdForSpecial
+      ? effectiveSportIdForSpecial === 'athletics'
+      : !Array.isArray(allowedSportIds) || allowedSportIds.includes('athletics');
+
+    let resetAthletics = false;
+    if (isAthleticsInScope && !tournamentId) {
+      try {
+        const athKeys = [
+          'school_athletics_results_v2',
+          'taourirt_athletics_results',
+          `taourirt_athletics_results_${effectiveDirId}`
+        ];
+        athKeys.forEach(k => {
+          const existing = localStorage.getItem(k);
+          if (existing && existing !== '{}') {
+            resetAthletics = true;
+          }
+          localStorage.setItem(k, '{}');
+        });
+        if (!isCloudSyncPaused()) {
+          const qAth = query(
+            collection(db, 'athletics_results'),
+            where('directorateId', '==', effectiveDirId)
+          );
+          const snapAth = await getDocs(qAth).catch(() => null);
+          if (snapAth && !snapAth.empty) {
+            const batch = writeBatch(db);
+            snapAth.docs.forEach((d: any) => batch.delete(d.ref));
+            await batch.commit().catch(() => {});
+            resetAthletics = true;
+          }
+        }
+        window.dispatchEvent(new CustomEvent('athleticsResultsUpdated', { detail: {} }));
+      } catch (e) {
+        console.warn('Error resetting athletics results:', e);
+      }
+    }
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('matchesDataChanged'));
+      window.dispatchEvent(new CustomEvent('matchesUpdated'));
+      window.dispatchEvent(new CustomEvent('resultsChanged'));
+      window.dispatchEvent(new CustomEvent('tournamentDataChanged'));
+    }
+
+    return {
+      resetMatchesCount: targetMatchIds.size,
+      resetCrossCountry,
+      resetAthletics
+    };
+  },
+
+  /**
+   * Delete all scheduled/programmed matches within optional sport/tournament & role scoping.
+   */
+  async clearScheduledMatchesByScope(options: {
+    allowedSportIds?: string[] | null;
+    sportId?: string;
+    tournamentId?: string;
+  } = {}): Promise<{ deletedMatchesCount: number }> {
+    const { allowedSportIds, sportId, tournamentId } = options;
+
+    if (sportId && Array.isArray(allowedSportIds) && !allowedSportIds.includes(sportId)) {
+      throw new Error('UNAUTHORIZED_SPORT_RESET');
+    }
+
+    let targetTournamentObj: Tournament | undefined;
+    if (tournamentId) {
+      const allTourns = await this.getTournaments();
+      targetTournamentObj = allTourns.find(t => t.id === tournamentId);
+      if (
+        targetTournamentObj &&
+        Array.isArray(allowedSportIds) &&
+        !allowedSportIds.includes(targetTournamentObj.sportId)
+      ) {
+        throw new Error('UNAUTHORIZED_SPORT_RESET');
+      }
+    }
+
+    const matchesToInspect = await this.getMatches();
+    const deleteIds = new Set<string>();
+
+    matchesToInspect.forEach(m => {
+      if (Array.isArray(allowedSportIds) && !allowedSportIds.includes(m.sportId)) {
+        return;
+      }
+      if (sportId && m.sportId !== sportId) {
+        return;
+      }
+      if (tournamentId) {
+        const directMatch = m.tournamentId === tournamentId;
+        const metaMatch =
+          targetTournamentObj &&
+          m.sportId === targetTournamentObj.sportId &&
+          normalizeCategoryKey(m.ageCategory) === normalizeCategoryKey(targetTournamentObj.ageCategory) &&
+          (m.gender === targetTournamentObj.gender || targetTournamentObj.gender === 'Mixed') &&
+          ((m as any).affiliationType || 'non_club') === (targetTournamentObj.affiliationType || 'non_club');
+        if (!directMatch && !metaMatch) {
+          return;
+        }
+      }
+      deleteIds.add(m.id);
+    });
+
+    if (deleteIds.size > 0) {
+      deleteIds.forEach(id => markRecentlyDeleted('matches', id));
+      const allCached = getLocal<Match>(STORAGE_KEYS.MATCHES, []);
+      const remaining = allCached.filter(m => !deleteIds.has(m.id));
+      setLocal(STORAGE_KEYS.MATCHES, remaining);
+
+      if (!isCloudSyncPaused()) {
+        const idsArray = Array.from(deleteIds);
+        for (let i = 0; i < idsArray.length; i += 400) {
+          const chunk = idsArray.slice(i, i + 400);
+          const batch = writeBatch(db);
+          chunk.forEach(id => {
+            batch.delete(doc(db, 'matches', id));
           });
+          try {
+            await batch.commit();
+          } catch (e) {
+            console.warn('Matches cleared locally; Firestore batch delete pending:', e);
+          }
         }
       }
     }
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('matchesDataChanged'));
+      window.dispatchEvent(new CustomEvent('matchesUpdated'));
+      window.dispatchEvent(new CustomEvent('resultsChanged'));
+      window.dispatchEvent(new CustomEvent('tournamentDataChanged'));
+    }
+
+    return {
+      deletedMatchesCount: deleteIds.size
+    };
   },
 
   async getCrossCountryResults(targetDirectorateId?: string): Promise<Record<string, CrossCountryCategoryResult>> {

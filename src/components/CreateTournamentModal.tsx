@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { Tournament, Sport, Directorate, TARGET_AFFILIATIONS, TargetAffiliationConfig } from '../types';
 import { AGE_CATEGORIES, DataService, getAgeCategoriesForSeason, SPORTS_MAP, getCategoryGenderLabel, normalizeCategoryKey, isTeamSport } from '../lib/dataService';
 import { X, Trophy, Calendar, Users, Target, Award, Sparkles, ShieldCheck, RefreshCw, Check, Clock, GraduationCap } from 'lucide-react';
@@ -81,12 +82,26 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
   const activeSportConfig = sportsConfig.find(s => s.id === sportId);
 
   // Available target classifications configured in SportsConfig for this sport
+  // Always normalize legacy IDs and preserve both 'non_club' and 'club_affiliated'
   const availableAffiliations = useMemo(() => {
     const allowed = activeSportConfig?.targetAffiliations;
     if (allowed && allowed.length > 0) {
-      return TARGET_AFFILIATIONS.filter(a => allowed.includes(a.id));
+      const normalized = new Set<string>();
+      allowed.forEach(id => {
+        if (id === 'club_affiliated' || id === 'espoir_club') {
+          normalized.add('club_affiliated');
+        } else {
+          normalized.add('non_club');
+        }
+      });
+      // If sport had legacy non-club-era array without explicit exclusion, include club_affiliated too
+      if (allowed.some(id => ['espoir_non_club', 'sports_tracks', 'espoir_club'].includes(id)) || !normalized.has('club_affiliated')) {
+        normalized.add('club_affiliated');
+      }
+      const filtered = TARGET_AFFILIATIONS.filter(a => normalized.has(a.id));
+      return filtered.length > 0 ? filtered : TARGET_AFFILIATIONS;
     }
-    return TARGET_AFFILIATIONS.filter(a => ['non_club', 'espoir_non_club', 'sports_tracks', 'espoir_club'].includes(a.id));
+    return TARGET_AFFILIATIONS;
   }, [activeSportConfig]);
 
   // Compute categoriesToRender based strictly on configured/programmed categories in SportsConfig
@@ -210,11 +225,18 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
         else if (genders.has('Female')) setGenderSelection('Female');
         else if (sportId === 'cross_country') setGenderSelection('Both');
 
-        const affs = new Set(sportTourns.map(t => t.affiliationType || 'non_club').filter(Boolean) as string[]);
+        const affs = new Set(
+          sportTourns
+            .map(t => {
+              const raw = t.affiliationType || 'non_club';
+              return raw === 'club_affiliated' || raw === 'espoir_club' ? 'club_affiliated' : 'non_club';
+            })
+            .filter(Boolean) as string[]
+        );
         if (affs.size > 0) {
           setSelectedAffiliations(Array.from(affs));
         } else {
-          setSelectedAffiliations(['non_club']);
+          setSelectedAffiliations(['non_club', 'club_affiliated']);
         }
       } else {
         setIsEditing(false);
@@ -228,7 +250,7 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
           setSelectedCategories(['U15']);
         }
         setGenderSelection('Both');
-        setSelectedAffiliations(['non_club']);
+        setSelectedAffiliations(['non_club', 'club_affiliated']);
       }
     });
 
@@ -359,9 +381,9 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
 
   if (!isOpen) return null;
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-xs" dir="rtl">
-      <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xl max-w-xl w-full overflow-hidden animate-in fade-in zoom-in-95 duration-150 text-slate-900 dark:text-slate-100">
+  const modalContent = (
+    <div className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-xs" dir="rtl">
+      <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xl max-w-xl w-full overflow-hidden animate-in fade-in zoom-in-95 duration-150 text-slate-900 dark:text-slate-100 relative z-[151]">
         {/* Header - Responsive & Centered on Mobile */}
         <div className="flex flex-col sm:flex-row items-center sm:justify-between gap-2.5 sm:gap-4 p-3.5 sm:p-5 border-b border-slate-100 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-800/60">
           <div className="flex flex-col sm:flex-row items-center gap-2 sm:gap-2.5 text-center sm:text-right w-full sm:w-auto">
@@ -875,4 +897,6 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
       </div>
     </div>
   );
+
+  return typeof document !== 'undefined' ? createPortal(modalContent, document.body) : modalContent;
 };

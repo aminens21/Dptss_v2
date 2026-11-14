@@ -86,7 +86,7 @@ export const PublicResults: React.FC = () => {
   };
 
   const getSchoolName = (id: string) => schools.find(sch => sch.id === id)?.name || id;
-  const getVenueName = (id: string) => venues.find(ven => ven.id === id)?.name || id;
+  const getVenueName = (id: string, fallbackName?: string) => venues.find(ven => ven.id === id)?.name || fallbackName || id;
 
   const getMatchSport = (m: Match): { id: string; name: string; icon: string } => {
     if (m.sportId) {
@@ -694,7 +694,7 @@ export const PublicResults: React.FC = () => {
                       <div className="flex items-center justify-between text-[10px] text-slate-500 font-medium px-1">
                         <div className="flex items-center gap-1">
                           <MapPin className="w-3 h-3 text-slate-400" />
-                          <span className="truncate max-w-[120px]">{getVenueName(m.venueId)}</span>
+                          <span className="truncate max-w-[120px]">{getVenueName(m.venueId, m.venueName)}</span>
                         </div>
                         <div className="flex items-center gap-1.5">
                           {m.stage && (

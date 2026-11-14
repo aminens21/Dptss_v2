@@ -1,4 +1,4 @@
-import { Tournament, Match, School, Sport } from '../types';
+import { Tournament, Match, School, Sport, Venue, Referee, User } from '../types';
 import { SPORTS_MAP, normalizeDateToYmd } from './dataService';
 import toast from 'react-hot-toast';
 
@@ -16,6 +16,8 @@ export interface CalendarExportEvent {
   gender?: string;
   organizer?: string;
   coordinator?: string;
+  referees?: string[];
+  refereesText?: string;
   notes?: string;
 }
 
@@ -229,9 +231,22 @@ export const OFFICIAL_PROPOSED_PROGRAM: Omit<CalendarExportEvent, 'sportName' | 
 export function buildAllCalendarEvents(
   tournaments: Tournament[],
   matches: Match[],
-  schools: School[]
+  schools: School[],
+  venues: Venue[] = [],
+  referees: Referee[] = [],
+  teachers: User[] = []
 ): CalendarExportEvent[] {
   const list: CalendarExportEvent[] = [];
+
+  const resolveRefereeName = (rawEntry: string): string => {
+    const clean = (rawEntry || '').trim();
+    if (!clean) return '';
+    const refMatch = referees.find(r => r.id === clean || r.fullName === clean);
+    if (refMatch?.fullName) return refMatch.fullName;
+    const tchMatch = teachers.find(t => t.id === clean || t.fullName === clean);
+    if (tchMatch?.fullName) return tchMatch.fullName;
+    return clean;
+  };
 
   // 1. Proposed program events
   OFFICIAL_PROPOSED_PROGRAM.forEach(item => {
@@ -239,7 +254,9 @@ export function buildAllCalendarEvents(
     list.push({
       ...item,
       sportName: sp.name,
-      sportIcon: sp.icon
+      sportIcon: sp.icon,
+      referees: [],
+      refereesText: '-'
     });
   });
 
@@ -253,6 +270,11 @@ export function buildAllCalendarEvents(
     else if (t.scope === 'regional' || t.name.includes('جهوي') || t.name.includes('الجهوية')) sc = 'regional';
 
     const dateStr = normalizeDateToYmd(t.startDate);
+    const resolvedTournamentVenue =
+      t.venue?.trim() ||
+      t.circuitLocation?.trim() ||
+      t.location?.trim() ||
+      'القاعة المغطاة بتاوريرت';
 
     if (dateStr) {
       list.push({
@@ -264,11 +286,13 @@ export function buildAllCalendarEvents(
         scope: sc,
         date: dateStr,
         time: '10:00 صباحاً',
-        venue: (t as any).location || 'القاعة المغطاة بتاوريرت',
+        venue: resolvedTournamentVenue,
         category: t.ageCategory || (t as any).category || 'كافة الفئات العمرية المعتمدة',
         gender: (t.gender as any) || 'Mixed',
         organizer: 'المديرية الإقليمية تاوريرت - الفرع الإقليمي',
         coordinator: t.managerName || 'المسؤول التقني المركزي',
+        referees: [],
+        refereesText: '-',
         notes: t.description || 'بطولة رسمية مبرمجة بالنظام'
       });
     }
@@ -281,8 +305,25 @@ export function buildAllCalendarEvents(
     const dateStr = normalizeDateToYmd(m.date);
 
     if (dateStr) {
-      const school1 = schools.find(s => s.id === m.team1Id)?.name || 'فريق 1';
-      const school2 = schools.find(s => s.id === m.team2Id)?.name || 'فريق 2';
+      const school1 = schools.find(s => s.id === m.team1Id)?.name || m.team1Name || m.team1SchoolName || 'فريق 1';
+      const school2 = schools.find(s => s.id === m.team2Id)?.name || m.team2Name || m.team2SchoolName || 'فريق 2';
+      const venueObj = venues.find(v => v.id === m.venueId || v.name === m.venueId);
+      const resolvedVenueName =
+        m.venueName?.trim() ||
+        venueObj?.name?.trim() ||
+        (m as any).location?.trim() ||
+        (m as any).venue?.trim() ||
+        m.venueId ||
+        'الملعب الإقليمي بتاوريرت';
+
+      const rawRefs = [
+        ...(Array.isArray(m.referees) ? m.referees : []),
+        ...(m.referee1Id ? [m.referee1Id] : []),
+        ...(m.referee2Id ? [m.referee2Id] : [])
+      ]
+        .map(r => resolveRefereeName(r))
+        .filter(Boolean);
+      const uniqueRefs = Array.from(new Set(rawRefs));
 
       list.push({
         id: `match-${m.id}`,
@@ -293,11 +334,13 @@ export function buildAllCalendarEvents(
         scope: 'provincial',
         date: dateStr,
         time: m.startTime || (m as any).time || '15:00',
-        venue: (m as any).location || m.venueId || 'الملعب الإقليمي بتاوريرت',
+        venue: resolvedVenueName,
         category: m.ageCategory || (m.stage ? `دور ${m.stage}` : 'مباراة رسمية'),
         gender: m.gender || 'Male',
         organizer: 'لجنة التحكيم والبرمجة بالمديرية',
-        notes: `المباراة: ${m.stage || ''} • الحالة: ${m.status === 'Completed' ? 'منتهية' : 'مبرمجة'}`
+        referees: uniqueRefs,
+        refereesText: uniqueRefs.length > 0 ? uniqueRefs.join(' • ') : '-',
+        notes: `${m.startTime ? `الساعة ${m.startTime} • ` : ''}${m.stage ? `${m.stage} • ` : ''}الحالة: ${m.status === 'Completed' ? 'منتهية' : 'مبرمجة'}`
       });
     }
   });
@@ -406,6 +449,8 @@ export function generateProgramHtml({
     }
   }
 
+  const hideSportColumn = !isAllSports && selectedSportIds.length === 1;
+
   const rowsHtml = filtered.length > 0 ? filtered.map((ev, index) => {
     const scopeBadge = ev.scope === 'national' ? 'بطولة وطنية' : ev.scope === 'regional' ? 'بطولة جهوية' : 'بطولة إقليمية';
     const scopeColor = ev.scope === 'national' ? '#b45309' : ev.scope === 'regional' ? '#047857' : '#1d4ed8';
@@ -415,19 +460,19 @@ export function generateProgramHtml({
         <td style="border: 1px solid #cbd5e1; padding: 7px 5px; text-align: center; font-weight: bold; font-size: 11px;">${index + 1}</td>
         <td style="border: 1px solid #cbd5e1; padding: 7px 8px; text-align: center; white-space: nowrap; font-weight: bold; color: #1e3a8a; font-size: 11px;">${ev.date}</td>
         <td style="border: 1px solid #cbd5e1; padding: 7px 8px; font-weight: bold; color: #0f172a; font-size: 11px;">${ev.title}</td>
-        <td style="border: 1px solid #cbd5e1; padding: 7px 6px; text-align: center; font-size: 11px; font-weight: bold; color: #334155;">${ev.sportName}</td>
+        ${!hideSportColumn ? `<td style="border: 1px solid #cbd5e1; padding: 7px 6px; text-align: center; font-size: 11px; font-weight: bold; color: #334155;">${ev.sportName}</td>` : ''}
         <td style="border: 1px solid #cbd5e1; padding: 7px 6px; text-align: center; font-weight: bold; font-size: 10.5px; color: ${scopeColor};">
           ${scopeBadge}
         </td>
         <td style="border: 1px solid #cbd5e1; padding: 7px 6px; font-size: 10.5px; color: #334155;">${ev.category || '-'}</td>
         <td style="border: 1px solid #cbd5e1; padding: 7px 8px; font-size: 10.5px; color: #334155;">${ev.venue || '-'}</td>
-        <td style="border: 1px solid #cbd5e1; padding: 7px 8px; font-size: 10.5px; color: #1e293b;">${ev.coordinator || ev.organizer || '-'}</td>
+        <td style="border: 1px solid #cbd5e1; padding: 7px 8px; font-size: 10.5px; color: #1e293b;">${ev.refereesText || (ev.referees && ev.referees.length > 0 ? ev.referees.join(' • ') : '-')}</td>
         <td style="border: 1px solid #cbd5e1; padding: 7px 6px; font-size: 10px; color: #64748b;">${ev.notes || '-'}</td>
       </tr>
     `;
   }).join('') : `
     <tr>
-      <td colspan="9" style="border: 1px solid #cbd5e1; padding: 25px; text-align: center; font-size: 13px; color: #64748b; font-weight: bold;">
+      <td colspan="${hideSportColumn ? 8 : 9}" style="border: 1px solid #cbd5e1; padding: 25px; text-align: center; font-size: 13px; color: #64748b; font-weight: bold;">
         لا توجد مواعيد أو أنشطة مبرمجة حالياً وفق الاختيارات المحددة
       </td>
     </tr>
@@ -498,12 +543,12 @@ export function generateProgramHtml({
           <tr style="background-color: #1e3a8a; color: #ffffff;">
             <th style="border: 1px solid #0f172a; padding: 8px 4px; text-align: center; width: 4%; font-weight: bold;">ر.ت</th>
             <th style="border: 1px solid #0f172a; padding: 8px 6px; text-align: center; width: 11%; font-weight: bold;">تاريخ الإجراء</th>
-            <th style="border: 1px solid #0f172a; padding: 8px 8px; text-align: right; width: 23%; font-weight: bold;">اسم البطولة أو التظاهرة</th>
-            <th style="border: 1px solid #0f172a; padding: 8px 6px; text-align: center; width: 10%; font-weight: bold;">نوع الرياضة</th>
+            <th style="border: 1px solid #0f172a; padding: 8px 8px; text-align: right; width: ${hideSportColumn ? '26%' : '23%'}; font-weight: bold;">اسم البطولة أو التظاهرة</th>
+            ${!hideSportColumn ? `<th style="border: 1px solid #0f172a; padding: 8px 6px; text-align: center; width: 10%; font-weight: bold;">نوع الرياضة</th>` : ''}
             <th style="border: 1px solid #0f172a; padding: 8px 6px; text-align: center; width: 10%; font-weight: bold;">المستوى</th>
             <th style="border: 1px solid #0f172a; padding: 8px 6px; text-align: center; width: 12%; font-weight: bold;">الفئة المستهدفة</th>
-            <th style="border: 1px solid #0f172a; padding: 8px 6px; text-align: right; width: 13%; font-weight: bold;">مكان الإجراء</th>
-            <th style="border: 1px solid #0f172a; padding: 8px 6px; text-align: right; width: 11%; font-weight: bold;">المؤطر / المشرف</th>
+            <th style="border: 1px solid #0f172a; padding: 8px 6px; text-align: right; width: ${hideSportColumn ? '16%' : '13%'}; font-weight: bold;">مكان الإجراء</th>
+            <th style="border: 1px solid #0f172a; padding: 8px 6px; text-align: right; width: ${hideSportColumn ? '15%' : '11%'}; font-weight: bold;">الحكام</th>
             <th style="border: 1px solid #0f172a; padding: 8px 4px; text-align: center; width: 6%; font-weight: bold;">ملاحظات</th>
           </tr>
         </thead>

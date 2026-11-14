@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { Tournament, Sport } from '../types';
 import { DataService, SPORTS_MAP, getAgeCategoriesForSeason } from '../lib/dataService';
 import { X, Trophy, Calendar, Clock, User, ShieldCheck, Check, Save } from 'lucide-react';
@@ -132,9 +133,9 @@ export const EditTournamentModal: React.FC<EditTournamentModalProps> = ({
     }
   };
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 overflow-y-auto" dir="rtl">
-      <div className="w-full max-w-2xl bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden my-8 transition-colors">
+  const modalContent = (
+    <div className="fixed inset-0 z-[150] flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 overflow-y-auto" dir="rtl">
+      <div className="w-full max-w-2xl bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden my-8 transition-colors relative z-[151]">
         {/* Header */}
         <div className="px-6 py-4 bg-gradient-to-r from-blue-900 via-indigo-900 to-slate-900 text-white flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -349,4 +350,6 @@ export const EditTournamentModal: React.FC<EditTournamentModalProps> = ({
       </div>
     </div>
   );
+
+  return typeof document !== 'undefined' ? createPortal(modalContent, document.body) : modalContent;
 };

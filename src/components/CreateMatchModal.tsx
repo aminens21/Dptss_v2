@@ -1,7 +1,9 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { Match, School, Venue, Tournament, Referee, Student } from '../types';
-import { X, CalendarDays, Clock, MapPin, Trophy, AlertTriangle, AlertCircle, Calendar, ArrowRight, ShieldCheck, Lock, Users, Tag, UserCheck, Plus, Building, Info, CheckCircle2 } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { Match, School, Venue, Tournament, Referee, Student, User } from '../types';
+import { X, CalendarDays, Clock, MapPin, Trophy, AlertTriangle, AlertCircle, Calendar, ArrowRight, ShieldCheck, Lock, Users, Tag, UserCheck, Plus, Building, Info, CheckCircle2, MessageCircle } from 'lucide-react';
 import { SPORTS_MAP, AGE_CATEGORIES, GENDER_MAP, DataService, getAgeCategoriesForSeason, normalizeCategoryKey, normalizeDateToYmd } from '../lib/dataService';
+import { findRefereeContact, generateRefereeMatchNotificationMessage, getWhatsAppUrl } from '../lib/whatsappService';
 import toast from 'react-hot-toast';
 
 interface CreateMatchModalProps {
@@ -10,9 +12,11 @@ interface CreateMatchModalProps {
   schools: School[];
   venues: Venue[];
   students?: Student[];
+  teachers?: User[];
   tournaments?: Tournament[];
   matches?: Match[];
   managerSportId?: string; // If set, user is restricted to this sport only
+  allowedSportIds?: string[] | null; // If set & non-null, user is restricted to these sports
   initialSportId?: string;
   initialTournamentId?: string; // Pre-select a tournament if opened from inside it
   initialAffiliation?: 'non_club' | 'club_affiliated' | 'open';
@@ -28,9 +32,11 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
   schools,
   venues,
   students = [],
+  teachers = [],
   tournaments = [],
   matches = [],
   managerSportId,
+  allowedSportIds = null,
   initialSportId,
   initialTournamentId,
   initialAffiliation,
@@ -39,12 +45,30 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
   onSave,
   editingMatch
 }) => {
-  // Filter tournaments if manager has a restricted sport or sport was requested
-  const effectiveSportId = managerSportId || initialSportId;
+  // Restricted sports list for Technical Committee Head / Sport Manager (null = unrestricted)
+  const effectiveAllowedSportIds = useMemo<string[] | null>(() => {
+    if (managerSportId) return [managerSportId];
+    if (allowedSportIds && allowedSportIds.length > 0) return allowedSportIds;
+    return null;
+  }, [managerSportId, allowedSportIds]);
+
+  const singleLockedSportId = effectiveAllowedSportIds && effectiveAllowedSportIds.length === 1
+    ? effectiveAllowedSportIds[0]
+    : undefined;
+
+  // Filter tournaments if manager/tech head has restricted sport(s) or sport was requested
+  const effectiveSportId = singleLockedSportId || (
+    initialSportId && (!effectiveAllowedSportIds || effectiveAllowedSportIds.includes(initialSportId))
+      ? initialSportId
+      : effectiveAllowedSportIds?.[0]
+  );
 
   const availableTournaments = useMemo(() => {
     let list = tournaments;
-    if (effectiveSportId) {
+    if (effectiveAllowedSportIds) {
+      const allowedMatching = tournaments.filter(t => effectiveAllowedSportIds.includes(t.sportId));
+      list = allowedMatching;
+    } else if (effectiveSportId) {
       const matching = tournaments.filter(t => t.sportId === effectiveSportId);
       if (matching.length > 0) {
         list = matching;
@@ -57,7 +81,7 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
       seen.add(t.id);
       return true;
     });
-  }, [tournaments, effectiveSportId]);
+  }, [tournaments, effectiveSportId, effectiveAllowedSportIds]);
 
   const [tournamentId, setTournamentId] = useState(availableTournaments[0]?.id || 'tourn-1');
   const [team1Id, setTeam1Id] = useState(schools[0]?.id || 'sch-1');
@@ -98,7 +122,7 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
   }, [isOpen]);
 
   // Current match sport
-  const currentSport = managerSportId || sportId;
+  const currentSport = singleLockedSportId || sportId;
 
   // Filter referees by specialty in the current sport
   const specializedReferees = useMemo(() => {
@@ -152,8 +176,12 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
       
       setStatus(editingMatch.status);
     } else {
-      if (initialSportId) {
+      if (singleLockedSportId) {
+        setSportId(singleLockedSportId);
+      } else if (initialSportId && (!effectiveAllowedSportIds || effectiveAllowedSportIds.includes(initialSportId))) {
         setSportId(initialSportId);
+      } else if (effectiveAllowedSportIds && effectiveAllowedSportIds.length > 0) {
+        setSportId(effectiveAllowedSportIds[0]);
       }
       if (initialCategory) {
         setAgeCategory(initialCategory);
@@ -168,7 +196,7 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
       if (initialTournamentId && availableTournaments.some(t => t.id === initialTournamentId)) {
         const target = availableTournaments.find(t => t.id === initialTournamentId)!;
         setTournamentId(target.id);
-        if (target.sportId) setSportId(target.sportId);
+        if (target.sportId && !singleLockedSportId) setSportId(target.sportId);
         if (target.ageCategory) setAgeCategory(target.ageCategory);
         if (target.gender) setGender(target.gender);
         if (target.affiliationType) setAffiliationType(target.affiliationType);
@@ -182,14 +210,14 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
 
         if (matchingTourn) {
           setTournamentId(matchingTourn.id);
-          if (matchingTourn.sportId && !managerSportId) setSportId(matchingTourn.sportId);
+          if (matchingTourn.sportId && !singleLockedSportId) setSportId(matchingTourn.sportId);
           if (matchingTourn.ageCategory) setAgeCategory(matchingTourn.ageCategory);
           if (matchingTourn.gender) setGender(matchingTourn.gender);
           if (matchingTourn.affiliationType) setAffiliationType(matchingTourn.affiliationType);
         }
       }
     }
-  }, [managerSportId, availableTournaments, isOpen, editingMatch, initialTournamentId, initialSportId, initialCategory, initialGender, initialAffiliation]);
+  }, [managerSportId, singleLockedSportId, effectiveAllowedSportIds, availableTournaments, isOpen, editingMatch, initialTournamentId, initialSportId, initialCategory, initialGender, initialAffiliation]);
 
   // Check for Venue Conflict on the chosen Date & Time (1 hour difference)
   const selectedVenue = useMemo(() => venues.find(v => v.id === venueId), [venues, venueId]);
@@ -401,9 +429,11 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
       return;
     }
 
-    // Sport Manager validation
-    if (managerSportId && sportId !== managerSportId) {
-      toast.error(`أنت مخول لبرمجة مباريات ${SPORTS_MAP[managerSportId]?.name || managerSportId} فقط.`);
+    // Sport Manager / Tech Head validation
+    const resolvedCheckSportId = singleLockedSportId || sportId;
+    if (effectiveAllowedSportIds && !effectiveAllowedSportIds.includes(resolvedCheckSportId)) {
+      const allowedNames = effectiveAllowedSportIds.map(id => SPORTS_MAP[id]?.name || id).join('، ');
+      toast.error(`أنت مخول لبرمجة وتعديل مباريات (${allowedNames}) فقط.`);
       return;
     }
 
@@ -416,7 +446,8 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
     setIsSubmitting(true);
     try {
       const activeDirId = DataService.getActiveDirectorateId() || 'taourirt';
-      const resolvedSportId = managerSportId || sportId || availableTournaments.find(t => t.id === tournamentId)?.sportId || 'football';
+      const resolvedSportId = singleLockedSportId || sportId || availableTournaments.find(t => t.id === tournamentId)?.sportId || 'football';
+      const resolvedVenueName = selectedVenue?.name || venues.find(v => v.id === venueId)?.name || editingMatch?.venueName || '';
       
       const cleanReferees = referees.map(r => r.trim()).filter(r => r !== '');
       await onSave({
@@ -431,6 +462,7 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
         date: normalizeDateToYmd(date) || date,
         startTime,
         venueId,
+        venueName: resolvedVenueName,
         referees: cleanReferees,
         referee1Id: cleanReferees[0] || undefined,
         referee2Id: cleanReferees[1] || undefined,
@@ -445,10 +477,10 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
     }
   };
 
-  const sportInfo = SPORTS_MAP[managerSportId || sportId] || { name: 'الرياضة', icon: '🏆' };
+  const sportInfo = SPORTS_MAP[currentSport] || { name: 'الرياضة', icon: '🏆' };
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs" dir="rtl">
+  const modalContent = (
+    <div className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs" dir="rtl">
       <div className="bg-white rounded-2xl border border-slate-200 shadow-xl max-w-lg w-full max-h-[90vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150">
         {/* Header */}
         <div className="flex items-center justify-between p-4 md:p-5 border-b border-slate-100 bg-slate-50/70 shrink-0">
@@ -473,8 +505,8 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
 
         {/* Scrollable Form Body */}
         <form onSubmit={handleSubmit} className="p-4 md:p-6 space-y-4 overflow-y-auto flex-1">
-          {/* Manager Specialty Notice */}
-          {managerSportId && (
+          {/* Manager / Tech Committee Head Specialty Notice */}
+          {effectiveAllowedSportIds && (
             <div className="p-3.5 bg-linear-to-r from-emerald-50 to-teal-50 border border-emerald-200 rounded-2xl flex items-center gap-3">
               <div className="w-9 h-9 rounded-xl bg-emerald-600 text-white flex items-center justify-center text-lg font-bold shadow-xs shrink-0">
                 {sportInfo.icon}
@@ -482,10 +514,13 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
               <div className="flex-1 text-xs">
                 <div className="flex items-center gap-1.5 font-bold text-emerald-950">
                   <ShieldCheck className="h-4 w-4 text-emerald-700" />
-                  <span>تخصصك المعتمد: {sportInfo.name} {sportInfo.icon}</span>
+                  <span>
+                    تخصصك المعتمد:{' '}
+                    {effectiveAllowedSportIds.map(id => `${SPORTS_MAP[id]?.name || id} ${SPORTS_MAP[id]?.icon || ''}`).join(' • ')}
+                  </span>
                 </div>
                 <p className="text-[11px] text-emerald-800 mt-0.5">
-                  بصفتك مسؤولاً عن هذا النشاط، يمكنك برمجة مقابلات <strong>{sportInfo.name}</strong> وتعيين حكام التخصص مباشرة.
+                  بصفتك رئيس اللجنة التقنية / مسؤولاً عن هذا النشاط، يمكنك برمجة وتعديل مقابلات تخصصك وإشعار الحكام عبر الواتساب.
                 </p>
               </div>
             </div>
@@ -713,7 +748,7 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
             <div>
               <div className="flex items-center justify-between mb-1">
                 <label className="block text-xs font-bold text-slate-700">الرياضة</label>
-                {managerSportId && (
+                {singleLockedSportId && (
                   <span className="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded flex items-center gap-1 font-medium">
                     <Lock className="h-3 w-3 text-slate-400" />
                     محدد حسب تخصصك
@@ -721,7 +756,7 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
                 )}
               </div>
 
-              {managerSportId ? (
+              {singleLockedSportId ? (
                 <div className="w-full text-xs rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-slate-800 font-bold flex items-center justify-between">
                   <span>{sportInfo.icon} {sportInfo.name}</span>
                   <span className="text-[10px] text-blue-600 font-semibold bg-blue-50 px-2 py-0.5 rounded">معتمد</span>
@@ -732,11 +767,13 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
                   onChange={(e) => setSportId(e.target.value)}
                   className="w-full text-xs rounded-lg border border-slate-200 px-3 py-2 text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium"
                 >
-                  {Object.entries(SPORTS_MAP).map(([id, info]) => (
-                    <option key={id} value={id}>
-                      {info.icon} {info.name}
-                    </option>
-                  ))}
+                  {Object.entries(SPORTS_MAP)
+                    .filter(([id]) => !effectiveAllowedSportIds || effectiveAllowedSportIds.includes(id))
+                    .map(([id, info]) => (
+                      <option key={id} value={id}>
+                        {info.icon} {info.name}
+                      </option>
+                    ))}
                 </select>
               )}
             </div>
@@ -846,9 +883,28 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
               </div>
             )}
 
-            {/* Referee Slots Inputs with Dropdown & Manual Input Option */}
+            {/* Referee Slots Inputs with Dropdown, Manual Input & Direct WhatsApp Notification */}
             <div className="space-y-2">
-              {referees.map((ref, idx) => (
+              {referees.map((ref, idx) => {
+                const contact = ref.trim()
+                  ? findRefereeContact(ref.trim(), allReferees, teachers)
+                  : null;
+                const refWhatsappMsg = contact
+                  ? generateRefereeMatchNotificationMessage({
+                      refereeName: contact.name || ref.trim(),
+                      sportName: sportInfo.name,
+                      ageCategory,
+                      gender: GENDER_MAP[gender]?.name || gender,
+                      stageName: stage,
+                      team1SchoolName: getSchoolName(team1Id),
+                      team2SchoolName: getSchoolName(team2Id),
+                      dateStr: date,
+                      timeStr: startTime || '10:00',
+                      venueName: selectedVenue?.name || venues.find(v => v.id === venueId)?.name || 'المكان المحدد'
+                    })
+                  : '';
+
+                return (
                 <div key={`ref-slot-${idx}`} className="flex items-center gap-2">
                   <div className="w-6 h-6 rounded-full bg-slate-200 text-slate-700 text-[10px] font-bold flex items-center justify-center shrink-0">
                     {idx + 1}
@@ -900,6 +956,19 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
                     />
                   </div>
 
+                  {contact && (
+                    <a
+                      href={getWhatsAppUrl(contact.phone, refWhatsappMsg)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      title={contact.phone ? `إرسال إشعار واتساب للحكم ${contact.name} (${contact.phone})` : `إرسال إشعار واتساب للحكم ${contact.name} (تحديد الرقم في واتساب)`}
+                      className="px-2 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[10px] font-bold flex items-center gap-1 shrink-0 transition-colors shadow-2xs"
+                    >
+                      <MessageCircle className="h-3.5 w-3.5" />
+                      <span className="hidden sm:inline">واتساب</span>
+                    </a>
+                  )}
+
                   {referees.length > 1 && (
                     <button
                       type="button"
@@ -914,7 +983,8 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
                     </button>
                   )}
                 </div>
-              ))}
+                );
+              })}
             </div>
           </div>
 
@@ -1000,5 +1070,7 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
       </div>
     </div>
   );
+
+  return typeof document !== 'undefined' ? createPortal(modalContent, document.body) : modalContent;
 };
 

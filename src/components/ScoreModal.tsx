@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Match, School, Venue } from '../types';
 import { X, Trophy, CheckCircle2, ShieldAlert, Sparkles, Plus, Minus, Database } from 'lucide-react';
 import { SPORTS_MAP, GENDER_MAP } from '../lib/dataService';
@@ -8,6 +9,7 @@ interface ScoreModalProps {
   onClose: () => void;
   match: Match | null;
   schools: School[];
+  venues?: Venue[];
   onSave: (
     matchId: string,
     score1: number,
@@ -98,9 +100,9 @@ export const ScoreModal: React.FC<ScoreModalProps> = ({
     }
   };
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs" dir="rtl">
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-lg w-full max-h-[92vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+  const modalContent = (
+    <div className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs" dir="rtl">
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-lg w-full max-h-[92vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150 relative z-[151]">
         {/* Header */}
         <div className="flex items-center justify-between p-4 md:p-5 border-b border-slate-200 bg-gradient-to-r from-emerald-800 via-teal-900 to-slate-900 text-white shrink-0">
           <div className="flex items-center gap-3">
@@ -377,4 +379,6 @@ export const ScoreModal: React.FC<ScoreModalProps> = ({
       </div>
     </div>
   );
+
+  return typeof document !== 'undefined' ? createPortal(modalContent, document.body) : modalContent;
 };

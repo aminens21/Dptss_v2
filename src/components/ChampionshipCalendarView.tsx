@@ -439,10 +439,10 @@ export const ChampionshipCalendarView: React.FC<ChampionshipCalendarViewProps> =
       const dateStr = normalizeDateToYmd(m.date);
 
       if (dateStr) {
-        const school1 = schools.find(s => s.id === m.team1Id)?.name || 'فريق 1';
-        const school2 = schools.find(s => s.id === m.team2Id)?.name || 'فريق 2';
-        const venueObj = venues?.find(v => v.id === m.venueId);
-        const venueName = venueObj?.name || (m as any).location || 'مركز التباري بتاوريرت';
+        const school1 = schools.find(s => s.id === m.team1Id)?.name || m.team1Name || m.team1SchoolName || 'فريق 1';
+        const school2 = schools.find(s => s.id === m.team2Id)?.name || m.team2Name || m.team2SchoolName || 'فريق 2';
+        const venueObj = venues?.find(v => v.id === m.venueId || v.name === m.venueId);
+        const venueName = m.venueName?.trim() || venueObj?.name || (m as any).location || m.venueId || 'مركز التباري بتاوريرت';
 
         list.push({
           id: `real-m-${m.id}`,
@@ -1073,6 +1073,7 @@ export const ChampionshipCalendarView: React.FC<ChampionshipCalendarViewProps> =
         tournaments={tournaments}
         matches={matches}
         schools={schools}
+        venues={venues}
         activeSeason={activeSeason}
         initialSelectedSportIds={exportModalInitialSports}
         initialScopeFilter={scopeFilter}

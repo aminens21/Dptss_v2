@@ -28,10 +28,12 @@ import {
   Square,
   ShieldAlert,
   Volleyball,
-  Award
+  Award,
+  MessageCircle
 } from 'lucide-react';
 import { Tournament, School, Team, Match, User, Venue, Sport, Referee, SchoolTournamentConfirmation } from '../types';
-import { DataService, SPORTS_MAP, deduplicateById, normalizeCategoryKey, getCustomCategoryName, doesConfirmationMatchBranch } from '../lib/dataService';
+import { DataService, SPORTS_MAP, GENDER_MAP, deduplicateById, normalizeCategoryKey, getCustomCategoryName, doesConfirmationMatchBranch } from '../lib/dataService';
+import { findRefereeContact, generateRefereeMatchNotificationMessage, getWhatsAppUrl } from '../lib/whatsappService';
 import { cn } from '../lib/utils';
 import * as XLSX from 'xlsx';
 import toast from 'react-hot-toast';
@@ -368,7 +370,7 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
     const isCentralAdmin = currentUser.role === 'CENTRAL_ADMIN' || currentUser.isSuperAdmin;
     if (isCentralAdmin) return null;
 
-    const isTechHead = currentUser.isTechCommitteeHead || currentUser.role === 'SPORT_MANAGER';
+    const isTechHead = currentUser.isTechCommitteeHead || currentUser.role === 'SPORT_MANAGER' || currentUser.role === 'TECH_HEAD' || (currentUser.role as string) === 'TECH_COMMITTEE_HEAD';
     if (isTechHead) {
       const allowedSports = new Set<string>();
       if (currentUser.sportId) allowedSports.add(currentUser.sportId);
@@ -2158,12 +2160,27 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
                               </span>
                             </div>
 
-                            {/* Assigned Referee Chips */}
+                            {/* Assigned Referee Chips with Direct WhatsApp Notification */}
                             {assignedRefIds.length > 0 && (
                               <div className="flex flex-wrap gap-1">
                                 {assignedRefIds.map((refId, idx) => {
                                   const refObj = combinedRefereesList.find(r => r.id === refId);
                                   const displayName = refObj?.fullName || match.refereeNames?.[idx] || 'حكم';
+                                  const fallbackContact = refObj?.phone
+                                    ? { name: displayName, phone: refObj.phone }
+                                    : findRefereeContact(displayName, referees, teachers);
+                                  const waMsg = generateRefereeMatchNotificationMessage({
+                                    refereeName: fallbackContact.name || displayName,
+                                    sportName: currentSportName,
+                                    ageCategory: selectedTournament?.ageCategory,
+                                    gender: selectedTournament?.gender ? (GENDER_MAP[selectedTournament.gender]?.name || selectedTournament.gender) : undefined,
+                                    stageName: match.stage,
+                                    team1SchoolName: match.team1Name,
+                                    team2SchoolName: match.team2Name,
+                                    dateStr: match.date,
+                                    timeStr: match.time || '10:00',
+                                    venueName: match.venueName || 'المكان المحدد'
+                                  });
                                   return (
                                     <span
                                       key={`match-${match.id}-chip-${refId}-${idx}`}
@@ -2175,6 +2192,15 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
                                       <span className="truncate max-w-[110px]" title={displayName}>
                                         {displayName}
                                       </span>
+                                      <a
+                                        href={getWhatsAppUrl(fallbackContact.phone, waMsg)}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        title={fallbackContact.phone ? `إرسال إشعار واتساب للحكم ${displayName} (${fallbackContact.phone})` : `إرسال إشعار واتساب للحكم ${displayName}`}
+                                        className="text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 rounded-full p-0.5 transition-colors"
+                                      >
+                                        <MessageCircle className="w-3 h-3" />
+                                      </a>
                                       <button
                                         type="button"
                                         onClick={() => handleRemoveRefereeFromMatch(match.id, refId)}

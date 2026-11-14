@@ -30,7 +30,8 @@ import {
   Shuffle,
   FileSpreadsheet,
   UploadCloud,
-  RefreshCw
+  RefreshCw,
+  RotateCcw
 } from 'lucide-react';
 import { CreateTournamentModal } from '../components/CreateTournamentModal';
 import { EditTournamentModal } from '../components/EditTournamentModal';
@@ -43,6 +44,7 @@ import { ProgramExportModal } from '../components/ProgramExportModal';
 import { ElectronicDrawModal, TEAM_SPORTS_IDS } from '../components/ElectronicDrawModal';
 import { DemoDataModal } from '../components/DemoDataModal';
 import { ImportParticipationsExcelModal } from '../components/ImportParticipationsExcelModal';
+import { TournamentResetModal } from '../components/TournamentResetModal';
 import { getPendingCloudSyncCount, syncPendingLocalImportsToCloud } from '../lib/excelParticipationsImportService';
 import { ConfirmParticipationModal } from '../components/ConfirmParticipationModal';
 import { ConfirmedParticipationBadge } from '../components/ConfirmedParticipationBadge';
@@ -116,6 +118,7 @@ export const Tournaments: React.FC = () => {
   const [selectedTournamentForDraw, setSelectedTournamentForDraw] = useState<string | undefined>(undefined);
   const [isDemoDataModalOpen, setIsDemoDataModalOpen] = useState(false);
   const [isImportExcelModalOpen, setIsImportExcelModalOpen] = useState(false);
+  const [isResetModalOpen, setIsResetModalOpen] = useState(false);
   const [pendingCloudSyncCount, setPendingCloudSyncCount] = useState<number>(() => getPendingCloudSyncCount());
   const [isSyncingPendingCloud, setIsSyncingPendingCloud] = useState(false);
 
@@ -401,17 +404,30 @@ export const Tournaments: React.FC = () => {
         ? allTeachersRaw.filter((u: any) => !u.role || u.role === 'TEACHER')
         : [];
 
+      let resolvedTournaments = tournList;
+      let resolvedSports = sportsList;
+      const restoredCount = await DataService.ensureClubAffiliatedBranchesForProgrammedSports(
+        activeDirId,
+        typeof season === 'string' && season ? season : activeSeason
+      ).catch(() => 0);
+      if (restoredCount > 0) {
+        [resolvedTournaments, resolvedSports] = await Promise.all([
+          DataService.getTournaments(),
+          DataService.getSportsConfig()
+        ]);
+      }
+
       const dirTeachers = allTeachers.filter(t => (t.directorateId || 'taourirt') === activeDirId);
       const dirStudents = studentsList.filter(st => (st.directorateId || 'taourirt') === activeDirId);
       const dirSchools = schoolsList.filter(s => (s.directorateId || 'taourirt') === activeDirId);
       const dirMatches = matchList.filter(m => (m.directorateId || 'taourirt') === activeDirId);
-      const dirTournaments = tournList.filter(t => (t.directorateId || 'taourirt') === activeDirId);
+      const dirTournaments = resolvedTournaments.filter(t => (t.directorateId || 'taourirt') === activeDirId);
 
       setActiveDirObj(activeDir);
       setTournaments(deduplicateById(dirTournaments));
-      setSportsConfig(sportsList);
+      setSportsConfig(resolvedSports);
       if (selectedSportForModal) {
-        const updatedSport = sportsList.find(s => s.id === selectedSportForModal.id);
+        const updatedSport = resolvedSports.find(s => s.id === selectedSportForModal.id);
         if (updatedSport) {
           setSelectedSportForModal(updatedSport);
         }
@@ -1141,6 +1157,24 @@ export const Tournaments: React.FC = () => {
                 >
                   <Sparkles className="w-3.5 h-3.5 text-emerald-200" />
                   <span>توليد بيانات افتراضية</span>
+                </button>
+              )}
+
+              {/* Reset Button (Central Admin & Technical Committee Head scoped to own sport) */}
+              {activeBranch === 'provincial' &&
+                (isCentralAdmin || (isTechCommitteeHead && allowedSportIds && allowedSportIds.length > 0)) && (
+                <button
+                  type="button"
+                  onClick={() => setIsResetModalOpen(true)}
+                  className="px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer bg-rose-600 hover:bg-rose-700 text-white shadow-xs flex items-center gap-1.5"
+                  title={
+                    isCentralAdmin
+                      ? 'تصفير نتائج المباريات أو المباريات المبرمجة لجميع البطولات أو لبطولة معينة'
+                      : 'تصفير نتائج المباريات أو المباريات المبرمجة الخاصة برياضتك فقط'
+                  }
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  <span>تصفير</span>
                 </button>
               )}
             </div>
@@ -1897,26 +1931,6 @@ export const Tournaments: React.FC = () => {
       </div>
     )}
 
-      {/* Create / Program Tournament Modal */}
-      <CreateTournamentModal
-        isOpen={isModalOpen}
-        onClose={() => {
-          setIsModalOpen(false);
-          setPreselectedSportId(undefined);
-        }}
-        allowedSportIds={allowedSportIds}
-        preselectedSportId={preselectedSportId}
-        onCreated={handleCreateTournament}
-      />
-
-      {/* Edit Tournament Modal */}
-      <EditTournamentModal
-        isOpen={!!editingTournament}
-        tournament={editingTournament}
-        onClose={() => setEditingTournament(null)}
-        onUpdated={loadData}
-      />
-
       {/* Confirm Delete Modal */}
       <ConfirmDeleteModal
         isOpen={!!tournamentToDelete}
@@ -2000,7 +2014,27 @@ export const Tournaments: React.FC = () => {
         }}
       />
 
-      {/* Edit Tournament Schedule & Dates Modal */}
+      {/* Create / Program Tournament Modal (Always Foreground) */}
+      <CreateTournamentModal
+        isOpen={isModalOpen}
+        onClose={() => {
+          setIsModalOpen(false);
+          setPreselectedSportId(undefined);
+        }}
+        allowedSportIds={allowedSportIds}
+        preselectedSportId={preselectedSportId}
+        onCreated={handleCreateTournament}
+      />
+
+      {/* Edit Tournament Modal (Always Foreground) */}
+      <EditTournamentModal
+        isOpen={!!editingTournament}
+        tournament={editingTournament}
+        onClose={() => setEditingTournament(null)}
+        onUpdated={loadData}
+      />
+
+      {/* Edit Tournament Schedule & Dates Modal (Always Foreground) */}
       <EditTournamentScheduleModal
         isOpen={isScheduleModalOpen}
         onClose={() => {
@@ -2083,6 +2117,18 @@ export const Tournaments: React.FC = () => {
           }}
         />
       )}
+
+      {/* Tournament & Matches Reset Modal (Central Admin + Technical Committee Head scoped) */}
+      <TournamentResetModal
+        isOpen={isResetModalOpen}
+        onClose={() => setIsResetModalOpen(false)}
+        sportsConfig={sportsConfig}
+        tournaments={tournaments}
+        matches={matches}
+        isCentralAdmin={isCentralAdmin}
+        allowedSportIds={allowedSportIds}
+        onResetComplete={() => loadData(true)}
+      />
 
     </div>
   );

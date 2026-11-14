@@ -34,6 +34,7 @@ import { AppLogo } from './AppLogo';
 import { SportSilhouette } from './SportSilhouettes';
 import { Tournament, Directorate, Sport } from '../types';
 import { SPORTS_MAP, OfficialLogos } from '../lib/dataService';
+import { prepareFontEmbedCss } from '../lib/fontExportHelper';
 
 interface TournamentCertificateModalProps {
   isOpen: boolean;
@@ -210,22 +211,27 @@ export const TournamentCertificateModal: React.FC<TournamentCertificateModalProp
     }
   };
 
+  const resolvedFontCss = CERTIFICATE_FONTS.find(f => f.id === selectedFont)?.css || "'Amiri', serif";
+
   // Export as PNG (Pure Certificate Card Only - No Preview Canvas or Shadow)
   const handleDownloadImage = async () => {
     if (!certificateRef.current) return;
     setIsExporting(true);
     const toastId = toast.loading('جاري توليد وتحميل الشهادة التقديرية بدقة عالية (PNG)...');
     try {
+      const fontEmbedCSS = await prepareFontEmbedCss(selectedFont);
       await new Promise(resolve => setTimeout(resolve, 150));
       const dataUrl = await toPng(certificateRef.current, {
         pixelRatio: 3,
         cacheBust: true,
         quality: 1.0,
+        ...(fontEmbedCSS ? { fontEmbedCSS } : {}),
         style: {
           transform: 'none',
           boxShadow: 'none',
           borderRadius: '0px',
-          margin: '0px'
+          margin: '0px',
+          fontFamily: resolvedFontCss
         }
       });
 
@@ -249,16 +255,19 @@ export const TournamentCertificateModal: React.FC<TournamentCertificateModalProp
     setIsExporting(true);
     const toastId = toast.loading('جاري توليد وتحميل ملف PDF للشهادة التقديرية...');
     try {
+      const fontEmbedCSS = await prepareFontEmbedCss(selectedFont);
       await new Promise(resolve => setTimeout(resolve, 150));
       const dataUrl = await toPng(certificateRef.current, {
         pixelRatio: 3,
         cacheBust: true,
         quality: 1.0,
+        ...(fontEmbedCSS ? { fontEmbedCSS } : {}),
         style: {
           transform: 'none',
           boxShadow: 'none',
           borderRadius: '0px',
-          margin: '0px'
+          margin: '0px',
+          fontFamily: resolvedFontCss
         }
       });
 
@@ -287,15 +296,18 @@ export const TournamentCertificateModal: React.FC<TournamentCertificateModalProp
     setIsExporting(true);
     const toastId = toast.loading('جاري نسخ الشهادة إلى الحافظة...');
     try {
+      const fontEmbedCSS = await prepareFontEmbedCss(selectedFont);
       const blob = await toBlob(certificateRef.current, {
         pixelRatio: 2.5,
         cacheBust: true,
         quality: 1.0,
+        ...(fontEmbedCSS ? { fontEmbedCSS } : {}),
         style: {
           transform: 'none',
           boxShadow: 'none',
           borderRadius: '0px',
-          margin: '0px'
+          margin: '0px',
+          fontFamily: resolvedFontCss
         }
       });
       if (blob && navigator.clipboard && (window as any).ClipboardItem) {
@@ -320,16 +332,19 @@ export const TournamentCertificateModal: React.FC<TournamentCertificateModalProp
     if (!certificateRef.current) return;
     const toastId = toast.loading('جاري تجهيز الشهادة للطباعة بجودة عالية...');
     try {
+      const fontEmbedCSS = await prepareFontEmbedCss(selectedFont);
       await new Promise(resolve => setTimeout(resolve, 150));
       const dataUrl = await toPng(certificateRef.current, {
         pixelRatio: 3,
         cacheBust: true,
         quality: 1.0,
+        ...(fontEmbedCSS ? { fontEmbedCSS } : {}),
         style: {
           transform: 'none',
           boxShadow: 'none',
           borderRadius: '0px',
-          margin: '0px'
+          margin: '0px',
+          fontFamily: resolvedFontCss
         }
       });
 
@@ -1668,7 +1683,7 @@ export const TournamentCertificateModal: React.FC<TournamentCertificateModalProp
                           ? 'border-amber-900/40 bg-gradient-to-tr from-amber-700 to-amber-500'
                           : 'border-amber-600/40 bg-gradient-to-tr from-amber-400 to-yellow-200'
                     }`}>
-                      <span className={`font-black text-[9px] xs:text-[10px] sm:text-base font-serif drop-shadow-xs ${
+                      <span className={`font-black text-[9px] xs:text-[10px] sm:text-base drop-shadow-xs ${
                         medalNumber === '3' ? 'text-white' : medalNumber === '2' ? 'text-slate-800' : 'text-amber-950'
                       }`}>
                         {medalNumber}
@@ -1776,7 +1791,7 @@ export const TournamentCertificateModal: React.FC<TournamentCertificateModalProp
                     </span>
                   ) : (
                     <span 
-                      className="font-black text-amber-950 font-serif border-b border-amber-900/40 px-1 sm:px-3 bg-white/60 rounded"
+                      className="font-black text-amber-950 border-b border-amber-900/40 px-1 sm:px-3 bg-white/60 rounded"
                       style={{ fontSize: `clamp(10px, calc(${recipientFontSize}px * 0.75), ${recipientFontSize}px)` }}
                     >
                       {studentName || '................................................'}

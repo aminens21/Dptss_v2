@@ -12,9 +12,9 @@ import {
   Info,
   ChevronDown
 } from 'lucide-react';
-import { Tournament, Match, School, Sport } from '../types';
+import { Tournament, Match, School, Sport, Venue, Referee, User } from '../types';
 import { SPORTS_CONFIG } from '../config/sportsConfig';
-import { SPORTS_MAP } from '../lib/dataService';
+import { DataService, SPORTS_MAP } from '../lib/dataService';
 import {
   buildAllCalendarEvents,
   downloadProgramAsPdf,
@@ -30,6 +30,9 @@ interface ProgramExportModalProps {
   tournaments: Tournament[];
   matches: Match[];
   schools: School[];
+  venues?: Venue[];
+  referees?: Referee[];
+  teachers?: User[];
   activeSeason: string;
   initialSelectedSportIds?: string[];
   initialScopeFilter?: 'ALL' | 'provincial' | 'regional' | 'national';
@@ -43,6 +46,9 @@ export const ProgramExportModal: React.FC<ProgramExportModalProps> = ({
   tournaments,
   matches,
   schools,
+  venues: propVenues,
+  referees: propReferees,
+  teachers: propTeachers,
   activeSeason,
   initialSelectedSportIds,
   initialScopeFilter = 'ALL'
@@ -74,8 +80,11 @@ export const ProgramExportModal: React.FC<ProgramExportModalProps> = ({
 
   const [scopeFilter, setScopeFilter] = useState<'ALL' | 'provincial' | 'regional' | 'national'>(initialScopeFilter);
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
+  const [loadedVenues, setLoadedVenues] = useState<Venue[]>([]);
+  const [loadedReferees, setLoadedReferees] = useState<Referee[]>([]);
+  const [loadedTeachers, setLoadedTeachers] = useState<User[]>([]);
 
-  // Sync initial props when modal opens
+  // Sync initial props and load venues / referees / teachers if not passed
   useEffect(() => {
     if (isOpen) {
       if (initialSelectedSportIds && initialSelectedSportIds.length === 1 && initialSelectedSportIds[0] !== 'ALL') {
@@ -90,13 +99,27 @@ export const ProgramExportModal: React.FC<ProgramExportModalProps> = ({
       if (initialScopeFilter) {
         setScopeFilter(initialScopeFilter);
       }
+
+      if (!propVenues || propVenues.length === 0) {
+        DataService.getVenues().then(setLoadedVenues).catch(() => {});
+      }
+      if (!propReferees || propReferees.length === 0) {
+        DataService.getReferees().then(setLoadedReferees).catch(() => {});
+      }
+      if (!propTeachers || propTeachers.length === 0) {
+        DataService.getTeachers().then(setLoadedTeachers).catch(() => {});
+      }
     }
-  }, [isOpen, initialSelectedSportIds, initialScopeFilter]);
+  }, [isOpen, initialSelectedSportIds, initialScopeFilter, propVenues, propReferees, propTeachers]);
+
+  const effectiveVenues = propVenues && propVenues.length > 0 ? propVenues : loadedVenues;
+  const effectiveReferees = propReferees && propReferees.length > 0 ? propReferees : loadedReferees;
+  const effectiveTeachers = propTeachers && propTeachers.length > 0 ? propTeachers : loadedTeachers;
 
   // Build unified calendar events
   const allEvents = useMemo(() => {
-    return buildAllCalendarEvents(tournaments, matches, schools);
-  }, [tournaments, matches, schools]);
+    return buildAllCalendarEvents(tournaments, matches, schools, effectiveVenues, effectiveReferees, effectiveTeachers);
+  }, [tournaments, matches, schools, effectiveVenues, effectiveReferees, effectiveTeachers]);
 
   // Determine active selected sport IDs based on current mode
   const activeSelectedSportIds = useMemo<string[]>(() => {
@@ -428,9 +451,10 @@ export const ProgramExportModal: React.FC<ProgramExportModalProps> = ({
                     <tr>
                       <th className="p-2">التاريخ</th>
                       <th className="p-2">البطولة أو التظاهرة</th>
-                      <th className="p-2">الرياضة</th>
+                      {mode !== 'SINGLE_SPORT' && <th className="p-2">الرياضة</th>}
                       <th className="p-2">المستوى</th>
                       <th className="p-2">المكان</th>
+                      <th className="p-2">الحكام</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
@@ -438,7 +462,7 @@ export const ProgramExportModal: React.FC<ProgramExportModalProps> = ({
                       <tr key={ev.id} className="hover:bg-slate-50">
                         <td className="p-2 font-bold text-blue-800 whitespace-nowrap">{ev.date}</td>
                         <td className="p-2 font-semibold text-slate-900">{ev.title}</td>
-                        <td className="p-2 text-slate-600">{ev.sportName}</td>
+                        {mode !== 'SINGLE_SPORT' && <td className="p-2 text-slate-600">{ev.sportName}</td>}
                         <td className="p-2">
                           <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
                             ev.scope === 'national' ? 'bg-amber-100 text-amber-800' : ev.scope === 'regional' ? 'bg-emerald-100 text-emerald-800' : 'bg-blue-100 text-blue-800'
@@ -446,7 +470,8 @@ export const ProgramExportModal: React.FC<ProgramExportModalProps> = ({
                             {ev.scope === 'national' ? 'وطني' : ev.scope === 'regional' ? 'جهوي' : 'إقليمي'}
                           </span>
                         </td>
-                        <td className="p-2 text-slate-500 truncate max-w-[150px]">{ev.venue}</td>
+                        <td className="p-2 text-slate-600 truncate max-w-[150px]">{ev.venue}</td>
+                        <td className="p-2 text-slate-600 truncate max-w-[140px]">{ev.refereesText || '-'}</td>
                       </tr>
                     ))}
                   </tbody>

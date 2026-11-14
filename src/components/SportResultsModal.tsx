@@ -1,6 +1,6 @@
-import React, { useState, useMemo } from 'react';
-import { Sport, Tournament, Match, School, Venue, Student, User } from '../types';
-import { DataService, isClubTournament, GENDER_MAP, getAgeCategoriesForSeason, normalizeCategoryKey } from '../lib/dataService';
+import React, { useState, useMemo, useEffect } from 'react';
+import { Sport, Tournament, Match, School, Venue, Student, User, Referee } from '../types';
+import { DataService, isClubTournament, GENDER_MAP, SPORTS_MAP, getAgeCategoriesForSeason, normalizeCategoryKey } from '../lib/dataService';
 import { CrossCountryPodiumView } from './CrossCountryPodiumView';
 import { AthleticsResultsView } from './AthleticsResultsView';
 import { CrossCountryCategoryResult } from '../types';
@@ -24,11 +24,13 @@ import {
   Award,
   Sparkles,
   Pencil,
-  ChevronLeft
+  ChevronLeft,
+  MessageCircle
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useRolePermissions } from '../hooks/useRolePermissions';
 import { cn, formatMatchDate } from '../lib/utils';
+import { findRefereeContact, generateRefereeMatchNotificationMessage, getWhatsAppUrl } from '../lib/whatsappService';
 
 interface SportResultsModalProps {
   isOpen: boolean;
@@ -39,6 +41,8 @@ interface SportResultsModalProps {
   schools: School[];
   venues: Venue[];
   students: Student[];
+  teachers?: User[];
+  referees?: Referee[];
   crossCountryResults: Record<string, CrossCountryCategoryResult>;
   onUpdateCrossCountryResult?: (res: CrossCountryCategoryResult) => Promise<void>;
   userProfile: User | null;
@@ -60,6 +64,8 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
   schools,
   venues,
   students,
+  teachers: teachersProp,
+  referees: refereesProp,
   crossCountryResults,
   onUpdateCrossCountryResult,
   userProfile,
@@ -78,13 +84,64 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
   const [searchQuery, setSearchQuery] = useState('');
   const [isFullScreen, setIsFullScreen] = useState(false);
+  const [loadedReferees, setLoadedReferees] = useState<Referee[]>([]);
+  const [loadedTeachers, setLoadedTeachers] = useState<User[]>([]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    if (!refereesProp) {
+      DataService.getReferees().then(setLoadedReferees).catch(() => {});
+    }
+    if (!teachersProp) {
+      DataService.getTeachers().then(setLoadedTeachers).catch(() => {});
+    }
+  }, [isOpen, refereesProp, teachersProp]);
+
+  const effectiveReferees = refereesProp || loadedReferees;
+  const effectiveTeachers = teachersProp || loadedTeachers;
 
   const { canDo } = useRolePermissions();
 
-  const isCentralAdmin = userProfile?.role === 'CENTRAL_ADMIN';
-  const isSportManager = userProfile?.role === 'SPORT_MANAGER';
-  const isTechHead = userProfile?.isTechCommitteeHead === true;
-  const canManage = isCentralAdmin || isSportManager || isTechHead || canDo('action:edit_results');
+  const matchedTeacher = useMemo(() => {
+    if (!userProfile) return null;
+    return effectiveTeachers.find(t =>
+      (t.id && t.id === userProfile.id) ||
+      (t.email && userProfile.email && t.email.toLowerCase() === userProfile.email.toLowerCase()) ||
+      (t.leaseNumber && userProfile.leaseNumber && t.leaseNumber === userProfile.leaseNumber)
+    ) || null;
+  }, [userProfile, effectiveTeachers]);
+
+  const isSuperAdmin = userProfile?.isSuperAdmin === true || matchedTeacher?.isSuperAdmin === true || userProfile?.role === 'SUPER_ADMIN';
+  const effectiveRole = matchedTeacher?.role || userProfile?.role;
+  const isCentralAdmin = effectiveRole === 'CENTRAL_ADMIN' || isSuperAdmin;
+  const isSportManager = effectiveRole === 'SPORT_MANAGER';
+  const isTechHead =
+    userProfile?.isTechCommitteeHead === true ||
+    matchedTeacher?.isTechCommitteeHead === true ||
+    effectiveRole === 'TECH_HEAD' ||
+    (effectiveRole as string) === 'TECH_COMMITTEE_HEAD';
+
+  const allowedSportsForUser = useMemo(() => {
+    const set = new Set<string>();
+    userProfile?.techCommitteeSports?.forEach(id => id && set.add(id));
+    matchedTeacher?.techCommitteeSports?.forEach(id => id && set.add(id));
+    if (userProfile?.sportId) set.add(userProfile.sportId);
+    if (matchedTeacher?.sportId) set.add(matchedTeacher.sportId);
+    tournaments.forEach(t => {
+      const emailMatch = t.managerEmail && userProfile?.email && t.managerEmail.toLowerCase() === userProfile.email.toLowerCase();
+      const nameMatch = t.managerName && userProfile?.fullName && t.managerName.trim() === userProfile.fullName.trim();
+      if ((emailMatch || nameMatch) && t.sportId) {
+        set.add(t.sportId);
+      }
+    });
+    return Array.from(set);
+  }, [userProfile, matchedTeacher, tournaments]);
+
+  const canManage = isCentralAdmin
+    ? true
+    : (isTechHead || isSportManager)
+      ? (sport ? allowedSportsForUser.includes(sport.id) : false)
+      : canDo('action:edit_results');
 
   const seasonalCategories = useMemo(() => {
     return getAgeCategoriesForSeason(activeSeason);
@@ -234,9 +291,9 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
     return s ? s.name : id || 'غير محدد';
   };
 
-  const getVenueName = (id: string) => {
+  const getVenueName = (id: string, fallbackName?: string) => {
     const v = venues.find(ven => ven.id === id);
-    return v ? v.name : id || 'ملعب غير محدد';
+    return v ? v.name : fallbackName || id || 'ملعب غير محدد';
   };
 
   const getCategoryName = (catId: string) => {
@@ -773,7 +830,13 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
                             {activeBranchMatches.map((m) => {
                               const t1Name = getSchoolName(m.team1Id);
                               const t2Name = getSchoolName(m.team2Id);
-                              const vName = getVenueName(m.venueId);
+                              const vName = getVenueName(m.venueId, m.venueName);
+                              const rawRefs = [
+                                ...(m.referees || []),
+                                ...(m.referee1Id ? [m.referee1Id] : []),
+                                ...(m.referee2Id ? [m.referee2Id] : [])
+                              ].map(r => (r || '').trim()).filter(Boolean);
+                              const matchReferees = Array.from(new Set(rawRefs));
 
                               const isCompleted = m.status === 'Completed';
                               const isOngoing = m.status === 'Ongoing';
@@ -980,6 +1043,68 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
                                           ⚽ الهدافون: <span className="font-medium text-slate-600">{m.scorers}</span>
                                         </div>
                                       )}
+                                    </div>
+                                  )}
+
+                                  {/* Assigned Referees & Direct WhatsApp Notification Strip */}
+                                  {matchReferees.length > 0 && (
+                                    <div className="bg-emerald-50/50 border border-emerald-200/70 rounded-xl p-2 space-y-1.5">
+                                      <div className="flex items-center justify-between text-[10px] font-black text-emerald-900">
+                                        <span className="flex items-center gap-1">
+                                          <ShieldCheck className="w-3 h-3 text-emerald-600 shrink-0" />
+                                          <span>طاقم التحكيم المكلف:</span>
+                                        </span>
+                                        {canManage && (
+                                          <span className="text-[9px] font-bold text-emerald-700">إشعار مباشر عبر واتساب</span>
+                                        )}
+                                      </div>
+                                      <div className="flex flex-wrap gap-1.5">
+                                        {matchReferees.map((refEntry, rIdx) => {
+                                          const contact = findRefereeContact(refEntry, effectiveReferees, effectiveTeachers);
+                                          const displayName = contact.name || refEntry;
+                                          const sportName = sport.name || SPORTS_MAP[m.sportId]?.name || '';
+                                          const waMsg = generateRefereeMatchNotificationMessage({
+                                            refereeName: displayName,
+                                            sportName,
+                                            ageCategory: m.ageCategory,
+                                            gender: m.gender && GENDER_MAP[m.gender] ? GENDER_MAP[m.gender].name : m.gender,
+                                            stageName: m.stage,
+                                            team1SchoolName: t1Name,
+                                            team2SchoolName: t2Name,
+                                            dateStr: formatMatchDate(m.date),
+                                            timeStr: m.startTime || '10:00',
+                                            venueName: vName
+                                          });
+                                          if (!canManage) {
+                                            return (
+                                              <span
+                                                key={`${m.id}-ref-${rIdx}`}
+                                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-white border border-slate-200 text-[10px] font-bold text-slate-700"
+                                              >
+                                                <span>🏁 {displayName}</span>
+                                              </span>
+                                            );
+                                          }
+                                          return (
+                                            <a
+                                              key={`${m.id}-ref-${rIdx}`}
+                                              href={getWhatsAppUrl(contact.phone, waMsg)}
+                                              target="_blank"
+                                              rel="noopener noreferrer"
+                                              title={contact.phone ? `إرسال إشعار واتساب للحكم ${displayName} (${contact.phone})` : `إرسال إشعار واتساب للحكم ${displayName} (بدون رقم مسجل - اختيار جهة الاتصال في واتساب)`}
+                                              className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-bold transition-colors shadow-3xs"
+                                            >
+                                              <MessageCircle className="w-3 h-3 shrink-0" />
+                                              <span>{displayName}</span>
+                                              {contact.phone ? (
+                                                <span className="text-[9px] text-emerald-100 font-mono" dir="ltr">({contact.phone})</span>
+                                              ) : (
+                                                <span className="text-[9px] text-emerald-100/90">(واتساب)</span>
+                                              )}
+                                            </a>
+                                          );
+                                        })}
+                                      </div>
                                     </div>
                                   )}
 

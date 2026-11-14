@@ -479,7 +479,15 @@ export const AppLayout: React.FC = () => {
 
   const isTeacher = userProfile?.role === 'TEACHER';
   const isCentralAdmin = userProfile?.role === 'CENTRAL_ADMIN';
-  const isTechCommitteeHead = userProfile?.isTechCommitteeHead === true;
+  const isSuperOrCentral =
+    isCentralAdmin ||
+    userProfile?.isSuperAdmin === true ||
+    userProfile?.role === 'SUPER_ADMIN';
+  const isTechCommitteeHead =
+    userProfile?.isTechCommitteeHead === true ||
+    userProfile?.role === 'TECH_HEAD' ||
+    (userProfile?.role as string) === 'TECH_COMMITTEE_HEAD';
+  const hideCloudSyncButton = !isSuperOrCentral && (isTeacher || isTechCommitteeHead);
 
   // Ordered Navigation as strictly requested by user:
   // 1. البطولات الاقليمية
@@ -1148,33 +1156,35 @@ export const AppLayout: React.FC = () => {
               )}
             </div>
 
-            {/* Sync ON/OFF Toggle Button (تشغيل وتوقيف المزامنة بالضغط) */}
-            <button
-              type="button"
-              onClick={handleToggleCloudSync}
-              title={
-                isCloudSyncPaused
-                  ? 'المزامنة متوقفة — اضغط لتشغيل المزامنة'
-                  : 'المزامنة مشغلة — اضغط لتوقيف المزامنة'
-              }
-              className={cn(
-                'p-2 rounded-full transition-all cursor-pointer shadow-2xs hover:shadow-xs flex items-center justify-center gap-1.5 shrink-0 border select-none',
-                isCloudSyncPaused
-                  ? 'px-2.5 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-800 border-rose-300 dark:bg-rose-950/60 dark:hover:bg-rose-900/70 dark:text-rose-200 dark:border-rose-700'
-                  : 'bg-emerald-50 hover:bg-emerald-100/90 text-emerald-800 border-emerald-300 dark:bg-emerald-950/40 dark:hover:bg-emerald-900/50 dark:text-emerald-300 dark:border-emerald-700'
-              )}
-              aria-label={isCloudSyncPaused ? 'تشغيل المزامنة' : 'توقيف المزامنة'}
-              aria-pressed={!isCloudSyncPaused}
-            >
-              {isCloudSyncPaused ? (
-                <>
-                  <CloudOff className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0" />
-                  <span className="hidden sm:inline text-[11px] font-black whitespace-nowrap">المزامنة متوقفة</span>
-                </>
-              ) : (
-                <RefreshCw className={`w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0 ${isSyncingData ? 'animate-spin' : ''}`} />
-              )}
-            </button>
+            {/* Sync ON/OFF Toggle Button (يظهر للمسؤولين فقط ويُخفى للأستاذ ورئيس اللجنة التقنية) */}
+            {!hideCloudSyncButton && (
+              <button
+                type="button"
+                onClick={handleToggleCloudSync}
+                title={
+                  isCloudSyncPaused
+                    ? 'المزامنة متوقفة — اضغط لتشغيل المزامنة'
+                    : 'المزامنة مشغلة — اضغط لتوقيف المزامنة'
+                }
+                className={cn(
+                  'p-2 rounded-full transition-all cursor-pointer shadow-2xs hover:shadow-xs flex items-center justify-center gap-1.5 shrink-0 border select-none',
+                  isCloudSyncPaused
+                    ? 'px-2.5 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-800 border-rose-300 dark:bg-rose-950/60 dark:hover:bg-rose-900/70 dark:text-rose-200 dark:border-rose-700'
+                    : 'bg-emerald-50 hover:bg-emerald-100/90 text-emerald-800 border-emerald-300 dark:bg-emerald-950/40 dark:hover:bg-emerald-900/50 dark:text-emerald-300 dark:border-emerald-700'
+                )}
+                aria-label={isCloudSyncPaused ? 'تشغيل المزامنة' : 'توقيف المزامنة'}
+                aria-pressed={!isCloudSyncPaused}
+              >
+                {isCloudSyncPaused ? (
+                  <>
+                    <CloudOff className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0" />
+                    <span className="hidden sm:inline text-[11px] font-black whitespace-nowrap">المزامنة متوقفة</span>
+                  </>
+                ) : (
+                  <RefreshCw className={`w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0 ${isSyncingData ? 'animate-spin' : ''}`} />
+                )}
+              </button>
+            )}
 
             {/* Statistics Quick Button */}
             <button

@@ -1569,85 +1569,90 @@ export async function executeAdditiveExcelImport(
     const catsBySportToEnsure = new Map<string, Set<string>>();
 
     for (const branch of neededBranches.values()) {
-      const alreadyExists = dirTournaments.some(
-        t =>
-          t.sportId === branch.sportId &&
-          normalizeCategoryKey(t.ageCategory) === normalizeCategoryKey(branch.category) &&
-          (t.gender === branch.gender || t.gender === 'Mixed') &&
-          (t.affiliationType || 'non_club') === 'non_club'
-      );
+      const genLabel = branch.gender === 'Female' ? 'إناث' : 'ذكور';
+      const sportLabel = SPORTS_MAP[branch.sportId]?.name || branch.sportId;
 
-      if (!alreadyExists) {
-        const genLabel = branch.gender === 'Female' ? 'إناث' : 'ذكور';
-        const start = new Date();
-        const end = new Date();
-        end.setMonth(end.getMonth() + 3);
+      for (const affId of ['non_club', 'club_affiliated'] as const) {
+        const alreadyExists = dirTournaments.some(
+          t =>
+            t.sportId === branch.sportId &&
+            normalizeCategoryKey(t.ageCategory) === normalizeCategoryKey(branch.category) &&
+            (t.gender === branch.gender || t.gender === 'Mixed') &&
+            (t.affiliationType || 'non_club') === affId
+        );
 
-        const docRef = doc(collection(db, 'tournaments'));
-        const realId = docRef.id;
-        const opKey = `tournaments__${realId}`;
+        if (!alreadyExists) {
+          const start = new Date();
+          const end = new Date();
+          end.setMonth(end.getMonth() + 3);
 
-        if (!excludedOpKeys.has(opKey)) {
-          const sportLabel = SPORTS_MAP[branch.sportId]?.name || branch.sportId;
-          const newTournament: Tournament = {
-            id: realId,
-            name: `بطولة غير المنتمين للأندية ${branch.category} ${genLabel}`,
-            seasonId: activeSeason,
-            sportId: branch.sportId,
-            sportName: sportLabel,
-            ageCategory: branch.category,
-            gender: branch.gender,
-            level: 'Primary,Middle,High',
-            scope: 'Provincial',
-            affiliationType: 'non_club',
-            targetAffiliations: ['non_club'],
-            startDate: start,
-            endDate: end,
-            registrationDeadline: end,
-            status: 'Scheduled',
-            description: `بطولة إقليمية لغير المنتمين للأندية (${sportLabel})`,
-            directorateId: effectiveDirId,
-            createdAt: nowDate,
-            updatedAt: nowDate
-          };
+          const docRef = doc(collection(db, 'tournaments'));
+          const realId = docRef.id;
+          const opKey = `tournaments__${realId}`;
 
-          tournamentsById.set(realId, newTournament);
-          dirTournaments.push(newTournament);
+          if (!excludedOpKeys.has(opKey)) {
+            const affPrefix = affId === 'club_affiliated' ? 'بطولة المنتمين للأندية' : 'بطولة غير المنتمين للأندية';
+            const affShort = affId === 'club_affiliated' ? 'منتمين للأندية' : 'غير منتمين';
+            const newTournament: Tournament = {
+              id: realId,
+              name: `${affPrefix} ${branch.category} ${genLabel}`,
+              seasonId: activeSeason,
+              sportId: branch.sportId,
+              sportName: sportLabel,
+              ageCategory: branch.category,
+              gender: branch.gender,
+              level: 'Primary,Middle,High',
+              scope: 'Provincial',
+              affiliationType: affId,
+              targetAffiliations: [affId],
+              startDate: start,
+              endDate: end,
+              registrationDeadline: end,
+              status: 'Scheduled',
+              description: `بطولة إقليمية ${affId === 'club_affiliated' ? 'للمنتمين للأندية' : 'لغير المنتمين للأندية'} (${sportLabel})`,
+              directorateId: effectiveDirId,
+              createdAt: nowDate,
+              updatedAt: nowDate
+            };
 
-          const jsonPayload = stripUndefinedDeep({
-            ...newTournament,
-            id: realId,
-            startDate: start.toISOString(),
-            endDate: end.toISOString(),
-            registrationDeadline: end.toISOString(),
-            createdAt: nowDate.toISOString(),
-            updatedAt: nowDate.toISOString()
-          });
+            tournamentsById.set(realId, newTournament);
+            dirTournaments.push(newTournament);
 
-          queuedOpsMap.set(opKey, {
-            opKey,
-            type: 'set',
-            col: 'tournaments',
-            id: realId,
-            label: `فرع بطولة: ${sportLabel} ${branch.category} ${genLabel} (غير منتمين)`,
-            ref: docRef,
-            jsonPayload,
-            isNewDoc: true,
-            data: sanitizeForFirestoreWrite(
-              stripUndefinedDeep({
-                ...newTournament,
-                id: realId,
-                startDate: Timestamp.fromDate(start),
-                endDate: Timestamp.fromDate(end),
-                registrationDeadline: Timestamp.fromDate(end),
-                createdAt: serverTimestamp(),
-                updatedAt: serverTimestamp()
-              })
-            ),
-            merge: false
-          });
+            const jsonPayload = stripUndefinedDeep({
+              ...newTournament,
+              id: realId,
+              startDate: start.toISOString(),
+              endDate: end.toISOString(),
+              registrationDeadline: end.toISOString(),
+              createdAt: nowDate.toISOString(),
+              updatedAt: nowDate.toISOString()
+            });
 
-          newlyProgrammedTournaments++;
+            queuedOpsMap.set(opKey, {
+              opKey,
+              type: 'set',
+              col: 'tournaments',
+              id: realId,
+              label: `فرع بطولة: ${sportLabel} ${branch.category} ${genLabel} (${affShort})`,
+              ref: docRef,
+              jsonPayload,
+              isNewDoc: true,
+              data: sanitizeForFirestoreWrite(
+                stripUndefinedDeep({
+                  ...newTournament,
+                  id: realId,
+                  startDate: Timestamp.fromDate(start),
+                  endDate: Timestamp.fromDate(end),
+                  registrationDeadline: Timestamp.fromDate(end),
+                  createdAt: serverTimestamp(),
+                  updatedAt: serverTimestamp()
+                })
+              ),
+              merge: false
+            });
+
+            newlyProgrammedTournaments++;
+          }
         }
       }
 
@@ -1665,12 +1670,14 @@ export async function executeAdditiveExcelImport(
       const currentSportCfg = workingSportsConfig.find(s => s.id === sportId);
       const prevCats = (currentSportCfg?.ageCategories || []).map(normalizeCategoryKey).filter(Boolean);
       const mergedCats = Array.from(new Set([...prevCats, ...Array.from(importedCats)]));
+      const prevAffs = currentSportCfg?.targetAffiliations || [];
+      const mergedAffs = Array.from(new Set([...prevAffs.filter(a => a === 'non_club' || a === 'club_affiliated'), 'non_club', 'club_affiliated']));
 
-      if (mergedCats.length > prevCats.length || currentSportCfg?.isProgrammed !== true) {
+      if (mergedCats.length > prevCats.length || currentSportCfg?.isProgrammed !== true || !prevAffs.includes('club_affiliated')) {
         const existsInWorking = workingSportsConfig.some(s => s.id === sportId);
         if (existsInWorking) {
           workingSportsConfig = workingSportsConfig.map(s =>
-            s.id === sportId ? { ...s, isProgrammed: true, ageCategories: mergedCats } : s
+            s.id === sportId ? { ...s, isProgrammed: true, ageCategories: mergedCats, targetAffiliations: mergedAffs } : s
           );
         } else {
           workingSportsConfig.push({
@@ -1679,13 +1686,15 @@ export async function executeAdditiveExcelImport(
             description: (BASE_SPORTS as Record<string, any>)[sportId]?.description || SPORTS_MAP[sportId]?.name || sportId,
             icon: SPORTS_MAP[sportId]?.icon || '🏆',
             isProgrammed: true,
-            ageCategories: mergedCats
+            ageCategories: mergedCats,
+            targetAffiliations: mergedAffs
           });
         }
 
         const jsonPayload = {
           isProgrammed: true,
-          ageCategories: mergedCats
+          ageCategories: mergedCats,
+          targetAffiliations: mergedAffs
         };
 
         queuedOpsMap.set(opKey, {

@@ -1,4 +1,5 @@
 import React from 'react';
+import { createPortal } from 'react-dom';
 import { AlertTriangle, Trash2, X } from 'lucide-react';
 
 interface ConfirmDeleteModalProps {
@@ -8,6 +9,7 @@ interface ConfirmDeleteModalProps {
   title: string;
   message: string;
   itemName?: string;
+  confirmText?: string;
   isDeleting?: boolean;
 }
 
@@ -18,11 +20,12 @@ export const ConfirmDeleteModal: React.FC<ConfirmDeleteModalProps> = ({
   title,
   message,
   itemName,
+  confirmText = 'تأكيد الحذف النهائي',
   isDeleting = false,
 }) => {
   if (!isOpen) return null;
 
-  return (
+  const modalContent = (
     <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in duration-150" dir="rtl">
       <div 
         className="w-full max-w-md bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-100 dark:border-slate-800 text-slate-900 dark:text-slate-100 overflow-hidden relative z-[201]"
@@ -84,10 +87,12 @@ export const ConfirmDeleteModal: React.FC<ConfirmDeleteModalProps> = ({
             className="flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-white bg-red-600 hover:bg-red-700 disabled:bg-red-300 rounded-xl transition-colors shadow-xs cursor-pointer"
           >
             <Trash2 className="h-3.5 w-3.5" />
-            <span>{isDeleting ? 'جاري الحذف...' : 'تأكيد الحذف النهائي'}</span>
+            <span>{isDeleting ? 'جاري الحذف...' : confirmText}</span>
           </button>
         </div>
       </div>
     </div>
   );
+
+  return typeof document !== 'undefined' ? createPortal(modalContent, document.body) : modalContent;
 };

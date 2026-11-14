@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { Sport, Tournament } from '../types';
 import { DataService, SPORTS_MAP } from '../lib/dataService';
 import { X, Calendar, Clock, ShieldCheck, Check, MapPin, FileText, Activity, GraduationCap } from 'lucide-react';
@@ -132,9 +133,9 @@ export const EditTournamentScheduleModal: React.FC<EditTournamentScheduleModalPr
     }
   };
 
-  return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-3 sm:p-4 bg-slate-950/80 backdrop-blur-sm overflow-y-auto" dir="rtl">
-      <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-2xl max-w-lg w-full flex flex-col overflow-hidden my-auto animate-in fade-in zoom-in-95 duration-150 relative z-[101] text-slate-900 dark:text-slate-100">
+  const modalContent = (
+    <div className="fixed inset-0 z-[150] flex items-center justify-center p-3 sm:p-4 bg-slate-950/80 backdrop-blur-sm overflow-y-auto" dir="rtl">
+      <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-2xl max-w-lg w-full flex flex-col overflow-hidden my-auto animate-in fade-in zoom-in-95 duration-150 relative z-[151] text-slate-900 dark:text-slate-100">
         
         {/* Header */}
         <div className="p-4 sm:p-5 bg-gradient-to-r from-emerald-800 via-teal-900 to-slate-900 text-white flex items-center justify-between gap-3">
@@ -348,4 +349,6 @@ export const EditTournamentScheduleModal: React.FC<EditTournamentScheduleModalPr
       </div>
     </div>
   );
+
+  return typeof document !== 'undefined' ? createPortal(modalContent, document.body) : modalContent;
 };
