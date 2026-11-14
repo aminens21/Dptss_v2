@@ -12,7 +12,8 @@ import {
   getCrossCountryCategoryResultKey,
   resolveRunnerParticipationType
 } from '../lib/crossCountryConfig';
-import { DataService, normalizeCategoryKey } from '../lib/dataService';
+import { DataService, normalizeCategoryKey, canUserApproveSportResult } from '../lib/dataService';
+import { useAuth } from '../contexts/AuthContext';
 import * as XLSX from 'xlsx';
 import {
   Trophy,
@@ -596,6 +597,9 @@ export const CrossCountryPodiumView: React.FC<CrossCountryPodiumViewProps> = ({
 
     setIsSaving(true);
     try {
+      const effectiveUser = currentUser || authUserProfile;
+      const canApproveCC = canUserApproveSportResult(effectiveUser, 'cross_country');
+      const actorName = effectiveUser?.fullName || 'المشرف التقني';
       const targetKey = getCrossCountryCategoryResultKey(catDef.id, selectedAffiliation);
       const updatedResult: CrossCountryCategoryResult = {
         categoryId: targetKey,
@@ -607,17 +611,54 @@ export const CrossCountryPodiumView: React.FC<CrossCountryPodiumViewProps> = ({
         affiliationType: selectedAffiliation,
         venueName: editingVenue.trim() || 'مضمار حلبة ألعاب القوى',
         podium: cleanedPodium,
-        updatedBy: currentUser?.fullName || 'المشرف التقني'
+        updatedBy: actorName,
+        ...(canApproveCC
+          ? {
+              approvalStatus: 'approved' as const,
+              approvedByName: actorName,
+              approvedAt: new Date().toISOString()
+            }
+          : {
+              approvalStatus: 'provisional' as const,
+              recordedByName: actorName,
+              recordedByRole: effectiveUser?.role || 'REFEREE'
+            })
       };
 
       await onUpdateResult(updatedResult);
-      toast.success(`تم حفظ نتائج منصة تتويج ${catDef.shortLabel} بنجاح! 🏆`);
+      toast.success(
+        canApproveCC
+          ? `تمت المصادقة وحفظ نتائج منصة تتويج ${catDef.shortLabel} بنجاح! 🏆`
+          : `تم حفظ النتائج الأولية لفئة ${catDef.shortLabel} (في انتظار المصادقة النهائية) ⏳`
+      );
       setIsEditModalOpen(false);
     } catch (e) {
       console.error('Error saving podium result:', e);
       toast.error('حدث خطأ أثناء حفظ النتائج');
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const { userProfile: authUserProfile } = useAuth();
+  const canApproveCrossCountry = canUserApproveSportResult(currentUser || authUserProfile, 'cross_country');
+
+  const handleApproveCategoryInline = async (catResult?: CrossCountryCategoryResult) => {
+    if (!catResult || !canApproveCrossCountry) return;
+    const approverName = (currentUser || authUserProfile)?.fullName || 'رئيس اللجنة التقنية';
+    try {
+      const approved: CrossCountryCategoryResult = {
+        ...catResult,
+        approvalStatus: 'approved',
+        approvedByName: approverName,
+        approvedAt: new Date().toISOString()
+      };
+      await onUpdateResult(approved);
+      toast.success(`تمت المصادقة النهائية على نتائج ${catResult.titleAr || 'الفئة'} بنجاح ✅`);
+      if (onRefreshData) onRefreshData();
+    } catch (err) {
+      console.error('Error approving CC category:', err);
+      toast.error('تعذرت المصادقة على نتائج الفئة');
     }
   };
 
@@ -1148,24 +1189,46 @@ export const CrossCountryPodiumView: React.FC<CrossCountryPodiumViewProps> = ({
                       <div className="flex items-center gap-2">
                         <span className="text-xl">{cat.icon}</span>
                         <div>
-                          <h3 className="text-xs font-black text-slate-900 group-hover:text-blue-600 transition-colors flex items-center gap-1.5">
-                            {cat.shortLabel}
+                          <h3 className="text-xs font-black text-slate-900 group-hover:text-blue-600 transition-colors flex items-center gap-1.5 flex-wrap">
+                            <span>{cat.shortLabel}</span>
                             {res?.status === 'running' && (
                               <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_4px_rgba(16,185,129,0.8)]" title="السباق جارٍ الآن"></span>
+                            )}
+                            {hasAny && res?.approvalStatus === 'provisional' && (
+                              <span className="px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-300 text-[9px] font-black">
+                                ⏳ أولية
+                              </span>
+                            )}
+                            {hasAny && res?.approvalStatus === 'approved' && (
+                              <span className="px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-[9px] font-black">
+                                ✅ مصادق عليها
+                              </span>
                             )}
                           </h3>
                           <span className="text-[10px] text-slate-500 font-bold">{cat.distance}</span>
                         </div>
                       </div>
-                      {canEdit && (
-                        <button
-                          onClick={() => handleOpenEdit(cat.id)}
-                          className="p-1 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-700 cursor-pointer"
-                          title="تعديل النتائج"
-                        >
-                          <Edit3 className="w-3.5 h-3.5" />
-                        </button>
-                      )}
+                      <div className="flex items-center gap-1">
+                        {hasAny && res?.approvalStatus === 'provisional' && canApproveCrossCountry && (
+                          <button
+                            type="button"
+                            onClick={() => handleApproveCategoryInline(res)}
+                            className="px-2 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[9px] font-black cursor-pointer shadow-2xs"
+                            title="المصادقة النهائية على نتائج هذه الفئة"
+                          >
+                            مصادقة ✅
+                          </button>
+                        )}
+                        {canEdit && (
+                          <button
+                            onClick={() => handleOpenEdit(cat.id)}
+                            className="p-1 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-slate-700 cursor-pointer"
+                            title="تعديل النتائج"
+                          >
+                            <Edit3 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
                     </div>
 
                     {/* Mini Olympic Podium */}
@@ -1311,23 +1374,49 @@ export const CrossCountryPodiumView: React.FC<CrossCountryPodiumViewProps> = ({
                 </div>
               </div>
 
-              {/* Race Status Badge */}
-              {currentCategoryResult.status === 'running' && (
-                <div className="bg-emerald-50 text-emerald-700 border border-emerald-200 px-3 py-1.5 rounded-xl flex items-center gap-2 animate-pulse shadow-sm">
-                  <div className="w-2 h-2 rounded-full bg-emerald-600 shadow-[0_0_8px_rgba(16,185,129,0.6)]"></div>
-                  <span className="text-xs font-black">السباق جارٍ الآن... مباشر 📡</span>
-                </div>
-              )}
+              {/* Race Status & Homologation Controls */}
+              <div className="flex flex-wrap items-center gap-2 self-stretch md:self-auto justify-end">
+                {currentCategoryResult.status === 'running' && (
+                  <div className="bg-emerald-50 text-emerald-700 border border-emerald-200 px-3 py-1.5 rounded-xl flex items-center gap-2 animate-pulse shadow-sm">
+                    <div className="w-2 h-2 rounded-full bg-emerald-600 shadow-[0_0_8px_rgba(16,185,129,0.6)]"></div>
+                    <span className="text-xs font-black">السباق جارٍ الآن... مباشر 📡</span>
+                  </div>
+                )}
 
-              {canEdit && (
-                <button
-                  onClick={() => handleOpenEdit(selectedCatId)}
-                  className="flex items-center gap-2 px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-xl shadow-xs transition-colors self-stretch md:self-auto justify-center cursor-pointer"
-                >
-                  <Edit3 className="w-4 h-4 text-amber-400" />
-                  <span>تعديل نتائج هذه الفئة</span>
-                </button>
-              )}
+                {currentCategoryResult.podium?.length > 0 && currentCategoryResult.approvalStatus === 'provisional' && (
+                  <span className="px-3 py-1.5 rounded-xl bg-amber-50 text-amber-800 border border-amber-300 text-xs font-black flex items-center gap-1.5">
+                    ⏳ نتائج أولية (في انتظار المصادقة)
+                  </span>
+                )}
+
+                {currentCategoryResult.podium?.length > 0 && currentCategoryResult.approvalStatus === 'approved' && (
+                  <span className="px-3 py-1.5 rounded-xl bg-emerald-50 text-emerald-800 border border-emerald-200 text-xs font-black flex items-center gap-1.5">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>نتائج مصادق عليها رسمياً</span>
+                  </span>
+                )}
+
+                {currentCategoryResult.podium?.length > 0 && currentCategoryResult.approvalStatus === 'provisional' && canApproveCrossCountry && (
+                  <button
+                    type="button"
+                    onClick={() => handleApproveCategoryInline(currentCategoryResult)}
+                    className="flex items-center gap-1.5 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs rounded-xl shadow-xs transition-colors cursor-pointer"
+                  >
+                    <CheckCircle2 className="w-4 h-4" />
+                    <span>المصادقة النهائية على النتائج</span>
+                  </button>
+                )}
+
+                {canEdit && (
+                  <button
+                    onClick={() => handleOpenEdit(selectedCatId)}
+                    className="flex items-center gap-2 px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-xl shadow-xs transition-colors justify-center cursor-pointer"
+                  >
+                    <Edit3 className="w-4 h-4 text-amber-400" />
+                    <span>تعديل نتائج هذه الفئة</span>
+                  </button>
+                )}
+              </div>
             </div>
 
             {/* Winning Team Banner inside Category Header Card */}

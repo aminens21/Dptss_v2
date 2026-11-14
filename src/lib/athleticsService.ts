@@ -579,8 +579,14 @@ export class AthleticsService {
 
   static saveEventResult(result: AthleticsEventResult): void {
     const all = this.getAllResults();
+    const resolvedApproval: 'provisional' | 'approved' =
+      result.approvalStatus || (result.isFinallyValidated === false ? 'provisional' : 'approved');
+    const isApproved = resolvedApproval === 'approved';
+
     all[result.id] = {
       ...result,
+      approvalStatus: resolvedApproval,
+      isFinallyValidated: isApproved,
       lastUpdated: new Date().toISOString()
     };
     localStorage.setItem(STORAGE_KEYS.RESULTS, JSON.stringify(all));
@@ -604,7 +610,8 @@ export class AthleticsService {
             bibNumber: lap.bibNumber ? String(lap.bibNumber) : undefined
           }));
       } else if (result.fieldEntries) {
-        podium = result.fieldEntries
+        const sortedField = [...result.fieldEntries].sort((a, b) => (b.bestAttempt || 0) - (a.bestAttempt || 0));
+        podium = sortedField
           .slice(0, 3)
           .filter(f => f.participantId || f.studentName)
           .map((f, idx) => ({
@@ -622,7 +629,11 @@ export class AthleticsService {
         specialtyName: specName,
         specialtyType: result.type,
         status: 'completed',
-        isFinallyValidated: true,
+        isFinallyValidated: isApproved,
+        approvalStatus: resolvedApproval,
+        recordedByName: result.recordedByTeacherName,
+        approvedByName: result.approvedByName,
+        approvedAt: isApproved ? (result.finalValidationDate || new Date().toISOString()) : undefined,
         directorateId: result.directorateName || 'taourirt',
         podium,
         updatedAt: new Date().toISOString()
@@ -644,6 +655,22 @@ export class AthleticsService {
     window.dispatchEvent(new CustomEvent('athleticsResultsUpdated', { detail: all }));
     window.dispatchEvent(new CustomEvent('resultsChanged'));
     window.dispatchEvent(new Event('storage'));
+  }
+
+  static approveEventResult(resultId: string, approverName: string): AthleticsEventResult | null {
+    const all = this.getAllResults();
+    const existing = all[resultId];
+    if (!existing) return null;
+    const approved: AthleticsEventResult = {
+      ...existing,
+      approvalStatus: 'approved',
+      isFinallyValidated: true,
+      approvedByName: approverName,
+      finalValidationDate: new Date().toISOString(),
+      lastUpdated: new Date().toISOString()
+    };
+    this.saveEventResult(approved);
+    return approved;
   }
 
   static deleteEventResult(resultId: string): void {

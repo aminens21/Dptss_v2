@@ -55,6 +55,7 @@ export const EditTeacherRoleModal: React.FC<EditTeacherRoleModalProps> = ({
   const [refereeSpecialty, setRefereeSpecialty] = useState<string[]>(
     Array.isArray(teacher?.refereeSpecialty) ? teacher.refereeSpecialty : teacher?.refereeSpecialty ? [teacher.refereeSpecialty] : []
   );
+  const [refereeDiplomas, setRefereeDiplomas] = useState<Record<string, string>>(teacher?.refereeDiplomas || {});
   const [workLocation, setWorkLocation] = useState<string>(teacher?.workLocation || '');
   const [leaseNumber, setLeaseNumber] = useState<string>(teacher?.leaseNumber || '');
   const [schoolSearch, setSchoolSearch] = useState<string>('');
@@ -100,9 +101,15 @@ export const EditTeacherRoleModal: React.FC<EditTeacherRoleModalProps> = ({
       setTechCommitteeSports(teacher.techCommitteeSports || []);
       setIsTechCommitteeMember(!!teacher.isTechCommitteeMember);
       setTechCommitteeMemberSports(teacher.techCommitteeSportsMemberOf || []);
-      setRefereeSpecialty(
-        Array.isArray(teacher.refereeSpecialty) ? teacher.refereeSpecialty : teacher.refereeSpecialty ? [teacher.refereeSpecialty] : []
-      );
+      const initialSpecs = Array.isArray(teacher.refereeSpecialty) ? teacher.refereeSpecialty : teacher.refereeSpecialty ? [teacher.refereeSpecialty] : [];
+      setRefereeSpecialty(initialSpecs);
+      const initialDiplomas: Record<string, string> = { ...(teacher.refereeDiplomas || {}) };
+      if (teacher.refereeDiploma && initialSpecs.length > 0) {
+        initialSpecs.forEach(sp => {
+          if (!initialDiplomas[sp]) initialDiplomas[sp] = teacher.refereeDiploma || '';
+        });
+      }
+      setRefereeDiplomas(initialDiplomas);
       setWorkLocation(teacher.workLocation || '');
       setLeaseNumber(teacher.leaseNumber || '');
       setSchoolSearch('');
@@ -120,6 +127,7 @@ export const EditTeacherRoleModal: React.FC<EditTeacherRoleModalProps> = ({
       setIsTechCommitteeMember(false);
       setTechCommitteeMemberSports([]);
       setRefereeSpecialty([]);
+      setRefereeDiplomas({});
       setWorkLocation('');
       setLeaseNumber('');
       setSchoolSearch('');
@@ -168,6 +176,13 @@ export const EditTeacherRoleModal: React.FC<EditTeacherRoleModalProps> = ({
     const teacherId = teacher?.id || `teacher_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
     const primarySport = isTechCommitteeHead && techCommitteeSports.length > 0 ? techCommitteeSports[0] : (teacher?.sportId || undefined);
 
+    const cleanedDiplomas: Record<string, string> = {};
+    refereeSpecialty.forEach(sp => {
+      const val = (refereeDiplomas[sp] || '').trim();
+      if (val) cleanedDiplomas[sp] = val;
+    });
+    const summaryDiploma = Object.values(cleanedDiplomas).filter(Boolean).join(' • ');
+
     const updateData: Partial<User> = {
       fullName: cleanName,
       email: cleanEmail,
@@ -180,6 +195,8 @@ export const EditTeacherRoleModal: React.FC<EditTeacherRoleModalProps> = ({
       isTechCommitteeMember: isTechCommitteeMember,
       techCommitteeSportsMemberOf: isTechCommitteeMember ? techCommitteeMemberSports : [],
       refereeSpecialty: refereeSpecialty,
+      refereeDiplomas: cleanedDiplomas,
+      refereeDiploma: summaryDiploma,
       workLocation: workLocation.trim(),
       leaseNumber: cleanLease,
       updatedAt: new Date()
@@ -560,8 +577,8 @@ export const EditTeacherRoleModal: React.FC<EditTeacherRoleModalProps> = ({
             </div>
 
             {/* Referee Specialties Selection */}
-            <div className="space-y-2 pt-1">
-              <label className="text-xs font-bold text-slate-700 block flex items-center gap-1.5">
+            <div className="space-y-3 pt-1">
+              <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
                 <span>تخصصات التحكيم الرياضي المعتمدة للأستاذ:</span>
                 <span className="text-[10px] text-slate-400 font-normal">(يظهر في سجل الحكام)</span>
               </label>
@@ -585,6 +602,62 @@ export const EditTeacherRoleModal: React.FC<EditTeacherRoleModalProps> = ({
                   );
                 })}
               </div>
+
+              {/* Diploma / Certificate / Refereeing Level per selected specialty */}
+              {refereeSpecialty.length > 0 && (
+                <div className="p-3.5 bg-amber-50/70 border border-amber-200/90 rounded-xl space-y-3 animate-in fade-in duration-150">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs font-black text-amber-950 flex items-center gap-1.5">
+                      <Award className="h-4 w-4 text-amber-600 shrink-0" />
+                      <span>الدبلوم أو الشهادة أو مستوى التحكيم لكل تخصص مختار:</span>
+                    </span>
+                    <span className="text-[10px] font-bold text-amber-800 bg-amber-100 px-2 py-0.5 rounded-md border border-amber-200">
+                      يظهر في بطاقة الحكم
+                    </span>
+                  </div>
+
+                  <div className="space-y-2.5">
+                    {refereeSpecialty.map(spId => {
+                      const spObj = allSportsList.find(s => s.id === spId) || { id: spId, name: SPORTS_MAP[spId]?.name || spId, icon: SPORTS_MAP[spId]?.icon || '🏆' };
+                      const currentVal = refereeDiplomas[spId] || '';
+                      const presets = ['حكم وطني', 'حكم فدرالي', 'حكم جهوي', 'حكم عصبة', 'حكم إقليمي / مدرسي', 'شهادة تحكيم معتمدة'];
+                      return (
+                        <div key={`diploma-${spId}`} className="bg-white p-2.5 rounded-xl border border-amber-200/80 shadow-3xs space-y-2">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                              <span>{spObj.icon}</span>
+                              <span>تخصص {spObj.name}:</span>
+                            </span>
+                          </div>
+                          <input
+                            type="text"
+                            value={currentVal}
+                            onChange={(e) => setRefereeDiplomas(prev => ({ ...prev, [spId]: e.target.value }))}
+                            placeholder="اكتب الدبلوم أو الشهادة أو مستوى التحكيم (مثال: حكم فدرالي درجة 2، شهادة عصبة الشرق...)"
+                            className="w-full px-3 py-2 text-xs font-bold text-slate-800 bg-slate-50 focus:bg-white border border-slate-200 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-amber-500"
+                          />
+                          <div className="flex flex-wrap gap-1">
+                            {presets.map(preset => (
+                              <button
+                                key={preset}
+                                type="button"
+                                onClick={() => setRefereeDiplomas(prev => ({ ...prev, [spId]: preset }))}
+                                className={`px-2 py-0.5 rounded-md text-[10px] font-bold border transition-colors cursor-pointer ${
+                                  currentVal === preset
+                                    ? 'bg-amber-600 text-white border-amber-600'
+                                    : 'bg-amber-50/70 hover:bg-amber-100 text-amber-900 border-amber-200'
+                                }`}
+                              >
+                                {preset}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 

@@ -151,6 +151,9 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
   const [isBulkRegisterOpen, setIsBulkRegisterOpen] = useState(false);
   const [preselectedSchoolForRegister, setPreselectedSchoolForRegister] = useState<string | undefined>(undefined);
   const [isEditDeadlineOpen, setIsEditDeadlineOpen] = useState(false);
+  const [isEditingRosterLimit, setIsEditingRosterLimit] = useState(false);
+  const [rosterLimitDraft, setRosterLimitDraft] = useState<number>(12);
+  const [isSavingRosterLimit, setIsSavingRosterLimit] = useState(false);
 
   // School Confirmation State
   const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
@@ -1519,25 +1522,21 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
                               refreshConfirmations();
                             }}
                           />
-                          <button
+                           <button
                             type="button"
                             onClick={() => {
-                              if (isDeadlineExpired) {
-                                toast.error('عذراً، لقد انتهى أجل تسجيل وتعديل المشاركين في هذه البطولة 🔒');
+                              const allCompleted = tournaments.length > 0 && tournaments.every(t => t.status === 'Completed' || t.status === 'Archived');
+                              if (allCompleted) {
+                                toast.error('عذراً، هذه البطولة منتهية ومؤرشفة نهائياً 🔒');
                                 return;
                               }
                               if (isProgrammed) {
                                 setIsBulkRegisterOpen(true);
                               }
                             }}
-                            disabled={isDeadlineExpired}
-                            className={`px-4 py-2 rounded-xl text-xs font-black shadow-3xs transition-all cursor-pointer flex items-center gap-1.5 ${
-                              isDeadlineExpired
-                                ? 'bg-slate-200 text-slate-400 cursor-not-allowed opacity-75'
-                                : 'bg-blue-600 hover:bg-blue-700 text-white'
-                            }`}
+                            className="px-4 py-2 rounded-xl text-xs font-black shadow-3xs transition-all cursor-pointer flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white"
                           >
-                            <span>{isDeadlineExpired ? 'انتهى أجل التسجيل 🔒' : 'تسجيل المشاركين (المرحلة 2) 👥'}</span>
+                            <span>{isDeadlineExpired ? 'تعويض / تحيين لائحة المشاركة 🔄' : 'تسجيل / تعويض المشاركين 👥'}</span>
                           </button>
                         </>
                       ) : (
@@ -1594,30 +1593,96 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
                   )}
                 </div>
 
-                {/* Participation limits & Rules */}
-                <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-3xs flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-10 h-10 rounded-xl bg-purple-50 text-purple-700 flex items-center justify-center font-bold shrink-0 border border-purple-100">
-                      <Settings className="h-5 w-5" />
+                {/* Unified Participation Roster Limit & Rules */}
+                <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-3xs flex flex-col justify-center gap-2.5">
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-10 h-10 rounded-xl bg-purple-50 text-purple-700 flex items-center justify-center font-bold shrink-0 border border-purple-100">
+                        <Settings className="h-5 w-5" />
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-slate-400 font-bold block">
+                          العدد الأقصى المسموح به في لائحة المشاركة (موحد لجميع الفروع):
+                        </span>
+                        <strong className="text-xs font-black text-slate-800 tabular-nums">
+                          {sport.studentLimit && sport.studentLimit > 0
+                            ? `${sport.studentLimit} مشارك(ة) في كل فرع`
+                            : 'بدون سقف عددي محدّد'}
+                        </strong>
+                      </div>
                     </div>
-                    <div>
-                      <span className="text-[10px] text-slate-400 font-bold block">سقف مشاركة المؤسسة التعليمية:</span>
-                      <strong className="text-xs font-bold text-slate-800">
-                        {sport.studentLimit && sport.studentLimit > 0
-                          ? `${sport.studentLimit} تلميذ(ة) كأقصى حد`
-                          : 'بدون سقف عددي محدّد'}
-                      </strong>
-                    </div>
+
+                    {canManage && (
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setRosterLimitDraft(sport.studentLimit && sport.studentLimit > 0 ? sport.studentLimit : 12);
+                            setIsEditingRosterLimit(prev => !prev);
+                          }}
+                          className="px-2.5 py-1.5 bg-purple-50 text-purple-800 hover:bg-purple-100 border border-purple-200 rounded-lg text-[11px] font-black flex items-center gap-1 transition-colors cursor-pointer"
+                        >
+                          <Users className="h-3.5 w-3.5" />
+                          <span>تحديد السقف</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => onProgramTournament(sport.id)}
+                          className="px-2.5 py-1.5 bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 rounded-lg text-[11px] font-bold flex items-center gap-1 transition-colors cursor-pointer"
+                        >
+                          <Edit className="h-3.5 w-3.5" />
+                          <span>تعديل الضوابط</span>
+                        </button>
+                      </div>
+                    )}
                   </div>
 
-                  {canManage && (
-                    <button
-                      onClick={() => onProgramTournament(sport.id)}
-                      className="px-3 py-1.5 bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 rounded-lg text-xs font-bold flex items-center gap-1 transition-colors cursor-pointer"
-                    >
-                      <Edit className="h-3.5 w-3.5" />
-                      <span>تعديل الضوابط</span>
-                    </button>
+                  {canManage && isEditingRosterLimit && (
+                    <div className="pt-2 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2 bg-purple-50/50 p-2 rounded-xl">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[11px] font-bold text-purple-950">العدد الأقصى للائحة:</span>
+                        <input
+                          type="number"
+                          min={1}
+                          max={60}
+                          value={rosterLimitDraft}
+                          onChange={(e) => setRosterLimitDraft(Math.max(1, parseInt(e.target.value || '1', 10)))}
+                          className="w-16 px-2 py-1 bg-white border border-purple-300 rounded-lg text-xs font-black text-center tabular-nums text-purple-950 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                        />
+                        <span className="text-[10px] font-bold text-purple-700">مشارك(ة)</span>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          disabled={isSavingRosterLimit}
+                          onClick={async () => {
+                            try {
+                              setIsSavingRosterLimit(true);
+                              await DataService.updateSportRosterLimit(sport.id, rosterLimitDraft);
+                              sport.studentLimit = rosterLimitDraft;
+                              setIsEditingRosterLimit(false);
+                              toast.success(`تم تحديد العدد الأقصى الموحد في لائحة المشاركة: ${rosterLimitDraft} مشارك(ة)`);
+                              if (onRefreshData) onRefreshData();
+                            } catch {
+                              toast.error('تعذر حفظ العدد الأقصى');
+                            } finally {
+                              setIsSavingRosterLimit(false);
+                            }
+                          }}
+                          className="px-3 py-1 bg-purple-700 hover:bg-purple-800 text-white rounded-lg text-[11px] font-black flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                        >
+                          <Save className="h-3 w-3" />
+                          <span>اعتماد</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setIsEditingRosterLimit(false)}
+                          className="px-2 py-1 bg-white hover:bg-slate-100 text-slate-600 border border-slate-200 rounded-lg text-[11px] font-bold cursor-pointer"
+                        >
+                          إلغاء
+                        </button>
+                      </div>
+                    </div>
                   )}
                 </div>
               </div>

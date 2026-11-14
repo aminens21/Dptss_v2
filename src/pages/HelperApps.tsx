@@ -12,7 +12,6 @@ import {
   CheckCircle, 
   HelpCircle, 
   ShieldAlert, 
-  Sparkles, 
   Play, 
   RotateCcw, 
   Shuffle, 
@@ -33,7 +32,6 @@ import { ElectronicDrawModal } from '../components/ElectronicDrawModal';
 import { BibGeneratorModal } from '../components/BibGeneratorModal';
 import { AthleticsBibGeneratorModal } from '../components/AthleticsBibGeneratorModal';
 import { AthleticsChampionshipModal } from '../components/AthleticsChampionshipModal';
-import { AthleticsService } from '../lib/athleticsService';
 import { useAuth } from '../contexts/AuthContext';
 import toast from 'react-hot-toast';
 
@@ -403,21 +401,6 @@ export const HelperApps: React.FC = () => {
               >
                 <Trophy className="w-3.5 h-3.5" />
                 <span>دخول للتطبيق</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  const res = AthleticsService.loadDefaultMockData();
-                  toast.success(`تم تحميل البيانات الافتراضية لألعاب القوى (${res.participantsCount} مشارك و${res.committeesCount} لجان)`);
-                  setIsAthleticsModalOpen(true);
-                }}
-                className="py-2.5 px-3 bg-purple-50 hover:bg-purple-100 border border-purple-200 text-purple-900 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-1 cursor-pointer active:scale-98"
-                title="تحميل بيانات افتراضية نموذجية وفتح التطبيق"
-              >
-                <Sparkles className="w-3.5 h-3.5 text-purple-600" />
-                <span className="hidden sm:inline">بيانات افتراضية</span>
               </button>
             </div>
           </div>

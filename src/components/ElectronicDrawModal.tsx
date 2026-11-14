@@ -29,11 +29,21 @@ import {
   ShieldAlert,
   Volleyball,
   Award,
-  MessageCircle
+  MessageCircle,
+  Share2
 } from 'lucide-react';
 import { Tournament, School, Team, Match, User, Venue, Sport, Referee, SchoolTournamentConfirmation } from '../types';
 import { DataService, SPORTS_MAP, GENDER_MAP, deduplicateById, normalizeCategoryKey, getCustomCategoryName, doesConfirmationMatchBranch } from '../lib/dataService';
-import { findRefereeContact, generateRefereeMatchNotificationMessage, getWhatsAppUrl } from '../lib/whatsappService';
+import {
+  resolveHostSchoolForMatch,
+  findRefereeContact,
+  generateRefereeMatchNotificationMessage,
+  getWhatsAppUrl
+} from '../lib/whatsappService';
+import {
+  MatchBroadcastDiffusionModal,
+  MatchBroadcastDiffusionTarget
+} from './MatchBroadcastDiffusionModal';
 import { cn } from '../lib/utils';
 import * as XLSX from 'xlsx';
 import toast from 'react-hot-toast';
@@ -52,12 +62,15 @@ export interface GeneratedDrawMatch {
   time: string;
   venueId: string;
   venueName: string;
+  hostSchoolId?: string;
+  venueMode?: 'school' | 'custom';
   refereeId?: string;
   refereeName?: string;
   referee2Id?: string;
   referee2Name?: string;
   refereeIds?: string[];
   refereeNames?: string[];
+  notes?: string;
 }
 
 // Helper to check if a teacher or referee has declared specialization in a given sport
@@ -159,8 +172,8 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
   const [confirmations, setConfirmations] = useState<SchoolTournamentConfirmation[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
 
-  // Workflow State: 1 = Choose Tournament & Filter, 2 = Review Teams & Draw Config, 3 = Draw & Schedule Matches with Referees
-  const [step, setStep] = useState<1 | 2 | 3>(1);
+  // Workflow State: 1 = Choose Tournament & Filter, 2 = Review Teams & Draw Config, 3 = Draw & Schedule Matches with Referees, 4 = Post-Save WhatsApp Notifications
+  const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
   const [selectedTournamentId, setSelectedTournamentId] = useState<string>(initialTournamentId || '');
 
   // Step 1 Filtering Options
@@ -188,10 +201,13 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
   // Batch edit helpers
   const [bulkDate, setBulkDate] = useState<string>(new Date().toISOString().slice(0, 10));
   const [bulkTime, setBulkTime] = useState<string>('10:00');
+  const [bulkVenueMode, setBulkVenueMode] = useState<'school' | 'custom'>('school');
+  const [bulkHostSchoolId, setBulkHostSchoolId] = useState<string>('');
   const [bulkVenueName, setBulkVenueName] = useState<string>('');
   const [bulkRefereeId, setBulkRefereeId] = useState<string>('');
   const [bulkRefereeIds, setBulkRefereeIds] = useState<string[]>([]);
   const [showAllRefereesFallback, setShowAllRefereesFallback] = useState<boolean>(false);
+  const [diffusionTarget, setDiffusionTarget] = useState<MatchBroadcastDiffusionTarget | null>(null);
 
   // Load Tournaments, Referees, Teachers & Data
   useEffect(() => {
@@ -857,6 +873,7 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
           const grpTeams = grp.teams;
           for (let i = 0; i < grpTeams.length; i++) {
             for (let j = i + 1; j < grpTeams.length; j++) {
+              const hostSch = schools.find(s => s.id === grpTeams[i].id);
               matchesList.push({
                 id: `gen-match-${matchCounter++}`,
                 stage: `${grp.groupName} - مواجهة الجولة ${i + 1}`,
@@ -867,8 +884,10 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
                 team2Name: grpTeams[j].name,
                 date: defaultDate,
                 time: `${9 + (matchCounter % 6)}:00`,
-                venueId: venues[0]?.id || 'v1',
-                venueName: defaultVenue,
+                venueMode: hostSch ? 'school' : 'custom',
+                hostSchoolId: hostSch ? hostSch.id : '',
+                venueId: hostSch ? hostSch.id : (venues[0]?.id || 'v1'),
+                venueName: hostSch ? hostSch.name : defaultVenue,
                 refereeId: defaultRef?.id,
                 refereeName: defaultRef?.name,
                 refereeIds: initialRefIds,
@@ -893,6 +912,7 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
         for (let i = 0; i < totalMatches; i++) {
           const t1 = shuffled[i * 2];
           const t2 = shuffled[i * 2 + 1];
+          const hostSch = schools.find(s => s.id === t1.id);
           matchesList.push({
             id: `gen-match-${matchCounter++}`,
             stage: totalMatches === 2 ? 'نصف النهائي' : totalMatches === 1 ? 'المباراة النهائية' : `دور خروج المغلوب (المباراة ${i + 1})`,
@@ -902,8 +922,10 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
             team2Name: t2.name,
             date: defaultDate,
             time: `${9 + i * 2}:00`,
-            venueId: venues[0]?.id || 'v1',
-            venueName: defaultVenue,
+            venueMode: hostSch ? 'school' : 'custom',
+            hostSchoolId: hostSch ? hostSch.id : '',
+            venueId: hostSch ? hostSch.id : (venues[0]?.id || 'v1'),
+            venueName: hostSch ? hostSch.name : defaultVenue,
             refereeId: defaultRef?.id,
             refereeName: defaultRef?.name,
             refereeIds: initialRefIds,
@@ -1007,7 +1029,14 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
 
   // Apply batch date, venue & multi-referee to all matches
   const handleApplyBatchSchedule = () => {
-    if (!bulkDate && !bulkVenueName && bulkRefereeIds.length === 0 && !bulkRefereeId) {
+    const selectedBulkHostSchool = bulkVenueMode === 'school'
+      ? schools.find(s => s.id === bulkHostSchoolId)
+      : undefined;
+    const hasBulkVenue = bulkVenueMode === 'school'
+      ? Boolean(selectedBulkHostSchool)
+      : Boolean(bulkVenueName.trim());
+
+    if (!bulkDate && !hasBulkVenue && bulkRefereeIds.length === 0 && !bulkRefereeId) {
       toast.error('يرجى تحديد التاريخ، المكان أو اختيار حكم واحد على الأقل لتعميمه');
       return;
     }
@@ -1032,11 +1061,33 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
           ? bulkRefNames 
           : (m.refereeNames || (m.refereeName ? [m.refereeName] : []));
 
+        let nextVenueMode = m.venueMode || 'school';
+        let nextHostSchoolId = m.hostSchoolId || '';
+        let nextVenueId = m.venueId;
+        let nextVenueName = m.venueName;
+
+        if (hasBulkVenue) {
+          if (bulkVenueMode === 'school' && selectedBulkHostSchool) {
+            nextVenueMode = 'school';
+            nextHostSchoolId = selectedBulkHostSchool.id;
+            nextVenueId = selectedBulkHostSchool.id;
+            nextVenueName = selectedBulkHostSchool.name;
+          } else if (bulkVenueMode === 'custom' && bulkVenueName.trim()) {
+            nextVenueMode = 'custom';
+            nextHostSchoolId = '';
+            nextVenueId = 'custom';
+            nextVenueName = bulkVenueName.trim();
+          }
+        }
+
         return {
           ...m,
           date: bulkDate || m.date,
           time: bulkTime || m.time,
-          venueName: bulkVenueName || m.venueName,
+          venueMode: nextVenueMode,
+          hostSchoolId: nextHostSchoolId,
+          venueId: nextVenueId,
+          venueName: nextVenueName,
           refereeIds: updatedRefIds,
           refereeNames: updatedRefNames,
           refereeId: updatedRefIds[0] || undefined,
@@ -1069,6 +1120,10 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
           ? gm.refereeIds
           : (gm.refereeId ? [gm.refereeId] : []);
 
+        const resolvedHost = gm.venueMode !== 'custom'
+          ? resolveHostSchoolForMatch({ hostSchoolId: gm.hostSchoolId, venueId: gm.venueId, venueName: gm.venueName }, schools)
+          : undefined;
+
         await DataService.addMatch({
           tournamentId: selectedTournament.id,
           sportId: selectedTournament.sportId,
@@ -1078,22 +1133,25 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
           team2Id: gm.team2Id,
           ageCategory: selectedTournament.ageCategory,
           gender: selectedTournament.gender,
+          affiliationType: selectedTournament.affiliationType,
           date: gm.date,
           startTime: gm.time || '10:00',
-          venueId: gm.venueId || 'default-venue',
-          venueName: gm.venueName,
+          hostSchoolId: resolvedHost?.id || '',
+          venueId: resolvedHost?.id || gm.venueId || 'default-venue',
+          venueName: resolvedHost?.name || gm.venueName,
           referee1Id: allRefs[0] || undefined,
           referee2Id: allRefs[1] || undefined,
           referees: allRefs,
+          notes: gm.notes?.trim() || '',
           status: 'Scheduled',
           updatedAt: new Date()
         });
       }
 
       toast.dismiss(toastId);
-      toast.success('تم حفظ واعتماد جميع المباريات والحكام في المنظومة بنجاح!');
+      toast.success('تم حفظ واعتماد جميع المباريات بنجاح! يمكنك الآن إرسال إشعارات الواتساب للمعنيين.');
       if (onMatchesCreated) onMatchesCreated();
-      onClose();
+      setStep(4);
     } catch (err) {
       console.error('Failed to save matches:', err);
       toast.dismiss(toastId);
@@ -1192,7 +1250,14 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
 
           <div className={`flex items-center gap-2 ${step >= 3 ? 'text-emerald-800 font-black' : 'text-slate-400'}`}>
             <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs ${step >= 3 ? 'bg-emerald-600 text-white' : 'bg-slate-300 text-slate-600'}`}>3</span>
-            <span>3. المواعيد والملاعب وتعيين الحكام</span>
+            <span>3. المواعيد والملاعب والحكام</span>
+          </div>
+
+          <div className="hidden sm:block w-8 h-0.5 bg-slate-300" />
+
+          <div className={`hidden sm:flex items-center gap-2 ${step >= 4 ? 'text-emerald-800 font-black' : 'text-slate-400'}`}>
+            <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs ${step >= 4 ? 'bg-emerald-600 text-white' : 'bg-slate-300 text-slate-600'}`}>4</span>
+            <span>4. إشعارات الواتساب</span>
           </div>
         </div>
 
@@ -1982,14 +2047,45 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
                   </div>
 
                   <div>
-                    <label className="block text-[10px] font-bold text-slate-600 mb-1">مكان الإجراء (الملعب/القاعة):</label>
-                    <input
-                      type="text"
-                      value={bulkVenueName}
-                      onChange={(e) => setBulkVenueName(e.target.value)}
-                      placeholder="القاعة المغطاة تاوريرت"
-                      className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-xl font-bold text-slate-800"
-                    />
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-[10px] font-bold text-slate-600">مكان الإجراء الموحد:</label>
+                      <div className="inline-flex rounded-lg bg-white border border-slate-200 p-0.5 text-[9px] font-bold">
+                        <button
+                          type="button"
+                          onClick={() => setBulkVenueMode('school')}
+                          className={`px-1.5 py-0.5 rounded cursor-pointer ${bulkVenueMode === 'school' ? 'bg-emerald-600 text-white' : 'text-slate-600'}`}
+                        >
+                          🏫 مؤسسة
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setBulkVenueMode('custom')}
+                          className={`px-1.5 py-0.5 rounded cursor-pointer ${bulkVenueMode === 'custom' ? 'bg-emerald-600 text-white' : 'text-slate-600'}`}
+                        >
+                          🏟️ فضاء آخر
+                        </button>
+                      </div>
+                    </div>
+                    {bulkVenueMode === 'school' ? (
+                      <select
+                        value={bulkHostSchoolId}
+                        onChange={(e) => setBulkHostSchoolId(e.target.value)}
+                        className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-xl font-bold text-slate-800 cursor-pointer"
+                      >
+                        <option value="">-- اختر المؤسسة المحتضنة --</option>
+                        {schools.map(s => (
+                          <option key={s.id} value={s.id}>{s.name}</option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input
+                        type="text"
+                        value={bulkVenueName}
+                        onChange={(e) => setBulkVenueName(e.target.value)}
+                        placeholder="مثال: القاعة المغطاة"
+                        className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-xl font-bold text-slate-800"
+                      />
+                    )}
                   </div>
 
                   <div>
@@ -2138,14 +2234,89 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
                           </div>
 
                           <div>
-                            <label className="block text-[10px] font-bold text-slate-500 mb-0.5">الملعب / المكان:</label>
-                            <input
-                              type="text"
-                              value={match.venueName}
-                              onChange={(e) => handleUpdateMatchField(match.id, 'venueName', e.target.value)}
-                              placeholder="اسم القاعة / الملعب"
-                              className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-xl font-bold text-slate-800"
-                            />
+                            <div className="flex items-center justify-between mb-0.5">
+                              <label className="text-[10px] font-bold text-slate-500">مكان المقابلة:</label>
+                              <div className="inline-flex rounded-md bg-white border border-slate-200 p-0.5 text-[9px] font-bold">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const fallbackSchool = schools.find(s => s.id === match.hostSchoolId) || schools.find(s => s.id === match.team1Id) || schools[0];
+                                    setGeneratedMatches(prev =>
+                                      prev.map(gm =>
+                                        gm.id === match.id
+                                          ? {
+                                              ...gm,
+                                              venueMode: 'school',
+                                              hostSchoolId: fallbackSchool?.id || '',
+                                              venueId: fallbackSchool?.id || gm.venueId,
+                                              venueName: fallbackSchool?.name || gm.venueName
+                                            }
+                                          : gm
+                                      )
+                                    );
+                                  }}
+                                  className={`px-1.5 py-0.5 rounded cursor-pointer ${(match.venueMode || 'school') === 'school' ? 'bg-emerald-600 text-white' : 'text-slate-600'}`}
+                                >
+                                  🏫 مؤسسة
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setGeneratedMatches(prev =>
+                                      prev.map(gm =>
+                                        gm.id === match.id
+                                          ? {
+                                              ...gm,
+                                              venueMode: 'custom',
+                                              hostSchoolId: '',
+                                              venueId: 'custom',
+                                              venueName: gm.venueMode === 'custom' ? gm.venueName : ''
+                                            }
+                                          : gm
+                                      )
+                                    );
+                                  }}
+                                  className={`px-1.5 py-0.5 rounded cursor-pointer ${match.venueMode === 'custom' ? 'bg-emerald-600 text-white' : 'text-slate-600'}`}
+                                >
+                                  🏟️ فضاء آخر
+                                </button>
+                              </div>
+                            </div>
+                            {(match.venueMode || 'school') === 'school' ? (
+                              <select
+                                value={match.hostSchoolId || ''}
+                                onChange={(e) => {
+                                  const sch = schools.find(s => s.id === e.target.value);
+                                  setGeneratedMatches(prev =>
+                                    prev.map(gm =>
+                                      gm.id === match.id
+                                        ? {
+                                            ...gm,
+                                            venueMode: 'school',
+                                            hostSchoolId: sch?.id || '',
+                                            venueId: sch?.id || '',
+                                            venueName: sch?.name || ''
+                                          }
+                                        : gm
+                                    )
+                                  );
+                                }}
+                                className="w-full px-2 py-1.5 bg-white border border-slate-200 rounded-xl font-bold text-slate-800 cursor-pointer text-[11px]"
+                              >
+                                <option value="">-- اختر المؤسسة المحتضنة --</option>
+                                {schools.map(s => (
+                                  <option key={s.id} value={s.id}>{s.name}</option>
+                                ))}
+                              </select>
+                            ) : (
+                              <input
+                                type="text"
+                                value={match.venueName}
+                                onChange={(e) => handleUpdateMatchField(match.id, 'venueName', e.target.value)}
+                                placeholder="مثال: القاعة المغطاة..."
+                                className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-xl font-bold text-slate-800"
+                              />
+                            )}
                           </div>
 
                           {/* ⭐ MULTI-REFEREE ASSIGNMENT FIELD ⭐ */}
@@ -2241,6 +2412,22 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
                           </div>
                         </div>
 
+                        {/* Optional Match Notes Field */}
+                        <div className="pt-2 border-t border-slate-100">
+                          <input
+                            type="text"
+                            value={match.notes || ''}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setGeneratedMatches(prev =>
+                                prev.map(gm => gm.id === match.id ? { ...gm, notes: val } : gm)
+                              );
+                            }}
+                            placeholder="📝 ملاحظة اختيارية لهذه المباراة (اختياري)..."
+                            className="w-full px-2.5 py-1.5 bg-slate-50 focus:bg-white border border-slate-200 rounded-lg text-[10px] font-medium text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                          />
+                        </div>
+
                       </div>
                     );
                   })}
@@ -2269,9 +2456,142 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
             </div>
           )}
 
+          {/* ========================================================================= */}
+          {/* STEP 4: POST-SCHEDULING UNIFIED NOUVELLE DIFFUSION NOTIFICATIONS */}
+          {/* ========================================================================= */}
+          {step === 4 && selectedTournament && (
+            <div className="space-y-5">
+              <div className="p-4 sm:p-5 bg-gradient-to-r from-emerald-700 via-teal-800 to-slate-900 rounded-3xl text-white flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-md">
+                <div className="flex items-center gap-3">
+                  <div className="w-11 h-11 rounded-2xl bg-emerald-400/20 border border-emerald-300/40 flex items-center justify-center shrink-0">
+                    <CheckCircle2 className="w-6 h-6 text-emerald-300" />
+                  </div>
+                  <div>
+                    <h4 className="text-sm sm:text-base font-black text-white">
+                      تم حفظ برمجة ({generatedMatches.length}) مقابلة بنجاح!
+                    </h4>
+                    <p className="text-xs text-emerald-100/90 mt-0.5">
+                      أخبر جميع المعنيين بكل مقابلة (الحكام، مدير المؤسسة المحتضنة، ومديري وأساتذة الفريقين) بضغطة زر موحدة عبر لائحة البث (Nouvelle diffusion).
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="px-5 py-2.5 bg-white text-slate-900 hover:bg-emerald-50 rounded-xl text-xs font-black transition-colors cursor-pointer shrink-0"
+                >
+                  إنهاء وإغلاق
+                </button>
+              </div>
+
+              <div className="space-y-3 max-h-[520px] overflow-y-auto pr-1">
+                {generatedMatches.map((gm, idx) => {
+                  const assignedIds = gm.refereeIds && gm.refereeIds.length > 0
+                    ? gm.refereeIds
+                    : (gm.refereeId ? [gm.refereeId] : []);
+                  const resolvedRefereeNames = assignedIds.map((rId, rIdx) => {
+                    const refObj = combinedRefereesList.find(r => r.id === rId);
+                    return refObj?.fullName || gm.refereeNames?.[rIdx] || rId;
+                  }).filter(Boolean);
+                  const hostSch = gm.venueMode !== 'custom'
+                    ? resolveHostSchoolForMatch({ hostSchoolId: gm.hostSchoolId, venueId: gm.venueId, venueName: gm.venueName }, schools)
+                    : undefined;
+                  const genderLabel = selectedTournament.gender ? (GENDER_MAP[selectedTournament.gender]?.name || selectedTournament.gender) : undefined;
+                  const effectiveVenueName = hostSch?.name || gm.venueName || 'المكان المحدد';
+
+                  return (
+                    <div key={`wa-summary-${gm.id}`} className="bg-white border border-slate-200 rounded-2xl p-4 space-y-3 shadow-2xs">
+                      <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-slate-100">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 text-[10px] font-black">
+                            مقابلة #{idx + 1} • {gm.stage}
+                          </span>
+                          <span className="text-xs sm:text-sm font-black text-slate-900">
+                            {gm.team1Name} <span className="text-slate-400 font-normal">ضد</span> {gm.team2Name}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2 text-[11px] font-bold text-slate-600">
+                          <span>📅 {gm.date}</span>
+                          <span>⏰ {gm.time || '10:00'}</span>
+                          <span>📍 {effectiveVenueName}</span>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                        <div className="flex flex-wrap items-center gap-1.5 text-[10px] font-bold text-slate-600">
+                          {resolvedRefereeNames.length > 0 && (
+                            <span className="px-2 py-0.5 rounded-lg bg-amber-50 text-amber-800 border border-amber-200">
+                              🏁 الحكام: {resolvedRefereeNames.join(' ، ')}
+                            </span>
+                          )}
+                          {hostSch && (
+                            <span className="px-2 py-0.5 rounded-lg bg-emerald-50 text-emerald-800 border border-emerald-200">
+                              🏫 المحتضنة: {hostSch.name}
+                            </span>
+                          )}
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setDiffusionTarget({
+                              matchId: gm.id,
+                              sportId: selectedTournament.sportId,
+                              sportName: currentSportName,
+                              ageCategory: selectedTournament.ageCategory,
+                              gender: genderLabel,
+                              stageName: gm.stage,
+                              team1Id: gm.team1Id,
+                              team2Id: gm.team2Id,
+                              team1Name: gm.team1Name,
+                              team2Name: gm.team2Name,
+                              hostSchoolId: hostSch?.id || gm.hostSchoolId,
+                              venueId: gm.venueId,
+                              venueName: effectiveVenueName,
+                              dateStr: gm.date,
+                              timeStr: gm.time || '10:00',
+                              referees: resolvedRefereeNames
+                            });
+                          }}
+                          className="px-4 py-2 rounded-xl bg-gradient-to-l from-emerald-600 via-teal-600 to-emerald-700 hover:from-emerald-700 hover:to-teal-800 text-white text-xs font-black shadow-2xs transition-all cursor-pointer flex items-center justify-center gap-2 shrink-0"
+                        >
+                          <MessageCircle className="w-3.5 h-3.5 shrink-0" />
+                          <span>إخبار المعنيين بالمباراة</span>
+                          <span className="px-1.5 py-0.5 rounded bg-white/15 border border-white/25 text-[9px] font-extrabold" dir="ltr">
+                            <Share2 className="w-2.5 h-2.5 inline mr-1" />
+                            Nouvelle diffusion
+                          </span>
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className="flex justify-end pt-3 border-t border-slate-200">
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="px-7 py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-2xl text-xs font-black cursor-pointer shadow-md"
+                >
+                  إتمام وإغلاق النافذة
+                </button>
+              </div>
+            </div>
+          )}
+
         </div>
 
       </div>
+
+      <MatchBroadcastDiffusionModal
+        isOpen={Boolean(diffusionTarget)}
+        onClose={() => setDiffusionTarget(null)}
+        target={diffusionTarget}
+        schools={schools}
+        refereesList={referees}
+        teachersList={teachers}
+      />
     </div>
   );
 };

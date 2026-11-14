@@ -11,7 +11,6 @@ import {
   Trophy,
   Calendar,
   Filter,
-  Sparkles,
   Trash2,
   Users,
   Layers,
@@ -42,7 +41,6 @@ import { AthleticsChampionshipModal } from '../components/AthleticsChampionshipM
 import { EditTournamentScheduleModal } from '../components/EditTournamentScheduleModal';
 import { ProgramExportModal } from '../components/ProgramExportModal';
 import { ElectronicDrawModal, TEAM_SPORTS_IDS } from '../components/ElectronicDrawModal';
-import { DemoDataModal } from '../components/DemoDataModal';
 import { ImportParticipationsExcelModal } from '../components/ImportParticipationsExcelModal';
 import { TournamentResetModal } from '../components/TournamentResetModal';
 import { getPendingCloudSyncCount, syncPendingLocalImportsToCloud } from '../lib/excelParticipationsImportService';
@@ -116,7 +114,6 @@ export const Tournaments: React.FC = () => {
   const [isDrawModalOpen, setIsDrawModalOpen] = useState(false);
   const [selectedSportForDraw, setSelectedSportForDraw] = useState<string | undefined>(undefined);
   const [selectedTournamentForDraw, setSelectedTournamentForDraw] = useState<string | undefined>(undefined);
-  const [isDemoDataModalOpen, setIsDemoDataModalOpen] = useState(false);
   const [isImportExcelModalOpen, setIsImportExcelModalOpen] = useState(false);
   const [isResetModalOpen, setIsResetModalOpen] = useState(false);
   const [pendingCloudSyncCount, setPendingCloudSyncCount] = useState<number>(() => getPendingCloudSyncCount());
@@ -648,118 +645,6 @@ export const Tournaments: React.FC = () => {
     }
   };
 
-  const handleGenerateCcMockData = async () => {
-    const activeDirId = DataService.getActiveDirectorateId();
-    const loadToastId = toast.loading('جاري توليد معطيات العدو الريفي لـ 5 مؤسسات تعليمية (8 مشاركين لكل مؤسسة: 3 فردي و 5 فريق)... ⏳');
-    try {
-      // 1. Define exactly 5 educational institutions to use for cross-country
-      const ccSchoolsData: Omit<School, 'id'>[] = [
-        { name: 'ثانوية الفتح التأهيلية', type: 'high', directorateId: activeDirId, commune: 'تاوريرت المركز', teacherName: 'ذ. عبد الرحيم بلقاسم' },
-        { name: 'ثانوية علال الفاسي التأهيلية', type: 'high', directorateId: activeDirId, commune: 'العيون سيدي ملوك', teacherName: 'ذ. رشيد الداودي' },
-        { name: 'إعدادية ابن سينا', type: 'middle', directorateId: activeDirId, commune: 'تاوريرت', teacherName: 'ذة. فاطمة الزهراء بنعلي' },
-        { name: 'إعدادية سيدي لحسن', type: 'middle', directorateId: activeDirId, commune: 'سيدي لحسن', teacherName: 'ذ. حميد بنعيسى' },
-        { name: 'مدرسة المسيرة الابتدائية', type: 'primary', directorateId: activeDirId, commune: 'تاوريرت', teacherName: 'ذ. يوسف المراكشي' }
-      ];
-
-      let currentSchools = await DataService.getSchools();
-      let targetSchools: School[] = [];
-
-      for (const mockSch of ccSchoolsData) {
-        const existing = currentSchools.find(s => s.name === mockSch.name && s.directorateId === activeDirId);
-        if (existing) {
-          targetSchools.push(existing);
-        } else {
-          const added = await DataService.addSchoolsBulk([mockSch]);
-          targetSchools.push(added[0]);
-          currentSchools.push(added[0]);
-        }
-      }
-      setSchools(currentSchools);
-
-      // 2. Define the 8 categories with their exact gender, category ID, correct birth date ranges and school type preferences
-      const categoriesToGenerate = [
-        { category: 'U12', gender: 'Male' as const, schoolType: 'primary', minYear: 2014, maxYear: 2016 },
-        { category: 'U12', gender: 'Female' as const, schoolType: 'primary', minYear: 2014, maxYear: 2016 },
-        { category: 'U15', gender: 'Male' as const, schoolType: 'middle', minYear: 2012, maxYear: 2013 },
-        { category: 'U15', gender: 'Female' as const, schoolType: 'middle', minYear: 2012, maxYear: 2013 },
-        { category: 'U18', gender: 'Male' as const, schoolType: 'high', minYear: 2010, maxYear: 2011 },
-        { category: 'U18', gender: 'Female' as const, schoolType: 'high', minYear: 2010, maxYear: 2011 },
-        { category: 'U20', gender: 'Male' as const, schoolType: 'high', minYear: 2008, maxYear: 2009 },
-        { category: 'U20', gender: 'Female' as const, schoolType: 'high', minYear: 2008, maxYear: 2009 },
-      ];
-
-      // Sample first names and last names for realistic random name generation
-      const boysNames = ['محمد', 'أحمد', 'يوسف', 'حمزة', 'ياسين', 'أمين', 'سفيان', 'أيوب', 'سعد', 'عمر', 'عبد الرحمن', 'معاذ', 'عثمان', 'ريان', 'مهدي', 'أنس', 'وليد', 'إلياس', 'صلاح', 'حاتم'];
-      const girlsNames = ['آية', 'فاطمة الزهراء', 'مريم', 'إيمان', 'ياسمين', 'نهيلة', 'سلمى', 'هبة', 'زينب', 'خديجة', 'دعاء', 'سارة', 'شيماء', 'صفاء', 'وئام', 'حفصة', 'ندى', 'كوثر', 'عبير', 'غزلان'];
-      const lastNames = ['العلوي', 'الإدريسي', 'الداودي', 'التازي', 'العراقي', 'البقالي', 'الفاسي', 'بلمقدم', 'منصور', 'العمراني', 'اليوسفي', 'رحماني', 'الناصري', 'الصنهاجي', 'الوردي', 'مرابط', 'الخطابي', 'بوزيان', 'بناني', 'الحسني'];
-
-      const newStudentsToCreate: any[] = [];
-
-      for (const catConfig of categoriesToGenerate) {
-        // Generate exactly 8 students for each of the 5 schools
-        for (const school of targetSchools) {
-          for (let i = 0; i < 8; i++) {
-            const isBoy = catConfig.gender === 'Male';
-            const randomFirst = isBoy 
-              ? boysNames[Math.floor(Math.random() * boysNames.length)] 
-              : girlsNames[Math.floor(Math.random() * girlsNames.length)];
-            const randomLast = lastNames[Math.floor(Math.random() * lastNames.length)];
-            const fullName = `${randomFirst} ${randomLast}`;
-
-            // Generate a valid year and a random birthdate
-            const birthYear = Math.floor(Math.random() * (catConfig.maxYear - catConfig.minYear + 1)) + catConfig.minYear;
-            const birthMonth = String(Math.floor(Math.random() * 12) + 1).padStart(2, '0');
-            const birthDay = String(Math.floor(Math.random() * 28) + 1).padStart(2, '0');
-            const birthDate = `${birthYear}-${birthMonth}-${birthDay}`;
-
-            // MASSAR number G130000000
-            const massarLetter = 'GHJKLM'.charAt(Math.floor(Math.random() * 6));
-            const massarNum = String(Math.floor(100000000 + Math.random() * 900000000));
-            const massarNumber = `${massarLetter}${massarNum}`;
-
-            // 3 فردي و 5 فريق المؤسسة
-            const participationType = i < 3 ? 'individual' : 'school_team';
-            const affiliationType = Math.random() < 0.1 ? 'club_affiliated' : 'non_club';
-
-            newStudentsToCreate.push({
-              fullName,
-              massarNumber,
-              gender: catConfig.gender,
-              birthDate,
-              category: catConfig.category,
-              schoolId: school.id,
-              schoolName: school.name,
-              sportId: 'cross_country',
-              affiliationType,
-              participationType,
-              distance: catConfig.category === 'U12' ? '1500 م' : catConfig.category === 'U15' ? '2500 م' : catConfig.category === 'U18' ? '3500 م' : '5000 م',
-              coachName: isBoy ? 'أستاذ التربية البدنية ذكور' : 'أستاذة التربية البدنية إناث',
-              coachLeaseNumber: '9988' + String(10 + Math.floor(Math.random() * 90)),
-              coachPhone: '06' + String(10000000 + Math.floor(Math.random() * 90000000)),
-              directorateId: activeDirId
-            });
-          }
-        }
-      }
-
-      // Add all students bulk to Firestore & local storage
-      const addedStudents = await DataService.addStudentsBulk(newStudentsToCreate);
-      
-      // Update local state
-      setAllStudents(prev => [...addedStudents, ...prev]);
-
-      toast.dismiss(loadToastId);
-      toast.success(`🎉 تم توليد وإضافة ${addedStudents.length} تلميذاً وتلميذة بنجاح لـ 5 مؤسسات تعليمية (8 مشاركين لكل مؤسسة: 3 فردي و 5 فريق المؤسسة) للفئات الثمانية للعدو الريفي!`);
-      
-      // Trigger data reload to recalculate counts instantly
-      await loadData();
-    } catch (error) {
-      console.error('Error generating cc mock data:', error);
-      toast.dismiss(loadToastId);
-      toast.error('حدث خطأ غير متوقع أثناء توليد البيانات الافتراضية.');
-    }
-  };
-
   const handleExportAllCrossCountry = async () => {
     const loadToastId = toast.loading('جاري تحضير وتصدير ملف فئات العدو الريفي الثمانية...');
     try {
@@ -1013,15 +898,15 @@ export const Tournaments: React.FC = () => {
       ) : (
         <div className="space-y-4">
           {/* Top action header */}
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-4 md:p-5 rounded-2xl border border-slate-200 shadow-3xs">
-            <div>
-              <div className="flex items-center gap-2">
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 bg-white p-3.5 sm:p-4 md:p-5 rounded-2xl border border-slate-200 shadow-3xs">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
                 <h2 className="text-base md:text-lg font-black text-slate-800">
                   {activeBranch === 'regional' && 'البطولة الجهوية للرياضة المدرسية (جهة الشرق)'}
                   {activeBranch === 'national' && 'البطولة الوطنية المدرسية (الجامعة الملكية المغربية للرياضة المدرسية)'}
                   {activeBranch === 'provincial' && `بطولات الرياضات الإقليمية (${activeDirObj?.name || 'المديرية الإقليمية'})`}
                 </h2>
-                <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full border ${
+                <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full border shrink-0 ${
                   activeBranch === 'regional' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
                   activeBranch === 'national' ? 'bg-amber-50 text-amber-700 border-amber-200' :
                   'bg-blue-50 text-blue-700 border-blue-200'
@@ -1029,28 +914,28 @@ export const Tournaments: React.FC = () => {
                   {activeBranch === 'regional' ? 'أكاديمية جهة الشرق' : activeBranch === 'national' ? 'القطاع الوطني' : (activeDirObj?.shortName || activeDirObj?.name || 'المديرية الإقليمية')}
                 </span>
               </div>
-              <p className="text-xs text-slate-500 font-medium mt-0.5">
+              <p className="text-xs text-slate-500 font-medium mt-1 leading-relaxed">
                 {activeBranch === 'regional' && 'استعراض ومتابعة البطولات والتأهيلات الجهوية على مستوى كافة مديريات جهة الشرق.'}
                 {activeBranch === 'national' && 'برمجة وتتبع المشاركات في البطولات الوطنية المدرسية المنظمة تحت إشراف الوزارة والجامعة الملكية.'}
                 {activeBranch === 'provincial' && 'تجميع كافة الفئات داخل بطولة كل رياضة. تكون الرياضات غير المعدة باللون الرمادي إلى حين إعداد ضوابطها وبرمجتها.'}
               </p>
             </div>
 
-            {/* Level switcher pills (only shown if qualified or admin) */}
-            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0 shrink-0">
+            {/* Level switcher & action buttons — cleanly wrapped for mobile with zero horizontal scrolling */}
+            <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-stretch sm:items-center gap-2 w-full lg:w-auto">
               <button
                 type="button"
                 onClick={() => {
                   setActiveBranch('provincial');
                   setSearchParams({ tab: 'provincial' });
                 }}
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
+                className={`px-2.5 sm:px-3 py-2 sm:py-1.5 rounded-xl text-[11px] sm:text-xs font-bold transition-all text-center justify-center flex items-center gap-1.5 cursor-pointer ${
                   activeBranch === 'provincial'
                     ? 'bg-blue-600 text-white shadow-xs'
                     : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                 }`}
               >
-                🏆 البطولة الإقليمية
+                <span>🏆 البطولة الإقليمية</span>
               </button>
 
               {hasRegionalQualification && (
@@ -1060,13 +945,13 @@ export const Tournaments: React.FC = () => {
                     setActiveBranch('regional');
                     setSearchParams({ tab: 'regional' });
                   }}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
+                  className={`px-2.5 sm:px-3 py-2 sm:py-1.5 rounded-xl text-[11px] sm:text-xs font-bold transition-all text-center justify-center flex items-center gap-1.5 cursor-pointer ${
                     activeBranch === 'regional'
                       ? 'bg-emerald-600 text-white shadow-xs'
                       : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                   }`}
                 >
-                  🏅 البطولة الجهوية
+                  <span>🏅 البطولة الجهوية</span>
                 </button>
               )}
 
@@ -1077,13 +962,13 @@ export const Tournaments: React.FC = () => {
                     setActiveBranch('national');
                     setSearchParams({ tab: 'national' });
                   }}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
+                  className={`px-2.5 sm:px-3 py-2 sm:py-1.5 rounded-xl text-[11px] sm:text-xs font-bold transition-all text-center justify-center flex items-center gap-1.5 cursor-pointer ${
                     activeBranch === 'national'
                       ? 'bg-amber-600 text-white shadow-xs'
                       : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                   }`}
                 >
-                  🥇 البطولة الوطنية
+                  <span>🥇 البطولة الوطنية</span>
                 </button>
               )}
 
@@ -1095,10 +980,10 @@ export const Tournaments: React.FC = () => {
                     setPreselectedSportId(undefined);
                     setIsModalOpen(true);
                   }}
-                  className="px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer bg-blue-600 hover:bg-blue-700 text-white shadow-xs flex items-center gap-1.5"
+                  className="px-2.5 sm:px-3 py-2 sm:py-1.5 rounded-xl text-[11px] sm:text-xs font-bold transition-all cursor-pointer bg-blue-600 hover:bg-blue-700 text-white shadow-xs flex items-center justify-center gap-1.5 text-center"
                   title="إضافة بطولة إقليمية جديدة وبرمجتها"
                 >
-                  <Plus className="w-3.5 h-3.5" />
+                  <Plus className="w-3.5 h-3.5 shrink-0" />
                   <span>إضافة بطولة جديدة</span>
                 </button>
               )}
@@ -1108,10 +993,10 @@ export const Tournaments: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setIsImportExcelModalOpen(true)}
-                  className="px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer bg-emerald-700 hover:bg-emerald-800 text-white shadow-xs flex items-center gap-1.5"
+                  className="col-span-2 sm:col-span-1 px-2.5 sm:px-3 py-2 sm:py-1.5 rounded-xl text-[11px] sm:text-xs font-bold transition-all cursor-pointer bg-emerald-700 hover:bg-emerald-800 text-white shadow-xs flex items-center justify-center gap-1.5 text-center"
                   title="استيراد ملف إكسيل شامل (الأساتذة، المؤسسات، ومشاركات البطولات من الأعمدة G إلى P مع الاحتفاظ بالمعطيات السابقة)"
                 >
-                  <FileSpreadsheet className="w-3.5 h-3.5" />
+                  <FileSpreadsheet className="w-3.5 h-3.5 shrink-0" />
                   <span>استيراد ملف المشاركات (Excel)</span>
                 </button>
               )}
@@ -1122,13 +1007,13 @@ export const Tournaments: React.FC = () => {
                   type="button"
                   onClick={handleManualCloudSync}
                   disabled={isSyncingPendingCloud}
-                  className="px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer bg-amber-600 hover:bg-amber-700 text-white shadow-xs flex items-center gap-1.5 disabled:opacity-60"
+                  className="col-span-2 sm:col-span-1 px-2.5 sm:px-3 py-2 sm:py-1.5 rounded-xl text-[11px] sm:text-xs font-bold transition-all cursor-pointer bg-amber-600 hover:bg-amber-700 text-white shadow-xs flex items-center justify-center gap-1.5 text-center disabled:opacity-60"
                   title="مزامنة المعطيات المحفوظة محلياً مع قاعدة بيانات السحابة بعد تجدد الحصة اليومية"
                 >
                   {isSyncingPendingCloud ? (
-                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin shrink-0" />
                   ) : (
-                    <UploadCloud className="w-3.5 h-3.5" />
+                    <UploadCloud className="w-3.5 h-3.5 shrink-0" />
                   )}
                   <span className="tabular-nums">مزامنة المحفوظات المحلية ({pendingCloudSyncCount})</span>
                 </button>
@@ -1139,24 +1024,11 @@ export const Tournaments: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setIsDrawModalOpen(true)}
-                  className="px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 text-white shadow-xs flex items-center gap-1.5"
+                  className="px-2.5 sm:px-3 py-2 sm:py-1.5 rounded-xl text-[11px] sm:text-xs font-bold transition-all cursor-pointer bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 text-white shadow-xs flex items-center justify-center gap-1.5 text-center"
                   title="إجراء القرعة الإلكترونية وبرمجة المباريات وتعيين الحكام"
                 >
-                  <Shuffle className="w-3.5 h-3.5" />
+                  <Shuffle className="w-3.5 h-3.5 shrink-0" />
                   <span>القرعة الإلكترونية والمباريات</span>
-                </button>
-              )}
-
-              {/* Demo Data Generator Button (Hidden for teachers) */}
-              {!isTeacherRole && userProfile?.role !== 'TEACHER' && (
-                <button
-                  type="button"
-                  onClick={() => setIsDemoDataModalOpen(true)}
-                  className="px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer bg-slate-800 hover:bg-slate-900 text-white shadow-xs flex items-center gap-1.5"
-                  title="توليد بيانات تجريبية وبطولات ونتائج للمنصة"
-                >
-                  <Sparkles className="w-3.5 h-3.5 text-emerald-200" />
-                  <span>توليد بيانات افتراضية</span>
                 </button>
               )}
 
@@ -1166,14 +1038,14 @@ export const Tournaments: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setIsResetModalOpen(true)}
-                  className="px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer bg-rose-600 hover:bg-rose-700 text-white shadow-xs flex items-center gap-1.5"
+                  className="px-2.5 sm:px-3 py-2 sm:py-1.5 rounded-xl text-[11px] sm:text-xs font-bold transition-all cursor-pointer bg-rose-600 hover:bg-rose-700 text-white shadow-xs flex items-center justify-center gap-1.5 text-center"
                   title={
                     isCentralAdmin
                       ? 'تصفير نتائج المباريات أو المباريات المبرمجة لجميع البطولات أو لبطولة معينة'
                       : 'تصفير نتائج المباريات أو المباريات المبرمجة الخاصة برياضتك فقط'
                   }
                 >
-                  <RotateCcw className="w-3.5 h-3.5" />
+                  <RotateCcw className="w-3.5 h-3.5 shrink-0" />
                   <span>تصفير</span>
                 </button>
               )}
@@ -1234,12 +1106,12 @@ export const Tournaments: React.FC = () => {
 
         <div className="flex flex-wrap items-center gap-2.5 w-full md:w-auto border-t md:border-t-0 md:border-r border-slate-100 pt-2 md:pt-0 md:pr-3 shrink-0">
           {/* Status Filter */}
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1.5 flex-1 sm:flex-initial min-w-[140px]">
             <span className="text-[11px] font-bold text-slate-500 whitespace-nowrap">الحالة:</span>
             <select
               value={filterStatus}
               onChange={(e) => setFilterStatus(e.target.value as any)}
-              className="text-xs font-bold text-slate-700 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl px-2.5 py-1.5 focus:outline-none cursor-pointer"
+              className="w-full sm:w-auto text-xs font-bold text-slate-700 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl px-2.5 py-1.5 focus:outline-none cursor-pointer"
             >
               <option value="ALL">{isTeacherRole ? '🟢 جميع البطولات المفعلة' : 'جميع الحالات'}</option>
               {!isTeacherRole && (
@@ -1255,12 +1127,12 @@ export const Tournaments: React.FC = () => {
           </div>
 
           {/* Sport Filter Dropdown */}
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1.5 flex-1 sm:flex-initial min-w-[140px]">
             <span className="text-[11px] font-bold text-slate-500 whitespace-nowrap">الرياضة:</span>
             <select
               value={filterSport}
               onChange={(e) => setFilterSport(e.target.value)}
-              className="text-xs font-bold text-slate-700 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl px-2.5 py-1.5 focus:outline-none cursor-pointer max-w-[160px]"
+              className="w-full sm:w-auto text-xs font-bold text-slate-700 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl px-2.5 py-1.5 focus:outline-none cursor-pointer sm:max-w-[160px]"
             >
               <option value="ALL">🏆 جميع الرياضات</option>
               {(isTeacherRole
@@ -1428,23 +1300,6 @@ export const Tournaments: React.FC = () => {
                         </span>
                       </div>
 
-                      {/* Mock Data Generation Button for Central Admin */}
-                      {isCentralAdmin && (
-                        <div className="flex justify-end pt-1">
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleGenerateCcMockData();
-                            }}
-                            title="توليد معطيات لـ 5 مؤسسات تعليمية بـ 8 مشاركين (3 فردي و5 فريق) لكل فئة"
-                            className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 text-[10px] font-black rounded-lg transition-all shadow-xs cursor-pointer select-none"
-                            id="btn-generate-cc-mock"
-                          >
-                            <span>⚡ توليد بيانات العدو الريفي (8 مشاركين/مؤسسة)</span>
-                          </button>
-                        </div>
-                      )}
                     </div>
 
                     <div className="p-3 bg-white/10 border-t border-white/10 flex items-center justify-between gap-2">
@@ -2058,16 +1913,6 @@ export const Tournaments: React.FC = () => {
         onMatchesCreated={loadData}
         initialSportId={selectedSportForDraw}
         initialTournamentId={selectedTournamentForDraw}
-      />
-
-      {/* Demo Data Seeder Modal for Testing */}
-      <DemoDataModal
-        isOpen={isDemoDataModalOpen}
-        onClose={() => setIsDemoDataModalOpen(false)}
-        activeDirectorateId={activeDirObj?.id || DataService.getActiveDirectorateId()}
-        activeDirectorateName={activeDirObj?.name || 'المديرية الإقليمية'}
-        activeSeason={activeSeason}
-        onDataLoaded={loadData}
       />
 
       {/* Comprehensive Excel Import Modal (Teachers + Schools + Sport Participations G..P) */}

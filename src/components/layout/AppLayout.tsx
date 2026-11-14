@@ -897,9 +897,9 @@ export const AppLayout: React.FC = () => {
       </aside>
 
       {/* Main App Container */}
-      <div className="flex flex-1 flex-col overflow-hidden bg-slate-50 dark:bg-[#0b0f1a] transition-colors duration-300">
+      <div className="flex flex-1 flex-col min-w-0 overflow-hidden bg-slate-50 dark:bg-[#0b0f1a] transition-colors duration-300">
         {/* Top Header - High Density Crisp Style */}
-        <header className="h-16 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between px-3 sm:px-4 md:px-8 z-10 shadow-[0_1px_3px_rgba(0,0,0,0.02)] transition-colors">
+        <header className="h-16 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between gap-2 px-2.5 sm:px-4 md:px-8 z-10 shadow-[0_1px_3px_rgba(0,0,0,0.02)] transition-colors">
           <div className="flex items-center gap-2 sm:gap-3 min-w-0">
             {/* Mobile menu trigger & AppLogo */}
             <div className="flex items-center gap-1.5 md:hidden shrink-0">
@@ -1053,7 +1053,7 @@ export const AppLayout: React.FC = () => {
             )}
           </div>
 
-          <div className="flex items-center gap-2 sm:gap-2.5 md:gap-3">
+          <div className="flex items-center gap-1.5 sm:gap-2.5 md:gap-3 shrink-0">
             {/* Dark Mode Toggle Button (Identical to Homepage) */}
             <button
               type="button"
@@ -1227,13 +1227,15 @@ export const AppLayout: React.FC = () => {
 
             {/* Quick Action Button - Central Admin Only */}
             {isCentralAdmin && (
-              <div className="flex items-center gap-2">
+              <div className="flex items-center">
                 <button
+                  type="button"
                   onClick={() => navigate('/tournaments')}
-                  className="bg-emerald-600 hover:bg-emerald-700 text-white px-3.5 py-2 rounded-xl text-xs font-black flex items-center gap-1.5 shadow-xs shadow-emerald-600/20 active:scale-98 transition-all cursor-pointer"
+                  title="إضافة بطولة جديدة"
+                  aria-label="إضافة بطولة جديدة"
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white w-9 h-9 rounded-xl flex items-center justify-center shadow-xs shadow-emerald-600/20 active:scale-95 transition-all cursor-pointer shrink-0"
                 >
-                  <Plus className="h-3.5 w-3.5" />
-                  <span>بطولة جديدة</span>
+                  <Plus className="h-4.5 w-4.5 shrink-0" />
                 </button>
               </div>
             )}
@@ -1431,7 +1433,7 @@ export const AppLayout: React.FC = () => {
         )}
 
         {/* Content Viewport */}
-        <main className="flex-1 overflow-y-auto bg-slate-50 dark:bg-[#0b0f1a] p-4 md:p-6 transition-colors">
+        <main className="flex-1 overflow-y-auto overflow-x-hidden bg-slate-50 dark:bg-[#0b0f1a] p-3 sm:p-4 md:p-6 transition-colors">
           <Outlet />
         </main>
       </div>

@@ -192,7 +192,6 @@ export const PublicResults: React.FC = () => {
     // 1. Process results from athResults (DataService / Firestore / taourirt_athletics_results)
     (Object.values(athResults) as AthleticsCategoryResult[]).forEach(res => {
       if (res && res.podium && res.podium.length > 0) {
-        // If validated or completed
         if ((res as any).isFinallyValidated === true || res.status === 'completed') {
           seenIds.add(res.id);
           list.push({
@@ -202,6 +201,7 @@ export const PublicResults: React.FC = () => {
             specialtyName: res.specialtyName,
             specialtyType: res.specialtyType || 'track',
             status: 'completed',
+            approvalStatus: res.approvalStatus || ((res as any).isFinallyValidated === false ? 'provisional' : 'approved'),
             directorateId: res.directorateId || selectedDirId,
             podium: res.podium
           });
@@ -209,12 +209,12 @@ export const PublicResults: React.FC = () => {
       }
     });
     
-    // 2. Also include validated results directly from AthleticsService
+    // 2. Also include completed results (provisional or validated) directly from AthleticsService
     const customAthResults = AthleticsService.getAllResults();
     const disciplines = AthleticsService.getDisciplines();
 
     Object.values(customAthResults).forEach(res => {
-      if (res.status === 'completed' && res.isFinallyValidated === true && !seenIds.has(res.id)) {
+      if (res.status === 'completed' && !seenIds.has(res.id)) {
         const disc = disciplines.find(d => d.id === res.disciplineId);
         const specName = disc?.nameAr || res.disciplineId;
         
@@ -251,6 +251,7 @@ export const PublicResults: React.FC = () => {
             specialtyName: specName,
             specialtyType: res.type === 'field' ? 'field' : 'track',
             status: 'completed',
+            approvalStatus: res.approvalStatus || (res.isFinallyValidated === false ? 'provisional' : 'approved'),
             directorateId: selectedDirId,
             podium: podiumItems
           });
@@ -364,7 +365,7 @@ export const PublicResults: React.FC = () => {
             </span>
           </div>
 
-          <div className="flex items-center gap-1.5 overflow-x-auto pb-1.5 no-scrollbar scroll-smooth">
+          <div className="flex flex-wrap items-center gap-1.5">
             {availableSportsList.map(sport => {
               const isSelected = selectedSportId === sport.id;
               return (
@@ -372,7 +373,7 @@ export const PublicResults: React.FC = () => {
                   key={sport.id}
                   onClick={() => setSelectedSportId(sport.id)}
                   className={cn(
-                    "flex items-center gap-1.5 px-3.5 py-2 rounded-2xl text-xs font-black transition-all cursor-pointer shrink-0 border",
+                    "flex items-center gap-1.5 px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-2xl text-[11px] sm:text-xs font-black transition-all cursor-pointer border",
                     isSelected
                       ? "bg-slate-900 text-white border-slate-900 shadow-md ring-2 ring-slate-900/20"
                       : "bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200"
@@ -465,14 +466,24 @@ export const PublicResults: React.FC = () => {
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3 gap-6 lg:gap-8">
                 {crossCountryList.map(cat => (
                   <div key={cat.key} className="bg-white rounded-3xl p-6 sm:p-7 lg:p-8 border border-slate-200 shadow-sm hover:shadow-md transition-all space-y-6">
-                    <div className="flex items-center gap-3 border-b border-slate-100 pb-3">
-                      <div className="p-2 bg-amber-500 text-white rounded-xl shadow-xs">
-                        <Trophy className="w-5 h-5" />
+                    <div className="flex items-center justify-between gap-2 border-b border-slate-100 pb-3">
+                      <div className="flex items-center gap-3">
+                        <div className="p-2 bg-amber-500 text-white rounded-xl shadow-xs">
+                          <Trophy className="w-5 h-5" />
+                        </div>
+                        <div>
+                          <h3 className="text-sm sm:text-base font-black text-slate-900">{cat.categoryName}</h3>
+                          <p className="text-[11px] text-slate-500 font-bold">المسافة: {cat.distance}</p>
+                        </div>
                       </div>
-                      <div>
-                        <h3 className="text-sm sm:text-base font-black text-slate-900">{cat.categoryName}</h3>
-                        <p className="text-[11px] text-slate-500 font-bold">منصة التتويج الرسمية • المسافة: {cat.distance}</p>
-                      </div>
+                      <span className={cn(
+                        "px-2.5 py-1 rounded-full text-[10px] font-black border shrink-0",
+                        cat.approvalStatus === 'provisional'
+                          ? "bg-amber-50 text-amber-800 border-amber-300"
+                          : "bg-emerald-50 text-emerald-700 border-emerald-200"
+                      )}>
+                        {cat.approvalStatus === 'provisional' ? '⏳ نتائج أولية' : '✅ مصادق عليها'}
+                      </span>
                     </div>
 
                     {/* Podium Display */}
@@ -556,7 +567,7 @@ export const PublicResults: React.FC = () => {
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3 gap-6 lg:gap-8">
                 {athleticsList.map((ath, idx) => (
                   <div key={`ath-${ath.id}-${idx}`} className="bg-white rounded-3xl p-6 sm:p-7 lg:p-8 border border-slate-200 shadow-sm hover:shadow-md transition-all space-y-6">
-                    <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                    <div className="flex items-center justify-between gap-2 border-b border-slate-100 pb-3">
                       <div className="flex items-center gap-3">
                         <div className="p-2 bg-emerald-500 text-white rounded-xl shadow-xs">
                           <Award className="w-5 h-5" />
@@ -566,6 +577,14 @@ export const PublicResults: React.FC = () => {
                           <p className="text-[11px] text-slate-500 font-bold">{ath.category} - {ath.gender === 'Male' ? 'ذكور' : 'إناث'}</p>
                         </div>
                       </div>
+                      <span className={cn(
+                        "px-2.5 py-1 rounded-full text-[10px] font-black border shrink-0",
+                        ath.approvalStatus === 'provisional'
+                          ? "bg-amber-50 text-amber-800 border-amber-300"
+                          : "bg-emerald-50 text-emerald-700 border-emerald-200"
+                      )}>
+                        {ath.approvalStatus === 'provisional' ? '⏳ نتائج أولية' : '✅ مصادق عليها'}
+                      </span>
                     </div>
 
                     <div className="grid grid-cols-3 gap-2 items-end pt-6 pb-2">
@@ -664,10 +683,19 @@ export const PublicResults: React.FC = () => {
                         </div>
                         <span className={cn(
                           "px-2 py-0.5 rounded-full font-bold",
-                          m.status?.toLowerCase() === 'completed' ? "bg-emerald-50 text-emerald-700 border border-emerald-200" :
-                          m.status?.toLowerCase() === 'ongoing' ? "bg-red-50 text-red-700 animate-pulse border border-red-200" : "bg-amber-50 text-amber-700 border border-amber-200"
+                          m.status?.toLowerCase() === 'completed'
+                            ? m.approvalStatus === 'provisional'
+                              ? "bg-amber-50 text-amber-800 border border-amber-300"
+                              : "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                            : m.status?.toLowerCase() === 'ongoing'
+                              ? "bg-red-50 text-red-700 animate-pulse border border-red-200"
+                              : "bg-amber-50 text-amber-700 border border-amber-200"
                         )}>
-                          {m.status?.toLowerCase() === 'completed' ? '🏆 منتهية' : m.status?.toLowerCase() === 'ongoing' ? '🔴 جارية' : '📅 مبرمجة'}
+                          {m.status?.toLowerCase() === 'completed'
+                            ? (m.approvalStatus === 'provisional' ? '⏳ نتيجة أولية' : '✅ مصادق عليها')
+                            : m.status?.toLowerCase() === 'ongoing'
+                              ? '🔴 جارية'
+                              : '📅 مبرمجة'}
                         </span>
                       </div>
 

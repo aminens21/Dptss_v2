@@ -146,7 +146,19 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
   const [endDate, setEndDate] = useState('2026-03-30');
   const [registrationDeadline, setRegistrationDeadline] = useState('2026-02-28T23:59');
   const [description, setDescription] = useState('');
+  const [maxRosterLimit, setMaxRosterLimit] = useState<number>(12);
   const [isEditing, setIsEditing] = useState(false);
+
+  // Sync maxRosterLimit when sport or sportsConfig changes
+  useEffect(() => {
+    if (activeSportConfig && typeof activeSportConfig.studentLimit === 'number' && activeSportConfig.studentLimit > 0) {
+      setMaxRosterLimit(activeSportConfig.studentLimit);
+    } else if (sportId === 'cross_country') {
+      setMaxRosterLimit(8);
+    } else {
+      setMaxRosterLimit(12);
+    }
+  }, [activeSportConfig?.id, activeSportConfig?.studentLimit, sportId]);
 
   // Auto-prefill existing tournament data for sport if present
   useEffect(() => {
@@ -344,6 +356,15 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
             });
           }
         }
+      }
+
+      // Sync unified max roster limit per participation list across all branches of this sport
+      try {
+        if (maxRosterLimit > 0) {
+          await DataService.updateSportRosterLimit(sportId, maxRosterLimit);
+        }
+      } catch (err) {
+        console.warn("Could not updateSportRosterLimit:", err);
       }
 
       // Sync sport dates & settings across tournaments
@@ -751,7 +772,50 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
               className="w-full text-xs rounded-xl border border-amber-300 bg-white px-3 py-2 text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-500 font-semibold"
             />
             <p className="text-[10px] text-amber-700 mt-1">
-              بعد هذا الموعد، يقفل نظام التسجيل أوتوماتيكياً أمام الأساتذة ولا يمكن إضافة مشاركين جدد.
+              بعد هذا الموعد أو بعد انطلاق البطولة، يظل بإمكان الأستاذ(ة) تعويض أي مشارك(ة) في لائحة مؤسسته دون تجاوز العدد الأقصى المسموح به أدناه.
+            </p>
+          </div>
+
+          {/* Unified Maximum Participants in Participation List (تحديد العدد الأقصى المسموح به في لائحة المشاركة) */}
+          <div className="space-y-2.5 p-3.5 bg-indigo-50/70 border border-indigo-200 rounded-2xl">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <label className="text-xs font-black text-indigo-950 flex items-center gap-1.5">
+                <Users className="w-4 h-4 text-indigo-700 shrink-0" />
+                <span>العدد الأقصى المسموح به في لائحة المشاركة (موحد لجميع الفروع) *</span>
+              </label>
+              <div className="flex items-center gap-1.5">
+                <input
+                  type="number"
+                  min={1}
+                  max={60}
+                  required
+                  value={maxRosterLimit}
+                  onChange={(e) => setMaxRosterLimit(Math.max(1, parseInt(e.target.value || '1', 10)))}
+                  className="w-20 px-2.5 py-1.5 bg-white border border-indigo-300 rounded-xl text-xs font-black text-indigo-950 text-center tabular-nums focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+                <span className="text-[11px] font-bold text-indigo-800">مشارك(ة)</span>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-1.5">
+              {[5, 6, 8, 10, 12, 14, 15, 16, 18].map(preset => (
+                <button
+                  key={preset}
+                  type="button"
+                  onClick={() => setMaxRosterLimit(preset)}
+                  className={`px-2.5 py-1 rounded-lg text-[11px] font-black tabular-nums border transition-all cursor-pointer ${
+                    maxRosterLimit === preset
+                      ? 'bg-indigo-600 text-white border-indigo-600 shadow-2xs'
+                      : 'bg-white text-slate-700 border-slate-200 hover:bg-indigo-100/70'
+                  }`}
+                >
+                  {preset}
+                </button>
+              ))}
+            </div>
+
+            <p className="text-[10.5px] text-indigo-900 leading-relaxed font-medium">
+              يُطبّق هذا السقف بشكل موحد على جميع فروع نفس البطولة، ويُمكّن الأستاذ(ة) من تعويض أي مشارك أو مشاركة حتى بعد انطلاق البطولة شريطة ألا يتجاوز العدد المسجل في لائحة الفرع هذا الحد الأقصى.
             </p>
           </div>
 

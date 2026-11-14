@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { DataService, SPORTS_MAP, AGE_CATEGORIES, deduplicateById, generateSecureAccessCode, getEffectiveConfirmedBranches, formatBranchLabelAr, normalizeCategoryKey, ConfirmedBranchTuple } from '../lib/dataService';
+import { DataService, SPORTS_MAP, AGE_CATEGORIES, deduplicateById, generateSecureAccessCode, getEffectiveConfirmedBranches, formatBranchLabelAr, normalizeCategoryKey, ConfirmedBranchTuple, normalizeSchoolCycleType } from '../lib/dataService';
 import { School, Match, Directorate } from '../types';
 import { useSchoolConfirmations } from '../hooks/useSchoolConfirmations';
 import * as XLSX from 'xlsx';
@@ -63,6 +63,7 @@ export const Schools: React.FC = () => {
     if (lvl === 'PRIMARY') return 'ابتدائي';
     if (lvl === 'MIDDLE') return 'إعدادي';
     if (lvl === 'HIGH') return 'تأهيلي';
+    if (lvl === 'PRIVATE') return 'خصوصي';
     return 'ALL';
   };
 
@@ -302,7 +303,7 @@ export const Schools: React.FC = () => {
     try {
       const headers = [
         'اسم المؤسسة التعليمية *',
-        'السلك التعليمي (تأهيلي / إعدادي / ابتدائي)',
+        'السلك التعليمي (تأهيلي / إعدادي / ابتدائي / خصوصي)',
         'الجماعة / الدائرة',
         'اسم المنسق (أستاذ التربية البدنية)',
         'هاتف المنسق',
@@ -337,6 +338,15 @@ export const Schools: React.FC = () => {
           '0665678901',
           'ذ. عبد القادر الفاسي',
           '0665554433'
+        ],
+        [
+          'مؤسسة النخبة الخاصة',
+          'خصوصي',
+          'تاوريرت المركز',
+          'ذ. كريم الفاسي',
+          '0667889900',
+          'ذ. كريم الفاسي',
+          '0667889900'
         ]
       ];
 
@@ -399,6 +409,7 @@ export const Schools: React.FC = () => {
         }
 
         const rawType = (
+          row['السلك التعليمي (تأهيلي / إعدادي / ابتدائي / خصوصي)'] ||
           row['السلك التعليمي (تأهيلي / إعدادي / ابتدائي)'] ||
           row['السلك التعليمي'] ||
           row['السلك'] ||
@@ -407,14 +418,7 @@ export const Schools: React.FC = () => {
           'تأهيلي'
         ).toString().trim();
 
-        let normalizedType = 'تأهيلي';
-        if (rawType.includes('إعداد') || rawType.includes('اعداد')) {
-          normalizedType = 'إعدادي';
-        } else if (rawType.includes('ابتدائ')) {
-          normalizedType = 'ابتدائي';
-        } else {
-          normalizedType = 'تأهيلي';
-        }
+        const normalizedType = normalizeSchoolCycleType({ name: schoolName, type: rawType });
 
         const commune = (
           row['الجماعة / الدائرة'] ||
@@ -576,7 +580,10 @@ export const Schools: React.FC = () => {
           'رمز الأمان': canSeeSecrets ? (s.accessCode || '—') : '—',
           'المشاركون': participantsCount,
           'تفاصيل المشاركة': participantsDetail,
-          'السلك التعليمي': s.type === 'تأهيلي' ? 'ثانوي تأهيلي' : s.type === 'إعدادي' ? 'ثانوي إعدادي' : 'ابتدائي',
+          'السلك التعليمي': (() => {
+            const cyc = normalizeSchoolCycleType(s);
+            return cyc === 'خصوصي' ? 'التعليم الخصوصي' : cyc === 'تأهيلي' ? 'ثانوي تأهيلي' : cyc === 'إعدادي' ? 'ثانوي إعدادي' : 'ابتدائي';
+          })(),
           'الجماعة / الدائرة': s.commune || '—',
           'المنسق (أستاذ التربية البدنية)': s.coordinatorName || s.teacherName || '—',
           'هاتف المنسق': s.phone || '—'
@@ -698,7 +705,8 @@ export const Schools: React.FC = () => {
                           principalStr.includes(search.toLowerCase()) ||
                           (s.phone || '').includes(search) ||
                           (s.principalPhone || '').includes(search);
-      const matchType = typeFilter === 'ALL' || s.type === typeFilter;
+      const sCycle = normalizeSchoolCycleType(s);
+      const matchType = typeFilter === 'ALL' || sCycle === typeFilter;
       const matchCommune = communeFilter === 'ALL' || s.commune.includes(communeFilter);
       const matchSport = selectedSport === 'ALL' || (participatingSchoolIdsForSport && (
         participatingSchoolIdsForSport.has(s.id) || 
@@ -721,9 +729,10 @@ export const Schools: React.FC = () => {
     return list;
   }, [effectiveSchools, search, typeFilter, communeFilter, selectedSport, selectedSchoolFilter, participatingSchoolIdsForSport, userProfile?.workLocation, userProfile?.schoolId]);
 
-  const highSchoolsCount = effectiveSchools.filter(s => s.type === 'تأهيلي').length;
-  const middleSchoolsCount = effectiveSchools.filter(s => s.type === 'إعدادي').length;
-  const primarySchoolsCount = effectiveSchools.filter(s => s.type === 'ابتدائي').length;
+  const highSchoolsCount = effectiveSchools.filter(s => normalizeSchoolCycleType(s) === 'تأهيلي').length;
+  const middleSchoolsCount = effectiveSchools.filter(s => normalizeSchoolCycleType(s) === 'إعدادي').length;
+  const primarySchoolsCount = effectiveSchools.filter(s => normalizeSchoolCycleType(s) === 'ابتدائي').length;
+  const privateSchoolsCount = effectiveSchools.filter(s => normalizeSchoolCycleType(s) === 'خصوصي').length;
 
   return (
     <div className="space-y-4" dir="rtl">
@@ -759,14 +768,14 @@ export const Schools: React.FC = () => {
         </div>
 
         {/* Specialized Icon Action Buttons Toolbar */}
-        <div className="flex flex-wrap items-center justify-center gap-2.5 w-full pt-1">
+        <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-stretch sm:items-center justify-center gap-2 w-full pt-1">
           {/* Download blank Excel template */}
           <button
             onClick={handleDownloadExcelTemplate}
             title="تحميل نموذج إكسيل فارغ لتعبئة مؤسسات الإقليم"
-            className="inline-flex items-center justify-center gap-2 rounded-xl border border-emerald-300 bg-emerald-50/80 px-3.5 py-2.5 text-xs font-black text-emerald-800 hover:bg-emerald-100 hover:border-emerald-400 transition-all shadow-2xs hover:shadow-xs active:scale-97 cursor-pointer whitespace-nowrap"
+            className="inline-flex items-center justify-center gap-1.5 sm:gap-2 rounded-xl border border-emerald-300 bg-emerald-50/80 px-2.5 sm:px-3.5 py-2 sm:py-2.5 text-[11px] sm:text-xs font-black text-emerald-800 hover:bg-emerald-100 hover:border-emerald-400 transition-all shadow-2xs hover:shadow-xs active:scale-97 cursor-pointer text-center"
           >
-            <div className="w-6 h-6 rounded-lg bg-emerald-600 text-white flex items-center justify-center shadow-2xs shrink-0">
+            <div className="w-5 h-5 sm:w-6 sm:h-6 rounded-lg bg-emerald-600 text-white flex items-center justify-center shadow-2xs shrink-0">
               <Download className="h-3.5 w-3.5" />
             </div>
             <span>تحميل نموذج Excel فارغ</span>
@@ -777,9 +786,9 @@ export const Schools: React.FC = () => {
             <button
               onClick={() => fileInputRef.current?.click()}
               title="استيراد وتعبئة المؤسسات التعليمية من ملف إكسيل"
-              className="inline-flex items-center justify-center gap-2 rounded-xl border border-indigo-300 bg-indigo-50/80 px-3.5 py-2.5 text-xs font-black text-indigo-800 hover:bg-indigo-100 hover:border-indigo-400 transition-all shadow-2xs hover:shadow-xs active:scale-97 cursor-pointer whitespace-nowrap"
+              className="inline-flex items-center justify-center gap-1.5 sm:gap-2 rounded-xl border border-indigo-300 bg-indigo-50/80 px-2.5 sm:px-3.5 py-2 sm:py-2.5 text-[11px] sm:text-xs font-black text-indigo-800 hover:bg-indigo-100 hover:border-indigo-400 transition-all shadow-2xs hover:shadow-xs active:scale-97 cursor-pointer text-center"
             >
-              <div className="w-6 h-6 rounded-lg bg-indigo-600 text-white flex items-center justify-center shadow-2xs shrink-0">
+              <div className="w-5 h-5 sm:w-6 sm:h-6 rounded-lg bg-indigo-600 text-white flex items-center justify-center shadow-2xs shrink-0">
                 <Upload className="h-3.5 w-3.5" />
               </div>
               <span>استيراد من Excel</span>
@@ -791,9 +800,9 @@ export const Schools: React.FC = () => {
             <button
               onClick={handleExportCurrentSchools}
               title="تصدير القائمة الحالية للمؤسسات التعليمية إلى ملف إكسيل"
-              className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-300 bg-slate-50 px-3.5 py-2.5 text-xs font-black text-slate-700 hover:bg-slate-100 hover:border-slate-400 transition-all shadow-2xs hover:shadow-xs active:scale-97 cursor-pointer whitespace-nowrap"
+              className="inline-flex items-center justify-center gap-1.5 sm:gap-2 rounded-xl border border-slate-300 bg-slate-50 px-2.5 sm:px-3.5 py-2 sm:py-2.5 text-[11px] sm:text-xs font-black text-slate-700 hover:bg-slate-100 hover:border-slate-400 transition-all shadow-2xs hover:shadow-xs active:scale-97 cursor-pointer text-center"
             >
-              <div className="w-6 h-6 rounded-lg bg-slate-700 text-white flex items-center justify-center shadow-2xs shrink-0">
+              <div className="w-5 h-5 sm:w-6 sm:h-6 rounded-lg bg-slate-700 text-white flex items-center justify-center shadow-2xs shrink-0">
                 <FileSpreadsheet className="h-3.5 w-3.5" />
               </div>
               <span>تصدير إلى Excel</span>
@@ -808,9 +817,9 @@ export const Schools: React.FC = () => {
                 setIsModalOpen(true);
               }}
               title="إضافة مؤسسة تعليمية جديدة"
-              className="inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 px-4 py-2.5 text-xs font-black text-white shadow-sm hover:from-blue-700 hover:to-indigo-700 transition-all hover:shadow-md active:scale-97 cursor-pointer whitespace-nowrap border border-blue-500/30"
+              className="inline-flex items-center justify-center gap-1.5 sm:gap-2 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 px-2.5 sm:px-4 py-2 sm:py-2.5 text-[11px] sm:text-xs font-black text-white shadow-sm hover:from-blue-700 hover:to-indigo-700 transition-all hover:shadow-md active:scale-97 cursor-pointer text-center border border-blue-500/30"
             >
-              <div className="w-6 h-6 rounded-lg bg-white/20 flex items-center justify-center shadow-2xs shrink-0">
+              <div className="w-5 h-5 sm:w-6 sm:h-6 rounded-lg bg-white/20 flex items-center justify-center shadow-2xs shrink-0">
                 <Plus className="h-4 w-4 text-white" />
               </div>
               <span>إضافة مؤسسة تعليمية</span>
@@ -823,20 +832,20 @@ export const Schools: React.FC = () => {
               <button
                 onClick={handleRegenerateCodes}
                 disabled={isLoading}
-                className="inline-flex items-center justify-center gap-2 rounded-xl bg-orange-50 border border-orange-300 px-3.5 py-2.5 text-xs font-black text-orange-800 shadow-2xs hover:bg-orange-100 transition-all hover:shadow-xs active:scale-97 cursor-pointer whitespace-nowrap disabled:opacity-50"
+                className="inline-flex items-center justify-center gap-1.5 sm:gap-2 rounded-xl bg-orange-50 border border-orange-300 px-2.5 sm:px-3.5 py-2 sm:py-2.5 text-[11px] sm:text-xs font-black text-orange-800 shadow-2xs hover:bg-orange-100 transition-all hover:shadow-xs active:scale-97 cursor-pointer text-center disabled:opacity-50"
                 title="تحديث جميع الرموز السرية القديمة إلى رموز أكثر أماناً"
               >
-                <div className="w-6 h-6 rounded-lg bg-orange-500 text-white flex items-center justify-center shadow-2xs shrink-0">
+                <div className="w-5 h-5 sm:w-6 sm:h-6 rounded-lg bg-orange-500 text-white flex items-center justify-center shadow-2xs shrink-0">
                   <Lock className="h-3.5 w-3.5" />
                 </div>
                 <span>تحديث الرموز القديمة</span>
               </button>
               <button
                 onClick={() => setShowDeleteAllModal(true)}
-                className="inline-flex items-center justify-center gap-2 rounded-xl bg-red-50 border border-red-300 px-3.5 py-2.5 text-xs font-black text-red-700 shadow-2xs hover:bg-red-100 transition-all hover:shadow-xs active:scale-97 cursor-pointer whitespace-nowrap"
+                className="inline-flex items-center justify-center gap-1.5 sm:gap-2 rounded-xl bg-red-50 border border-red-300 px-2.5 sm:px-3.5 py-2 sm:py-2.5 text-[11px] sm:text-xs font-black text-red-700 shadow-2xs hover:bg-red-100 transition-all hover:shadow-xs active:scale-97 cursor-pointer text-center"
                 title="حذف جميع المؤسسات المسجلة في هذه المديرية"
               >
-                <div className="w-6 h-6 rounded-lg bg-red-600 text-white flex items-center justify-center shadow-2xs shrink-0">
+                <div className="w-5 h-5 sm:w-6 sm:h-6 rounded-lg bg-red-600 text-white flex items-center justify-center shadow-2xs shrink-0">
                   <Trash2 className="h-3.5 w-3.5" />
                 </div>
                 <span>حذف الكل</span>
@@ -896,8 +905,9 @@ export const Schools: React.FC = () => {
           </div>
         </div>
       ) : (
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 sm:gap-3">
           <button
+            type="button"
             onClick={() => setTypeFilter(typeFilter === 'تأهيلي' ? 'ALL' : 'تأهيلي')}
             className={`p-3 rounded-xl border text-right transition-all cursor-pointer ${
               typeFilter === 'تأهيلي'
@@ -905,11 +915,12 @@ export const Schools: React.FC = () => {
                 : 'bg-white border-slate-200 hover:border-blue-200'
             }`}
           >
-            <span className="text-[10px] font-bold text-blue-700 uppercase">الثانوي التأهيلي</span>
+            <span className="text-[10px] sm:text-[11px] font-bold text-blue-700 uppercase block">الثانوي التأهيلي</span>
             <p className="text-lg md:text-xl font-black text-slate-800 mt-1">{highSchoolsCount}</p>
           </button>
 
           <button
+            type="button"
             onClick={() => setTypeFilter(typeFilter === 'إعدادي' ? 'ALL' : 'إعدادي')}
             className={`p-3 rounded-xl border text-right transition-all cursor-pointer ${
               typeFilter === 'إعدادي'
@@ -917,11 +928,12 @@ export const Schools: React.FC = () => {
                 : 'bg-white border-slate-200 hover:border-emerald-200'
             }`}
           >
-            <span className="text-[10px] font-bold text-emerald-700 uppercase">الثانوي الإعدادي</span>
+            <span className="text-[10px] sm:text-[11px] font-bold text-emerald-700 uppercase block">الثانوي الإعدادي</span>
             <p className="text-lg md:text-xl font-black text-emerald-700 mt-1">{middleSchoolsCount}</p>
           </button>
 
           <button
+            type="button"
             onClick={() => setTypeFilter(typeFilter === 'ابتدائي' ? 'ALL' : 'ابتدائي')}
             className={`p-3 rounded-xl border text-right transition-all cursor-pointer ${
               typeFilter === 'ابتدائي'
@@ -929,8 +941,21 @@ export const Schools: React.FC = () => {
                 : 'bg-white border-slate-200 hover:border-amber-200'
             }`}
           >
-            <span className="text-[10px] font-bold text-amber-700 uppercase">التعليم الابتدائي</span>
+            <span className="text-[10px] sm:text-[11px] font-bold text-amber-700 uppercase block">التعليم الابتدائي</span>
             <p className="text-lg md:text-xl font-black text-slate-800 mt-1">{primarySchoolsCount}</p>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setTypeFilter(typeFilter === 'خصوصي' ? 'ALL' : 'خصوصي')}
+            className={`p-3 rounded-xl border text-right transition-all cursor-pointer ${
+              typeFilter === 'خصوصي'
+                ? 'bg-purple-50/90 border-purple-300 ring-2 ring-purple-500/20'
+                : 'bg-white border-slate-200 hover:border-purple-200'
+            }`}
+          >
+            <span className="text-[10px] sm:text-[11px] font-bold text-purple-700 uppercase block">التعليم الخصوصي</span>
+            <p className="text-lg md:text-xl font-black text-purple-700 mt-1">{privateSchoolsCount}</p>
           </button>
         </div>
       )}
@@ -955,7 +980,7 @@ export const Schools: React.FC = () => {
               <SchoolIcon className="h-3.5 w-3.5 text-emerald-600" />
               <span>المؤسسة:</span>
             </label>
-            <div className="relative min-w-[200px] w-full lg:w-auto">
+            <div className="relative flex-1 min-w-0 lg:min-w-[200px] lg:w-auto">
               <button
                 type="button"
                 onClick={() => setIsSchoolDropdownOpen(!isSchoolDropdownOpen)}
@@ -1029,7 +1054,7 @@ export const Schools: React.FC = () => {
 
         {/* Sport Filter Dropdown */}
         <div className="flex items-center gap-2 w-full lg:w-auto border-t lg:border-t-0 lg:border-r border-slate-100 pt-2 lg:pt-0 lg:pr-3 shrink-0">
-          <label htmlFor="schools-sport-filter" className="text-xs font-bold text-slate-600 whitespace-nowrap flex items-center gap-1.5">
+          <label htmlFor="schools-sport-filter" className="text-xs font-bold text-slate-600 whitespace-nowrap flex items-center gap-1.5 shrink-0">
             <Filter className="h-3.5 w-3.5 text-blue-600" />
             <span>الرياضة:</span>
           </label>
@@ -1037,7 +1062,7 @@ export const Schools: React.FC = () => {
             id="schools-sport-filter"
             value={selectedSport}
             onChange={(e) => setSelectedSport(e.target.value)}
-            className="text-xs font-bold text-slate-700 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer min-w-[160px]"
+            className="flex-1 lg:flex-initial min-w-0 text-xs font-bold text-slate-700 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer sm:min-w-[160px]"
           >
             <option value="ALL">🏆 جميع الرياضات</option>
             {Object.entries(SPORTS_MAP).map(([id, info]) => (
@@ -1048,57 +1073,60 @@ export const Schools: React.FC = () => {
           </select>
         </div>
 
-        <div className="flex items-center justify-between gap-2 w-full sm:w-auto overflow-x-auto pb-1 sm:pb-0">
-          <div className="flex items-center gap-1.5 flex-wrap">
+        <div className="flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-center justify-between gap-2.5 w-full border-t lg:border-t-0 border-slate-100 pt-2.5 lg:pt-0">
+          <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-stretch sm:items-center gap-1.5 w-full sm:w-auto flex-1 min-w-0">
             {[
-              { id: 'ALL', label: `جميع المؤسسات (${effectiveSchools.length})`, icon: '🏫' },
-              { id: 'تأهيلي', label: `الثانوي التأهيلي (${highSchoolsCount})`, icon: '🎓' },
-              { id: 'إعدادي', label: `الثانوي الإعدادي (${middleSchoolsCount})`, icon: '👦' },
-              { id: 'ابتدائي', label: `التعليم الابتدائي (${primarySchoolsCount})`, icon: '👧' },
+              { id: 'ALL', label: `الكل (${effectiveSchools.length})`, icon: '🏫', colSpan: 'col-span-2 sm:col-span-1' },
+              { id: 'تأهيلي', label: `تأهيلي (${highSchoolsCount})`, icon: '🎓', colSpan: '' },
+              { id: 'إعدادي', label: `إعدادي (${middleSchoolsCount})`, icon: '👦', colSpan: '' },
+              { id: 'ابتدائي', label: `ابتدائي (${primarySchoolsCount})`, icon: '👧', colSpan: '' },
+              { id: 'خصوصي', label: `الخصوصي (${privateSchoolsCount})`, icon: '🏛️', colSpan: '' },
             ].map(f => (
               <button
                 key={f.id}
                 type="button"
                 onClick={() => setTypeFilter(f.id)}
-                className={`px-3 py-1.5 text-xs font-bold rounded-xl whitespace-nowrap transition-all cursor-pointer flex items-center gap-1.5 ${
+                className={`${f.colSpan} px-2.5 sm:px-3 py-2 sm:py-1.5 text-[11px] sm:text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5 text-center leading-tight min-w-0 overflow-hidden ${
                   typeFilter === f.id
-                    ? 'bg-emerald-600 text-white shadow-xs font-black'
-                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-900'
+                    ? f.id === 'خصوصي'
+                      ? 'bg-purple-600 text-white shadow-xs font-black'
+                      : 'bg-emerald-600 text-white shadow-xs font-black'
+                    : 'bg-slate-100 text-slate-700 hover:bg-slate-200 hover:text-slate-900'
                 }`}
               >
-                <span>{f.icon}</span>
-                <span>{f.label}</span>
+                <span className="shrink-0">{f.icon}</span>
+                <span className="truncate">{f.label}</span>
               </button>
             ))}
           </div>
 
-          {/* Cards vs Table View Switcher */}
-          <div className="flex items-center gap-1.5 bg-slate-200/80 p-1 rounded-xl border border-slate-300/80 shrink-0 mr-auto sm:mr-2">
+          {/* Cards vs Table View Switcher (Icon-only) */}
+          <div className="flex items-center gap-1 bg-slate-200/80 p-1 rounded-xl border border-slate-300/80 shrink-0 self-end sm:self-auto">
             <button
               type="button"
               onClick={() => setViewMode('cards')}
-              title="عرض المؤسسات التعليمية على شكل بطائق تفاعلية"
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+              title="عرض المؤسسات التعليمية على شكل بطائق"
+              aria-label="عرض البطائق"
+              className={`p-2 rounded-lg transition-all flex items-center justify-center cursor-pointer ${
                 viewMode === 'cards'
-                  ? 'bg-blue-600 text-white shadow-xs font-black'
+                  ? 'bg-blue-600 text-white shadow-xs'
                   : 'bg-white text-slate-700 hover:text-blue-700 hover:bg-slate-50'
               }`}
             >
               <LayoutGrid className="w-4 h-4" />
-              <span>بطائق 📇</span>
             </button>
             <button
               type="button"
               onClick={() => setViewMode('table')}
-              title="عرض المؤسسات التعليمية على شكل جدول منظم"
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+              title="عرض المؤسسات التعليمية على شكل جدول"
+              aria-label="عرض الجدول"
+              className={`p-2 rounded-lg transition-all flex items-center justify-center cursor-pointer ${
                 viewMode === 'table'
-                  ? 'bg-blue-600 text-white shadow-xs font-black'
+                  ? 'bg-blue-600 text-white shadow-xs'
                   : 'bg-white text-slate-700 hover:text-blue-700 hover:bg-slate-50'
               }`}
             >
               <List className="w-4 h-4" />
-              <span>جدول 📊</span>
             </button>
           </div>
         </div>
@@ -1351,15 +1379,22 @@ export const Schools: React.FC = () => {
                           🏫
                         </div>
                         <div>
-                          <span className={`inline-block text-[10px] font-bold px-2.5 py-0.5 rounded-lg border ${
-                            s.type === 'تأهيلي'
-                              ? 'bg-blue-50 text-blue-700 border-blue-200'
-                              : s.type === 'إعدادي'
-                              ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                              : 'bg-amber-50 text-amber-700 border-amber-200'
-                          }`}>
-                            {s.type === 'تأهيلي' ? 'ثانوي تأهيلي' : s.type === 'إعدادي' ? 'ثانوي إعدادي' : 'ابتدائي'}
-                          </span>
+                          {(() => {
+                            const cyc = normalizeSchoolCycleType(s);
+                            return (
+                              <span className={`inline-block text-[10px] font-bold px-2.5 py-0.5 rounded-lg border ${
+                                cyc === 'خصوصي'
+                                  ? 'bg-purple-50 text-purple-700 border-purple-200'
+                                  : cyc === 'تأهيلي'
+                                  ? 'bg-blue-50 text-blue-700 border-blue-200'
+                                  : cyc === 'إعدادي'
+                                  ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                  : 'bg-amber-50 text-amber-700 border-amber-200'
+                              }`}>
+                                {cyc === 'خصوصي' ? 'التعليم الخصوصي' : cyc === 'تأهيلي' ? 'ثانوي تأهيلي' : cyc === 'إعدادي' ? 'ثانوي إعدادي' : 'ابتدائي'}
+                              </span>
+                            );
+                          })()}
                           <h3 className="text-sm md:text-base font-black text-slate-900 leading-tight mt-1">
                             {s.name}
                           </h3>
@@ -1711,13 +1746,19 @@ export const Schools: React.FC = () => {
                     <h3 className="text-sm sm:text-base font-black text-white leading-tight">
                       {selectedSchoolForDetails.name}
                     </h3>
-                    <span className={`text-[10px] font-black px-2 py-0.5 rounded-full border ${
-                      selectedSchoolForDetails.type === 'تأهيلي' ? 'bg-blue-500/20 text-blue-300 border-blue-500/30' :
-                      selectedSchoolForDetails.type === 'إعدادي' ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' :
-                      'bg-amber-500/20 text-amber-300 border-amber-500/30'
-                    }`}>
-                      {selectedSchoolForDetails.type === 'تأهيلي' ? 'ثانوي تأهيلي' : selectedSchoolForDetails.type === 'إعدادي' ? 'ثانوي إعدادي' : 'ابتدائي'}
-                    </span>
+                    {(() => {
+                      const cyc = normalizeSchoolCycleType(selectedSchoolForDetails);
+                      return (
+                        <span className={`text-[10px] font-black px-2 py-0.5 rounded-full border ${
+                          cyc === 'خصوصي' ? 'bg-purple-500/20 text-purple-200 border-purple-400/40' :
+                          cyc === 'تأهيلي' ? 'bg-blue-500/20 text-blue-300 border-blue-500/30' :
+                          cyc === 'إعدادي' ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' :
+                          'bg-amber-500/20 text-amber-300 border-amber-500/30'
+                        }`}>
+                          {cyc === 'خصوصي' ? 'التعليم الخصوصي' : cyc === 'تأهيلي' ? 'ثانوي تأهيلي' : cyc === 'إعدادي' ? 'ثانوي إعدادي' : 'ابتدائي'}
+                        </span>
+                      );
+                    })()}
                   </div>
                   <p className="text-[10px] text-slate-300 font-medium mt-0.5">
                     المديرية الإقليمية تاوريرت • جماعة {selectedSchoolForDetails.commune}

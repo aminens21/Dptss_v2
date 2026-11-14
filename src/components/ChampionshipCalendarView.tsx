@@ -1,12 +1,15 @@
-import React, { useState, useMemo } from 'react';
-import { Tournament, Match, School, User, Venue } from '../types';
-import { SPORTS_MAP, normalizeDateToYmd } from '../lib/dataService';
+import React, { useState, useMemo, useEffect } from 'react';
+import { Tournament, Match, School, User, Venue, Referee } from '../types';
+import { DataService, SPORTS_MAP } from '../lib/dataService';
 import { SPORTS_CONFIG } from '../config/sportsConfig';
 import { ProgramExportModal } from './ProgramExportModal';
 import {
+  buildAllCalendarEvents,
   downloadProgramAsPdf,
   downloadProgramAsWord,
-  printProgram
+  printProgram,
+  ProgramAffiliationFilter,
+  AFFILIATION_LABELS
 } from '../lib/programExportService';
 import {
   Calendar as CalendarIcon,
@@ -29,11 +32,12 @@ import {
   ExternalLink,
   Plus,
   Layers,
+  ShieldCheck,
   X
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { formatMatchDate } from '../lib/utils';
-import { useAuth } from '../contexts/AuthContext';
+import { useAuth, isSuperAdminEmail } from '../contexts/AuthContext';
 
 export interface CalendarEventItem {
   id: string;
@@ -42,6 +46,7 @@ export interface CalendarEventItem {
   sportName: string;
   sportIcon: string;
   scope: 'provincial' | 'regional' | 'national';
+  affiliationType?: 'non_club' | 'club_affiliated' | 'open';
   date: string; // YYYY-MM-DD
   time?: string;
   venue: string;
@@ -49,6 +54,8 @@ export interface CalendarEventItem {
   gender: 'Male' | 'Female' | 'Mixed';
   organizer: string;
   coordinator?: string;
+  referees?: string[];
+  refereesText?: string;
   notes?: string;
   isRealData?: boolean;
   rawTournament?: Tournament;
@@ -62,273 +69,12 @@ interface ChampionshipCalendarViewProps {
   venues?: Venue[];
   userProfile?: User | null;
   activeSeason: string;
+  allowedSportIds?: string[] | null;
+  isCentralAdmin?: boolean;
   onNavigateToTournament?: (tournamentId: string) => void;
   onOpenCreateMatch?: (initialDate?: string) => void;
   onOpenMatchDetail?: (match: Match) => void;
 }
-
-// Proposed official annual program for Moroccan School Sports in Taourirt & Oriental region
-const OFFICIAL_PROPOSED_PROGRAM: Omit<CalendarEventItem, 'sportName' | 'sportIcon'>[] = [
-  // November 2026
-  {
-    id: 'prop-cc-prov',
-    title: 'البطولة الإقليمية المدرسية للعدو الريفي',
-    sportId: 'cross_country',
-    scope: 'provincial',
-    date: '2026-11-12',
-    time: '09:00 صباحاً',
-    venue: 'مطاف وحلبة العدو الريفي بتاوريرت',
-    category: 'جميع الفئات (U12, U15, U18, U20)',
-    gender: 'Mixed',
-    organizer: 'الفرع الإقليمي للجامعة الملكية المغربية للرياضة المدرسية بتاوريرت',
-    coordinator: 'ذ. عبد الرحيم بلقاسم',
-    notes: 'مشاركة جميع المؤسسات التعليمية الابتدائية، الإعدادية والتأهيلية بالإقليم'
-  },
-  {
-    id: 'prop-fb-prov-qual',
-    title: 'تصفيات البطولة الإقليمية لكرة القدم المصغرة',
-    sportId: 'football',
-    scope: 'provincial',
-    date: '2026-11-25',
-    time: '14:30 بعد الزوال',
-    venue: 'ملاعب القرب والقاعة المغطاة تاوريرت',
-    category: 'فئة البراعم والصغار (U12 - U15)',
-    gender: 'Male',
-    organizer: 'اللجنة التقنية الإقليمية لكرة القدم المدرسية',
-    coordinator: 'ذ. إبراهيم بنعلي',
-    notes: 'إقصائيات تمهيدية بين أحواض تاوريرت، العيون سيدي ملوك ودبدو'
-  },
-  // December 2026
-  {
-    id: 'prop-cc-reg',
-    title: 'البطولة الجهوية المدرسية للعدو الريفي (جهة الشرق)',
-    sportId: 'cross_country',
-    scope: 'regional',
-    date: '2026-12-06',
-    time: '09:30 صباحاً',
-    venue: 'مطاف السعيدية / حلبة وجدة سيدي يحيى',
-    category: 'المتأهلون من البطولات الإقليمية (U15, U18, U20)',
-    gender: 'Mixed',
-    organizer: 'الأكاديمية الجهوية للتربية والتكوين لجهة الشرق والفرع الجهوي للجامعة',
-    coordinator: 'اللجنة التقنية الجهوية للعدو الريفي',
-    notes: 'تأهيل أحسن العدائين والفرق لتمثيل جهة الشرق في البطولة الوطنية'
-  },
-  {
-    id: 'prop-bb-prov',
-    title: 'نهائيات البطولة الإقليمية لكرة السلة 3x3',
-    sportId: 'basketball',
-    scope: 'provincial',
-    date: '2026-12-16',
-    time: '10:00 صباحاً',
-    venue: 'القاعة المغطاة تاوريرت',
-    category: 'فئة الفتيان والشبان (U18 - U20)',
-    gender: 'Mixed',
-    organizer: 'فرع تاوريرت للجامعة الملكية للرياضة المدرسية',
-    coordinator: 'ذ. محمد القادري',
-    notes: 'مباريات حماسية بمشاركة 16 مؤسسة تعليمية إعدادية وتأهيلية'
-  },
-  {
-    id: 'prop-hb-prov',
-    title: 'تصفيات البطولة الإقليمية لكرة اليد المدرسية',
-    sportId: 'handball',
-    scope: 'provincial',
-    date: '2026-12-23',
-    time: '14:00 زوالاً',
-    venue: 'ملاعب ثانوية الفتح التأهيلية وثانوية 9 أبريل',
-    category: 'فئة الصغار والفتيان (U15 - U18)',
-    gender: 'Male',
-    organizer: 'اللجنة التقنية الإقليمية لكرة اليد',
-    coordinator: 'ذ. رشيد المنصوري',
-    notes: 'مباريات بنظام خروج المغلوب'
-  },
-  // January 2027
-  {
-    id: 'prop-cc-nat',
-    title: 'البطولة الوطنية المدرسية للعدو الريفي (المستوى الوطني)',
-    sportId: 'cross_country',
-    scope: 'national',
-    date: '2027-01-10',
-    time: '09:00 صباحاً',
-    venue: 'حلبة باب جديد بمراكش / الرباط',
-    category: 'نخبة أبطال جهات المملكة المتأهلون (U15, U18, U20)',
-    gender: 'Mixed',
-    organizer: 'وزارة التربية الوطنية والجامعة الملكية المغربية للرياضة المدرسية',
-    coordinator: 'المسؤول الوطني للجامعة',
-    notes: 'تتويج أبطال المغرب المدرسيين بحضور شخصيات وازنة'
-  },
-  {
-    id: 'prop-vb-prov',
-    title: 'البطولة الإقليمية المدرسية للكرة الطائرة',
-    sportId: 'volleyball',
-    scope: 'provincial',
-    date: '2027-01-18',
-    time: '14:30 زوالاً',
-    venue: 'القاعة المغطاة المسيرة تاوريرت',
-    category: 'فئة الفتيات والشابات (U15 - U18)',
-    gender: 'Female',
-    organizer: 'لجنة تطوير الرياضة النسوية المدرسية بتاوريرت',
-    coordinator: 'الأستاذة فاطمة الزهراء المرابط',
-    notes: 'تشجيع الممارسة الرياضية النسوية المدرسية'
-  },
-  {
-    id: 'prop-tt-prov',
-    title: 'إقصائيات كرة الطاولة المدرسية (فردي وزوجي)',
-    sportId: 'table_tennis',
-    scope: 'provincial',
-    date: '2027-01-25',
-    time: '09:30 صباحاً',
-    venue: 'النادي الرياضي البلدي وقاعة الأنشطة بالثانوية التأهيلية المرينيين',
-    category: 'جميع الفئات (ذكور وإناث)',
-    gender: 'Mixed',
-    organizer: 'اللجنة التقنية الإقليمية لكرة الطاولة',
-    coordinator: 'ذ. طارق العلمي',
-    notes: 'بطولة مفتوحة وتأهيل الفائزين للبطولة الجهوية'
-  },
-  // February 2027
-  {
-    id: 'prop-team-reg-1',
-    title: 'البطولة الجهوية للرياضات الجماعية (شطر الناظور - تاوريرت - جرسيف - الدريوش)',
-    sportId: 'football',
-    scope: 'regional',
-    date: '2027-02-08',
-    time: '10:00 صباحاً',
-    venue: 'المركب الرياضي بتاوريرت والقاعة المغطاة بالناظور',
-    category: 'فئة الصغار والفتيان (كرة قدم، كرة سلة، كرة يد)',
-    gender: 'Mixed',
-    organizer: 'الأكاديمية الجهوية للتربية والتكوين لجهة الشرق',
-    coordinator: 'ممثلو المديريات الإقليمية الأربعة',
-    notes: 'نصف نهائيات جهة الشرق'
-  },
-  {
-    id: 'prop-chess-prov',
-    title: 'البطولة الإقليمية للشطرنج والرياضات الذهنية المدرسية',
-    sportId: 'athletics',
-    scope: 'provincial',
-    date: '2027-02-15',
-    time: '09:00 صباحاً',
-    venue: 'مركز التفتح الفني والأدبي والرياضي بتاوريرت',
-    category: 'التعليم الابتدائي، الإعدادي والتأهيلي',
-    gender: 'Mixed',
-    organizer: 'الفرع الإقليمي لجامعة الرياضة المدرسية',
-    coordinator: 'ذ. يوسف الشريف',
-    notes: 'تعزيز الذكاء الاستراتيجي لدى المتعلمات والمتعلمين'
-  },
-  {
-    id: 'prop-badm-gym-prov',
-    title: 'البطولة الإقليمية للبادمنتون والجمباز المدرسي',
-    sportId: 'volleyball',
-    scope: 'provincial',
-    date: '2027-02-22',
-    time: '14:00 زوالاً',
-    venue: 'القاعة المغطاة المسيرة تاوريرت',
-    category: 'فئة البراعم والصغار',
-    gender: 'Mixed',
-    organizer: 'اللجنة التقنية للجمباز والريشة الطائرة',
-    coordinator: 'الأستاذة سناء الوهابي',
-    notes: 'عروض فردية وجماعية ومنافسات البادمنتون'
-  },
-  // March 2027
-  {
-    id: 'prop-ath-prov',
-    title: 'البطولة الإقليمية المدرسية لألعاب القوى (المضمار والميدان)',
-    sportId: 'athletics',
-    scope: 'provincial',
-    date: '2027-03-07',
-    time: '08:30 صباحاً',
-    venue: 'الملعب البلدي وحلبة ألعاب القوى تاوريرت',
-    category: 'السرعة، الوثب، رمي الجلة، والمسافات المتوسطة',
-    gender: 'Mixed',
-    organizer: 'فرع تاوريرت للجامعة الملكية للرياضة المدرسية',
-    coordinator: 'ذ. عبد الرحيم بلقاسم وذ. كريم الناصري',
-    notes: 'تحديد المنتخب الإقليمي لألعاب القوى'
-  },
-  {
-    id: 'prop-ath-reg',
-    title: 'البطولة الجهوية المدرسية لألعاب القوى',
-    sportId: 'athletics',
-    scope: 'regional',
-    date: '2027-03-18',
-    time: '09:00 صباحاً',
-    venue: 'الملعب الشرفي بوجدة / حلبة بركان الأولمبية',
-    category: 'أبطال الأقاليم الثمانية لجهة الشرق',
-    gender: 'Mixed',
-    organizer: 'الأكاديمية الجهوية لجهة الشرق والفرع الجهوي للجامعة',
-    coordinator: 'اللجنة التقنية الجهوية لألعاب القوى',
-    notes: 'التأهيل للبطولة الوطنية المدرسية'
-  },
-  {
-    id: 'prop-team-reg-finals',
-    title: 'نهائيات البطولة الجهوية للرياضات الجماعية (كرة القدم، السلة، اليد، الطائرة)',
-    sportId: 'basketball',
-    scope: 'regional',
-    date: '2027-03-28',
-    time: '10:00 صباحاً',
-    venue: 'القاعات المغطاة والملاعب الكبرى بوجدة',
-    category: 'المتأهلون لنهائي جهة الشرق',
-    gender: 'Mixed',
-    organizer: 'أكاديمية جهة الشرق',
-    coordinator: 'المكتب المديري الجهوي للرياضة المدرسية',
-    notes: 'تتويج أبطال جهة الشرق المتأهلين للبطولة الوطنية'
-  },
-  // April 2027
-  {
-    id: 'prop-nat-teams',
-    title: 'البطولة الوطنية المدرسية للرياضات الجماعية',
-    sportId: 'football',
-    scope: 'national',
-    date: '2027-04-12',
-    time: '09:00 صباحاً',
-    venue: 'المركبات الرياضية والقاعات المغطاة بطنجة وتطوان',
-    category: 'أبطال جهات المملكة الـ 12',
-    gender: 'Mixed',
-    organizer: 'وزارة التربية الوطنية والجامعة الملكية المغربية للرياضة المدرسية',
-    coordinator: 'اللجنة المركزية للبطولات الوطنية',
-    notes: 'تتويج أبطال المغرب المدرسيين في الرياضات الجماعية'
-  },
-  {
-    id: 'prop-nat-indiv',
-    title: 'البطولة الوطنية المدرسية لألعاب القوى وكرة الطاولة',
-    sportId: 'athletics',
-    scope: 'national',
-    date: '2027-04-24',
-    time: '09:00 صباحاً',
-    venue: 'المركب الرياضي أدرار بأكادير',
-    category: 'نخبة أبطال ألعاب القوى بالمملكة',
-    gender: 'Mixed',
-    organizer: 'الجامعة الملكية المغربية للرياضة المدرسية',
-    coordinator: 'الجامعة الملكية المغربية للرياضة المدرسية',
-    notes: 'تحطيم أرقام قياسية وطنية مدرسية'
-  },
-  // May 2027
-  {
-    id: 'prop-gymnasiade-nat',
-    title: 'الجمنزياد الوطني للرياضة المدرسية والمهرجان الختامي',
-    sportId: 'athletics',
-    scope: 'national',
-    date: '2027-05-10',
-    time: '10:00 صباحاً',
-    venue: 'المجمع الرياضي الأمير مولاي عبد الله بالرباط',
-    category: 'مختلف الرياضات الفردية والجماعية',
-    gender: 'Mixed',
-    organizer: 'الوزارة الوصية والجامعة الملكية المغربية للرياضة المدرسية',
-    coordinator: 'المسؤولون المركزيون',
-    notes: 'اختتام الموسم الرياضي المدرسي الوطني'
-  },
-  {
-    id: 'prop-closing-prov',
-    title: 'الحفل الإقليمي الختامي وتتويج الفرق والأساتذة والتلاميذ المتوجين',
-    sportId: 'cross_country',
-    scope: 'provincial',
-    date: '2027-05-20',
-    time: '16:00 مساءً',
-    venue: 'قاعة الأنشطة الكبرى بالمديرية الإقليمية تاوريرت',
-    category: 'جميع المؤسسات المتوجة والأطر المكرمة',
-    gender: 'Mixed',
-    organizer: 'المديرية الإقليمية لوزارة التربية الوطنية بتاوريرت',
-    coordinator: 'السيد المدير الإقليمي ورئيس الفرع الإقليمي',
-    notes: 'توزيع الجوائز والشواهد التقديرية والكؤوس والميداليات'
-  }
-];
 
 export const ChampionshipCalendarView: React.FC<ChampionshipCalendarViewProps> = ({
   tournaments,
@@ -337,13 +83,51 @@ export const ChampionshipCalendarView: React.FC<ChampionshipCalendarViewProps> =
   venues,
   userProfile,
   activeSeason,
+  allowedSportIds: propAllowedSportIds,
+  isCentralAdmin: propIsCentralAdmin,
   onNavigateToTournament,
   onOpenCreateMatch,
   onOpenMatchDetail
 }) => {
   const { userProfile: authUser } = useAuth();
   const activeUser = userProfile || authUser;
-  const isTeacher = activeUser?.role === 'TEACHER' && !activeUser?.isTechCommitteeHead;
+
+  const effectiveIsCentralAdmin = useMemo(() => {
+    if (propIsCentralAdmin !== undefined) return propIsCentralAdmin;
+    return (
+      activeUser?.role === 'CENTRAL_ADMIN' ||
+      activeUser?.role === 'SUPER_ADMIN' ||
+      activeUser?.isSuperAdmin === true ||
+      isSuperAdminEmail(activeUser?.email)
+    );
+  }, [propIsCentralAdmin, activeUser]);
+
+  const effectiveIsTechHeadOrManager = useMemo(() => {
+    if (effectiveIsCentralAdmin) return false;
+    return (
+      activeUser?.isTechCommitteeHead === true ||
+      activeUser?.role === 'TECH_HEAD' ||
+      (activeUser?.role as string) === 'TECH_COMMITTEE_HEAD' ||
+      activeUser?.role === 'SPORT_MANAGER'
+    );
+  }, [effectiveIsCentralAdmin, activeUser]);
+
+  const effectiveAllowedSportIds = useMemo<string[] | null>(() => {
+    if (effectiveIsCentralAdmin) return null;
+    if (propAllowedSportIds !== undefined) return propAllowedSportIds;
+    if (!effectiveIsTechHeadOrManager) return null;
+    const set = new Set<string>();
+    activeUser?.techCommitteeSports?.forEach(id => id && set.add(id));
+    if (activeUser?.sportId) set.add(activeUser.sportId);
+    return Array.from(set);
+  }, [effectiveIsCentralAdmin, propAllowedSportIds, effectiveIsTechHeadOrManager, activeUser]);
+
+  const isScopedToTechHead = !effectiveIsCentralAdmin && Array.isArray(effectiveAllowedSportIds);
+
+  const isTeacher =
+    activeUser?.role === 'TEACHER' &&
+    !effectiveIsTechHeadOrManager &&
+    !effectiveIsCentralAdmin;
 
   // Hover Popover & Quick Modal States
   const [hoveredDateKey, setHoveredDateKey] = useState<string | null>(null);
@@ -372,115 +156,146 @@ export const ChampionshipCalendarView: React.FC<ChampionshipCalendarViewProps> =
   // Filter States
   const [scopeFilter, setScopeFilter] = useState<'ALL' | 'provincial' | 'regional' | 'national'>('ALL');
   const [sportFilter, setSportFilter] = useState<string>('ALL');
+  const [affiliationFilter, setAffiliationFilter] = useState<ProgramAffiliationFilter>('ALL');
   const [searchQuery, setSearchQuery] = useState('');
+  const [loadedReferees, setLoadedReferees] = useState<Referee[]>([]);
+  const [loadedTeachers, setLoadedTeachers] = useState<User[]>([]);
+
+  useEffect(() => {
+    DataService.getReferees().then(setLoadedReferees).catch(() => {});
+    DataService.getTeachers().then(setLoadedTeachers).catch(() => {});
+  }, []);
+
+  // Keep sportFilter locked/valid when scoped to Technical Committee Head
+  React.useEffect(() => {
+    if (isScopedToTechHead) {
+      const allowed = effectiveAllowedSportIds || [];
+      if (allowed.length === 1) {
+        setSportFilter(allowed[0]);
+      } else if (allowed.length > 1 && sportFilter !== 'ALL' && !allowed.includes(sportFilter)) {
+        setSportFilter('ALL');
+      }
+    }
+  }, [isScopedToTechHead, effectiveAllowedSportIds, sportFilter]);
 
   // Export Modal State
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   const [exportModalInitialSports, setExportModalInitialSports] = useState<string[]>([]);
 
-  // Unify and build all events from:
-  // 1. Official Proposed program
-  // 2. Real tournaments in the database
-  // 3. Real scheduled matches in the database
+  // Build calendar events EXCLUSIVELY from real matches, scoped strictly for Tech Head
   const allEvents = useMemo<CalendarEventItem[]>(() => {
-    const list: CalendarEventItem[] = [];
-
-    // 1. Add Proposed Program items
-    OFFICIAL_PROPOSED_PROGRAM.forEach(item => {
-      const sp = SPORTS_MAP[item.sportId] || { name: 'رياضة مدرسية', icon: '🏆' };
-      list.push({
-        ...item,
-        sportName: sp.name,
-        sportIcon: sp.icon,
-        isRealData: false
-      });
-    });
-
-    // 2. Add Real Tournaments from database
-    tournaments.forEach(t => {
-      if (!t.startDate) return;
-      const sp = SPORTS_MAP[t.sportId] || { name: t.name, icon: '🏆' };
-      
-      // Determine scope
-      let sc: 'provincial' | 'regional' | 'national' = 'provincial';
-      if (t.scope === 'national') sc = 'national';
-      else if (t.scope === 'regional') sc = 'regional';
-      else if (t.name.includes('وطني') || t.name.includes('الوطنية')) sc = 'national';
-      else if (t.name.includes('جهوي') || t.name.includes('الجهوية')) sc = 'regional';
-
-      const dateStr = normalizeDateToYmd(t.startDate);
-
-      if (dateStr) {
-        list.push({
-          id: `real-t-${t.id}`,
-          title: t.name,
-          sportId: t.sportId,
-          sportName: sp.name,
-          sportIcon: sp.icon,
-          scope: sc,
-          date: dateStr,
-          time: '10:00 صباحاً',
-          venue: t.location || 'القاعة الرياضية بتاوريرت',
-          category: t.category || 'جميع الفئات المعتمدة',
-          gender: (t.gender as any) || 'Mixed',
-          organizer: 'المديرية الإقليمية تاوريرت',
-          coordinator: t.managerName || 'المسؤول المركزي',
-          notes: t.description || 'بطولة مبرمجة بالنظام',
-          isRealData: true,
-          rawTournament: t
-        });
-      }
-    });
-
-    // 3. Add Real Matches from database
+    const allowedSet = isScopedToTechHead ? new Set(effectiveAllowedSportIds || []) : null;
+    const matchById = new Map<string, Match>();
     matches.forEach(m => {
-      if (!m.date) return;
-      const sp = SPORTS_MAP[m.sportId || 'football'] || { name: 'كرة القدم', icon: '⚽' };
-      const dateStr = normalizeDateToYmd(m.date);
-
-      if (dateStr) {
-        const school1 = schools.find(s => s.id === m.team1Id)?.name || m.team1Name || m.team1SchoolName || 'فريق 1';
-        const school2 = schools.find(s => s.id === m.team2Id)?.name || m.team2Name || m.team2SchoolName || 'فريق 2';
-        const venueObj = venues?.find(v => v.id === m.venueId || v.name === m.venueId);
-        const venueName = m.venueName?.trim() || venueObj?.name || (m as any).location || m.venueId || 'مركز التباري بتاوريرت';
-
-        list.push({
-          id: `real-m-${m.id}`,
-          title: `مباراة: ${school1} ضد ${school2}`,
-          sportId: m.sportId || 'football',
-          sportName: sp.name,
-          sportIcon: sp.icon,
-          scope: 'provincial',
-          date: dateStr,
-          time: m.startTime || (m as any).time || '15:00',
-          venue: venueName,
-          category: m.ageCategory ? `${m.ageCategory} (${m.stage ? `دور ${m.stage}` : ''})` : (m.stage ? `دور ${m.stage}` : 'مباراة رسمية'),
-          gender: m.gender || 'Male',
-          organizer: 'لجنة التحكيم والبرمجة بالمديرية',
-          notes: `الحالة: ${m.status === 'Completed' ? `منتهية (النتيجة: ${m.score1} - ${m.score2})` : 'مبرمجة'}${m.referees && m.referees.length > 0 ? ` • الحكام: ${m.referees.join(', ')}` : ''}`,
-          isRealData: true,
-          rawMatch: m
-        });
-      }
+      if (m.id) matchById.set(`match-${m.id}`, m);
     });
 
+    const built = buildAllCalendarEvents(
+      tournaments,
+      matches,
+      schools,
+      venues || [],
+      loadedReferees,
+      loadedTeachers
+    );
+
+    return built
+      .filter(ev => !allowedSet || allowedSet.has(ev.sportId))
+      .map(ev => ({
+        id: ev.id,
+        title: ev.title,
+        sportId: ev.sportId,
+        sportName: ev.sportName,
+        sportIcon: ev.sportIcon || '🏆',
+        scope: ev.scope,
+        affiliationType: ev.affiliationType || 'non_club',
+        date: ev.date,
+        time: ev.time,
+        venue: ev.venue,
+        category: ev.category || 'مباراة رسمية',
+        gender: (ev.gender as 'Male' | 'Female' | 'Mixed') || 'Male',
+        organizer: ev.organizer || 'لجنة التحكيم والبرمجة بالمديرية',
+        coordinator: ev.coordinator,
+        referees: ev.referees,
+        refereesText: ev.refereesText,
+        notes: (ev.notes || '').trim(),
+        isRealData: true,
+        rawMatch: matchById.get(ev.id)
+      }));
+  }, [tournaments, matches, schools, venues, loadedReferees, loadedTeachers, isScopedToTechHead, effectiveAllowedSportIds]);
+
+  // Available sports for dropdown (strictly Tech Head's assigned sports, or sports that have matches for Admin)
+  const availableFilterSports = useMemo(() => {
+    const base = SPORTS_CONFIG.map(s => ({ id: s.id, name: s.name }));
+    if (isScopedToTechHead) {
+      const allowedSet = new Set(effectiveAllowedSportIds || []);
+      const filtered = base.filter(s => allowedSet.has(s.id));
+      (effectiveAllowedSportIds || []).forEach(id => {
+        if (!filtered.some(s => s.id === id)) {
+          filtered.push({ id, name: SPORTS_MAP[id]?.name || id });
+        }
+      });
+      return filtered;
+    }
+    const sportsWithMatches = new Set(allEvents.map(ev => ev.sportId));
+    const filtered = base.filter(s => sportsWithMatches.has(s.id));
+    allEvents.forEach(ev => {
+      if (!filtered.some(s => s.id === ev.sportId)) {
+        filtered.push({ id: ev.sportId, name: ev.sportName || SPORTS_MAP[ev.sportId]?.name || ev.sportId });
+      }
+    });
+    return filtered;
+  }, [isScopedToTechHead, effectiveAllowedSportIds, allEvents]);
+
+  // Keep sportFilter valid if matches of previously selected sport were cleared
+  useEffect(() => {
+    if (!isScopedToTechHead && sportFilter !== 'ALL' && !availableFilterSports.some(s => s.id === sportFilter)) {
+      setSportFilter('ALL');
+    }
+  }, [isScopedToTechHead, sportFilter, availableFilterSports]);
+
+  // Tournament types/affiliations that actually have matches in the selected sport + scope
+  const availableAffiliations = useMemo(() => {
+    const counts: Record<'non_club' | 'club_affiliated' | 'open', number> = {
+      non_club: 0,
+      club_affiliated: 0,
+      open: 0
+    };
+    allEvents.forEach(ev => {
+      if (scopeFilter !== 'ALL' && ev.scope !== scopeFilter) return;
+      if (sportFilter !== 'ALL' && ev.sportId !== sportFilter) return;
+      const aff = ev.affiliationType || 'non_club';
+      counts[aff] += 1;
+    });
+    const list: { id: 'non_club' | 'club_affiliated' | 'open'; label: string; count: number; icon: string }[] = [];
+    if (counts.non_club > 0) list.push({ id: 'non_club', label: AFFILIATION_LABELS.non_club, count: counts.non_club, icon: '🏫' });
+    if (counts.club_affiliated > 0) list.push({ id: 'club_affiliated', label: AFFILIATION_LABELS.club_affiliated, count: counts.club_affiliated, icon: '🏅' });
+    if (counts.open > 0) list.push({ id: 'open', label: AFFILIATION_LABELS.open, count: counts.open, icon: '🌍' });
     return list;
-  }, [tournaments, matches, schools, venues]);
+  }, [allEvents, scopeFilter, sportFilter]);
+
+  useEffect(() => {
+    if (affiliationFilter !== 'ALL' && !availableAffiliations.some(a => a.id === affiliationFilter)) {
+      setAffiliationFilter('ALL');
+    }
+  }, [affiliationFilter, availableAffiliations]);
 
   // Filtered Events
   const filteredEvents = useMemo(() => {
     return allEvents.filter(ev => {
       const matchesScope = scopeFilter === 'ALL' || ev.scope === scopeFilter;
       const matchesSport = sportFilter === 'ALL' || ev.sportId === sportFilter;
+      const matchesAffiliation = affiliationFilter === 'ALL' || (ev.affiliationType || 'non_club') === affiliationFilter;
       const matchesSearch = !searchQuery ||
         ev.title.includes(searchQuery) ||
         ev.sportName.includes(searchQuery) ||
         ev.venue.includes(searchQuery) ||
         (ev.coordinator && ev.coordinator.includes(searchQuery)) ||
-        (ev.category && ev.category.includes(searchQuery));
-      return matchesScope && matchesSport && matchesSearch;
+        (ev.category && ev.category.includes(searchQuery)) ||
+        (ev.notes && ev.notes.includes(searchQuery));
+      return matchesScope && matchesSport && matchesAffiliation && matchesSearch;
     });
-  }, [allEvents, scopeFilter, sportFilter, searchQuery]);
+  }, [allEvents, scopeFilter, sportFilter, affiliationFilter, searchQuery]);
 
   // Map of date string -> events list for fast lookup in calendar days
   const eventsByDate = useMemo(() => {
@@ -572,8 +387,14 @@ export const ChampionshipCalendarView: React.FC<ChampionshipCalendarViewProps> =
       sportName: e.sportName || SPORTS_MAP[e.sportId]?.name || e.sportId,
       sportIcon: e.sportIcon || SPORTS_MAP[e.sportId]?.icon || '🏆'
     })),
-    selectedSportIds: sportFilter !== 'ALL' ? [sportFilter] : [],
+    selectedSportIds:
+      sportFilter !== 'ALL'
+        ? [sportFilter]
+        : isScopedToTechHead
+        ? (effectiveAllowedSportIds && effectiveAllowedSportIds.length > 0 ? effectiveAllowedSportIds : ['__none__'])
+        : [],
     scopeFilter,
+    affiliationFilter,
     activeSeason
   });
 
@@ -609,6 +430,16 @@ export const ChampionshipCalendarView: React.FC<ChampionshipCalendarViewProps> =
               <span className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[11px] font-bold px-2.5 py-1 rounded-full">
                 إقليمي • جهوي • وطني
               </span>
+              {isScopedToTechHead && availableFilterSports.length > 0 && (
+                <span className="bg-amber-500/20 text-amber-200 border border-amber-400/40 text-[11px] font-black px-2.5 py-1 rounded-full">
+                  🛡️ برنامج رياضتك فقط: {availableFilterSports.map(s => s.name).join('، ')}
+                </span>
+              )}
+              {effectiveIsCentralAdmin && (
+                <span className="bg-indigo-500/25 text-indigo-200 border border-indigo-400/40 text-[11px] font-black px-2.5 py-1 rounded-full">
+                  🌐 جميع الرزنامات والبرامج (المسير المركزي)
+                </span>
+              )}
             </div>
 
             <h2 className="text-xl sm:text-2xl font-black text-white mt-2 flex items-center gap-2.5">
@@ -619,35 +450,35 @@ export const ChampionshipCalendarView: React.FC<ChampionshipCalendarViewProps> =
             </p>
           </div>
 
-          {/* Download & Print Actions - Distinct & Granular */}
-          <div className="flex flex-wrap items-center gap-2 shrink-0">
+          {/* Download & Print Actions - Clean 2x2 Grid on mobile, inline flex on tablet/desktop */}
+          <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-stretch sm:items-center gap-2 w-full lg:w-auto shrink-0">
             {/* 1. SEPARATE PDF DOWNLOAD */}
             <button
               onClick={handleDirectPdfDownload}
-              className="flex items-center gap-2 px-3.5 py-2.5 rounded-xl bg-red-600 hover:bg-red-700 active:bg-red-800 text-white text-xs font-bold shadow-md transition-all cursor-pointer hover:scale-102 active:scale-98"
+              className="flex items-center justify-center gap-1.5 sm:gap-2 px-3 sm:px-3.5 py-2.5 rounded-xl bg-red-600 hover:bg-red-700 active:bg-red-800 text-white text-xs font-bold shadow-md transition-all cursor-pointer hover:scale-102 active:scale-98 text-center"
               title="تحميل البرنامج بصيغة PDF مباشرة إلى جهازك"
             >
-              <Download className="h-4 w-4" />
+              <Download className="h-4 w-4 shrink-0" />
               <span>تحميل (PDF)</span>
             </button>
 
             {/* 2. WORD DOWNLOAD */}
             <button
               onClick={handleExportWord}
-              className="flex items-center gap-2 px-3.5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-md transition-all cursor-pointer hover:scale-102 active:scale-98"
+              className="flex items-center justify-center gap-1.5 sm:gap-2 px-3 sm:px-3.5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-md transition-all cursor-pointer hover:scale-102 active:scale-98 text-center"
               title="تحميل البرنامج بصيغة Microsoft Word قابلة للتعديل"
             >
-              <FileText className="h-4 w-4" />
+              <FileText className="h-4 w-4 shrink-0" />
               <span>تحميل (Word)</span>
             </button>
 
             {/* 3. PRINT BUTTON (SEPARATE) */}
             <button
               onClick={handlePrintPdf}
-              className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white border border-slate-700 text-xs font-bold shadow-xs transition-all cursor-pointer"
+              className="flex items-center justify-center gap-1.5 sm:gap-2 px-3 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white border border-slate-700 text-xs font-bold shadow-xs transition-all cursor-pointer text-center"
               title="طباعة البرنامج ورقية فورية"
             >
-              <Printer className="h-4 w-4" />
+              <Printer className="h-4 w-4 shrink-0" />
               <span>طباعة البرنامج</span>
             </button>
 
@@ -655,23 +486,29 @@ export const ChampionshipCalendarView: React.FC<ChampionshipCalendarViewProps> =
             {!isTeacher && (
               <button
                 onClick={() => {
-                  setExportModalInitialSports(sportFilter !== 'ALL' ? [sportFilter] : []);
+                  setExportModalInitialSports(
+                    sportFilter !== 'ALL'
+                      ? [sportFilter]
+                      : isScopedToTechHead
+                      ? (effectiveAllowedSportIds || [])
+                      : []
+                  );
                   setIsExportModalOpen(true);
                 }}
-                className="flex items-center gap-2 px-3.5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs shadow-md transition-all cursor-pointer hover:scale-102"
+                className="flex items-center justify-center gap-1.5 sm:gap-2 px-3 sm:px-3.5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs shadow-md transition-all cursor-pointer hover:scale-102 text-center"
                 title="تخصيص استخراج وتنزيل برنامج بطولة واحدة معينة أو بطولتين أو أكثر"
               >
-                <Layers className="h-4 w-4" />
-                <span>تخصيص بطولة معينة...</span>
+                <Layers className="h-4 w-4 shrink-0" />
+                <span>{isScopedToTechHead ? 'تخصيص وتصدير البرنامج...' : 'تخصيص بطولة معينة...'}</span>
               </button>
             )}
           </div>
         </div>
 
         {/* Filter Pills Ribbon */}
-        <div className="mt-5 pt-4 border-t border-white/10 flex flex-wrap items-center justify-between gap-3 text-xs">
+        <div className="mt-5 pt-4 border-t border-white/10 flex flex-col lg:flex-row lg:items-center justify-between gap-3 text-xs">
           {/* Level Filter Tabs */}
-          <div className="flex flex-wrap items-center gap-1.5 bg-white/5 p-1 rounded-xl border border-white/10">
+          <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-1.5 bg-white/5 p-1.5 rounded-xl border border-white/10 w-full lg:w-auto">
             {[
               { id: 'ALL', label: 'جميع المستويات (الشامل)', icon: '🌐' },
               { id: 'provincial', label: 'بطولة إقليمية (تاوريرت)', icon: '🏆' },
@@ -683,46 +520,85 @@ export const ChampionshipCalendarView: React.FC<ChampionshipCalendarViewProps> =
                 <button
                   key={tab.id}
                   onClick={() => setScopeFilter(tab.id as any)}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-bold transition-all cursor-pointer ${
+                  className={`flex items-center justify-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg text-[11px] sm:text-xs font-bold transition-all cursor-pointer text-center ${
                     isActive
                       ? 'bg-blue-600 text-white shadow-xs'
                       : 'text-slate-300 hover:text-white hover:bg-white/10'
                   }`}
                 >
-                  <span>{tab.icon}</span>
+                  <span className="shrink-0">{tab.icon}</span>
                   <span>{tab.label}</span>
                 </button>
               );
             })}
           </div>
 
-          {/* Sport Filter Dropdown */}
-          <div className="flex items-center gap-2 bg-white/10 px-3 py-1.5 rounded-xl border border-white/15">
-            <span className="text-slate-300 font-bold text-xs">نوع الرياضة:</span>
-            <select
-              value={sportFilter}
-              onChange={e => setSportFilter(e.target.value)}
-              className="bg-slate-900/90 text-white font-bold text-xs rounded-lg px-2.5 py-1 border border-white/20 focus:outline-hidden cursor-pointer"
-            >
-              <option value="ALL">كافة الرياضات (الشامل)</option>
-              {SPORTS_CONFIG.map(s => (
-                <option key={s.id} value={s.id}>{s.name}</option>
-              ))}
-            </select>
-          </div>
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full lg:w-auto">
+            {/* Sport Filter Dropdown */}
+            <div className="flex items-center gap-2 bg-white/10 px-3 py-1.5 rounded-xl border border-white/15 w-full sm:w-auto min-w-0">
+              <span className="text-slate-300 font-bold text-xs shrink-0">نوع الرياضة:</span>
+              <select
+                value={sportFilter}
+                onChange={e => setSportFilter(e.target.value)}
+                disabled={isScopedToTechHead && availableFilterSports.length <= 1}
+                className="flex-1 sm:flex-initial min-w-0 bg-slate-900/90 text-white font-bold text-xs rounded-lg px-2.5 py-1 border border-white/20 focus:outline-hidden cursor-pointer disabled:opacity-80 disabled:cursor-default"
+              >
+                {(!isScopedToTechHead || availableFilterSports.length > 1) && (
+                  <option value="ALL">
+                    {isScopedToTechHead ? 'جميع رياضاتي المسندة' : 'كافة الرياضات (الشامل)'}
+                  </option>
+                )}
+                {availableFilterSports.map(s => (
+                  <option key={s.id} value={s.id}>{s.name}</option>
+                ))}
+              </select>
+            </div>
 
-          {/* Quick Search Field */}
-          <div className="relative min-w-[200px] flex-1 sm:flex-initial">
-            <Search className="absolute right-3 top-2.5 h-3.5 w-3.5 text-slate-400" />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={e => setSearchQuery(e.target.value)}
-              placeholder="ابحث عن بطولة، رياضة، مكان أو مؤطر..."
-              className="w-full bg-white/10 border border-white/15 rounded-xl pr-9 pl-3 py-1.5 text-xs text-white placeholder-slate-400 focus:outline-hidden focus:ring-2 focus:ring-blue-400"
-            />
+            {/* Quick Search Field */}
+            <div className="relative w-full sm:w-auto sm:min-w-[200px] flex-1">
+              <Search className="absolute right-3 top-2.5 h-3.5 w-3.5 text-slate-400" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                placeholder="ابحث عن بطولة، رياضة، مكان أو مؤطر..."
+                className="w-full bg-white/10 border border-white/15 rounded-xl pr-9 pl-3 py-1.5 text-xs text-white placeholder-slate-400 focus:outline-hidden focus:ring-2 focus:ring-blue-400"
+              />
+            </div>
           </div>
         </div>
+
+        {/* Affiliation / Tournament Class Pills (Shown only when matches exist in classes) */}
+        {availableAffiliations.length > 0 && (
+          <div className="mt-3 pt-3 border-t border-white/10 flex flex-wrap items-center gap-1.5 text-xs">
+            <span className="text-[11px] text-slate-300 font-bold ml-1">صنف البطولة:</span>
+            <button
+              type="button"
+              onClick={() => setAffiliationFilter('ALL')}
+              className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${
+                affiliationFilter === 'ALL'
+                  ? 'bg-emerald-600 text-white shadow-xs'
+                  : 'bg-white/10 text-slate-300 hover:text-white hover:bg-white/15'
+              }`}
+            >
+              🌐 الكل ({allEvents.filter(ev => (scopeFilter === 'ALL' || ev.scope === scopeFilter) && (sportFilter === 'ALL' || ev.sportId === sportFilter)).length})
+            </button>
+            {availableAffiliations.map(opt => (
+              <button
+                key={opt.id}
+                type="button"
+                onClick={() => setAffiliationFilter(opt.id)}
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${
+                  affiliationFilter === opt.id
+                    ? 'bg-emerald-600 text-white shadow-xs'
+                    : 'bg-white/10 text-slate-300 hover:text-white hover:bg-white/15'
+                }`}
+              >
+                {opt.icon} {opt.label} ({opt.count})
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Main Grid: Interactive Calendar on Right (8 cols) + Selected Day Events on Left (4 cols) */}
@@ -780,7 +656,7 @@ export const ChampionshipCalendarView: React.FC<ChampionshipCalendarViewProps> =
             {weekdaysArabic.map((dayName, idx) => (
               <div
                 key={dayName}
-                className={`py-2 text-xs font-black rounded-lg ${
+                className={`py-1.5 sm:py-2 px-0.5 text-[10px] sm:text-xs font-black rounded-lg truncate ${
                   idx === 5 || idx === 6 ? 'text-amber-700 bg-amber-50/60' : 'text-slate-600 bg-slate-50'
                 }`}
               >
@@ -1030,6 +906,13 @@ export const ChampionshipCalendarView: React.FC<ChampionshipCalendarViewProps> =
                           <span>المؤطر المكلف: <strong className="text-slate-700">{ev.coordinator}</strong></span>
                         </div>
                       )}
+
+                      {ev.refereesText && ev.refereesText !== '-' && (
+                        <div className="flex items-center gap-1.5 text-slate-500">
+                          <ShieldCheck className="h-3.5 w-3.5 text-indigo-500 shrink-0" />
+                          <span>الحكام: <strong className="text-slate-700">{ev.refereesText}</strong></span>
+                        </div>
+                      )}
                     </div>
 
                     {ev.notes && (
@@ -1074,9 +957,14 @@ export const ChampionshipCalendarView: React.FC<ChampionshipCalendarViewProps> =
         matches={matches}
         schools={schools}
         venues={venues}
+        referees={loadedReferees}
+        teachers={loadedTeachers}
         activeSeason={activeSeason}
         initialSelectedSportIds={exportModalInitialSports}
         initialScopeFilter={scopeFilter}
+        initialAffiliationFilter={affiliationFilter}
+        allowedSportIds={isScopedToTechHead ? effectiveAllowedSportIds : null}
+        isCentralAdmin={effectiveIsCentralAdmin}
       />
 
       {/* Interactive Popup Modal for Date Match Details */}
@@ -1170,6 +1058,12 @@ export const ChampionshipCalendarView: React.FC<ChampionshipCalendarViewProps> =
                           <Trophy className="w-3.5 h-3.5 text-amber-500 shrink-0" />
                           <span>الجنس: <strong>{ev.gender === 'Male' ? 'ذكور' : ev.gender === 'Female' ? 'إناث' : 'مختلط'}</strong></span>
                         </div>
+                        {ev.refereesText && ev.refereesText !== '-' && (
+                          <div className="flex items-center gap-1.5 col-span-2">
+                            <ShieldCheck className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+                            <span className="truncate" title={ev.refereesText}>الحكام: <strong>{ev.refereesText}</strong></span>
+                          </div>
+                        )}
                       </div>
 
                       {ev.notes && (

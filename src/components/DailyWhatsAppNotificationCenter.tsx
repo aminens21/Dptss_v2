@@ -6,12 +6,20 @@ import {
   generateTeacherWhatsAppMessage,
   generateRefereeWhatsAppMessage,
   generatePrincipalWhatsAppMessage,
+  generateHostPrincipalMatchNotificationMessage,
+  generateTeamPrincipalMatchNotificationMessage,
+  resolveHostSchoolForMatch,
+  getSchoolDirectorContact,
   generateDirectConciseMatchReminder,
   openWhatsApp,
   isValidPhoneNumber,
   sanitizePhoneNumber,
   WhatsAppMessageParams
 } from '../lib/whatsappService';
+import {
+  MatchBroadcastDiffusionModal,
+  MatchBroadcastDiffusionTarget
+} from './MatchBroadcastDiffusionModal';
 import {
   MessageSquare,
   Calendar,
@@ -63,7 +71,7 @@ interface DailyWhatsAppNotificationCenterProps {
 // Stakeholder representation for Unified Broadcast
 export interface MatchStakeholder {
   id: string;
-  roleType: 'teacher1' | 'teacher2' | 'referee' | 'principal1' | 'principal2';
+  roleType: 'teacher1' | 'teacher2' | 'referee' | 'principal1' | 'principal2' | 'host_principal';
   roleLabel: string;
   roleBadgeColor: string;
   name: string;
@@ -122,6 +130,7 @@ export const DailyWhatsAppNotificationCenter: React.FC<DailyWhatsAppNotification
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [expandedMatchId, setExpandedMatchId] = useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [diffusionTarget, setDiffusionTarget] = useState<MatchBroadcastDiffusionTarget | null>(null);
 
   // Set default sport filter when restricted
   useEffect(() => {
@@ -276,10 +285,13 @@ export const DailyWhatsAppNotificationCenter: React.FC<DailyWhatsAppNotification
         schoolId: school2?.id
       };
 
-      // Find Venue
-      const venue = venues.find((v) => v.id === m.venueId) || {
-        name: m.venueId || 'مركز التباري المحدد',
-        address: ''
+      // Host School & Venue resolution
+      const hostSchool = resolveHostSchoolForMatch(m, schools);
+      const hostPrincipalContact = hostSchool ? getSchoolDirectorContact(hostSchool) : null;
+      const matchedVenue = venues.find((v) => v.id === m.venueId);
+      const venue = {
+        name: m.venueName || matchedVenue?.name || hostSchool?.name || m.venueId || 'مركز التباري المحدد',
+        address: matchedVenue?.address || ''
       };
 
       // Find Referees with live synchronized phones
@@ -363,6 +375,20 @@ export const DailyWhatsAppNotificationCenter: React.FC<DailyWhatsAppNotification
           phone: ref.phone,
           refereeId: ref.id
         })),
+        ...(hostSchool && hostPrincipalContact
+          ? [
+              {
+                id: `hp-${m.id}`,
+                roleType: 'host_principal' as const,
+                roleLabel: `مدير المؤسسة المحتضنة (${hostSchool.name})`,
+                roleBadgeColor: 'bg-purple-50 text-purple-800 border-purple-200',
+                name: hostPrincipalContact.directorName,
+                phone: hostPrincipalContact.phone,
+                schoolName: hostSchool.name,
+                schoolId: hostSchool.id
+              }
+            ]
+          : []),
         {
           id: `p1-${m.id}`,
           roleType: 'principal1',
@@ -392,6 +418,8 @@ export const DailyWhatsAppNotificationCenter: React.FC<DailyWhatsAppNotification
         sportInfo,
         school1,
         school2,
+        hostSchool,
+        hostPrincipalContact,
         team1Name,
         team2Name,
         teacher1,
@@ -551,7 +579,11 @@ export const DailyWhatsAppNotificationCenter: React.FC<DailyWhatsAppNotification
           name: stakeholder.name,
           phone: cleanPhone
         });
-      } else if (stakeholder.roleType === 'principal1' || stakeholder.roleType === 'principal2') {
+      } else if (
+        stakeholder.roleType === 'principal1' ||
+        stakeholder.roleType === 'principal2' ||
+        stakeholder.roleType === 'host_principal'
+      ) {
         await DataService.updateContactPhone({
           type: 'principal',
           schoolId: stakeholder.schoolId,
@@ -600,7 +632,11 @@ export const DailyWhatsAppNotificationCenter: React.FC<DailyWhatsAppNotification
           name: currentItem.recipientName,
           phone: cleanPhone
         });
-      } else if (currentItem.roleType === 'principal1' || currentItem.roleType === 'principal2') {
+      } else if (
+        currentItem.roleType === 'principal1' ||
+        currentItem.roleType === 'principal2' ||
+        currentItem.roleType === 'host_principal'
+      ) {
         await DataService.updateContactPhone({
           type: 'principal',
           schoolId: currentItem.schoolId,
@@ -1058,6 +1094,43 @@ export const DailyWhatsAppNotificationCenter: React.FC<DailyWhatsAppNotification
 
                   {/* Primary Action: ONE-CLICK UNIFIED BROADCAST BUTTON */}
                   <div className="flex flex-wrap items-center gap-2 self-start md:self-auto">
+                    {canSendNotifications && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const rawRefs = [
+                            ...(m.referees || []),
+                            ...(m.referee1Id ? [m.referee1Id] : []),
+                            ...(m.referee2Id ? [m.referee2Id] : [])
+                          ].map(r => (r || '').trim()).filter(Boolean);
+                          setDiffusionTarget({
+                            matchId: m.id,
+                            sportId: m.sportId,
+                            sportName: item.sportInfo.name,
+                            ageCategory: m.ageCategory || tourn?.ageCategory,
+                            gender: m.gender || tourn?.gender,
+                            stageName: m.stage,
+                            team1Id: m.team1Id,
+                            team2Id: m.team2Id,
+                            team1Name: item.team1Name,
+                            team2Name: item.team2Name,
+                            hostSchoolId: m.hostSchoolId,
+                            venueId: m.venueId,
+                            venueName: item.venueName,
+                            dateStr: item.dateString,
+                            timeStr: m.startTime || '10:00',
+                            referees: Array.from(new Set(rawRefs)),
+                            notes: m.notes
+                          });
+                        }}
+                        className="px-3.5 py-2 bg-gradient-to-l from-emerald-600 via-teal-600 to-emerald-700 hover:from-emerald-700 hover:to-teal-800 text-white text-xs font-black rounded-xl flex items-center gap-1.5 shadow-2xs transition-all cursor-pointer"
+                        title="إخبار جميع المعنيين بالمباراة بضغطة زر عبر لائحة بث موحدة (Nouvelle diffusion)"
+                      >
+                        <Share2 className="w-3.5 h-3.5 shrink-0" />
+                        <span>إخبار المعنيين (Nouvelle diffusion)</span>
+                      </button>
+                    )}
+
                     <button
                       type="button"
                       onClick={() => setSelectedMatchForBroadcast(item)}
@@ -1314,24 +1387,36 @@ export const DailyWhatsAppNotificationCenter: React.FC<DailyWhatsAppNotification
                       </div>
                     </div>
 
-                    {/* 4. Principals */}
+                    {/* 4. Principals (Host School + Competing Schools) */}
                     <div className="bg-white border border-blue-200/80 rounded-xl p-3 flex flex-col justify-between gap-2 shadow-2xs">
                       <div>
                         <div className="flex items-center justify-between gap-1 mb-1">
                           <span className="text-[10px] font-black bg-blue-100 text-blue-800 px-2 py-0.5 rounded">
-                            مدراء المؤسستين
+                            مدراء المؤسسات المعنية
                           </span>
                         </div>
                         <div className="space-y-1">
+                          {item.hostSchool && item.hostPrincipalContact && (
+                            <div className="flex items-center justify-between text-[11px] bg-purple-50/70 p-1 rounded border border-purple-200">
+                              <span className="font-bold text-purple-900 truncate" title={`المؤسسة المحتضنة: ${item.hostSchool.name}`}>
+                                🏫 المحتضنة: {item.hostSchool.name.split(' ').slice(0, 2).join(' ')}
+                              </span>
+                              <span className="text-[9px] font-mono">
+                                {item.hostPrincipalContact.phone ? (
+                                  <span className="text-emerald-700 font-bold">{item.hostPrincipalContact.phone}</span>
+                                ) : (
+                                  <span className="text-amber-600">غير مسجل</span>
+                                )}
+                              </span>
+                            </div>
+                          )}
                           <div className="flex items-center justify-between text-[11px] bg-white/80 p-1 rounded border border-blue-100">
                             <span className="font-bold text-slate-800 truncate" title={item.team1Name}>
-                              م.1: {item.team1Name.split(' ')[0]}
+                              م.1: {item.team1Name.split(' ').slice(0, 2).join(' ')}
                             </span>
                             <span className="text-[9px] font-mono">
-                              {((userProfile?.role === 'CENTRAL_ADMIN' || userProfile?.role === 'REGIONAL_ADMIN' || userProfile?.role === 'PROVINCIAL_ADMIN' || (userProfile?.schoolId && userProfile.schoolId === item.school1?.id) || (userProfile?.schoolName && userProfile.schoolName === item.school1?.name)) && item.school1?.principalPhone) || item.school1?.phone ? (
-                                <span className="text-emerald-700 font-bold">
-                                  {((userProfile?.role === 'CENTRAL_ADMIN' || userProfile?.role === 'REGIONAL_ADMIN' || userProfile?.role === 'PROVINCIAL_ADMIN' || (userProfile?.schoolId && userProfile.schoolId === item.school1?.id) || (userProfile?.schoolName && userProfile.schoolName === item.school1?.name)) && item.school1?.principalPhone) || item.school1?.phone}
-                                </span>
+                              {item.principal1.phone ? (
+                                <span className="text-emerald-700 font-bold">{item.principal1.phone}</span>
                               ) : (
                                 <span className="text-amber-600">غير مسجل</span>
                               )}
@@ -1339,13 +1424,11 @@ export const DailyWhatsAppNotificationCenter: React.FC<DailyWhatsAppNotification
                           </div>
                           <div className="flex items-center justify-between text-[11px] bg-white/80 p-1 rounded border border-blue-100">
                             <span className="font-bold text-slate-800 truncate" title={item.team2Name}>
-                              م.2: {item.team2Name.split(' ')[0]}
+                              م.2: {item.team2Name.split(' ').slice(0, 2).join(' ')}
                             </span>
                             <span className="text-[9px] font-mono">
-                              {((userProfile?.role === 'CENTRAL_ADMIN' || userProfile?.role === 'REGIONAL_ADMIN' || userProfile?.role === 'PROVINCIAL_ADMIN' || (userProfile?.schoolId && userProfile.schoolId === item.school2?.id) || (userProfile?.schoolName && userProfile.schoolName === item.school2?.name)) && item.school2?.principalPhone) || item.school2?.phone ? (
-                                <span className="text-emerald-700 font-bold">
-                                  {((userProfile?.role === 'CENTRAL_ADMIN' || userProfile?.role === 'REGIONAL_ADMIN' || userProfile?.role === 'PROVINCIAL_ADMIN' || (userProfile?.schoolId && userProfile.schoolId === item.school2?.id) || (userProfile?.schoolName && userProfile.schoolName === item.school2?.name)) && item.school2?.principalPhone) || item.school2?.phone}
-                                </span>
+                              {item.principal2.phone ? (
+                                <span className="text-emerald-700 font-bold">{item.principal2.phone}</span>
                               ) : (
                                 <span className="text-amber-600">غير مسجل</span>
                               )}
@@ -1356,21 +1439,59 @@ export const DailyWhatsAppNotificationCenter: React.FC<DailyWhatsAppNotification
 
                       <div className="pt-2 border-t border-blue-200/50 flex flex-col gap-1.5">
                         {canSendNotifications ? (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const pPhone = item.school1?.principalPhone || item.school1?.phone;
-                              if (!pPhone) {
-                                toast.error(`رقم هاتف مدير ${item.team1Name} غير مسجل`);
-                                return;
-                              }
-                              openWhatsApp(pPhone, unifiedMsg);
-                            }}
-                            className="w-full bg-blue-600 hover:bg-blue-700 active:scale-95 text-white py-1.5 px-2 rounded-lg text-[10px] font-bold flex items-center justify-center gap-1 transition-all shadow-xs cursor-pointer truncate"
-                          >
-                            <Send className="w-2.5 h-2.5 shrink-0" />
-                            <span className="truncate">توجيه لمدير م.1</span>
-                          </button>
+                          <div className="space-y-1.5">
+                            {item.hostSchool && item.hostPrincipalContact && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const hostMsg = generateHostPrincipalMatchNotificationMessage({
+                                    ...getParamsForMatch(item, item.hostPrincipalContact?.directorName),
+                                    hostSchoolName: item.hostSchool?.name
+                                  });
+                                  openWhatsApp(item.hostPrincipalContact?.phone || '', hostMsg);
+                                  setDispatchedIds((prev) => new Set(prev).add(`hp-${m.id}`));
+                                }}
+                                className="w-full bg-purple-600 hover:bg-purple-700 active:scale-95 text-white py-1.5 px-2 rounded-lg text-[10px] font-bold flex items-center justify-center gap-1 transition-all shadow-xs cursor-pointer truncate"
+                              >
+                                <Send className="w-2.5 h-2.5 shrink-0" />
+                                <span className="truncate">إشعار مدير المحتضنة ({item.hostSchool.name.split(' ')[0]})</span>
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const pPhone = item.principal1.phone;
+                                const msg = generateTeamPrincipalMatchNotificationMessage({
+                                  ...getParamsForMatch(item, item.principal1.fullName),
+                                  schoolName: item.team1Name,
+                                  opponentName: item.team2Name
+                                });
+                                openWhatsApp(pPhone || '', msg);
+                                setDispatchedIds((prev) => new Set(prev).add(`p1-${m.id}`));
+                              }}
+                              className="w-full bg-blue-600 hover:bg-blue-700 active:scale-95 text-white py-1.5 px-2 rounded-lg text-[10px] font-bold flex items-center justify-center gap-1 transition-all shadow-xs cursor-pointer truncate"
+                            >
+                              <Send className="w-2.5 h-2.5 shrink-0" />
+                              <span className="truncate">إشعار مدير م.1 ({item.team1Name.split(' ')[0]})</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const pPhone = item.principal2.phone;
+                                const msg = generateTeamPrincipalMatchNotificationMessage({
+                                  ...getParamsForMatch(item, item.principal2.fullName),
+                                  schoolName: item.team2Name,
+                                  opponentName: item.team1Name
+                                });
+                                openWhatsApp(pPhone || '', msg);
+                                setDispatchedIds((prev) => new Set(prev).add(`p2-${m.id}`));
+                              }}
+                              className="w-full bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white py-1.5 px-2 rounded-lg text-[10px] font-bold flex items-center justify-center gap-1 transition-all shadow-xs cursor-pointer truncate"
+                            >
+                              <Send className="w-2.5 h-2.5 shrink-0" />
+                              <span className="truncate">إشعار مدير م.2 ({item.team2Name.split(' ')[0]})</span>
+                            </button>
+                          </div>
                         ) : (
                           <span className="text-[10px] text-slate-500 font-medium py-1">إدارات المؤسسات المعنية</span>
                         )}
@@ -2095,6 +2216,15 @@ export const DailyWhatsAppNotificationCenter: React.FC<DailyWhatsAppNotification
       )}
           </div>
         </div>
+
+        <MatchBroadcastDiffusionModal
+          isOpen={Boolean(diffusionTarget)}
+          onClose={() => setDiffusionTarget(null)}
+          target={diffusionTarget}
+          schools={schools}
+          refereesList={referees}
+          teachersList={teachers}
+        />
       </div>
     );
 };

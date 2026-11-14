@@ -565,24 +565,24 @@ export const Teachers: React.FC = () => {
       />
 
       {/* Header and Quick Stats */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+        <div className="min-w-0">
           <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
-            <GraduationCap className="h-6 w-6 text-blue-600" />
+            <GraduationCap className="h-6 w-6 text-blue-600 shrink-0" />
             <span>لائحة الأطر التربوية</span>
           </h2>
           <p className="text-xs text-slate-500 mt-1">
             إدارة ومتابعة ملفات أساتذة التربية البدنية والرياضية المسجلين بالمديرية. اضغط على أي أستاذ لعرض بطاقته التفصيلية.
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-stretch sm:items-center gap-2 w-full lg:w-auto">
           {/* Download Blank Template Button */}
           <button
             onClick={handleDownloadExcelTemplate}
-            className="flex items-center gap-1.5 px-3.5 py-2 bg-emerald-50 border border-emerald-300 hover:bg-emerald-100 text-emerald-800 rounded-xl text-xs font-black transition-all shadow-3xs cursor-pointer"
+            className="flex items-center justify-center gap-1.5 px-2.5 sm:px-3.5 py-2 bg-emerald-50 border border-emerald-300 hover:bg-emerald-100 text-emerald-800 rounded-xl text-[11px] sm:text-xs font-black transition-all shadow-3xs cursor-pointer text-center"
             title="تحميل نموذج إكسيل فارغ لتعبئة بيانات الأطر التربوية"
           >
-            <Download className="h-3.5 w-3.5" />
+            <Download className="h-3.5 w-3.5 shrink-0" />
             <span>تحميل نموذج Excel فارغ</span>
           </button>
 
@@ -590,10 +590,10 @@ export const Teachers: React.FC = () => {
           {(userProfile?.role === 'CENTRAL_ADMIN' || userProfile?.role === 'SPORT_MANAGER') && (
             <button
               onClick={() => fileInputRef.current?.click()}
-              className="flex items-center gap-1.5 px-3.5 py-2 bg-indigo-50 border border-indigo-300 hover:bg-indigo-100 text-indigo-800 rounded-xl text-xs font-black transition-all shadow-3xs cursor-pointer"
+              className="flex items-center justify-center gap-1.5 px-2.5 sm:px-3.5 py-2 bg-indigo-50 border border-indigo-300 hover:bg-indigo-100 text-indigo-800 rounded-xl text-[11px] sm:text-xs font-black transition-all shadow-3xs cursor-pointer text-center"
               title="استيراد وتعبئة لائحة الأساتذة من ملف إكسيل (الأعمدة B إلى G)"
             >
-              <Upload className="h-3.5 w-3.5" />
+              <Upload className="h-3.5 w-3.5 shrink-0" />
               <span>استيراد من Excel</span>
             </button>
           )}
@@ -601,10 +601,10 @@ export const Teachers: React.FC = () => {
           {/* Export to Excel Button */}
           <button
             onClick={handleExportCurrentTeachers}
-            className="flex items-center gap-1.5 px-3.5 py-2 bg-slate-50 border border-slate-300 hover:bg-slate-100 text-slate-700 rounded-xl text-xs font-black transition-all shadow-3xs cursor-pointer"
+            className="flex items-center justify-center gap-1.5 px-2.5 sm:px-3.5 py-2 bg-slate-50 border border-slate-300 hover:bg-slate-100 text-slate-700 rounded-xl text-[11px] sm:text-xs font-black transition-all shadow-3xs cursor-pointer text-center"
             title="تصدير اللائحة الحالية للأساتذة إلى ملف إكسيل"
           >
-            <FileSpreadsheet className="h-3.5 w-3.5" />
+            <FileSpreadsheet className="h-3.5 w-3.5 shrink-0" />
             <span>تصدير إلى Excel</span>
           </button>
 
@@ -615,10 +615,10 @@ export const Teachers: React.FC = () => {
                 setSelectedTeacherForEdit(null);
                 setIsEditRoleModalOpen(true);
               }}
-              className="flex items-center gap-1.5 px-3.5 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white rounded-xl text-xs font-black transition-all shadow-sm hover:shadow-md cursor-pointer"
+              className="flex items-center justify-center gap-1.5 px-2.5 sm:px-3.5 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white rounded-xl text-[11px] sm:text-xs font-black transition-all shadow-sm hover:shadow-md cursor-pointer text-center"
               title="إضافة أستاذ جديد واعتماد بريده الإلكتروني للدخول عبر Google"
             >
-              <UserPlus className="h-4 w-4" />
+              <UserPlus className="h-4 w-4 shrink-0" />
               <span>إضافة أستاذ جديد (اعتماد بريد)</span>
             </button>
           )}
@@ -629,28 +629,28 @@ export const Teachers: React.FC = () => {
               setPreselectedTeacherId(undefined);
               setIsBadgesModalOpen(true);
             }}
-            className="flex items-center gap-2 px-3.5 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl text-xs font-black transition-all shadow-sm hover:shadow-md cursor-pointer"
+            className="col-span-2 sm:col-span-1 flex items-center justify-center gap-2 px-3 sm:px-3.5 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl text-[11px] sm:text-xs font-black transition-all shadow-sm hover:shadow-md cursor-pointer text-center"
             title="إنشاء وطباعة شارات وبادجات الأساتذة (8 في الورقة A4)"
           >
-            <span className="text-sm">🪪</span>
+            <span className="text-sm shrink-0">🪪</span>
             <span>إنشاء شارات وبادجات الأساتذة (A4)</span>
           </button>
 
           <button
             onClick={loadTeachersAndStudents}
-            className="flex items-center gap-1.5 px-3 py-2 border border-slate-200 hover:bg-slate-50 rounded-xl text-xs font-semibold text-slate-600 cursor-pointer transition-all bg-white shadow-3xs"
+            className="flex items-center justify-center gap-1.5 px-2.5 sm:px-3 py-2 border border-slate-200 hover:bg-slate-50 rounded-xl text-[11px] sm:text-xs font-semibold text-slate-600 cursor-pointer transition-all bg-white shadow-3xs text-center"
           >
-            <RefreshCw className="h-3.5 w-3.5" />
+            <RefreshCw className="h-3.5 w-3.5 shrink-0" />
             <span>تحديث القائمة</span>
           </button>
 
           {userProfile?.role === 'CENTRAL_ADMIN' && teachers.length > 0 && (
             <button
               onClick={() => setShowDeleteAllModal(true)}
-              className="flex items-center gap-1.5 px-3 py-2 bg-red-50 border border-red-200 hover:bg-red-100 rounded-xl text-xs font-bold text-red-600 transition-all shadow-3xs cursor-pointer"
+              className="flex items-center justify-center gap-1.5 px-2.5 sm:px-3 py-2 bg-red-50 border border-red-200 hover:bg-red-100 rounded-xl text-[11px] sm:text-xs font-bold text-red-600 transition-all shadow-3xs cursor-pointer text-center"
               title="حذف جميع حسابات الأطر التربوية في هذه المديرية"
             >
-              <Trash2 className="h-3.5 w-3.5" />
+              <Trash2 className="h-3.5 w-3.5 shrink-0" />
               <span>حذف الكل</span>
             </button>
           )}
@@ -706,7 +706,7 @@ export const Teachers: React.FC = () => {
         </div>
 
         {/* Quick Level Filter Pills */}
-        <div className="flex items-center gap-1.5 overflow-x-auto w-full pb-1 sm:pb-0 pt-1">
+        <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-1.5 w-full pt-1">
           {[
             { id: '', label: `جميع الأسلاك (${teachers.length})`, icon: '👥' },
             { id: 'HIGH', label: `الثانوي التأهيلي (${teachers.filter(t => (t.teachingCadre || 'HIGH') === 'HIGH').length})`, icon: '🎓' },
@@ -724,13 +724,13 @@ export const Teachers: React.FC = () => {
                   setSearchParams({});
                 }
               }}
-              className={`px-3 py-1.5 text-xs font-bold rounded-xl whitespace-nowrap transition-all cursor-pointer flex items-center gap-1.5 ${
+              className={`px-2.5 sm:px-3 py-1.5 text-[11px] sm:text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5 text-center ${
                 selectedCadre === f.id
                   ? 'bg-emerald-600 text-white shadow-xs font-black'
                   : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300'
               }`}
             >
-              <span>{f.icon}</span>
+              <span className="shrink-0">{f.icon}</span>
               <span>{f.label}</span>
             </button>
           ))}

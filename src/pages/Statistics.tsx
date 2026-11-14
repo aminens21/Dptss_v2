@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo } from 'react';
-import { DataService, SPORTS_MAP, deduplicateById } from '../lib/dataService';
+import { DataService, SPORTS_MAP, deduplicateById, normalizeSchoolCycleType } from '../lib/dataService';
 import { School, Match, Student, Tournament, Sport, Directorate, CrossCountryCategoryResult } from '../types';
 import { CROSS_COUNTRY_CATEGORIES, calculateTeamRankings } from '../lib/crossCountryConfig';
 import {
@@ -24,7 +24,11 @@ import {
   Flame,
   ShieldCheck,
   X,
-  Eye
+  Eye,
+  LayoutGrid,
+  List,
+  MapPin,
+  Clock
 } from 'lucide-react';
 
 export const Statistics: React.FC = () => {
@@ -38,12 +42,30 @@ export const Statistics: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [selectedSchoolAchievements, setSelectedSchoolAchievements] = useState<{ schoolName: string; achievements: any[] } | null>(null);
 
-  // Filters
-  const [activeTab, setActiveTab] = useState<'results' | 'participation' | 'sports'>('results');
+  // Filters & View Mode
+  const [activeTab, setActiveTab] = useState<'results' | 'participation' | 'sports' | 'matches'>('results');
+  const [activeKpiFocus, setActiveKpiFocus] = useState<'schools' | 'students' | 'matches' | 'sports' | null>(null);
+  const [rankingViewMode, setRankingViewMode] = useState<'cards' | 'table'>(() =>
+    typeof window !== 'undefined' && window.innerWidth < 768 ? 'cards' : 'table'
+  );
   const [selectedSport, setSelectedSport] = useState<string>('ALL');
   const [selectedType, setSelectedType] = useState<string>('ALL'); // Primary / Middle / High
   const [selectedCommune, setSelectedCommune] = useState<string>('ALL');
   const [searchQuery, setSearchQuery] = useState('');
+
+  const handleKpiCardClick = (
+    focus: 'schools' | 'students' | 'matches' | 'sports',
+    targetTab: 'results' | 'participation' | 'sports' | 'matches'
+  ) => {
+    setActiveKpiFocus(focus);
+    setActiveTab(targetTab);
+    setTimeout(() => {
+      const el = document.getElementById('stats-main-section');
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    }, 60);
+  };
 
   useEffect(() => {
     loadAllData();
@@ -172,7 +194,7 @@ export const Statistics: React.FC = () => {
       resultsMap[s.id] = {
         schoolId: s.id,
         schoolName: s.name,
-        type: s.type || 'إعدادي',
+        type: normalizeSchoolCycleType(s),
         commune: s.commune || 'تاوريرت',
         firstPlaces: 0,
         secondPlaces: 0,
@@ -611,7 +633,7 @@ export const Statistics: React.FC = () => {
       partMap[s.name] = {
         schoolId: s.id,
         schoolName: s.name,
-        type: s.type || 'إعدادي',
+        type: normalizeSchoolCycleType(s),
         commune: s.commune || 'تاوريرت',
         maleStudents: 0,
         femaleStudents: 0,
@@ -628,7 +650,7 @@ export const Statistics: React.FC = () => {
         partMap[targetSchoolName] = {
           schoolId: found?.id || st.schoolId,
           schoolName: targetSchoolName,
-          type: found?.type || 'إعدادي',
+          type: found ? normalizeSchoolCycleType(found) : normalizeSchoolCycleType({ name: targetSchoolName }),
           commune: found?.commune || 'تاوريرت',
           maleStudents: 0,
           femaleStudents: 0,
@@ -786,173 +808,291 @@ export const Statistics: React.FC = () => {
         </button>
       </div>
 
-      {/* KPI Cards Grid */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
-          <div className="flex items-center justify-between mb-2">
+      {/* Clickable KPI Cards Grid */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-4">
+        <button
+          type="button"
+          onClick={() => handleKpiCardClick('schools', 'participation')}
+          className={`text-right w-full bg-white p-3 sm:p-4 rounded-xl border transition-all cursor-pointer hover:shadow-md hover:-translate-y-0.5 active:scale-[0.98] ${
+            activeTab === 'participation' && activeKpiFocus === 'schools'
+              ? 'border-blue-500 ring-2 ring-blue-500/20 shadow-sm'
+              : 'border-slate-200 hover:border-blue-300 shadow-xs'
+          }`}
+        >
+          <div className="flex items-center justify-between mb-1.5 sm:mb-2">
             <span className="text-[11px] font-bold text-slate-500">المؤسسات المشاركة</span>
             <span className="p-1.5 bg-blue-50 text-blue-600 rounded-lg">
               <SchoolIcon className="w-4 h-4" />
             </span>
           </div>
-          <h3 className="text-2xl font-black text-slate-800">{summaryCounts.schools}</h3>
+          <h3 className="text-xl sm:text-2xl font-black text-slate-800 tabular-nums">{summaryCounts.schools}</h3>
           <p className="text-[10px] text-slate-400 font-medium mt-1">مؤسسة تعليمية مسجلة</p>
-        </div>
+        </button>
 
-        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
-          <div className="flex items-center justify-between mb-2">
+        <button
+          type="button"
+          onClick={() => handleKpiCardClick('students', 'participation')}
+          className={`text-right w-full bg-white p-3 sm:p-4 rounded-xl border transition-all cursor-pointer hover:shadow-md hover:-translate-y-0.5 active:scale-[0.98] ${
+            activeTab === 'participation' && activeKpiFocus === 'students'
+              ? 'border-emerald-500 ring-2 ring-emerald-500/20 shadow-sm'
+              : 'border-slate-200 hover:border-emerald-300 shadow-xs'
+          }`}
+        >
+          <div className="flex items-center justify-between mb-1.5 sm:mb-2">
             <span className="text-[11px] font-bold text-slate-500">التلاميذ المشاركون</span>
             <span className="p-1.5 bg-emerald-50 text-emerald-600 rounded-lg">
               <Users className="w-4 h-4" />
             </span>
           </div>
-          <h3 className="text-2xl font-black text-slate-800">{summaryCounts.students}</h3>
-          <div className="flex items-center gap-2 text-[10px] font-bold mt-1">
-            <span className="text-blue-600">👦 {summaryCounts.boys} ذكور</span>
-            <span className="text-slate-300">|</span>
-            <span className="text-pink-600">👧 {summaryCounts.girls} إناث</span>
+          <h3 className="text-xl sm:text-2xl font-black text-slate-800 tabular-nums">{summaryCounts.students}</h3>
+          <div className="flex items-center gap-1.5 sm:gap-2 text-[10px] font-bold mt-1 flex-wrap">
+            <span className="text-blue-600 tabular-nums">👦 {summaryCounts.boys} ذكور</span>
+            <span className="text-slate-300">·</span>
+            <span className="text-pink-600 tabular-nums">👧 {summaryCounts.girls} إناث</span>
           </div>
-        </div>
+        </button>
 
-        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
-          <div className="flex items-center justify-between mb-2">
+        <button
+          type="button"
+          onClick={() => handleKpiCardClick('matches', 'matches')}
+          className={`text-right w-full bg-white p-3 sm:p-4 rounded-xl border transition-all cursor-pointer hover:shadow-md hover:-translate-y-0.5 active:scale-[0.98] ${
+            activeTab === 'matches'
+              ? 'border-amber-500 ring-2 ring-amber-500/20 shadow-sm'
+              : 'border-slate-200 hover:border-amber-300 shadow-xs'
+          }`}
+        >
+          <div className="flex items-center justify-between mb-1.5 sm:mb-2">
             <span className="text-[11px] font-bold text-slate-500">المباريات المنجزة</span>
             <span className="p-1.5 bg-amber-50 text-amber-600 rounded-lg">
               <Trophy className="w-4 h-4" />
             </span>
           </div>
-          <h3 className="text-2xl font-black text-slate-800">
+          <h3 className="text-xl sm:text-2xl font-black text-slate-800 tabular-nums">
             {summaryCounts.completedMatches}{' '}
             <span className="text-xs text-slate-400 font-normal">/ {summaryCounts.matches}</span>
           </h3>
-          <p className="text-[10px] text-amber-700 font-medium mt-1">
+          <p className="text-[10px] text-amber-700 font-medium mt-1 tabular-nums">
             نسبة الإنجاز:{' '}
             {summaryCounts.matches > 0
               ? Math.round((summaryCounts.completedMatches / summaryCounts.matches) * 100)
               : 0}
             %
           </p>
-        </div>
+        </button>
 
-        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
-          <div className="flex items-center justify-between mb-2">
+        <button
+          type="button"
+          onClick={() => handleKpiCardClick('sports', 'sports')}
+          className={`text-right w-full bg-white p-3 sm:p-4 rounded-xl border transition-all cursor-pointer hover:shadow-md hover:-translate-y-0.5 active:scale-[0.98] ${
+            activeTab === 'sports'
+              ? 'border-purple-500 ring-2 ring-purple-500/20 shadow-sm'
+              : 'border-slate-200 hover:border-purple-300 shadow-xs'
+          }`}
+        >
+          <div className="flex items-center justify-between mb-1.5 sm:mb-2">
             <span className="text-[11px] font-bold text-slate-500">البطولات والتخصصات</span>
             <span className="p-1.5 bg-purple-50 text-purple-600 rounded-lg">
               <Activity className="w-4 h-4" />
             </span>
           </div>
-          <h3 className="text-2xl font-black text-slate-800">{sportsStats.length}</h3>
-          <p className="text-[10px] text-purple-700 font-medium mt-1">
+          <h3 className="text-xl sm:text-2xl font-black text-slate-800 tabular-nums">{sportsStats.length}</h3>
+          <p className="text-[10px] text-purple-700 font-medium mt-1 tabular-nums">
             {summaryCounts.tournaments} بطولة مبرمجة
           </p>
-        </div>
+        </button>
       </div>
 
       {/* Main Container */}
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+      <div id="stats-main-section" className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden scroll-mt-4">
         {/* Navigation Tabs */}
-        <div className="p-4 border-b border-slate-200 bg-slate-50/70 flex flex-col md:flex-row md:items-center justify-between gap-3">
-          <div className="flex items-center gap-2 overflow-x-auto pb-1 md:pb-0">
+        <div className="p-3 sm:p-4 border-b border-slate-200 bg-slate-50/70 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+          <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-stretch gap-2 w-full lg:w-auto">
             <button
               type="button"
               onClick={() => setActiveTab('results')}
-              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer shrink-0 ${
+              className={`min-h-[42px] px-3 sm:px-4 py-2 rounded-xl text-[11px] sm:text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer text-center ${
                 activeTab === 'results'
                   ? 'bg-blue-600 text-white shadow-xs'
                   : 'bg-white text-slate-700 hover:bg-slate-100 border border-slate-200'
               }`}
             >
-              <Trophy className="w-3.5 h-3.5" />
+              <Trophy className="w-3.5 h-3.5 shrink-0" />
               <span>ترتيب المؤسسات حسب النتائج</span>
             </button>
 
             <button
               type="button"
               onClick={() => setActiveTab('participation')}
-              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer shrink-0 ${
+              className={`min-h-[42px] px-3 sm:px-4 py-2 rounded-xl text-[11px] sm:text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer text-center ${
                 activeTab === 'participation'
                   ? 'bg-emerald-600 text-white shadow-xs'
                   : 'bg-white text-slate-700 hover:bg-slate-100 border border-slate-200'
               }`}
             >
-              <Users className="w-3.5 h-3.5" />
+              <Users className="w-3.5 h-3.5 shrink-0" />
               <span>ترتيب المؤسسات حسب المشاركة</span>
             </button>
 
             <button
               type="button"
+              onClick={() => setActiveTab('matches')}
+              className={`min-h-[42px] px-3 sm:px-4 py-2 rounded-xl text-[11px] sm:text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer text-center ${
+                activeTab === 'matches'
+                  ? 'bg-amber-600 text-white shadow-xs'
+                  : 'bg-white text-slate-700 hover:bg-slate-100 border border-slate-200'
+              }`}
+            >
+              <Calendar className="w-3.5 h-3.5 shrink-0" />
+              <span>المباريات المنجزة والمبرمجة</span>
+            </button>
+
+            <button
+              type="button"
               onClick={() => setActiveTab('sports')}
-              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer shrink-0 ${
+              className={`min-h-[42px] px-3 sm:px-4 py-2 rounded-xl text-[11px] sm:text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer text-center ${
                 activeTab === 'sports'
                   ? 'bg-purple-600 text-white shadow-xs'
                   : 'bg-white text-slate-700 hover:bg-slate-100 border border-slate-200'
               }`}
             >
-              <BarChart3 className="w-3.5 h-3.5" />
+              <BarChart3 className="w-3.5 h-3.5 shrink-0" />
               <span>إحصائيات التخصصات الرياضية</span>
             </button>
           </div>
 
           {/* Search Bar */}
-          <div className="relative w-full md:w-64">
+          <div className="relative w-full lg:w-64">
             <Search className="w-3.5 h-3.5 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2" />
             <input
               type="text"
               placeholder="بحث باسم المؤسسة أو الجماعة..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pr-8 pl-3 py-1.5 text-xs bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              className="w-full pr-8 pl-3 py-2 text-xs bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             />
           </div>
         </div>
 
-        {/* Dynamic Filters Bar */}
-        <div className="p-3 bg-white border-b border-slate-100 flex flex-col sm:flex-row sm:items-center gap-2.5 text-xs">
-          <div className="flex items-center gap-1.5 font-bold text-slate-600 shrink-0">
-            <Filter className="w-3.5 h-3.5 text-slate-400" />
-            <span>تصفية:</span>
+        {/* Dynamic Filters Bar + Table/Cards View Switcher */}
+        <div className="p-3 bg-white border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs">
+          <div className="flex flex-col sm:flex-row sm:items-center gap-2 flex-1">
+            <div className="flex items-center justify-between sm:justify-start gap-1.5 font-bold text-slate-600 shrink-0">
+              <span className="flex items-center gap-1.5">
+                <Filter className="w-3.5 h-3.5 text-slate-400" />
+                <span>تصفية:</span>
+              </span>
+
+              {/* Mobile View Mode Switcher inline with Filter label */}
+              {(activeTab === 'results' || activeTab === 'participation') && (
+                <div className="inline-flex sm:hidden items-center bg-slate-100 p-1 rounded-xl border border-slate-200 gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setRankingViewMode('cards')}
+                    className={`px-2.5 py-1 rounded-lg text-[11px] font-black flex items-center gap-1 transition-all cursor-pointer ${
+                      rankingViewMode === 'cards'
+                        ? 'bg-slate-900 text-white shadow-2xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                    title="عرض على شكل بطائق"
+                  >
+                    <LayoutGrid className="w-3.5 h-3.5" />
+                    <span>بطائق</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setRankingViewMode('table')}
+                    className={`px-2.5 py-1 rounded-lg text-[11px] font-black flex items-center gap-1 transition-all cursor-pointer ${
+                      rankingViewMode === 'table'
+                        ? 'bg-slate-900 text-white shadow-2xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                    title="عرض على شكل جدول"
+                  >
+                    <List className="w-3.5 h-3.5" />
+                    <span>جدول</span>
+                  </button>
+                </div>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 sm:flex sm:flex-wrap items-stretch sm:items-center gap-2 w-full sm:w-auto">
+              {(activeTab === 'results' || activeTab === 'matches') && (
+                <select
+                  value={selectedSport}
+                  onChange={(e) => setSelectedSport(e.target.value)}
+                  className="px-2.5 py-2 sm:py-1.5 bg-slate-50 border border-slate-200 rounded-xl sm:rounded-lg font-medium text-slate-700 w-full sm:w-auto cursor-pointer"
+                >
+                  <option value="ALL">جميع الرياضات</option>
+                  {Object.entries(SPORTS_MAP).map(([id, info]) => (
+                    <option key={id} value={id}>
+                      {info.icon} {info.name}
+                    </option>
+                  ))}
+                </select>
+              )}
+
+              {activeTab !== 'matches' && (
+                <>
+                  <select
+                    value={selectedType}
+                    onChange={(e) => setSelectedType(e.target.value)}
+                    className="px-2.5 py-2 sm:py-1.5 bg-slate-50 border border-slate-200 rounded-xl sm:rounded-lg font-medium text-slate-700 w-full sm:w-auto cursor-pointer"
+                  >
+                    <option value="ALL">جميع الأسلاك (ابتدائي / إعدادي / تأهيلي / خصوصي)</option>
+                    <option value="ابتدائي">التعليم الابتدائي</option>
+                    <option value="إعدادي">الثانوي الإعدادي</option>
+                    <option value="تأهيلي">الثانوي التأهيلي</option>
+                    <option value="خصوصي">التعليم الخصوصي</option>
+                  </select>
+
+                  <select
+                    value={selectedCommune}
+                    onChange={(e) => setSelectedCommune(e.target.value)}
+                    className="px-2.5 py-2 sm:py-1.5 bg-slate-50 border border-slate-200 rounded-xl sm:rounded-lg font-medium text-slate-700 w-full sm:w-auto cursor-pointer"
+                  >
+                    <option value="ALL">جميع الجماعات الترابية</option>
+                    {communes.map((c) => (
+                      <option key={c} value={c}>
+                        جماعة {c}
+                      </option>
+                    ))}
+                  </select>
+                </>
+              )}
+            </div>
           </div>
 
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full sm:w-auto">
-            {activeTab === 'results' && (
-              <select
-                value={selectedSport}
-                onChange={(e) => setSelectedSport(e.target.value)}
-                className="px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg font-medium text-slate-700 w-full sm:w-auto cursor-pointer"
+          {/* Desktop View Mode Switcher (Table vs Cards) */}
+          {(activeTab === 'results' || activeTab === 'participation') && (
+            <div className="hidden sm:inline-flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200 gap-1 shrink-0">
+              <button
+                type="button"
+                onClick={() => setRankingViewMode('table')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer ${
+                  rankingViewMode === 'table'
+                    ? 'bg-slate-900 text-white shadow-2xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+                title="عرض على شكل جدول"
               >
-                <option value="ALL">جميع الرياضات</option>
-                {Object.entries(SPORTS_MAP).map(([id, info]) => (
-                  <option key={id} value={id}>
-                    {info.icon} {info.name}
-                  </option>
-                ))}
-              </select>
-            )}
-
-            <select
-              value={selectedType}
-              onChange={(e) => setSelectedType(e.target.value)}
-              className="px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg font-medium text-slate-700 w-full sm:w-auto cursor-pointer"
-            >
-              <option value="ALL">جميع الأسلاك (ابتدائي / إعدادي / تأهيلي)</option>
-              <option value="ابتدائي">السلك الابتدائي</option>
-              <option value="ثانوي إعدادي">السلك الثانوي الإعدادي</option>
-              <option value="ثانوي تأهيلي">السلك الثانوي التأهيلي</option>
-            </select>
-
-            <select
-              value={selectedCommune}
-              onChange={(e) => setSelectedCommune(e.target.value)}
-              className="px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg font-medium text-slate-700 w-full sm:w-auto cursor-pointer"
-            >
-              <option value="ALL">جميع الجماعات الترابية</option>
-              {communes.map((c) => (
-                <option key={c} value={c}>
-                  جماعة {c}
-                </option>
-              ))}
-            </select>
-          </div>
+                <List className="w-3.5 h-3.5" />
+                <span>جدول</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setRankingViewMode('cards')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer ${
+                  rankingViewMode === 'cards'
+                    ? 'bg-slate-900 text-white shadow-2xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+                title="عرض على شكل بطائق"
+              >
+                <LayoutGrid className="w-3.5 h-3.5" />
+                <span>بطائق</span>
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Tab 1: Results Leaderboard Table (ترتيب التتويجات والنتائج) */}
@@ -1120,8 +1260,117 @@ export const Statistics: React.FC = () => {
               </span>
             </div>
 
+            {/* Results Cards View */}
+            {rankingViewMode === 'cards' && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 p-3 bg-slate-50/40">
+              {schoolResultsRanking.length === 0 ? (
+                <div className="md:col-span-2 py-12 px-4 text-center text-slate-400 text-xs">
+                  لا توجد نتائج مسجلة للمؤسسات في الفئات والبطولات المحددة
+                </div>
+              ) : (
+                schoolResultsRanking.map((item, idx) => {
+                  const rank = idx + 1;
+                  const hasPodium = item.totalPodiums > 0;
+                  return (
+                    <div
+                      key={`mob-res-${item.schoolId}`}
+                      className={`p-3.5 rounded-xl border space-y-2.5 shadow-2xs ${
+                        rank === 1 && hasPodium
+                          ? 'bg-amber-50/70 border-amber-300'
+                          : rank === 2 && hasPodium
+                          ? 'bg-slate-50 border-slate-300'
+                          : rank === 3 && hasPodium
+                          ? 'bg-orange-50/50 border-orange-200'
+                          : 'bg-white border-slate-200'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-2.5">
+                        <div className="flex items-start gap-2.5 min-w-0 flex-1">
+                          <div className="shrink-0 mt-0.5">
+                            {rank === 1 && item.firstPlaces > 0 ? (
+                              <span className="w-8 h-8 rounded-full bg-amber-400 text-slate-950 font-black inline-flex items-center justify-center text-sm shadow-xs">
+                                🥇
+                              </span>
+                            ) : rank === 2 && (item.firstPlaces > 0 || item.secondPlaces > 0) ? (
+                              <span className="w-8 h-8 rounded-full bg-slate-300 text-slate-900 font-black inline-flex items-center justify-center text-sm shadow-xs">
+                                🥈
+                              </span>
+                            ) : rank === 3 && item.totalPodiums > 0 ? (
+                              <span className="w-8 h-8 rounded-full bg-amber-700 text-white font-black inline-flex items-center justify-center text-sm shadow-xs">
+                                🥉
+                              </span>
+                            ) : (
+                              <span className="w-8 h-8 rounded-full bg-slate-100 border border-slate-200 text-slate-700 font-black inline-flex items-center justify-center text-xs tabular-nums">
+                                {rank}
+                              </span>
+                            )}
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <h4 className="font-black text-slate-900 text-xs leading-snug break-words">
+                              {item.schoolName}
+                            </h4>
+                            <p className="text-[11px] text-slate-500 mt-0.5 truncate">
+                              {item.type} · جماعة {item.commune}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="shrink-0 text-left">
+                          <span
+                            className={`inline-flex items-center justify-center px-2.5 py-1 rounded-xl font-black text-xs tabular-nums ${
+                              item.points > 0
+                                ? 'bg-blue-600 text-white shadow-xs'
+                                : 'bg-slate-100 text-slate-400'
+                            }`}
+                          >
+                            {item.points} ن
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Medals & Podiums Strip */}
+                      <div className="grid grid-cols-4 gap-1.5 text-center text-[11px]">
+                        <div className="bg-amber-50/90 border border-amber-200/80 rounded-lg py-1.5 px-1">
+                          <div className="text-[10px] text-amber-800 font-bold">🥇 ذهب</div>
+                          <div className="font-black text-amber-950 tabular-nums mt-0.5">{item.firstPlaces}</div>
+                        </div>
+                        <div className="bg-slate-100/90 border border-slate-200 rounded-lg py-1.5 px-1">
+                          <div className="text-[10px] text-slate-600 font-bold">🥈 فضة</div>
+                          <div className="font-black text-slate-900 tabular-nums mt-0.5">{item.secondPlaces}</div>
+                        </div>
+                        <div className="bg-orange-50/90 border border-orange-200/80 rounded-lg py-1.5 px-1">
+                          <div className="text-[10px] text-orange-800 font-bold">🥉 برونز</div>
+                          <div className="font-black text-orange-950 tabular-nums mt-0.5">{item.thirdPlaces}</div>
+                        </div>
+                        <div className="bg-indigo-50/90 border border-indigo-200/80 rounded-lg py-1.5 px-1">
+                          <div className="text-[10px] text-indigo-800 font-bold">🏆 مجموع</div>
+                          <div className="font-black text-indigo-950 tabular-nums mt-0.5">{item.totalPodiums}</div>
+                        </div>
+                      </div>
+
+                      {item.achievements && item.achievements.length > 0 ? (
+                        <button
+                          type="button"
+                          onClick={() => setSelectedSchoolAchievements({ schoolName: item.schoolName, achievements: item.achievements })}
+                          className="w-full min-h-[40px] px-3 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-800 border border-indigo-200 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                        >
+                          <Trophy className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                          <span>عرض سجل التتويجات ({item.achievements.length})</span>
+                        </button>
+                      ) : (
+                        <div className="text-[11px] text-slate-400 text-center py-1">في طور التباري ⏳</div>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+            )}
+
+            {/* Results Table View */}
+            {rankingViewMode === 'table' && (
             <div className="overflow-x-auto">
-              <table className="w-full text-center text-xs">
+              <table className="w-full text-center text-xs min-w-[780px]">
               <thead className="bg-slate-50 text-slate-700 border-b border-slate-200 font-bold">
                 <tr>
                   <th className="py-3.5 px-4 text-center w-14">الرتبة</th>
@@ -1283,59 +1532,238 @@ export const Statistics: React.FC = () => {
               </tbody>
             </table>
           </div>
+          )}
           </div>
         )}
 
-        {/* Tab 2: Participation Ranking Table */}
+        {/* Tab 2: Participation Ranking Table + Cards */}
         {activeTab === 'participation' && (
-          <div className="overflow-x-auto">
-            <table className="w-full text-center text-xs">
-              <thead className="bg-slate-50 text-slate-600 border-b border-slate-200 font-bold">
-                <tr>
-                  <th className="py-3 px-4 text-center w-12">الرتبة</th>
-                  <th className="py-3 px-4">المؤسسة التعليمية</th>
-                  <th className="py-3 px-4">السلك</th>
-                  <th className="py-3 px-4">الجماعة</th>
-                  <th className="py-3 px-4 text-center font-bold text-blue-600">👦 الذكور</th>
-                  <th className="py-3 px-4 text-center font-bold text-pink-600">👧 الإناث</th>
-                  <th className="py-3 px-4 text-center font-black text-emerald-700">مجموع التلاميذ</th>
-                  <th className="py-3 px-4 text-center font-bold text-purple-700">الرياضات المشارك بها</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {schoolParticipationRanking.length === 0 ? (
+          <div>
+            {/* Participation Cards View */}
+            {rankingViewMode === 'cards' && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 p-3 bg-slate-50/40">
+              {schoolParticipationRanking.length === 0 ? (
+                <div className="md:col-span-2 py-10 px-4 text-center text-slate-400 text-xs">
+                  لا توجد بيانات مشاركة مسجلة
+                </div>
+              ) : (
+                schoolParticipationRanking.map((item, idx) => {
+                  const rank = idx + 1;
+                  return (
+                    <div
+                      key={`mob-part-${item.schoolName}`}
+                      className={`p-3.5 rounded-xl border space-y-2.5 shadow-2xs ${
+                        rank === 1
+                          ? 'bg-emerald-50/70 border-emerald-300'
+                          : rank === 2
+                          ? 'bg-slate-50 border-slate-300'
+                          : 'bg-white border-slate-200'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-2.5">
+                        <div className="flex items-start gap-2.5 min-w-0 flex-1">
+                          <span
+                            className={`w-8 h-8 rounded-full font-black inline-flex items-center justify-center text-xs shrink-0 mt-0.5 tabular-nums ${
+                              rank === 1
+                                ? 'bg-emerald-600 text-white shadow-xs'
+                                : rank === 2
+                                ? 'bg-emerald-100 text-emerald-900 border border-emerald-300'
+                                : rank === 3
+                                ? 'bg-teal-100 text-teal-900 border border-teal-300'
+                                : 'bg-slate-100 text-slate-600 border border-slate-200'
+                            }`}
+                          >
+                            #{rank}
+                          </span>
+                          <div className="min-w-0 flex-1">
+                            <h4 className="font-black text-slate-900 text-xs leading-snug break-words">
+                              {item.schoolName}
+                            </h4>
+                            <p className="text-[11px] text-slate-500 mt-0.5 truncate">
+                              {item.type} · جماعة {item.commune}
+                            </p>
+                          </div>
+                        </div>
+
+                        <span className="shrink-0 px-2.5 py-1 bg-emerald-600 text-white rounded-xl font-black text-xs tabular-nums shadow-xs">
+                          {item.totalStudents} تلميذ(ة)
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-3 gap-1.5 text-center text-[11px]">
+                        <div className="bg-blue-50/80 border border-blue-200/80 rounded-lg py-1.5 px-1">
+                          <div className="text-[10px] text-blue-700 font-bold">👦 الذكور</div>
+                          <div className="font-black text-blue-900 tabular-nums mt-0.5">{item.maleStudents}</div>
+                        </div>
+                        <div className="bg-pink-50/80 border border-pink-200/80 rounded-lg py-1.5 px-1">
+                          <div className="text-[10px] text-pink-700 font-bold">👧 الإناث</div>
+                          <div className="font-black text-pink-900 tabular-nums mt-0.5">{item.femaleStudents}</div>
+                        </div>
+                        <div className="bg-purple-50/80 border border-purple-200/80 rounded-lg py-1.5 px-1">
+                          <div className="text-[10px] text-purple-700 font-bold">🏅 الرياضات</div>
+                          <div className="font-black text-purple-900 tabular-nums mt-0.5">{item.sportsCount}</div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+            )}
+
+            {/* Participation Table View */}
+            {rankingViewMode === 'table' && (
+            <div className="overflow-x-auto">
+              <table className="w-full text-center text-xs min-w-[680px]">
+                <thead className="bg-slate-50 text-slate-600 border-b border-slate-200 font-bold">
                   <tr>
-                    <td colSpan={8} className="py-8 text-center text-slate-400">
-                      لا توجد بيانات مشاركة مسجلة
-                    </td>
+                    <th className="py-3 px-4 text-center w-12">الرتبة</th>
+                    <th className="py-3 px-4">المؤسسة التعليمية</th>
+                    <th className="py-3 px-4">السلك</th>
+                    <th className="py-3 px-4">الجماعة</th>
+                    <th className="py-3 px-4 text-center font-bold text-blue-600">👦 الذكور</th>
+                    <th className="py-3 px-4 text-center font-bold text-pink-600">👧 الإناث</th>
+                    <th className="py-3 px-4 text-center font-black text-emerald-700">مجموع التلاميذ</th>
+                    <th className="py-3 px-4 text-center font-bold text-purple-700">الرياضات المشارك بها</th>
                   </tr>
-                ) : (
-                  schoolParticipationRanking.map((item, idx) => {
-                    const rank = idx + 1;
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {schoolParticipationRanking.length === 0 ? (
+                    <tr>
+                      <td colSpan={8} className="py-8 text-center text-slate-400">
+                        لا توجد بيانات مشاركة مسجلة
+                      </td>
+                    </tr>
+                  ) : (
+                    schoolParticipationRanking.map((item, idx) => {
+                      const rank = idx + 1;
+                      return (
+                        <tr key={item.schoolName} className="hover:bg-slate-50 transition-colors">
+                          <td className="py-3 px-4 text-center font-bold text-slate-500">#{rank}</td>
+                          <td className="py-3 px-4 font-bold text-slate-800">{item.schoolName}</td>
+                          <td className="py-3 px-4 text-slate-500">{item.type}</td>
+                          <td className="py-3 px-4 text-slate-500">{item.commune}</td>
+                          <td className="py-3 px-4 text-center font-bold text-blue-700">{item.maleStudents}</td>
+                          <td className="py-3 px-4 text-center font-bold text-pink-700">{item.femaleStudents}</td>
+                          <td className="py-3 px-4 text-center">
+                            <span className="inline-block px-3 py-1 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-lg font-black">
+                              {item.totalStudents} تلميذ(ة)
+                            </span>
+                          </td>
+                          <td className="py-3 px-4 text-center">
+                            <span className="inline-block px-2.5 py-1 bg-purple-50 border border-purple-200 text-purple-800 rounded-lg font-bold">
+                              {item.sportsCount} رياضات
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+            )}
+          </div>
+        )}
+
+        {/* Tab 4: Matches Breakdown (Opened by clicking المباريات المنجزة KPI Card or Tab) */}
+        {activeTab === 'matches' && (
+          <div className="p-3.5 sm:p-5 space-y-3 bg-slate-50/40">
+            {(() => {
+              const filteredMatches = matches.filter(m => {
+                if (selectedSport !== 'ALL' && m.sportId !== selectedSport) return false;
+                if (searchQuery.trim()) {
+                  const q = searchQuery.trim().toLowerCase();
+                  const s1 = schools.find(s => s.id === m.team1Id)?.name || m.team1Name || '';
+                  const s2 = schools.find(s => s.id === m.team2Id)?.name || m.team2Name || '';
+                  const v = m.venueName || '';
+                  if (!s1.toLowerCase().includes(q) && !s2.toLowerCase().includes(q) && !v.toLowerCase().includes(q)) {
+                    return false;
+                  }
+                }
+                return true;
+              });
+
+              if (filteredMatches.length === 0) {
+                return (
+                  <div className="py-12 text-center text-slate-400 text-xs bg-white rounded-2xl border border-slate-200">
+                    لا توجد مباريات مسجلة مطابقة للبحث أو التصفية الحالية
+                  </div>
+                );
+              }
+
+              return (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {filteredMatches.map((m) => {
+                    const t1Name = schools.find(s => s.id === m.team1Id)?.name || m.team1Name || 'الفريق الأول';
+                    const t2Name = schools.find(s => s.id === m.team2Id)?.name || m.team2Name || 'الفريق الثاني';
+                    const spInfo = SPORTS_MAP[m.sportId] || { name: m.sportId || 'رياضة', icon: '🏆' };
+                    const isDone = m.status === 'Completed' || (m.score1 !== undefined && m.score1 !== null && m.score2 !== undefined && m.score2 !== null);
+                    const dateDisplay = m.date instanceof Date
+                      ? m.date.toISOString().split('T')[0]
+                      : typeof m.date === 'string'
+                      ? m.date.split('T')[0]
+                      : '';
                     return (
-                      <tr key={item.schoolName} className="hover:bg-slate-50 transition-colors">
-                        <td className="py-3 px-4 text-center font-bold text-slate-500">#{rank}</td>
-                        <td className="py-3 px-4 font-bold text-slate-800">{item.schoolName}</td>
-                        <td className="py-3 px-4 text-slate-500">{item.type}</td>
-                        <td className="py-3 px-4 text-slate-500">{item.commune}</td>
-                        <td className="py-3 px-4 text-center font-bold text-blue-700">{item.maleStudents}</td>
-                        <td className="py-3 px-4 text-center font-bold text-pink-700">{item.femaleStudents}</td>
-                        <td className="py-3 px-4 text-center">
-                          <span className="inline-block px-3 py-1 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-lg font-black">
-                            {item.totalStudents} تلميذ(ة)
+                      <div
+                        key={m.id}
+                        className={`p-3.5 rounded-xl border space-y-2.5 shadow-2xs ${
+                          isDone ? 'bg-emerald-50/40 border-emerald-200' : 'bg-white border-slate-200'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-2 text-[11px]">
+                          <span className="inline-flex items-center gap-1 font-black text-slate-700">
+                            <span>{spInfo.icon}</span>
+                            <span>{spInfo.name}</span>
+                            {m.ageCategory && (
+                              <span className="text-[10px] text-slate-500 font-bold">• {m.ageCategory}</span>
+                            )}
                           </span>
-                        </td>
-                        <td className="py-3 px-4 text-center">
-                          <span className="inline-block px-2.5 py-1 bg-purple-50 border border-purple-200 text-purple-800 rounded-lg font-bold">
-                            {item.sportsCount} رياضات
+                          <span
+                            className={`px-2 py-0.5 rounded-md text-[10px] font-black ${
+                              isDone
+                                ? 'bg-emerald-600 text-white'
+                                : 'bg-amber-100 text-amber-800 border border-amber-200'
+                            }`}
+                          >
+                            {isDone ? 'منجزة ✓' : 'مبرمجة ⏳'}
                           </span>
-                        </td>
-                      </tr>
+                        </div>
+
+                        <div className="flex items-center justify-between gap-2 bg-white p-2.5 rounded-xl border border-slate-100 text-xs font-black text-slate-900">
+                          <span className="truncate flex-1">{t1Name}</span>
+                          <span className="px-2.5 py-1 rounded-lg bg-slate-900 text-white font-mono tabular-nums shrink-0">
+                            {isDone ? `${m.score1 ?? 0} - ${m.score2 ?? 0}` : 'VS'}
+                          </span>
+                          <span className="truncate flex-1 text-left">{t2Name}</span>
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-3 text-[10px] font-bold text-slate-500">
+                          {dateDisplay && (
+                            <span className="inline-flex items-center gap-1 tabular-nums">
+                              <Calendar className="w-3 h-3 text-slate-400" />
+                              {dateDisplay}
+                            </span>
+                          )}
+                          {m.startTime && (
+                            <span className="inline-flex items-center gap-1 tabular-nums">
+                              <Clock className="w-3 h-3 text-slate-400" />
+                              {m.startTime}
+                            </span>
+                          )}
+                          {m.venueName && (
+                            <span className="inline-flex items-center gap-1 truncate">
+                              <MapPin className="w-3 h-3 text-rose-400 shrink-0" />
+                              <span className="truncate">{m.venueName}</span>
+                            </span>
+                          )}
+                        </div>
+                      </div>
                     );
-                  })
-                )}
-              </tbody>
-            </table>
+                  })}
+                </div>
+              );
+            })()}
           </div>
         )}
 
@@ -1343,19 +1771,24 @@ export const Statistics: React.FC = () => {
         {activeTab === 'sports' && (
           <div className="p-4 md:p-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {sportsStats.map((sport) => (
-              <div
+              <button
+                type="button"
                 key={sport.sportId}
-                className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3 hover:border-purple-300 transition-all"
+                onClick={() => {
+                  setSelectedSport(sport.sportId);
+                  setActiveTab('results');
+                }}
+                className="text-right bg-slate-50 hover:bg-white border border-slate-200 hover:border-purple-300 hover:shadow-md rounded-xl p-4 space-y-3 transition-all cursor-pointer"
               >
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2.5">
                     <span className="text-2xl">{sport.icon}</span>
                     <div>
                       <h4 className="font-bold text-slate-800 text-sm">{sport.name}</h4>
-                      <p className="text-[10px] text-slate-400">{sport.schoolsCount.size} مؤسسة مشاركة</p>
+                      <p className="text-[10px] text-slate-400 tabular-nums">{sport.schoolsCount.size} مؤسسة مشاركة</p>
                     </div>
                   </div>
-                  <span className="text-xs font-black bg-purple-100 text-purple-800 px-2.5 py-1 rounded-lg">
+                  <span className="text-xs font-black bg-purple-100 text-purple-800 px-2.5 py-1 rounded-lg tabular-nums">
                     {sport.studentsCount} مشارك
                   </span>
                 </div>
@@ -1363,18 +1796,18 @@ export const Statistics: React.FC = () => {
                 <div className="space-y-1.5 pt-2 border-t border-slate-200 text-xs">
                   <div className="flex items-center justify-between">
                     <span className="text-slate-500">👦 الذكور:</span>
-                    <span className="font-bold text-blue-600">{sport.maleCount}</span>
+                    <span className="font-bold text-blue-600 tabular-nums">{sport.maleCount}</span>
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="text-slate-500">👧 الإناث:</span>
-                    <span className="font-bold text-pink-600">{sport.femaleCount}</span>
+                    <span className="font-bold text-pink-600 tabular-nums">{sport.femaleCount}</span>
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="text-slate-500">🏆 المباريات المبرمجة:</span>
-                    <span className="font-bold text-slate-700">{sport.matchesCount}</span>
+                    <span className="font-bold text-slate-700 tabular-nums">{sport.matchesCount}</span>
                   </div>
                 </div>
-              </div>
+              </button>
             ))}
           </div>
         )}

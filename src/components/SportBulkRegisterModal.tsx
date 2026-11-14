@@ -26,6 +26,7 @@ import toast from 'react-hot-toast';
 
 export interface SportParticipantSlot {
   slotIndex: number;
+  existingStudentId?: string;
   fullName: string;
   massarNumber: string;
   birthDate: string;
@@ -132,12 +133,12 @@ export const SportBulkRegisterModal: React.FC<SportBulkRegisterModalProps> = ({
   // File input ref for Excel upload
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Dynamic slot count based on the sport limit (default 10 slots)
+  // Dynamic slot count based strictly on the unified sport roster limit (default 12 slots)
   const slotCount = useMemo(() => {
     if (sport?.studentLimit && sport.studentLimit > 0) {
-      return Math.max(4, sport.studentLimit);
+      return sport.studentLimit;
     }
-    return 10;
+    return 12;
   }, [sport]);
 
   // Pre-initialize empty slots
@@ -235,6 +236,7 @@ export const SportBulkRegisterModal: React.FC<SportBulkRegisterModalProps> = ({
         if (student) {
           return {
             ...slot,
+            existingStudentId: student.id,
             fullName: student.fullName || '',
             massarNumber: student.massarNumber || '',
             birthDate: student.birthDate || '',
@@ -244,6 +246,7 @@ export const SportBulkRegisterModal: React.FC<SportBulkRegisterModalProps> = ({
         }
         return {
           ...slot,
+          existingStudentId: undefined,
           fullName: '',
           massarNumber: '',
           birthDate: '',
@@ -549,6 +552,11 @@ export const SportBulkRegisterModal: React.FC<SportBulkRegisterModalProps> = ({
       return;
     }
 
+    if (sport.studentLimit && sport.studentLimit > 0 && filledSlots.length > sport.studentLimit) {
+      toast.error(`لا يمكن تجاوز العدد الأقصى المسموح به في لائحة المشاركة (${sport.studentLimit} مشارك).`);
+      return;
+    }
+
     // Validation
     const massarRegex = /^[A-Z]\d{9}$/i;
     const seenMassars = new Set<string>();
@@ -645,12 +653,17 @@ export const SportBulkRegisterModal: React.FC<SportBulkRegisterModalProps> = ({
 
       const studentsToCreate: Array<Omit<Student, 'id' | 'createdAt' | 'updatedAt'>> = [];
       const studentsToUpdate: Array<{ id: string; data: Partial<Student> }> = [];
+      const studentIdsToDelete: string[] = [];
+      const usedExistingIds = new Set<string>();
 
-      for (const slot of filledSlots) {
-        // Check if student already exists in this sport under this school
-        const existingStudent = allExistingStudents.find(
-          s => s.sportId === sport.id && s.massarNumber.toUpperCase() === slot.massarNumber.trim().toUpperCase()
-        );
+      for (const slot of slots) {
+        const isBlank = !slot.fullName.trim() && !slot.massarNumber.trim() && !slot.birthDate.trim();
+        if (isBlank) {
+          if (slot.existingStudentId) {
+            studentIdsToDelete.push(slot.existingStudentId);
+          }
+          continue;
+        }
 
         const payload: Omit<Student, 'id' | 'createdAt' | 'updatedAt'> = {
           fullName: slot.fullName.trim(),
@@ -670,14 +683,37 @@ export const SportBulkRegisterModal: React.FC<SportBulkRegisterModalProps> = ({
           ...(sport.id === 'athletics' ? { athleticsSpecialty: slot.athleticsSpecialty } : {})
         };
 
-        if (existingStudent) {
-          studentsToUpdate.push({ id: existingStudent.id, data: payload });
+        // 1. If this slot already held an existing student, update in-place (supports seamless تعويض مشارك!)
+        if (slot.existingStudentId && !usedExistingIds.has(slot.existingStudentId)) {
+          usedExistingIds.add(slot.existingStudentId);
+          studentsToUpdate.push({ id: slot.existingStudentId, data: payload });
+          continue;
+        }
+
+        // 2. Otherwise check if Massar matches an existing student in this sport
+        const existingByMassar = allExistingStudents.find(
+          s =>
+            s.sportId === sport.id &&
+            s.massarNumber.toUpperCase() === slot.massarNumber.trim().toUpperCase() &&
+            !usedExistingIds.has(s.id)
+        );
+
+        if (existingByMassar) {
+          usedExistingIds.add(existingByMassar.id);
+          studentsToUpdate.push({ id: existingByMassar.id, data: payload });
         } else {
           studentsToCreate.push(payload);
         }
       }
 
-      // Execute updates
+      // Execute deletions of cleared slots (that weren't reused)
+      for (const delId of studentIdsToDelete) {
+        if (!usedExistingIds.has(delId)) {
+          await DataService.deleteStudent(delId);
+        }
+      }
+
+      // Execute updates (including replacements)
       for (const item of studentsToUpdate) {
         await DataService.updateStudent(item.id, item.data);
       }
@@ -687,7 +723,7 @@ export const SportBulkRegisterModal: React.FC<SportBulkRegisterModalProps> = ({
         await DataService.addStudentsBulk(studentsToCreate);
       }
 
-      toast.success(`تم بنجاح تسجيل وتحديث ${filledSlots.length} مشاركين في منافسات ${sport.name}! 🎉`, {
+      toast.success(`تم بنجاح حفظ وتحيين لائحة المشاركة (${filledSlots.length} مشارك) في منافسات ${sport.name}! 🎉`, {
         duration: 5000
       });
 

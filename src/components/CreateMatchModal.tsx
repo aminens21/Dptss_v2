@@ -1,9 +1,10 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { Match, School, Venue, Tournament, Referee, Student, User } from '../types';
-import { X, CalendarDays, Clock, MapPin, Trophy, AlertTriangle, AlertCircle, Calendar, ArrowRight, ShieldCheck, Lock, Users, Tag, UserCheck, Plus, Building, Info, CheckCircle2, MessageCircle } from 'lucide-react';
+import { X, CalendarDays, Clock, MapPin, Trophy, AlertTriangle, AlertCircle, Calendar, ArrowRight, ShieldCheck, Lock, Users, Tag, UserCheck, Plus, Building, Info, Search, CheckCircle2, MessageCircle } from 'lucide-react';
 import { SPORTS_MAP, AGE_CATEGORIES, GENDER_MAP, DataService, getAgeCategoriesForSeason, normalizeCategoryKey, normalizeDateToYmd } from '../lib/dataService';
-import { findRefereeContact, generateRefereeMatchNotificationMessage, getWhatsAppUrl } from '../lib/whatsappService';
+import { resolveHostSchoolForMatch, findRefereeContact, generateRefereeMatchNotificationMessage, getWhatsAppUrl } from '../lib/whatsappService';
+import { MatchBroadcastDiffusionModal, MatchBroadcastDiffusionTarget } from './MatchBroadcastDiffusionModal';
 import toast from 'react-hot-toast';
 
 interface CreateMatchModalProps {
@@ -93,17 +94,27 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
   const [affiliationType, setAffiliationType] = useState<'non_club' | 'club_affiliated' | 'open'>(initialAffiliation || 'non_club');
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   const [startTime, setStartTime] = useState('10:00');
+  const [venueMode, setVenueMode] = useState<'school' | 'custom'>('school');
+  const [hostSchoolId, setHostSchoolId] = useState<string>(schools[0]?.id || '');
+  const [hostSchoolSearch, setHostSchoolSearch] = useState<string>('');
   const [venueId, setVenueId] = useState(venues[0]?.id || 'ven-1');
+  const [customVenueName, setCustomVenueName] = useState<string>('');
   const [referees, setReferees] = useState<string[]>(['']);
   const [allReferees, setAllReferees] = useState<Referee[]>([]);
   const [status, setStatus] = useState<Match['status']>('Scheduled');
+  const [notes, setNotes] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [currentSeason, setCurrentSeason] = useState('2026/2027');
   const [showAllSchools, setShowAllSchools] = useState<boolean>(false);
 
+  // Post-scheduling unified WhatsApp Nouvelle diffusion state
+  const [savedMatchSummary, setSavedMatchSummary] = useState<MatchBroadcastDiffusionTarget | null>(null);
+
   useEffect(() => {
     if (isOpen) {
       setShowAllSchools(false);
+      setSavedMatchSummary(null);
+      setHostSchoolSearch('');
       DataService.getActiveSeason()
         .then(season => setCurrentSeason(season))
         .catch(err => console.warn("Error loading season in match modal:", err));
@@ -162,7 +173,19 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
       }
       
       setStartTime(editingMatch.startTime);
-      setVenueId(editingMatch.venueId);
+      const matchedHostSchool = resolveHostSchoolForMatch(editingMatch, schools);
+      if (matchedHostSchool) {
+        setVenueMode('school');
+        setHostSchoolId(matchedHostSchool.id);
+        setVenueId(matchedHostSchool.id);
+        setCustomVenueName('');
+      } else {
+        setVenueMode('custom');
+        setHostSchoolId('');
+        setVenueId(editingMatch.venueId || 'custom');
+        const matchedVen = venues.find(v => v.id === editingMatch.venueId);
+        setCustomVenueName(editingMatch.venueName || matchedVen?.name || editingMatch.venueId || '');
+      }
       
       // Load existing referees
       if (editingMatch.referees && editingMatch.referees.length > 0) {
@@ -175,7 +198,21 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
       }
       
       setStatus(editingMatch.status);
+      setNotes(editingMatch.notes || '');
+      if (editingMatch.affiliationType) setAffiliationType(editingMatch.affiliationType);
     } else {
+      setNotes('');
+      if (schools.length > 0) {
+        setVenueMode('school');
+        setHostSchoolId(schools[0].id);
+        setVenueId(schools[0].id);
+        setCustomVenueName('');
+      } else {
+        setVenueMode('custom');
+        setHostSchoolId('');
+        setVenueId(venues[0]?.id || 'custom');
+        setCustomVenueName(venues[0]?.name || 'القاعة المغطاة');
+      }
       if (singleLockedSportId) {
         setSportId(singleLockedSportId);
       } else if (initialSportId && (!effectiveAllowedSportIds || effectiveAllowedSportIds.includes(initialSportId))) {
@@ -217,10 +254,39 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
         }
       }
     }
-  }, [managerSportId, singleLockedSportId, effectiveAllowedSportIds, availableTournaments, isOpen, editingMatch, initialTournamentId, initialSportId, initialCategory, initialGender, initialAffiliation]);
+  }, [managerSportId, singleLockedSportId, effectiveAllowedSportIds, availableTournaments, isOpen, editingMatch, initialTournamentId, initialSportId, initialCategory, initialGender, initialAffiliation, schools, venues]);
 
-  // Check for Venue Conflict on the chosen Date & Time (1 hour difference)
+  // Effective venue ID & name based on venueMode ('school' vs 'custom')
+  const selectedHostSchool = useMemo(
+    () => (venueMode === 'school' ? schools.find(s => s.id === hostSchoolId) : undefined),
+    [venueMode, schools, hostSchoolId]
+  );
+
   const selectedVenue = useMemo(() => venues.find(v => v.id === venueId), [venues, venueId]);
+
+  const effectiveVenueKey = useMemo(() => {
+    if (venueMode === 'school') return hostSchoolId || '';
+    const matchedVenue = venues.find(v => v.name.trim() === customVenueName.trim() || v.id === venueId);
+    return matchedVenue?.id || customVenueName.trim() || venueId;
+  }, [venueMode, hostSchoolId, venues, customVenueName, venueId]);
+
+  const effectiveVenueDisplayName = useMemo(() => {
+    if (venueMode === 'school') {
+      return selectedHostSchool?.name || 'المؤسسة المحتضنة';
+    }
+    return customVenueName.trim() || selectedVenue?.name || 'الفضاء الرياضي';
+  }, [venueMode, selectedHostSchool, customVenueName, selectedVenue]);
+
+  const filteredHostSchools = useMemo(() => {
+    const q = hostSchoolSearch.trim().toLowerCase();
+    if (!q) return schools;
+    return schools.filter(
+      s =>
+        s.name.toLowerCase().includes(q) ||
+        (s.commune || '').toLowerCase().includes(q) ||
+        (s.principalName || '').toLowerCase().includes(q)
+    );
+  }, [schools, hostSchoolSearch]);
 
   const parseTimeToMinutes = (timeStr: string): number => {
     if (!timeStr) return 0;
@@ -231,9 +297,12 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
   };
 
   const conflictingMatches = useMemo(() => {
-    if (!venueId || !date) return [];
+    if (!effectiveVenueKey || !date) return [];
     return matches.filter(m => {
-      if (m.venueId !== venueId) return false;
+      const sameVenue =
+        (venueMode === 'school' && (m.hostSchoolId === hostSchoolId || m.venueId === hostSchoolId || m.venueName === selectedHostSchool?.name)) ||
+        (venueMode === 'custom' && (m.venueId === effectiveVenueKey || (customVenueName.trim() && m.venueName === customVenueName.trim())));
+      if (!sameVenue) return false;
       if (m.status === 'Cancelled' || m.status === 'Postponed') return false;
       if (editingMatch && m.id === editingMatch.id) return false;
 
@@ -249,14 +318,14 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
       }
       return true; // fallback if no times defined
     });
-  }, [matches, venueId, date, startTime]);
+  }, [matches, effectiveVenueKey, venueMode, hostSchoolId, selectedHostSchool, customVenueName, date, startTime, editingMatch]);
 
   const hasConflict = conflictingMatches.length > 0;
   const [forceScheduleDespiteConflict, setForceScheduleDespiteConflict] = useState(false);
 
   useEffect(() => {
     setForceScheduleDespiteConflict(false);
-  }, [venueId, date, startTime, isOpen]);
+  }, [effectiveVenueKey, date, startTime, isOpen]);
 
   // Filter schools to only show those registered in the selected tournament with students
   const eligibleSchools = useMemo(() => {
@@ -429,6 +498,15 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
       return;
     }
 
+    if (venueMode === 'school' && !hostSchoolId) {
+      toast.error('يرجى اختيار المؤسسة المحتضنة للمقابلة من القائمة');
+      return;
+    }
+    if (venueMode === 'custom' && !customVenueName.trim()) {
+      toast.error('يرجى كتابة اسم الفضاء الرياضي (مثال: القاعة المغطاة)');
+      return;
+    }
+
     // Sport Manager / Tech Head validation
     const resolvedCheckSportId = singleLockedSportId || sportId;
     if (effectiveAllowedSportIds && !effectiveAllowedSportIds.includes(resolvedCheckSportId)) {
@@ -447,9 +525,23 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
     try {
       const activeDirId = DataService.getActiveDirectorateId() || 'taourirt';
       const resolvedSportId = singleLockedSportId || sportId || availableTournaments.find(t => t.id === tournamentId)?.sportId || 'football';
-      const resolvedVenueName = selectedVenue?.name || venues.find(v => v.id === venueId)?.name || editingMatch?.venueName || '';
+      const hostSch = venueMode === 'school' ? schools.find(s => s.id === hostSchoolId) : undefined;
+      const matchedCustomVen = venueMode === 'custom'
+        ? venues.find(v => v.name.trim() === customVenueName.trim() || v.id === venueId)
+        : undefined;
+
+      const resolvedVenueId = venueMode === 'school'
+        ? (hostSch?.id || hostSchoolId)
+        : (matchedCustomVen?.id || 'custom');
+      const resolvedVenueName = venueMode === 'school'
+        ? (hostSch?.name || getSchoolName(hostSchoolId))
+        : (customVenueName.trim() || matchedCustomVen?.name || '');
+      const resolvedHostSchoolId = venueMode === 'school' ? (hostSch?.id || hostSchoolId) : '';
       
+      const selectedTourn = availableTournaments.find(t => t.id === tournamentId);
       const cleanReferees = referees.map(r => r.trim()).filter(r => r !== '');
+      const normalizedDate = normalizeDateToYmd(date) || date;
+
       await onSave({
         tournamentId,
         sportId: resolvedSportId,
@@ -459,19 +551,41 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
         team2Id,
         ageCategory,
         gender,
-        date: normalizeDateToYmd(date) || date,
+        affiliationType: selectedTourn?.affiliationType || affiliationType || editingMatch?.affiliationType || 'non_club',
+        date: normalizedDate,
         startTime,
-        venueId,
+        venueId: resolvedVenueId,
         venueName: resolvedVenueName,
+        hostSchoolId: resolvedHostSchoolId,
         referees: cleanReferees,
         referee1Id: cleanReferees[0] || undefined,
         referee2Id: cleanReferees[1] || undefined,
         status,
+        notes: notes.trim(),
         score1: editingMatch?.score1 ?? 0,
         score2: editingMatch?.score2 ?? 0,
         updatedAt: new Date()
       }, editingMatch?.id);
-      onClose();
+
+      setSavedMatchSummary({
+        matchId: editingMatch?.id,
+        sportId: resolvedSportId,
+        sportName: SPORTS_MAP[resolvedSportId]?.name || resolvedSportId,
+        ageCategory,
+        gender: GENDER_MAP[gender]?.name || gender,
+        stageName: stage,
+        team1Id,
+        team2Id,
+        team1Name: getSchoolName(team1Id),
+        team2Name: getSchoolName(team2Id),
+        hostSchoolId: resolvedHostSchoolId || undefined,
+        venueId: resolvedVenueId,
+        venueName: resolvedVenueName,
+        dateStr: normalizedDate,
+        timeStr: startTime || '10:00',
+        referees: cleanReferees,
+        notes: notes.trim() || undefined
+      });
     } finally {
       setIsSubmitting(false);
     }
@@ -481,7 +595,7 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
 
   const modalContent = (
     <div className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs" dir="rtl">
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-xl max-w-lg w-full max-h-[90vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+      <div className="relative bg-white rounded-2xl border border-slate-200 shadow-xl max-w-lg w-full max-h-[90vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150">
         {/* Header */}
         <div className="flex items-center justify-between p-4 md:p-5 border-b border-slate-100 bg-slate-50/70 shrink-0">
           <div className="flex items-center gap-2.5">
@@ -790,22 +904,169 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
             </div>
           </div>
 
-          {/* Venue Selection */}
-          <div>
-            <label className="block text-xs font-bold text-slate-700 mb-1">
-              مركز التباري / القاعة الرياضية *
-            </label>
-            <select
-              value={venueId}
-              onChange={(e) => setVenueId(e.target.value)}
-              className={`w-full text-xs rounded-lg border px-3 py-2 text-slate-800 bg-white focus:outline-none focus:ring-2 ${
-                hasConflict ? 'border-amber-400 bg-amber-50/30 ring-2 ring-amber-300' : 'border-slate-200 focus:ring-blue-500'
-              }`}
-            >
-              {venues.map(v => (
-                <option key={v.id} value={v.id}>{v.name} ({v.city})</option>
-              ))}
-            </select>
+          {/* Venue Selection: School from App OR Another Custom Space */}
+          <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200 space-y-3">
+            <div className="flex items-center justify-between gap-2">
+              <label className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                <MapPin className="h-4 w-4 text-emerald-600 shrink-0" />
+                <span>مكان إجراء المقابلة (مؤسسة محتضنة أو فضاء رياضي آخر) *</span>
+              </label>
+            </div>
+
+            {/* Segmented Mode Toggle */}
+            <div className="grid grid-cols-2 gap-1.5 p-1 bg-white rounded-xl border border-slate-200">
+              <button
+                type="button"
+                onClick={() => {
+                  setVenueMode('school');
+                  if (!hostSchoolId && (team1Id || schools[0]?.id)) {
+                    setHostSchoolId(team1Id || schools[0]?.id || '');
+                  }
+                }}
+                className={`py-2 px-2.5 rounded-lg text-[11px] font-black flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                  venueMode === 'school'
+                    ? 'bg-emerald-600 text-white shadow-2xs'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+                }`}
+              >
+                <Building className="h-3.5 w-3.5 shrink-0" />
+                <span>مؤسسة تعليمية محتضنة</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setVenueMode('custom');
+                  if (!customVenueName.trim() && venues[0]?.name) {
+                    setCustomVenueName(venues[0].name);
+                  }
+                }}
+                className={`py-2 px-2.5 rounded-lg text-[11px] font-black flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                  venueMode === 'custom'
+                    ? 'bg-slate-900 text-white shadow-2xs'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+                }`}
+              >
+                <MapPin className="h-3.5 w-3.5 shrink-0" />
+                <span>فضاء رياضي آخر (كتابة)</span>
+              </button>
+            </div>
+
+            {venueMode === 'school' ? (
+              <div className="space-y-2.5">
+                {/* Quick Chips for Competing Team 1 & Team 2 */}
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="text-[10px] font-bold text-slate-500">اختيار سريع:</span>
+                  {team1Id && schools.some(s => s.id === team1Id) && (
+                    <button
+                      type="button"
+                      onClick={() => setHostSchoolId(team1Id)}
+                      className={`px-2.5 py-1 rounded-lg text-[10px] font-bold border transition-colors cursor-pointer ${
+                        hostSchoolId === team1Id
+                          ? 'bg-emerald-100 border-emerald-400 text-emerald-950'
+                          : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-100'
+                      }`}
+                    >
+                      🏫 بمؤسسة الطرف 1 ({getSchoolName(team1Id)})
+                    </button>
+                  )}
+                  {team2Id && schools.some(s => s.id === team2Id) && (
+                    <button
+                      type="button"
+                      onClick={() => setHostSchoolId(team2Id)}
+                      className={`px-2.5 py-1 rounded-lg text-[10px] font-bold border transition-colors cursor-pointer ${
+                        hostSchoolId === team2Id
+                          ? 'bg-emerald-100 border-emerald-400 text-emerald-950'
+                          : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-100'
+                      }`}
+                    >
+                      🏫 بمؤسسة الطرف 2 ({getSchoolName(team2Id)})
+                    </button>
+                  )}
+                </div>
+
+                {/* Search + School Dropdown */}
+                <div className="relative">
+                  <Search className="h-3.5 w-3.5 text-slate-400 absolute right-3 top-2.5 pointer-events-none" />
+                  <input
+                    type="text"
+                    value={hostSchoolSearch}
+                    onChange={(e) => setHostSchoolSearch(e.target.value)}
+                    placeholder="ابحث في المؤسسات الموجودة في التطبيق..."
+                    className="w-full pr-8 pl-3 py-1.5 text-[11px] font-bold bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                </div>
+
+                <select
+                  value={hostSchoolId}
+                  onChange={(e) => setHostSchoolId(e.target.value)}
+                  className={`w-full text-xs font-bold rounded-xl border px-3 py-2 text-slate-800 bg-white focus:outline-none focus:ring-2 ${
+                    hasConflict ? 'border-amber-400 bg-amber-50/30 ring-2 ring-amber-300' : 'border-slate-200 focus:ring-emerald-500'
+                  }`}
+                >
+                  <option value="">-- اختر المؤسسة المحتضنة من مؤسسات التطبيق --</option>
+                  {filteredHostSchools.map(sch => (
+                    <option key={`host-sch-${sch.id}`} value={sch.id}>
+                      🏫 {sch.name} {sch.commune ? `(${sch.commune})` : ''}
+                    </option>
+                  ))}
+                </select>
+
+                {selectedHostSchool && (
+                  <div className="p-2.5 bg-emerald-50/80 border border-emerald-200 rounded-xl flex items-center justify-between gap-2 text-[11px] text-emerald-950">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
+                      <span className="font-bold truncate">
+                        المركز المعتمد: {selectedHostSchool.name} — سيتم إتاحة إشعار مدير المؤسسة المحتضنة عبر الواتساب بعد الحفظ.
+                      </span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <input
+                  type="text"
+                  value={customVenueName}
+                  onChange={(e) => setCustomVenueName(e.target.value)}
+                  placeholder="اكتب اسم الفضاء الرياضي (مثال: القاعة المغطاة، الملعب البلدي، حلبة ألعاب القوى...)"
+                  className={`w-full text-xs font-bold rounded-xl border px-3 py-2.5 text-slate-800 bg-white focus:outline-none focus:ring-2 ${
+                    hasConflict ? 'border-amber-400 bg-amber-50/30 ring-2 ring-amber-300' : 'border-slate-200 focus:ring-slate-900'
+                  }`}
+                />
+                {venues.length > 0 && (
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="text-[10px] font-bold text-slate-500">فضاءات مقترحة:</span>
+                    {venues.map(v => (
+                      <button
+                        key={v.id}
+                        type="button"
+                        onClick={() => {
+                          setVenueId(v.id);
+                          setCustomVenueName(v.name);
+                        }}
+                        className={`px-2 py-0.5 rounded-md text-[10px] font-bold border transition-colors cursor-pointer ${
+                          customVenueName.trim() === v.name.trim()
+                            ? 'bg-slate-900 text-white border-slate-900'
+                            : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
+                        }`}
+                      >
+                        🏟️ {v.name}
+                      </button>
+                    ))}
+                    {!venues.some(v => v.name.includes('القاعة المغطاة')) && (
+                      <button
+                        type="button"
+                        onClick={() => setCustomVenueName('القاعة المغطاة')}
+                        className="px-2 py-0.5 rounded-md text-[10px] font-bold border bg-white text-slate-700 border-slate-200 hover:bg-slate-100 cursor-pointer"
+                      >
+                        🏟️ القاعة المغطاة
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Date & Time */}
@@ -900,7 +1161,7 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
                       team2SchoolName: getSchoolName(team2Id),
                       dateStr: date,
                       timeStr: startTime || '10:00',
-                      venueName: selectedVenue?.name || venues.find(v => v.id === venueId)?.name || 'المكان المحدد'
+                      venueName: effectiveVenueDisplayName
                     })
                   : '';
 
@@ -988,6 +1249,20 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
             </div>
           </div>
 
+          {/* Optional Match Notes Field */}
+          <div className="space-y-1.5">
+            <label className="block text-xs font-bold text-slate-700">
+              ملاحظات حول المباراة <span className="text-[10px] font-medium text-slate-400">(اختياري — تظهر في البرنامج عند كتابتها)</span>
+            </label>
+            <textarea
+              rows={2}
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              placeholder="اكتب ملاحظة تنظيمية أو تحكيمية اختيارية..."
+              className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 text-slate-800 bg-slate-50/70 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+            />
+          </div>
+
           {/* CRITICAL OCCUPANCY CONFLICT WARNING ALERT */}
           {hasConflict && (
             <div className="rounded-xl border border-red-200 bg-gradient-to-br from-red-50 to-amber-50/80 p-3.5 space-y-2.5 animate-in fade-in slide-in-from-top-2 duration-200">
@@ -1000,7 +1275,7 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
                     <span>تنبيه: مركز التباري غير شاغر في هذا التاريخ!</span>
                   </h4>
                   <p className="text-[11px] text-red-700 mt-0.5 leading-relaxed">
-                    تم برمجة نشاط/مقابلة أخرى بـ <strong className="font-bold underline">{selectedVenue?.name}</strong> في تاريخ <span className="font-mono font-bold" dir="ltr">{date}</span>.
+                    تم برمجة نشاط/مقابلة أخرى بـ <strong className="font-bold underline">{effectiveVenueDisplayName}</strong> في تاريخ <span className="font-mono font-bold" dir="ltr">{date}</span>.
                   </p>
                 </div>
               </div>
@@ -1036,37 +1311,78 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
           )}
 
           {/* Footer Buttons */}
-          <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-100">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer"
-            >
-              إلغاء
-            </button>
-            <button
-              type="submit"
-              disabled={isSubmitting}
-              className={`px-5 py-2.5 text-xs font-bold text-white rounded-xl transition-all shadow-md active:scale-95 disabled:bg-slate-300 cursor-pointer ${
-                hasConflict
+          <div className="flex items-center justify-between gap-2.5 pt-3 border-t border-slate-100">
+            {editingMatch ? (
+              <button
+                type="button"
+                onClick={() => {
+                  const cleanRefs = referees.map(r => r.trim()).filter(Boolean);
+                  setSavedMatchSummary({
+                    sportName: sportInfo.name,
+                    ageCategory,
+                    genderLabel: GENDER_MAP[gender]?.name || gender,
+                    stageName: stage,
+                    team1Id,
+                    team2Id,
+                    team1Name: getSchoolName(team1Id),
+                    team2Name: getSchoolName(team2Id),
+                    hostSchoolId: venueMode === 'school' ? hostSchoolId : undefined,
+                    venueName: effectiveVenueDisplayName,
+                    dateStr: normalizeDateToYmd(date) || date,
+                    timeStr: startTime || '10:00',
+                    referees: cleanRefs
+                  });
+                }}
+                className="px-3 py-2 text-xs font-bold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-xl flex items-center gap-1.5 transition-colors cursor-pointer"
+              >
+                <MessageCircle className="h-3.5 w-3.5 text-emerald-600" />
+                <span>إشعارات الواتساب</span>
+              </button>
+            ) : <span />}
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={onClose}
+                className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer"
+              >
+                إلغاء
+              </button>
+              <button
+                type="submit"
+                disabled={isSubmitting}
+                className={`px-5 py-2.5 text-xs font-bold text-white rounded-xl transition-all shadow-md active:scale-95 disabled:bg-slate-300 cursor-pointer ${
+                  hasConflict
+                    ? forceScheduleDespiteConflict
+                      ? 'bg-red-600 hover:bg-red-700 shadow-red-600/20'
+                      : 'bg-amber-600 hover:bg-amber-700 shadow-amber-600/20'
+                    : 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-600/20'
+                }`}
+              >
+                {isSubmitting
+                  ? 'جاري الحفظ...'
+                  : hasConflict
                   ? forceScheduleDespiteConflict
-                    ? 'bg-red-600 hover:bg-red-700 shadow-red-600/20'
-                    : 'bg-amber-600 hover:bg-amber-700 shadow-amber-600/20'
-                  : 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-600/20'
-              }`}
-            >
-              {isSubmitting
-                ? 'جاري الحفظ...'
-                : hasConflict
-                ? forceScheduleDespiteConflict
-                  ? 'نعم، تثبيت البرمجة رغم التعارض'
-                  : 'برمجة رغم التعارض (تأكيد)'
-                : editingMatch
-                ? 'حفظ التعديلات'
-                : 'تأكيد برمجة المباراة'}
-            </button>
+                    ? 'نعم، تثبيت البرمجة رغم التعارض'
+                    : 'برمجة رغم التعارض (تأكيد)'
+                  : editingMatch
+                  ? 'حفظ التعديلات'
+                  : 'تأكيد برمجة المباراة'}
+              </button>
+            </div>
           </div>
         </form>
+
+        {/* POST-SCHEDULING UNIFIED NOUVELLE DIFFUSION MODAL */}
+        <MatchBroadcastDiffusionModal
+          isOpen={Boolean(savedMatchSummary)}
+          onClose={onClose}
+          target={savedMatchSummary}
+          schools={schools}
+          refereesList={allReferees}
+          teachersList={teachers}
+          studentsList={students}
+        />
       </div>
     </div>
   );

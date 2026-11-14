@@ -113,6 +113,7 @@ export const TeacherTeams: React.FC = () => {
   const [uploading, setUploading] = useState(false);
   const [studentToDelete, setStudentToDelete] = useState<Student | null>(null);
   const [studentToEditConfirm, setStudentToEditConfirm] = useState<Student | null>(null);
+  const [replacingStudentName, setReplacingStudentName] = useState<string | null>(null);
   const [isDeletingStudent, setIsDeletingStudent] = useState(false);
   const formCardRef = useRef<HTMLDivElement>(null);
 
@@ -428,11 +429,7 @@ export const TeacherTeams: React.FC = () => {
       return;
     }
 
-    if (activeTourn?.status === 'Ongoing' && isTeacher) {
-      toast.error('البطولة جارية حالياً ومغلقة أمام تسجيل الأساتذة، ومتاحة فقط للمسؤول الإقليمي أو المركزي لاستكمال اللوائح.');
-      return;
-    }
-
+    setReplacingStudentName(null);
     setEditingStudentId(null);
     setFullName('');
     setMassarNumber('');
@@ -577,8 +574,58 @@ export const TeacherTeams: React.FC = () => {
     setStudentToEditConfirm(student);
   };
 
+  // Direct Replacement Mode (تعويض مشارك أو مشاركة في لائحة المشاركة حتى بعد انطلاق البطولة ضمن السقف المسموح به)
+  const handleStartReplaceStudent = (student: Student) => {
+    if (!canTeacherManageStudent(student)) {
+      toast.error('غير مسموح لك بتعويض مشارك لا ينتمي لمؤسستك التعليمية.');
+      return;
+    }
+    const activeTourn = selectedSportId ? getSportTournament(selectedSportId) : undefined;
+    if (activeTourn?.status === 'Completed' || activeTourn?.status === 'Archived') {
+      toast.error('البطولة منتهية ومؤرشفة نهائياً ولا يمكن إجراء تعويض.');
+      return;
+    }
+
+    const normCat = normalizeCategoryKey(student.category);
+    const normAff: 'non_club' | 'club_affiliated' =
+      student.affiliationType === 'club_affiliated' ? 'club_affiliated' : 'non_club';
+
+    setReplacingStudentName(student.fullName);
+    setEditingStudentId(student.id);
+    setFullName('');
+    setMassarNumber('');
+    setBirthDate('');
+    setPhoto('');
+    setGender(student.gender);
+    setCategory(normCat);
+    setAffiliationType(normAff);
+    setLockedGender(student.gender);
+    setLockedCategory(normCat);
+    setLockedAffiliation(normAff);
+
+    if (student.schoolId) {
+      setSelectedSchoolId(student.schoolId);
+    }
+    if (student.participationType) {
+      setParticipationType(student.participationType);
+    }
+    setAthleticsSpecialty(student.athleticsSpecialty || '');
+    setCoachName(student.coachName || userProfile?.fullName || '');
+    setCoachLeaseNumber(student.coachLeaseNumber || userProfile?.leaseNumber || '');
+    setCoachPhone(student.coachPhone || userProfile?.phone || '');
+    setStudentToEditConfirm(null);
+    setIsFormOpen(true);
+
+    toast.success(`وضع التعويض: أدخل بيانات المشارك(ة) البديل(ة) لتعويض (${student.fullName})`);
+    setTimeout(() => {
+      formCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }, 60);
+  };
+
   // Step 2: Proceed with loading data into the form after confirmation
   const confirmStartEdit = (student: Student) => {
+    setReplacingStudentName(null);
     setEditingStudentId(student.id);
     setFullName(student.fullName);
     setMassarNumber(student.massarNumber || '');
@@ -714,27 +761,24 @@ export const TeacherTeams: React.FC = () => {
       return;
     }
 
-    // 1. General Overall Limit Checked
+    // 1. Unified Per-Branch Roster Limit Checked (العدد الأقصى المسموح به في لائحة المشاركة موحد لجميع فروع البطولة)
     if (activeSportConfig?.studentLimit && activeSportConfig.studentLimit > 0) {
-      const activeCount = editingStudentId 
-        ? activeSportStudents.filter(s => s.id !== editingStudentId).length
-        : activeSportStudents.length;
-      if (activeCount >= activeSportConfig.studentLimit) {
-        toast.error(`خطأ في التسجيل: تم بلوغ السقف الأقصى المسموح به للتسجيل في هذا التخصص وهو ${activeSportConfig.studentLimit} تلاميذ.`);
-        return;
-      }
-    }
+      const normTargetCat = normalizeCategoryKey(category);
+      const normTargetAff = affiliationType === 'club_affiliated' ? 'club_affiliated' : 'non_club';
+      const sameBranchCount = activeSportStudents.filter(s => {
+        if (editingStudentId && s.id === editingStudentId) return false;
+        const sAff = s.affiliationType === 'club_affiliated' ? 'club_affiliated' : 'non_club';
+        return (
+          normalizeCategoryKey(s.category) === normTargetCat &&
+          s.gender === gender &&
+          sAff === normTargetAff
+        );
+      }).length;
 
-    // 1.5 Per-Category Custom Limit Checked (تخصيص سقف عدد المشاركين في كل فئة بالنسبة للمؤسسة)
-    const categoryLimit = activeSportConfig?.categoryStudentLimits?.[category] ?? 
-                          activeSportConfig?.categoryStudentLimits?.[normalizeCategoryKey(category)];
-    if (categoryLimit !== undefined && categoryLimit > 0) {
-      const sameCategoryCount = editingStudentId
-        ? activeSportStudents.filter(s => s.id !== editingStudentId && (s.category === category || normalizeCategoryKey(s.category) === normalizeCategoryKey(category))).length
-        : activeSportStudents.filter(s => s.category === category || normalizeCategoryKey(s.category) === normalizeCategoryKey(category)).length;
-
-      if (sameCategoryCount >= categoryLimit) {
-        toast.error(`خطأ في التسجيل: تم بلوغ السقف الأقصى المسموح به لمؤسستك في فئة (${getCategoryLabel(category)}) وهو ${categoryLimit} مشارك(ين).`);
+      if (sameBranchCount >= activeSportConfig.studentLimit) {
+        toast.error(
+          `تم بلوغ العدد الأقصى المسموح به في لائحة المشاركة (${activeSportConfig.studentLimit} مشارك في كل فرع). يمكنك استعمال زر "تعويض 🔄" لتعويض أحد المشاركين المسجلين.`
+        );
         return;
       }
     }
@@ -846,7 +890,11 @@ export const TeacherTeams: React.FC = () => {
         await DataService.updateStudent(editingStudentId, studentData);
         setStudents(prev => prev.map(s => s.id === editingStudentId ? { ...s, ...studentData } : s));
         
-        toast.success('تم تعديل بيانات التلميذ بنجاح!');
+        if (replacingStudentName) {
+          toast.success(`تم تعويض (${replacingStudentName}) بالمشارك(ة) (${fullName.trim()}) بنجاح! 🔄`);
+        } else {
+          toast.success('تم تعديل بيانات التلميذ بنجاح!');
+        }
       } else {
         const studentData: Omit<Student, 'id' | 'createdAt' | 'updatedAt'> = {
           fullName: fullName.trim(),
@@ -887,6 +935,7 @@ export const TeacherTeams: React.FC = () => {
       setCoachLeaseNumber('');
       setCoachPhone('');
       setEditingStudentId(null);
+      setReplacingStudentName(null);
       setIsFormOpen(false);
     } catch (error) {
       console.error('Error saving student:', error);
@@ -1385,9 +1434,14 @@ export const TeacherTeams: React.FC = () => {
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
-              <span className="text-xs bg-slate-800 px-3 py-1.5 rounded-xl border border-slate-700 font-bold">
+              <span className="text-xs bg-slate-800 px-3 py-1.5 rounded-xl border border-slate-700 font-bold tabular-nums">
                 إجمالي التلاميذ: {activeSportStudents.length}
               </span>
+              {activeSportConfig?.studentLimit && activeSportConfig.studentLimit > 0 && (
+                <span className="text-xs bg-indigo-900/80 text-indigo-200 px-3 py-1.5 rounded-xl border border-indigo-700 font-bold tabular-nums">
+                  سقف لائحة كل فرع: {activeSportConfig.studentLimit} مشارك
+                </span>
+              )}
               <button
                 type="button"
                 onClick={handleExportSportStudentsExcel}
@@ -1503,14 +1557,15 @@ export const TeacherTeams: React.FC = () => {
             if (statusVal === 'Ongoing') {
               return (
                 <div className="p-4 bg-blue-50 border border-blue-200 rounded-2xl flex items-start gap-3 text-blue-950 text-xs leading-relaxed shadow-3xs">
-                  <AlertCircle className="h-5 w-5 shrink-0 text-blue-600 mt-0.5" />
+                  <RefreshCw className="h-5 w-5 shrink-0 text-blue-600 mt-0.5" />
                   <div>
-                    <p className="font-extrabold text-sm text-blue-950">🔵 بطولة جارية حالياً (In Progress)</p>
+                    <p className="font-extrabold text-sm text-blue-950">🔵 البطولة جارية حالياً — إمكانية تعويض المشاركين متاحة</p>
                     <p className="mt-1 text-blue-900 font-medium">
-                      تُعرض هذه البطولة لجميع الأطر والأساتذة لمتابعة المنافسات والبرمجة.
-                      {isTeacher
-                        ? ' تم إقفال باب الإضافة والعدل النهائي أمام الأساتذة، ويُتاح التعديل الاستثنائي فقط للمسؤول الإقليمي أو المركزي.'
-                        : ' بصفتك مسؤولاً إقليمياً أو مركزياً، يُمكِنُك الاستمرار في استكمال وتعديل اللوائح للأساتذة.'}
+                      يمكن للأستاذ(ة) تعويض أي مشارك أو مشاركة في لائحة المشاركة لمؤسسته(ا) حتى بعد انطلاق البطولة، شريطة عدم تجاوز العدد الأقصى المسموح به في لائحة كل فرع
+                      {activeSportConfig?.studentLimit && activeSportConfig.studentLimit > 0
+                        ? ` (${activeSportConfig.studentLimit} مشارك)`
+                        : ''}
+                      {' '}والمحدد من طرف رئيس اللجنة التقنية.
                     </p>
                   </div>
                 </div>
@@ -1532,7 +1587,13 @@ export const TeacherTeams: React.FC = () => {
                 <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-2xl flex items-center gap-3 text-emerald-950 text-xs shadow-3xs">
                   <span className="text-base">🟢</span>
                   <p className="font-bold text-emerald-900 text-xs">
-                    مفتوحة للتسجيل: تظهر لجميع الأطر والأساتذة ومفتوحة لتسجيل المؤسسات واللوائح حتى انتهاء الأجل.
+                    مفتوحة للتسجيل: السقف الموحد للائحة المشاركة في كل فرع هو{' '}
+                    <strong>
+                      {activeSportConfig?.studentLimit && activeSportConfig.studentLimit > 0
+                        ? `${activeSportConfig.studentLimit} مشارك(ة)`
+                        : 'غير محدود'}
+                    </strong>{' '}
+                    مع إمكانية تعويض أي مشارك(ة) ضمن السقف المسموح به.
                   </p>
                 </div>
               );
@@ -1559,20 +1620,38 @@ export const TeacherTeams: React.FC = () => {
               id="student-edit-form-card"
               className={`bg-white rounded-2xl p-5 md:p-6 shadow-sm max-w-2xl transition-all ${
                 editingStudentId
-                  ? 'border-2 border-blue-600 ring-4 ring-blue-500/20 shadow-xl'
+                  ? replacingStudentName
+                    ? 'border-2 border-amber-500 ring-4 ring-amber-500/20 shadow-xl'
+                    : 'border-2 border-blue-600 ring-4 ring-blue-500/20 shadow-xl'
                   : 'border border-slate-200'
               }`}
             >
               {editingStudentId && (
-                <div className="mb-4 p-3.5 bg-gradient-to-r from-blue-700 to-indigo-800 text-white rounded-xl shadow-xs flex items-center justify-between gap-3">
+                <div
+                  className={`mb-4 p-3.5 text-white rounded-xl shadow-xs flex items-center justify-between gap-3 ${
+                    replacingStudentName
+                      ? 'bg-gradient-to-r from-amber-600 to-orange-700'
+                      : 'bg-gradient-to-r from-blue-700 to-indigo-800'
+                  }`}
+                >
                   <div className="flex items-center gap-2.5">
                     <div className="w-8 h-8 rounded-lg bg-white/20 flex items-center justify-center shrink-0">
-                      <Edit className="h-4 w-4 text-white" />
+                      {replacingStudentName ? (
+                        <RefreshCw className="h-4 w-4 text-white" />
+                      ) : (
+                        <Edit className="h-4 w-4 text-white" />
+                      )}
                     </div>
                     <div>
-                      <h4 className="text-xs font-black">جاري تعديل بيانات التلميذ: {fullName}</h4>
-                      <p className="text-[10.5px] text-blue-100">
-                        الفئة، الجنس، والصنف مقفلة وفق شروط البطولة (البراعم - ذكور - لا منتمي). يمكنك تعديل الاسم، الصورة، وباقي المعطيات أدناه.
+                      <h4 className="text-xs font-black">
+                        {replacingStudentName
+                          ? `تعويض المشارك(ة): ${replacingStudentName} بمشارك(ة) جديد(ة)`
+                          : `جاري تعديل بيانات التلميذ: ${fullName}`}
+                      </h4>
+                      <p className="text-[10.5px] text-white/90">
+                        {replacingStudentName
+                          ? 'أدخل الاسم ورقم مسار وتاريخ الازدياد والصورة للمشارك(ة) البديل(ة) في نفس الفرع دون تجاوز العدد الأقصى للائحة.'
+                          : 'يمكنك تعديل الاسم، الصورة، وباقي المعطيات أدناه.'}
                       </p>
                     </div>
                   </div>
@@ -1581,23 +1660,37 @@ export const TeacherTeams: React.FC = () => {
                     onClick={() => {
                       setIsFormOpen(false);
                       setEditingStudentId(null);
+                      setReplacingStudentName(null);
                     }}
                     className="px-2.5 py-1 bg-white/15 hover:bg-white/25 text-white text-[11px] font-bold rounded-lg transition-colors cursor-pointer shrink-0"
                   >
-                    إلغاء التعديل
+                    إلغاء
                   </button>
                 </div>
               )}
 
               <div className="flex items-center justify-between border-b border-slate-100 pb-3 mb-4">
                 <h4 className="text-xs md:text-sm font-bold text-slate-800 flex items-center gap-2">
-                  {editingStudentId ? <Edit className="h-4 w-4 text-blue-600" /> : <UserPlus className="h-4 w-4 text-blue-600" />}
-                  <span>{editingStudentId ? `تعديل بيانات: ${fullName}` : 'تسجيل تلميذ جديد في الفريق'}</span>
+                  {replacingStudentName ? (
+                    <RefreshCw className="h-4 w-4 text-amber-600" />
+                  ) : editingStudentId ? (
+                    <Edit className="h-4 w-4 text-blue-600" />
+                  ) : (
+                    <UserPlus className="h-4 w-4 text-blue-600" />
+                  )}
+                  <span>
+                    {replacingStudentName
+                      ? `بيانات المشارك(ة) البديل(ة) مكان (${replacingStudentName})`
+                      : editingStudentId
+                      ? `تعديل بيانات: ${fullName}`
+                      : 'تسجيل تلميذ جديد في الفريق'}
+                  </span>
                 </h4>
                 <button
                   onClick={() => {
                     setIsFormOpen(false);
                     setEditingStudentId(null);
+                    setReplacingStudentName(null);
                   }}
                   className="text-xs text-slate-400 hover:text-slate-600 font-semibold cursor-pointer"
                 >
@@ -2298,11 +2391,13 @@ export const TeacherTeams: React.FC = () => {
                         <span className="text-xs font-black text-slate-800 flex items-center gap-1.5 font-bold">
                           <span className={`w-2.5 h-2.5 rounded-full ${isCategoryClub ? 'bg-amber-500 animate-pulse' : 'bg-blue-500'}`} />
                           {label}
-                          {matchingStudents.length > 0 && (
-                            <span className="text-[10px] text-slate-500 font-mono font-normal">
-                              ({matchingStudents.length} مشارك)
-                            </span>
-                          )}
+                          <span className="text-[10px] text-slate-500 font-mono font-normal tabular-nums">
+                            ({matchingStudents.length}
+                            {activeSportConfig?.studentLimit && activeSportConfig.studentLimit > 0
+                              ? `/${activeSportConfig.studentLimit}`
+                              : ''}{' '}
+                            مشارك)
+                          </span>
                         </span>
                         
                         <div className="flex items-center gap-1.5">
@@ -2747,6 +2842,16 @@ export const TeacherTeams: React.FC = () => {
                               {canTeacherManageStudent(stud) && (
                                 <>
                                   <button
+                                    type="button"
+                                    onClick={() => handleStartReplaceStudent(stud)}
+                                    title="تعويض هذا المشارك(ة) بمشارك آخر ضمن لائحة المشاركة"
+                                    className="px-2 py-1.5 text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded-lg transition-colors cursor-pointer inline-flex items-center gap-1 text-[10px] font-black"
+                                  >
+                                    <RefreshCw className="h-3 w-3 shrink-0" />
+                                    <span>تعويض</span>
+                                  </button>
+                                  <button
+                                    type="button"
                                     onClick={() => handleRequestEditStudent(stud)}
                                     title="تعديل بيانات التلميذ"
                                     className="p-1.5 text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors cursor-pointer inline-flex items-center"
@@ -2756,6 +2861,7 @@ export const TeacherTeams: React.FC = () => {
                                     </svg>
                                   </button>
                                   <button
+                                    type="button"
                                     onClick={() => handleRequestDeleteStudent(stud)}
                                     title="حذف التلميذ"
                                     className="p-1.5 text-red-600 bg-red-50 hover:bg-red-100 rounded-lg transition-colors cursor-pointer inline-flex items-center"
@@ -2901,6 +3007,16 @@ export const TeacherTeams: React.FC = () => {
                                   {canTeacherManageStudent(stud) && (
                                     <>
                                       <button
+                                        type="button"
+                                        onClick={() => handleStartReplaceStudent(stud)}
+                                        title="تعويض هذا المشارك(ة) بمشارك آخر ضمن لائحة المشاركة"
+                                        className="px-2 py-1 text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded-lg transition-colors cursor-pointer inline-flex items-center gap-1 text-[10px] font-black"
+                                      >
+                                        <RefreshCw className="h-3.5 w-3.5 shrink-0" />
+                                        <span>تعويض</span>
+                                      </button>
+                                      <button
+                                        type="button"
                                         onClick={() => handleRequestEditStudent(stud)}
                                         title="تعديل بيانات التلميذ"
                                         className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer inline-flex items-center"
@@ -2910,6 +3026,7 @@ export const TeacherTeams: React.FC = () => {
                                         </svg>
                                       </button>
                                       <button
+                                        type="button"
                                         onClick={() => handleRequestDeleteStudent(stud)}
                                         title="حذف التلميذ"
                                         className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer inline-flex items-center"

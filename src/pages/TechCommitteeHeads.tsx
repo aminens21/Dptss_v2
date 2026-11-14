@@ -16,9 +16,13 @@ import {
   AlertCircle,
   Users,
   UserPlus,
-  Edit2
+  Edit2,
+  Award,
+  MessageCircle,
+  Eye
 } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { getWhatsAppUrl } from '../lib/whatsappService';
 
 export const TechCommitteeHeads: React.FC = () => {
   const { userProfile } = useAuth();
@@ -32,6 +36,7 @@ export const TechCommitteeHeads: React.FC = () => {
   const [selectedSports, setSelectedSports] = useState<string[]>([]);
   const [isEditing, setIsEditing] = useState(false);
   const [editingHeadId, setEditingHeadId] = useState<string | null>(null);
+  const [headTeacherSearch, setHeadTeacherSearch] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // States for confirmation modal
@@ -55,7 +60,9 @@ export const TechCommitteeHeads: React.FC = () => {
   const [isMemberModalOpen, setIsMemberModalOpen] = useState(false);
   const [selectedMemberSport, setSelectedMemberSport] = useState('');
   const [selectedMemberIdForModal, setSelectedMemberIdForModal] = useState('');
+  const [memberTeacherSearch, setMemberTeacherSearch] = useState('');
   const [isSubmittingMemberModal, setIsSubmittingMemberModal] = useState(false);
+  const [viewingMembersHead, setViewingMembersHead] = useState<User | null>(null);
   const [sportsConfig, setSportsConfig] = useState<Sport[]>([]);
 
   const effectiveSportsMap = useMemo(() => {
@@ -160,6 +167,7 @@ export const TechCommitteeHeads: React.FC = () => {
     setEditingHeadId(null);
     setSelectedTeacherId('');
     setSelectedSports([]);
+    setHeadTeacherSearch('');
     setIsModalOpen(true);
   };
 
@@ -168,6 +176,7 @@ export const TechCommitteeHeads: React.FC = () => {
     setEditingHeadId(head.id);
     setSelectedTeacherId(head.id);
     setSelectedSports(head.techCommitteeSports || []);
+    setHeadTeacherSearch('');
     setIsModalOpen(true);
   };
 
@@ -190,12 +199,26 @@ export const TechCommitteeHeads: React.FC = () => {
 
     setIsSubmitting(true);
     try {
+      // If editing an existing head and the user chose a replacement teacher, revoke the previous head first
+      if (isEditing && editingHeadId && editingHeadId !== selectedTeacherId) {
+        await DataService.updateUserProfile(editingHeadId, {
+          isTechCommitteeHead: false,
+          techCommitteeSports: []
+        });
+      }
+
       await DataService.updateUserProfile(selectedTeacherId, {
         isTechCommitteeHead: true,
         techCommitteeSports: selectedSports
       });
 
-      toast.success(isEditing ? 'تم تحديث تعيين رئيس اللجنة التقنية بنجاح' : 'تم تعيين رئيس لجنة تقنية جديد بنجاح');
+      const msg =
+        isEditing && editingHeadId && editingHeadId !== selectedTeacherId
+          ? 'تم تعويض رئيس اللجنة التقنية وتحديث الصلاحيات بنجاح'
+          : isEditing
+          ? 'تم تحديث تعيين رئيس اللجنة التقنية بنجاح'
+          : 'تم تعيين رئيس لجنة تقنية جديد بنجاح';
+      toast.success(msg);
       setIsModalOpen(false);
       loadData();
     } catch (err) {
@@ -295,6 +318,18 @@ export const TechCommitteeHeads: React.FC = () => {
   // Get list of teachers who can be assigned as heads (excluding already assigned heads, unless in edit mode)
   const assignableTeachers = teachers.filter(t => !t.isTechCommitteeHead || t.id === editingHeadId);
 
+  const filteredAssignableTeachers = useMemo(() => {
+    const q = headTeacherSearch.trim().toLowerCase();
+    if (!q) return assignableTeachers;
+    return assignableTeachers.filter(t =>
+      (t.fullName || '').toLowerCase().includes(q) ||
+      (t.workLocation || '').toLowerCase().includes(q) ||
+      (t.leaseNumber || '').toLowerCase().includes(q) ||
+      (t.phone || '').toLowerCase().includes(q) ||
+      (t.email || '').toLowerCase().includes(q)
+    );
+  }, [assignableTeachers, headTeacherSearch]);
+
   // Statistics
   const totalHeads = heads.length;
   const uniqueSportsCount = new Set(heads.flatMap(h => h.techCommitteeSports || [])).size;
@@ -335,6 +370,7 @@ export const TechCommitteeHeads: React.FC = () => {
                 onClick={() => {
                   setSelectedMemberSport('');
                   setSelectedMemberIdForModal('');
+                  setMemberTeacherSearch('');
                   setIsMemberModalOpen(true);
                 }}
                 className="flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold shadow-xs cursor-pointer transition-colors"
@@ -415,96 +451,157 @@ export const TechCommitteeHeads: React.FC = () => {
             )}
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {filteredHeads.map((head) => (
-              <div
-                key={head.id}
-                className="bg-white rounded-xl border border-slate-200 shadow-xs p-4 flex flex-col justify-between hover:border-blue-300 hover:shadow-md transition-all duration-200 relative overflow-hidden"
-              >
-                {/* Premium Top Accents */}
-                <div className="absolute top-0 right-0 left-0 h-1 bg-gradient-to-l from-blue-500 to-indigo-600"></div>
-                
-                <div>
-                  {/* Profile Header */}
-                  <div className="flex items-start justify-between gap-2.5 mt-2">
-                    <div className="flex items-center gap-2.5">
-                      <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 border border-blue-100 flex items-center justify-center text-sm font-bold shrink-0">
-                        <ShieldCheck className="h-5.5 w-5.5 text-blue-600" />
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
+            {filteredHeads.map((head) => {
+              const headSportKeys = head.techCommitteeSports || [];
+              const headMembers = teachers.filter(
+                t =>
+                  t.isTechCommitteeMember &&
+                  t.id !== head.id &&
+                  t.techCommitteeSportsMemberOf?.some(sk => headSportKeys.includes(sk))
+              );
+              const firstNameLetter = (head.fullName || 'ر').trim().charAt(0);
+
+              return (
+                <div
+                  key={head.id}
+                  className="bg-white rounded-2xl border border-slate-200/90 shadow-sm hover:shadow-lg hover:border-indigo-300 transition-all duration-200 flex flex-col justify-between overflow-hidden group"
+                >
+                  <div>
+                    {/* Prestigious Executive Card Header */}
+                    <div className="bg-gradient-to-l from-slate-900 via-indigo-950 to-slate-900 p-4 text-white relative">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex items-center gap-3 min-w-0">
+                          {head.photoUrl ? (
+                            <img
+                              src={head.photoUrl}
+                              alt={head.fullName}
+                              className="w-13 h-13 rounded-2xl object-cover border-2 border-amber-400/80 shadow-md shrink-0 bg-slate-800"
+                            />
+                          ) : (
+                            <div className="w-13 h-13 rounded-2xl bg-gradient-to-br from-amber-400/20 to-indigo-500/30 border-2 border-amber-400/70 flex items-center justify-center shrink-0 shadow-md">
+                              <span className="text-lg font-black text-amber-300">{firstNameLetter}</span>
+                            </div>
+                          )}
+
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-1.5 text-amber-300 text-[10px] font-bold">
+                              <Award className="w-3.5 h-3.5 shrink-0" />
+                              <span>رئيس اللجنة التقنية الإقليمية</span>
+                            </div>
+                            <h4 className="text-sm sm:text-base font-black text-white leading-snug truncate mt-0.5" title={head.fullName}>
+                              {head.fullName}
+                            </h4>
+                            {head.workLocation && (
+                              <p className="text-[11px] text-slate-300 flex items-center gap-1 truncate mt-0.5">
+                                <MapPin className="w-3 h-3 text-amber-400/90 shrink-0" />
+                                <span className="truncate">{head.workLocation}</span>
+                              </p>
+                            )}
+                          </div>
+                        </div>
+
+                        {isCentralAdmin && (
+                          <div className="flex items-center gap-1 shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => handleOpenEditModal(head)}
+                              className="p-1.5 text-slate-300 hover:text-white rounded-lg bg-white/10 hover:bg-white/20 transition-colors cursor-pointer"
+                              title="تعديل تعيين الأستاذ أو الأنشطة الرياضية"
+                            >
+                              <Edit2 className="h-3.5 w-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleRevoke(head.id, head.fullName)}
+                              className="p-1.5 text-rose-300 hover:text-white rounded-lg bg-white/10 hover:bg-rose-600/80 transition-colors cursor-pointer"
+                              title="إلغاء التعيين"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        )}
                       </div>
+                    </div>
+
+                    {/* Sports Managed */}
+                    <div className="p-4 space-y-3.5">
                       <div>
-                        <h4 className="text-xs font-black text-slate-800">{head.fullName}</h4>
-                        <span className="inline-flex px-2 py-0.5 mt-1 bg-blue-50 text-blue-700 border border-blue-200 rounded text-[9px] font-bold">
-                          رئيس لجنة تقنية
+                        <p className="text-[11px] text-slate-500 font-bold mb-2">اللجان والتخصصات المسندة إليه:</p>
+                        <div className="flex flex-wrap gap-1.5">
+                          {headSportKeys.length > 0 ? (
+                            headSportKeys.map(s => {
+                              const sportInfo = effectiveSportsMap[s];
+                              if (!sportInfo) return null;
+                              return (
+                                <span
+                                  key={s}
+                                  className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-indigo-50/80 text-indigo-950 border border-indigo-200/80 rounded-xl text-[11px] font-bold"
+                                >
+                                  <span>{sportInfo.icon}</span>
+                                  <span>{sportInfo.name}</span>
+                                </span>
+                              );
+                            })
+                          ) : (
+                            <span className="text-slate-400 italic text-xs">لا يوجد أصناف معينة</span>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Contact Details */}
+                      <div className="space-y-2 text-xs pt-3 border-t border-slate-100">
+                        {head.phone && (
+                          <div className="flex items-center justify-between gap-2 text-slate-700">
+                            <div className="flex items-center gap-1.5 font-mono tabular-nums">
+                              <Phone className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
+                              <span dir="ltr">{head.phone}</span>
+                            </div>
+                            <a
+                              href={getWhatsAppUrl(head.phone, `السلام عليكم الأستاذ الفاضل ${head.fullName}، رئيس اللجنة التقنية،`)}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1 px-2 py-0.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 rounded-lg text-[10px] font-bold transition-colors"
+                              title="مراسلة رئيس اللجنة عبر واتساب"
+                            >
+                              <MessageCircle className="w-3 h-3" />
+                              <span>واتساب</span>
+                            </a>
+                          </div>
+                        )}
+                        <div className="flex items-center gap-1.5 text-slate-500 truncate">
+                          <Mail className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+                          <span className="truncate">{head.email}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Interactive Committee Members Button on Card Footer */}
+                  <div className="px-4 py-3 bg-slate-50/90 border-t border-slate-100 flex items-center justify-between gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setViewingMembersHead(head)}
+                      className="w-full min-h-[40px] px-3 py-2 bg-white hover:bg-indigo-50 text-slate-800 hover:text-indigo-900 border border-slate-200 hover:border-indigo-300 rounded-xl text-xs font-bold flex items-center justify-between gap-2 transition-all cursor-pointer shadow-2xs"
+                      title="عرض أعضاء اللجنة التقنية التابعة لهذا الرئيس"
+                    >
+                      <span className="flex items-center gap-2">
+                        <span className="w-7 h-7 rounded-lg bg-indigo-100 text-indigo-700 flex items-center justify-center shrink-0">
+                          <Users className="w-4 h-4" />
                         </span>
-                      </div>
-                    </div>
-
-                    {isCentralAdmin && (
-                      <div className="flex items-center gap-1">
-                        <button
-                          onClick={() => handleOpenEditModal(head)}
-                          className="p-1 text-slate-400 hover:text-blue-600 rounded hover:bg-slate-50 cursor-pointer"
-                          title="تعديل الأنشطة الرياضية"
-                        >
-                          <Edit2 className="h-3.5 w-3.5" />
-                        </button>
-                        <button
-                          onClick={() => handleRevoke(head.id, head.fullName)}
-                          className="p-1 text-slate-400 hover:text-red-600 rounded hover:bg-slate-50 cursor-pointer"
-                          title="إلغاء التعيين"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Info List */}
-                  <div className="mt-4 space-y-2 text-xs border-t border-slate-100 pt-3">
-                    {head.workLocation && (
-                      <div className="flex items-center gap-1.5 text-slate-600 font-medium">
-                        <MapPin className="h-3.5 w-3.5 text-slate-400" />
-                        <span>{head.workLocation}</span>
-                      </div>
-                    )}
-                    {head.phone && (
-                      <div className="flex items-center gap-1.5 text-slate-600 font-mono">
-                        <Phone className="h-3.5 w-3.5 text-slate-400" />
-                        <span>{head.phone}</span>
-                      </div>
-                    )}
-                    <div className="flex items-center gap-1.5 text-slate-500 truncate">
-                      <Mail className="h-3.5 w-3.5 text-slate-400" />
-                      <span className="truncate">{head.email}</span>
-                    </div>
+                        <span>أعضاء اللجنة التقنية</span>
+                      </span>
+                      <span className="flex items-center gap-1.5">
+                        <span className="px-2 py-0.5 rounded-lg bg-indigo-600 text-white text-[11px] font-black tabular-nums">
+                          {headMembers.length}
+                        </span>
+                        <Eye className="w-3.5 h-3.5 text-slate-400" />
+                      </span>
+                    </button>
                   </div>
                 </div>
-
-                {/* Sports Managed List */}
-                <div className="mt-4 pt-3 border-t border-slate-100">
-                  <p className="text-[10px] text-slate-400 font-bold mb-1.5">الأنشطة واللجن المشرف عليها:</p>
-                  <div className="flex flex-wrap gap-1">
-                    {head.techCommitteeSports && head.techCommitteeSports.length > 0 ? (
-                      head.techCommitteeSports.map(s => {
-                        const sportInfo = effectiveSportsMap[s];
-                        if (!sportInfo) return null;
-                        return (
-                          <span
-                            key={s}
-                            className="inline-flex items-center gap-1 px-2 py-1 bg-slate-50 text-slate-700 border border-slate-200 rounded-md text-[10px] font-bold"
-                          >
-                            <span>{sportInfo.icon}</span>
-                            <span>{sportInfo.name}</span>
-                          </span>
-                        );
-                      })
-                    ) : (
-                      <span className="text-slate-400 italic text-[11px]">لا يوجد أصناف معينة</span>
-                    )}
-                  </div>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
@@ -708,33 +805,108 @@ export const TechCommitteeHeads: React.FC = () => {
             </div>
 
             {/* Form */}
-            <form onSubmit={handleSave} className="p-5 space-y-4">
-              {/* Select Teacher */}
+            <form onSubmit={handleSave} className="p-4 sm:p-5 space-y-4 max-h-[82vh] overflow-y-auto">
+              {/* Select / Search / Replace Teacher */}
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                  اختر الأستاذ من لائحة هيئة التدريس <span className="text-red-500">*</span>
-                </label>
-                {isEditing ? (
-                  <div className="p-3 bg-slate-50 rounded-lg border border-slate-200 text-xs font-bold text-slate-700">
-                    👨‍🏫 {teachers.find(t => t.id === selectedTeacherId)?.fullName}
+                <div className="flex items-center justify-between gap-2 mb-1.5">
+                  <label className="block text-xs font-bold text-slate-700">
+                    {isEditing
+                      ? 'الأستاذ المكلف (يمكنك البحث وتعويضه بأستاذ آخر مباشرة)'
+                      : 'اختر الأستاذ من لائحة هيئة التدريس'}{' '}
+                    <span className="text-red-500">*</span>
+                  </label>
+                  <span className="text-[10px] font-bold text-slate-400">
+                    {filteredAssignableTeachers.length} أستاذ متاح
+                  </span>
+                </div>
+
+                {isEditing && editingHeadId && (
+                  <div className="mb-2 px-3 py-2 bg-blue-50/80 border border-blue-200 rounded-xl text-[11px] text-blue-900 flex items-center justify-between gap-2">
+                    <span className="font-bold truncate">
+                      المكلف حالياً: {teachers.find(t => t.id === editingHeadId)?.fullName}
+                    </span>
+                    {selectedTeacherId && selectedTeacherId !== editingHeadId && (
+                      <span className="shrink-0 bg-amber-100 text-amber-900 px-2 py-0.5 rounded-full text-[10px] font-black border border-amber-300">
+                        سيتم التعويض بـ {teachers.find(t => t.id === selectedTeacherId)?.fullName}
+                      </span>
+                    )}
                   </div>
-                ) : (
-                  <select
-                    value={selectedTeacherId}
-                    onChange={(e) => setSelectedTeacherId(e.target.value)}
-                    required
-                    className="w-full text-xs rounded-lg border border-slate-200 px-3 py-2.5 text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  >
-                    <option value="">-- اختر أستاذاً للتعيين كمسؤول تقني --</option>
-                    {assignableTeachers.map(teacher => (
-                      <option key={teacher.id} value={teacher.id}>
-                        👨‍🏫 {teacher.fullName} ({teacher.workLocation || 'بدون مؤسسة محددة'})
-                      </option>
-                    ))}
-                  </select>
                 )}
+
+                {/* Search Input */}
+                <div className="relative mb-2">
+                  <Search className="absolute right-3 top-2.5 h-3.5 w-3.5 text-slate-400 pointer-events-none" />
+                  <input
+                    type="text"
+                    value={headTeacherSearch}
+                    onChange={(e) => setHeadTeacherSearch(e.target.value)}
+                    placeholder="ابحث بالاسم، المؤسسة، رقم التأجير (SOM)، أو الهاتف..."
+                    className="w-full pr-8 pl-8 py-2 text-xs rounded-xl border border-slate-200 bg-slate-50 focus:bg-white text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                  {headTeacherSearch && (
+                    <button
+                      type="button"
+                      onClick={() => setHeadTeacherSearch('')}
+                      className="absolute left-2.5 top-2 text-slate-400 hover:text-slate-700 cursor-pointer"
+                      title="مسح البحث"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  )}
+                </div>
+
+                {/* Searchable Teacher Picker List */}
+                <div className="max-h-44 overflow-y-auto rounded-xl border border-slate-200 divide-y divide-slate-100 bg-white">
+                  {filteredAssignableTeachers.length === 0 ? (
+                    <div className="p-4 text-center text-xs text-slate-400 font-medium">
+                      لا يوجد أستاذ مطابق للبحث "{headTeacherSearch}"
+                    </div>
+                  ) : (
+                    filteredAssignableTeachers.map(teacher => {
+                      const isPicked = selectedTeacherId === teacher.id;
+                      return (
+                        <button
+                          key={teacher.id}
+                          type="button"
+                          onClick={() => setSelectedTeacherId(teacher.id)}
+                          className={`w-full px-3 py-2 text-right flex items-center justify-between gap-2 transition-colors cursor-pointer ${
+                            isPicked
+                              ? 'bg-blue-50 text-blue-950'
+                              : 'hover:bg-slate-50 text-slate-700'
+                          }`}
+                        >
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-xs font-bold truncate">
+                                👨‍🏫 {teacher.fullName}
+                              </span>
+                              {teacher.id === editingHeadId && (
+                                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-slate-200 text-slate-700 shrink-0">
+                                  الحالي
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-[10px] text-slate-500 truncate mt-0.5">
+                              {teacher.workLocation || 'بدون مؤسسة محددة'}
+                              {teacher.leaseNumber ? ` • SOM: ${teacher.leaseNumber}` : ''}
+                            </p>
+                          </div>
+                          <span
+                            className={`w-4 h-4 rounded-full border flex items-center justify-center shrink-0 ${
+                              isPicked
+                                ? 'border-blue-600 bg-blue-600 text-white'
+                                : 'border-slate-300 bg-white'
+                            }`}
+                          >
+                            {isPicked && <span className="w-1.5 h-1.5 rounded-full bg-white" />}
+                          </span>
+                        </button>
+                      );
+                    })
+                  )}
+                </div>
                 <p className="text-[10px] text-slate-400 mt-1 leading-normal">
-                  * يتم تعيين رئيس اللجنة التقنية حصراً من بين أساتذة التربية البدنية المسجلين بالنظام.
+                  * يتم تعيين رئيس اللجنة التقنية حصراً من بين أساتذة التربية البدنية المسجلين بالنظام، ويمكن تغييره مباشرة دون حذف السجل.
                 </p>
               </div>
 
@@ -840,6 +1012,17 @@ export const TechCommitteeHeads: React.FC = () => {
                 <label className="block text-xs font-bold text-slate-700 mb-1.5">
                   اختر الأستاذ من لائحة هيئة التدريس <span className="text-red-500">*</span>
                 </label>
+                <div className="relative mb-2">
+                  <Search className="absolute right-3 top-2.5 h-3.5 w-3.5 text-slate-400 pointer-events-none" />
+                  <input
+                    type="text"
+                    value={memberTeacherSearch}
+                    onChange={(e) => setMemberTeacherSearch(e.target.value)}
+                    disabled={!selectedMemberSport}
+                    placeholder="ابحث باسم الأستاذ، المؤسسة، أو رقم التأجير..."
+                    className="w-full pr-8 pl-3 py-2 text-xs rounded-lg border border-slate-200 bg-slate-50 focus:bg-white text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 disabled:opacity-60"
+                  />
+                </div>
                 <select
                   value={selectedMemberIdForModal}
                   onChange={(e) => setSelectedMemberIdForModal(e.target.value)}
@@ -852,8 +1035,16 @@ export const TechCommitteeHeads: React.FC = () => {
                   </option>
                   {teachers
                     .filter(t => {
-                      if (!selectedMemberSport) return true;
-                      return !t.techCommitteeSportsMemberOf?.includes(selectedMemberSport);
+                      if (selectedMemberSport && t.techCommitteeSportsMemberOf?.includes(selectedMemberSport)) {
+                        return false;
+                      }
+                      const q = memberTeacherSearch.trim().toLowerCase();
+                      if (!q) return true;
+                      return (
+                        (t.fullName || '').toLowerCase().includes(q) ||
+                        (t.workLocation || '').toLowerCase().includes(q) ||
+                        (t.leaseNumber || '').toLowerCase().includes(q)
+                      );
                     })
                     .map(teacher => (
                       <option key={teacher.id} value={teacher.id}>
@@ -938,6 +1129,149 @@ export const TechCommitteeHeads: React.FC = () => {
                     <span>نعم، تأكيد الحذف</span>
                   </>
                 )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Committee Members Modal for a Specific Head */}
+      {viewingMembersHead && (
+        <div
+          className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-in fade-in duration-150"
+          dir="rtl"
+          onClick={() => setViewingMembersHead(null)}
+        >
+          <div
+            className="bg-white rounded-3xl max-w-xl w-full shadow-2xl border border-slate-200 overflow-hidden max-h-[86vh] flex flex-col animate-in zoom-in-95 duration-150"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="bg-gradient-to-l from-slate-900 via-indigo-950 to-slate-900 p-4 sm:p-5 text-white flex items-center justify-between gap-3 shrink-0">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-11 h-11 rounded-2xl bg-amber-400/20 border border-amber-400/50 flex items-center justify-center shrink-0 text-amber-300">
+                  <Users className="w-5 h-5" />
+                </div>
+                <div className="min-w-0">
+                  <h3 className="text-sm sm:text-base font-black truncate">
+                    أعضاء اللجنة التقنية — {viewingMembersHead.fullName}
+                  </h3>
+                  <p className="text-[11px] text-slate-300 truncate mt-0.5">
+                    {viewingMembersHead.workLocation || 'رئيس اللجنة التقنية الإقليمية'}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setViewingMembersHead(null)}
+                className="p-2 rounded-xl bg-white/10 hover:bg-white/20 text-white transition-colors cursor-pointer shrink-0"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-4 sm:p-5 overflow-y-auto flex-1 space-y-4 bg-slate-50/60">
+              {(viewingMembersHead.techCommitteeSports || []).length === 0 ? (
+                <div className="text-center py-8 bg-white rounded-2xl border border-slate-200 text-xs text-slate-500">
+                  لم يتم إسناد أي صنف رياضي لهذا الرئيس بعد.
+                </div>
+              ) : (
+                (viewingMembersHead.techCommitteeSports || []).map(sportKey => {
+                  const sportInfo = effectiveSportsMap[sportKey] || { name: sportKey, icon: '🏆' };
+                  const sportMembers = teachers.filter(
+                    t =>
+                      t.id !== viewingMembersHead.id &&
+                      t.isTechCommitteeMember &&
+                      t.techCommitteeSportsMemberOf?.includes(sportKey)
+                  );
+                  return (
+                    <div key={`modal-sport-${sportKey}`} className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
+                      <div className="px-4 py-3 bg-slate-50 border-b border-slate-100 flex items-center justify-between">
+                        <div className="flex items-center gap-2 font-black text-slate-800 text-xs sm:text-sm">
+                          <span>{sportInfo.icon}</span>
+                          <span>لجنة {sportInfo.name}</span>
+                        </div>
+                        <span className="px-2.5 py-0.5 rounded-lg bg-indigo-50 text-indigo-700 border border-indigo-200 text-[11px] font-black tabular-nums">
+                          {sportMembers.length} أعضاء
+                        </span>
+                      </div>
+
+                      <div className="p-3 space-y-2">
+                        {sportMembers.length === 0 ? (
+                          <p className="text-center text-xs text-slate-400 py-3">
+                            لا يوجد أعضاء معينون في لجنة {sportInfo.name} حالياً.
+                          </p>
+                        ) : (
+                          sportMembers.map(member => (
+                            <div
+                              key={`modal-member-${sportKey}-${member.id}`}
+                              className="p-2.5 rounded-xl border border-slate-100 bg-slate-50/70 flex items-center justify-between gap-2 text-xs"
+                            >
+                              <div className="min-w-0 flex-1">
+                                <p className="font-bold text-slate-800 truncate">{member.fullName}</p>
+                                <p className="text-[11px] text-slate-500 truncate">
+                                  {member.workLocation || 'أستاذ التربية البدنية'}
+                                </p>
+                              </div>
+                              <div className="flex items-center gap-1.5 shrink-0">
+                                {member.phone && (
+                                  <a
+                                    href={getWhatsAppUrl(member.phone, `السلام عليكم الأستاذ(ة) ${member.fullName}، عضو اللجنة التقنية لـ ${sportInfo.name}،`)}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[10px] font-bold flex items-center gap-1 transition-colors"
+                                  >
+                                    <MessageCircle className="w-3 h-3" />
+                                    <span dir="ltr" className="hidden xs:inline">{member.phone}</span>
+                                  </a>
+                                )}
+                                {(isCentralAdmin ||
+                                  (userProfile?.isTechCommitteeHead &&
+                                    userProfile?.techCommitteeSports?.includes(sportKey))) && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleRemoveMember(member.id, sportKey, member.fullName)}
+                                    className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
+                                    title="إزالة العضو"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            <div className="p-3.5 bg-white border-t border-slate-100 flex items-center justify-between gap-2 shrink-0">
+              {isCentralAdmin && (viewingMembersHead.techCommitteeSports || []).length > 0 ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const firstSport = viewingMembersHead.techCommitteeSports?.[0] || '';
+                    setViewingMembersHead(null);
+                    setSelectedMemberSport(firstSport);
+                    setSelectedMemberIdForModal('');
+                    setMemberTeacherSearch('');
+                    setIsMemberModalOpen(true);
+                  }}
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+                >
+                  <UserPlus className="w-3.5 h-3.5" />
+                  <span>إضافة عضو لهذه اللجنة</span>
+                </button>
+              ) : (
+                <div />
+              )}
+              <button
+                type="button"
+                onClick={() => setViewingMembersHead(null)}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold cursor-pointer"
+              >
+                إغلاق
               </button>
             </div>
           </div>

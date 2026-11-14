@@ -1556,11 +1556,11 @@ export const SportsConfig: React.FC = () => {
         </div>
 
         {/* Status Filter Tabs */}
-        <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl w-full sm:w-auto overflow-x-auto">
+        <div className="flex flex-wrap items-center gap-1.5 bg-slate-100 p-1.5 rounded-xl w-full sm:w-auto">
           <button
             type="button"
             onClick={() => setStatusFilter('ALL')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
+            className={`flex-1 sm:flex-initial text-center px-2.5 sm:px-3 py-1.5 rounded-lg text-[11px] sm:text-xs font-bold transition-all cursor-pointer ${
               statusFilter === 'ALL'
                 ? 'bg-white text-slate-800 shadow-xs'
                 : 'text-slate-600 hover:text-slate-900'
@@ -1571,25 +1571,25 @@ export const SportsConfig: React.FC = () => {
           <button
             type="button"
             onClick={() => setStatusFilter('PROGRAMMED')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
+            className={`flex-1 sm:flex-initial justify-center flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg text-[11px] sm:text-xs font-bold transition-all cursor-pointer ${
               statusFilter === 'PROGRAMMED'
                 ? 'bg-emerald-600 text-white shadow-xs'
                 : 'text-slate-600 hover:text-slate-900'
             }`}
           >
-            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shrink-0" />
             <span>المبرمجة ({programmedCount})</span>
           </button>
           <button
             type="button"
             onClick={() => setStatusFilter('UNPROGRAMMED')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
+            className={`flex-1 sm:flex-initial justify-center flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg text-[11px] sm:text-xs font-bold transition-all cursor-pointer ${
               statusFilter === 'UNPROGRAMMED'
                 ? 'bg-amber-600 text-white shadow-xs'
                 : 'text-slate-600 hover:text-slate-900'
             }`}
           >
-            <span className="w-2 h-2 rounded-full bg-amber-400" />
+            <span className="w-2 h-2 rounded-full bg-amber-400 shrink-0" />
             <span>في طور الإعداد ({unprogrammedCount})</span>
           </button>
         </div>
@@ -1768,6 +1768,66 @@ export const SportsConfig: React.FC = () => {
                       }));
                     }}
                   />
+
+                  {/* Unified Max Participants in Participation List (موحد لجميع فروع البطولة) */}
+                  <div className="pt-3 border-t border-slate-100 space-y-2.5 bg-indigo-50/60 p-3.5 rounded-xl border border-indigo-200/80">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <label className="text-xs font-black text-indigo-950 flex items-center gap-2">
+                        <Users className="h-4 w-4 text-indigo-600 shrink-0" />
+                        <span>العدد الأقصى المسموح به في لائحة المشاركة (موحد لجميع فروع البطولة):</span>
+                      </label>
+                      <div className="flex items-center gap-2 self-start sm:self-auto">
+                        <input
+                          type="number"
+                          min={0}
+                          max={60}
+                          value={sport.studentLimit ?? 12}
+                          onChange={(e) => {
+                            const val = Math.max(0, parseInt(e.target.value || '0', 10));
+                            setSportsList(prev =>
+                              prev.map(s =>
+                                s.id === sport.id
+                                  ? { ...s, studentLimit: val, categoryStudentLimits: {} }
+                                  : s
+                              )
+                            );
+                          }}
+                          className="w-24 px-3 py-1.5 bg-white border border-indigo-300 rounded-xl text-xs font-black text-indigo-950 text-center tabular-nums focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                        />
+                        <span className="text-[11px] font-bold text-indigo-800">مشارك(ة) لكل فرع</span>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="text-[10px] font-bold text-slate-500 ml-1">اختيار سريع:</span>
+                      {[5, 6, 8, 10, 12, 14, 15, 16, 18].map(preset => (
+                        <button
+                          key={preset}
+                          type="button"
+                          onClick={() => {
+                            setSportsList(prev =>
+                              prev.map(s =>
+                                s.id === sport.id
+                                  ? { ...s, studentLimit: preset, categoryStudentLimits: {} }
+                                  : s
+                              )
+                            );
+                          }}
+                          className={`px-2.5 py-1 rounded-lg text-[11px] font-black tabular-nums border transition-all cursor-pointer ${
+                            sport.studentLimit === preset
+                              ? 'bg-indigo-600 text-white border-indigo-600 shadow-2xs'
+                              : 'bg-white text-slate-700 border-slate-200 hover:bg-indigo-50'
+                          }`}
+                        >
+                          {preset}
+                        </button>
+                      ))}
+                    </div>
+
+                    <p className="text-[11px] text-indigo-900/85 font-medium leading-relaxed">
+                      * يُطبّق هذا العدد الأقصى بشكل <strong>موحد على جميع فروع البطولة</strong> (مختلف الفئات العمرية، الذكور والإناث، المنتمون وغير المنتمين للأندية)، ويمكن للأستاذ(ة) تعويض أي مشارك أو مشاركة حتى بعد انطلاق البطولة شريطة عدم تجاوز هذا العدد في لائحة المشاركة.
+                    </p>
+                  </div>
 
                   {/* Target Classifications Checkboxes (الأصناف المستهدفة) */}
                   <div className="pt-3 border-t border-slate-100 space-y-2.5 bg-slate-50/70 p-3.5 rounded-xl border border-slate-100">

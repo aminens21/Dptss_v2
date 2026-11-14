@@ -226,15 +226,21 @@ export const TeacherDetailModal: React.FC<TeacherDetailModalProps> = ({
               {/* Referee Specialties */}
               <div>
                 <span className="text-[11px] font-bold text-slate-500 block mb-1.5">تخصصات التحكيم والإشراف الرياضي:</span>
-                <div className="flex flex-wrap gap-1.5">
+                <div className="flex flex-wrap gap-2">
                   {specialties.length > 0 ? (
                     specialties.map(spec => {
                       const sport = SPORTS_MAP[spec];
+                      const specDiploma = teacher.refereeDiplomas?.[spec] || teacher.refereeDiploma;
                       return (
-                        <span key={spec} className="inline-flex items-center gap-1.5 px-3 py-1 bg-purple-50 text-purple-800 border border-purple-200 rounded-xl text-xs font-bold">
+                        <div key={spec} className="inline-flex items-center gap-2 px-3 py-1.5 bg-purple-50 text-purple-900 border border-purple-200 rounded-xl text-xs font-bold">
                           <span>{sport?.icon || '🏆'}</span>
                           <span>{sport?.name || spec}</span>
-                        </span>
+                          {specDiploma && (
+                            <span className="px-2 py-0.5 rounded-md bg-amber-100 text-amber-900 border border-amber-300 text-[10px] font-black">
+                              🏅 {specDiploma}
+                            </span>
+                          )}
+                        </div>
                       );
                     })
                   ) : (

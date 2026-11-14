@@ -570,16 +570,26 @@ export const Login: React.FC = () => {
         if (!matchesDir) return false;
         const t = (s.type || '').trim().toLowerCase();
         const n = (s.name || '').trim().toLowerCase();
-        const isPrivate = t.includes('خاص') || t.includes('خصوص') || n.includes('خاص') || n.includes('خصوص') || (s as any).isPrivate;
+        const isPrivate =
+          t.includes('خاص') ||
+          t.includes('خصوص') ||
+          n.includes('خاص') ||
+          n.includes('خصوص') ||
+          (s.name || '').trim().startsWith('مؤسسة ') ||
+          (s as any).isPrivate;
+
+        if (isPrivate) {
+          return true;
+        }
 
         if (regTeachingCadre === 'PRIMARY') {
-          return t.includes('ابتدائي') || t === 'primary' || n.includes('ابتدائي') || n.includes('م/م') || n.includes('مجموعة مدارس') || n.includes('مدرسة') || (isPrivate && (t.includes('ابتدائي') || !t.includes('إعدادي') && !t.includes('تأهيلي')));
+          return t.includes('ابتدائي') || t === 'primary' || n.includes('ابتدائي') || n.includes('م/م') || n.includes('مجموعة مدارس') || n.includes('مدرسة');
         }
         if (regTeachingCadre === 'MIDDLE') {
-          return t.includes('إعدادي') || t === 'middle' || n.includes('إعدادي') || n.includes('إعدادية') || (isPrivate && (t.includes('إعدادي') || !n.includes('م/م') && !n.includes('مدرسة ابتدائية')));
+          return t.includes('إعدادي') || t === 'middle' || n.includes('إعدادي') || n.includes('إعدادية');
         }
         if (regTeachingCadre === 'HIGH') {
-          return t.includes('تأهيلي') || t === 'high' || t.includes('ثانوي تأهيلي') || n.includes('تأهيلي') || n.includes('ثانوية') || (isPrivate && (t.includes('تأهيلي') || !n.includes('م/م') && !n.includes('مدرسة ابتدائية')));
+          return t.includes('تأهيلي') || t === 'high' || t.includes('ثانوي تأهيلي') || n.includes('تأهيلي') || n.includes('ثانوية');
         }
         return false;
       })
@@ -591,7 +601,13 @@ export const Login: React.FC = () => {
     list.forEach(s => {
       const t = (s.type || '').trim().toLowerCase();
       const n = (s.name || '').trim().toLowerCase();
-      const isPriv = t.includes('خاص') || t.includes('خصوص') || n.includes('خاص') || n.includes('خصوص') || (s as any).isPrivate;
+      const isPriv =
+        t.includes('خاص') ||
+        t.includes('خصوص') ||
+        n.includes('خاص') ||
+        n.includes('خصوص') ||
+        (s.name || '').trim().startsWith('مؤسسة ') ||
+        (s as any).isPrivate;
       if (isPriv) {
         priv.push(s);
       } else {

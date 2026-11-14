@@ -124,8 +124,45 @@ export const TeacherBadgesModal: React.FC<TeacherBadgesModalProps> = ({
 
   // Preview & Pagination State
   const [previewZoom, setPreviewZoom] = useState<number>(100);
+  const [hasManualZoom, setHasManualZoom] = useState<boolean>(false);
   const [currentPreviewPage, setCurrentPreviewPage] = useState<number>(1);
   const [isExporting, setIsExporting] = useState(false);
+  const previewContainerRef = useRef<HTMLDivElement>(null);
+
+  const computeFitZoom = (containerWidth: number) => {
+    const a4WidthPx = 794; // 210mm at 96dpi
+    const available = Math.max(220, containerWidth - 20);
+    return Math.min(100, Math.max(30, Math.floor((available / a4WidthPx) * 100)));
+  };
+
+  useEffect(() => {
+    if (!isOpen) {
+      setHasManualZoom(false);
+      return;
+    }
+    if (activeTab !== 'preview') return;
+    const el = previewContainerRef.current;
+    if (!el) return;
+
+    const applyFit = () => {
+      if (hasManualZoom) return;
+      const w = el.clientWidth;
+      if (w > 0 && w < 830) {
+        setPreviewZoom(computeFitZoom(w));
+      } else if (w >= 830) {
+        setPreviewZoom(100);
+      }
+    };
+
+    applyFit();
+    if (typeof ResizeObserver !== 'undefined') {
+      const ro = new ResizeObserver(() => applyFit());
+      ro.observe(el);
+      return () => ro.disconnect();
+    }
+    window.addEventListener('resize', applyFit);
+    return () => window.removeEventListener('resize', applyFit);
+  }, [isOpen, activeTab, hasManualZoom]);
 
   // Generated QR codes cache (TeacherId -> DataURL)
   const [qrCodeUrls, setQrCodeUrls] = useState<Record<string, string>>({});
@@ -440,7 +477,7 @@ export const TeacherBadgesModal: React.FC<TeacherBadgesModalProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-slate-950/80 backdrop-blur-sm overflow-hidden" dir="rtl">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-1 sm:p-4 bg-slate-950/80 backdrop-blur-sm overflow-hidden" dir="rtl">
       {/* Hidden Global Print Style Override for A4 */}
       <style>{`
         @media print {
@@ -478,43 +515,77 @@ export const TeacherBadgesModal: React.FC<TeacherBadgesModalProps> = ({
       `}</style>
 
       {/* Main Modal Dialog */}
-      <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-7xl h-[94vh] flex flex-col shadow-2xl overflow-hidden text-slate-100">
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl sm:rounded-3xl w-full max-w-7xl h-[96dvh] sm:h-[94vh] flex flex-col shadow-2xl overflow-hidden text-slate-100">
         
         {/* Top Header Bar */}
-        <div className="px-5 py-3.5 bg-slate-950 border-b border-slate-800 flex flex-wrap items-center justify-between gap-3 shrink-0">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-emerald-600 to-teal-500 text-white flex items-center justify-center shadow-md font-bold text-xl">
-              🪪
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h3 className="text-sm sm:text-base font-black text-white">
-                  إنشاء وطباعة شارات وبادجات الأساتذة (A4)
-                </h3>
-                <span className="bg-emerald-500/20 text-emerald-300 text-[10px] font-extrabold px-2.5 py-0.5 rounded-full border border-emerald-500/30">
-                  8 شارات بالورقة
-                </span>
+        <div className="px-3 sm:px-5 py-2.5 sm:py-3.5 bg-slate-950 border-b border-slate-800 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-2.5 sm:gap-3 shrink-0">
+          <div className="flex items-center justify-between gap-2 min-w-0">
+            <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+              <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl sm:rounded-2xl bg-gradient-to-tr from-emerald-600 to-teal-500 text-white flex items-center justify-center shadow-md font-bold text-base sm:text-xl shrink-0">
+                🪪
               </div>
-              <p className="text-[11px] text-slate-400 mt-0.5">
-                توليد شارات الاعتماد الرسمية لأطر الرياضة المدرسية بـ {dirName} ({activeSeason})
-              </p>
+              <div className="min-w-0">
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <h3 className="text-xs sm:text-base font-black text-white truncate">
+                    بادجات وشارات الأساتذة (A4)
+                  </h3>
+                  <span className="bg-emerald-500/20 text-emerald-300 text-[9px] sm:text-[10px] font-extrabold px-2 py-0.5 rounded-full border border-emerald-500/30 shrink-0">
+                    8/ورقة
+                  </span>
+                </div>
+                <p className="hidden sm:block text-[11px] text-slate-400 mt-0.5 truncate">
+                  توليد شارات الاعتماد الرسمية لأطر الرياضة المدرسية بـ {dirName} ({activeSeason})
+                </p>
+              </div>
+            </div>
+
+            {/* Action Buttons on mobile top-right/left & close button */}
+            <div className="flex lg:hidden items-center gap-1.5 shrink-0">
+              <button
+                type="button"
+                onClick={handlePrint}
+                disabled={activeSelectedTeachers.length === 0 || isExporting}
+                className="flex items-center gap-1 px-2.5 py-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 text-white text-[11px] font-black rounded-xl shadow-xs cursor-pointer disabled:opacity-50"
+                title="طباعة ورقية مباشرة A4"
+              >
+                <Printer className="w-3.5 h-3.5" />
+                <span>طباعة</span>
+              </button>
+              <button
+                type="button"
+                onClick={handleDownloadPdf}
+                disabled={activeSelectedTeachers.length === 0 || isExporting}
+                className="flex items-center gap-1 px-2.5 py-1.5 bg-slate-800 border border-slate-700 text-white text-[11px] font-black rounded-xl cursor-pointer disabled:opacity-50"
+                title="تحميل كملف PDF"
+              >
+                <Download className="w-3.5 h-3.5 text-emerald-400" />
+                <span>PDF</span>
+              </button>
+              <button
+                type="button"
+                onClick={onClose}
+                className="p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors cursor-pointer"
+                aria-label="إغلاق"
+              >
+                <X className="w-4 h-4" />
+              </button>
             </div>
           </div>
 
           {/* Navigation Tabs between Preview, Customizer, and Teacher Selection */}
-          <div className="flex items-center gap-1.5 bg-slate-800 p-1 rounded-2xl border border-slate-700/80">
+          <div className="grid grid-cols-3 lg:flex items-center gap-1 sm:gap-1.5 bg-slate-800 p-1 rounded-xl sm:rounded-2xl border border-slate-700/80 w-full lg:w-auto">
             <button
               type="button"
               onClick={() => setActiveTab('preview')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+              className={`flex items-center justify-center gap-1 sm:gap-1.5 px-1.5 sm:px-3 py-1.5 rounded-lg sm:rounded-xl text-[11px] sm:text-xs font-bold transition-all cursor-pointer min-w-0 ${
                 activeTab === 'preview'
                   ? 'bg-emerald-600 text-white shadow-xs'
                   : 'text-slate-300 hover:text-white hover:bg-slate-700/60'
               }`}
             >
-              <Eye className="w-3.5 h-3.5" />
-              <span>معاينة الشارات</span>
-              <span className="bg-white/20 text-[10px] px-1.5 py-0.2 rounded-md">
+              <Eye className="w-3.5 h-3.5 shrink-0" />
+              <span className="truncate"><span className="sm:hidden">معاينة</span><span className="hidden sm:inline">معاينة الشارات</span></span>
+              <span className="bg-white/20 text-[9px] sm:text-[10px] px-1 sm:px-1.5 rounded-md shrink-0">
                 {activeSelectedTeachers.length}
               </span>
             </button>
@@ -522,15 +593,15 @@ export const TeacherBadgesModal: React.FC<TeacherBadgesModalProps> = ({
             <button
               type="button"
               onClick={() => setActiveTab('selection')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+              className={`flex items-center justify-center gap-1 sm:gap-1.5 px-1.5 sm:px-3 py-1.5 rounded-lg sm:rounded-xl text-[11px] sm:text-xs font-bold transition-all cursor-pointer min-w-0 ${
                 activeTab === 'selection'
                   ? 'bg-blue-600 text-white shadow-xs'
                   : 'text-slate-300 hover:text-white hover:bg-slate-700/60'
               }`}
             >
-              <Users className="w-3.5 h-3.5" />
-              <span>اختيار الأساتذة</span>
-              <span className="bg-white/20 text-[10px] px-1.5 py-0.2 rounded-md">
+              <Users className="w-3.5 h-3.5 shrink-0" />
+              <span className="truncate"><span className="sm:hidden">الأساتذة</span><span className="hidden sm:inline">اختيار الأساتذة</span></span>
+              <span className="bg-white/20 text-[9px] sm:text-[10px] px-1 sm:px-1.5 rounded-md shrink-0">
                 {selectedTeacherIds.size}/{teachers.length}
               </span>
             </button>
@@ -538,19 +609,19 @@ export const TeacherBadgesModal: React.FC<TeacherBadgesModalProps> = ({
             <button
               type="button"
               onClick={() => setActiveTab('customizer')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+              className={`flex items-center justify-center gap-1 sm:gap-1.5 px-1.5 sm:px-3 py-1.5 rounded-lg sm:rounded-xl text-[11px] sm:text-xs font-bold transition-all cursor-pointer min-w-0 ${
                 activeTab === 'customizer'
                   ? 'bg-amber-600 text-white shadow-xs'
                   : 'text-slate-300 hover:text-white hover:bg-slate-700/60'
               }`}
             >
-              <SlidersHorizontal className="w-3.5 h-3.5" />
-              <span>إعدادات الورقة والخط</span>
+              <SlidersHorizontal className="w-3.5 h-3.5 shrink-0" />
+              <span className="truncate"><span className="sm:hidden">الإعدادات</span><span className="hidden sm:inline">إعدادات الورقة والخط</span></span>
             </button>
           </div>
 
-          {/* Action Buttons Toolbar */}
-          <div className="flex items-center gap-2">
+          {/* Desktop Action Buttons Toolbar */}
+          <div className="hidden lg:flex items-center gap-2 shrink-0">
             <button
               type="button"
               onClick={handlePrint}
@@ -570,7 +641,7 @@ export const TeacherBadgesModal: React.FC<TeacherBadgesModalProps> = ({
               title="تحميل كملف PDF متعدد الصفحات"
             >
               <Download className="w-4 h-4 text-emerald-400" />
-              <span className="hidden sm:inline">تحميل PDF</span>
+              <span>تحميل PDF</span>
             </button>
 
             <button
@@ -590,41 +661,43 @@ export const TeacherBadgesModal: React.FC<TeacherBadgesModalProps> = ({
 
           {/* TAB 1: TEACHER SELECTION PANEL */}
           {activeTab === 'selection' && (
-            <div className="w-full flex-1 p-4 overflow-y-auto space-y-4 bg-slate-900">
-              <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800 space-y-3 shadow-md">
-                <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="w-full flex-1 p-2.5 sm:p-4 overflow-y-auto space-y-3 sm:space-y-4 bg-slate-900">
+              <div className="bg-slate-950 p-3 sm:p-4 rounded-2xl border border-slate-800 space-y-3 shadow-md">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 sm:gap-3">
                   <div>
-                    <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                    <h4 className="text-xs sm:text-sm font-bold text-white flex items-center gap-2">
                       <Users className="w-4 h-4 text-blue-400" />
                       <span>تحديد الأطر التربوية للطباعة</span>
                     </h4>
-                    <p className="text-xs text-slate-400 mt-0.5">
+                    <p className="text-[11px] sm:text-xs text-slate-400 mt-0.5">
                       حدد الأساتذة المطلوب توليد شاراتهم أو اختر السلك أو عدداً محدداً
                     </p>
                   </div>
 
                   {/* Quick Quantity Buttons & Custom Number Input */}
-                  <div className="flex flex-wrap items-center gap-2">
-                    <div className="flex items-center gap-1.5 bg-slate-900 p-1 rounded-xl border border-slate-800">
-                      <span className="text-[11px] text-slate-400 font-bold px-1.5">تحديد عدد مخصص:</span>
-                      <input
-                        type="number"
-                        min={1}
-                        max={filteredTeacherList.length || 100}
-                        value={customQuantity}
-                        onChange={(e) => setCustomQuantity(Math.max(1, parseInt(e.target.value) || 1))}
-                        className="w-16 px-2 py-1 bg-slate-800 border border-slate-700 text-white font-mono font-bold text-xs rounded-lg text-center focus:ring-2 focus:ring-blue-500"
-                      />
-                      <button
-                        type="button"
-                        onClick={handleApplyCustomQuantity}
-                        className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black rounded-lg transition-colors cursor-pointer"
-                      >
-                        تطبيق
-                      </button>
+                  <div className="flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-center gap-2">
+                    <div className="flex items-center justify-between sm:justify-start gap-1.5 bg-slate-900 p-1.5 rounded-xl border border-slate-800">
+                      <span className="text-[11px] text-slate-400 font-bold px-1">عدد مخصص:</span>
+                      <div className="flex items-center gap-1.5">
+                        <input
+                          type="number"
+                          min={1}
+                          max={filteredTeacherList.length || 100}
+                          value={customQuantity}
+                          onChange={(e) => setCustomQuantity(Math.max(1, parseInt(e.target.value) || 1))}
+                          className="w-16 px-2 py-1 bg-slate-800 border border-slate-700 text-white font-mono font-bold text-xs rounded-lg text-center focus:ring-2 focus:ring-blue-500"
+                        />
+                        <button
+                          type="button"
+                          onClick={handleApplyCustomQuantity}
+                          className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black rounded-lg transition-colors cursor-pointer"
+                        >
+                          تطبيق
+                        </button>
+                      </div>
                     </div>
 
-                    <div className="flex items-center gap-1">
+                    <div className="flex flex-wrap items-center gap-1.5">
                       <button
                         type="button"
                         onClick={() => {
@@ -633,7 +706,7 @@ export const TeacherBadgesModal: React.FC<TeacherBadgesModalProps> = ({
                           setSelectedTeacherIds(new Set(subset.map(t => t.id)));
                           toast.success(`تم تحديد أول 8 أساتذة (ورقة واحدة A4)`);
                         }}
-                        className="px-2.5 py-1 bg-slate-800 hover:bg-blue-600 text-slate-200 hover:text-white text-xs font-bold rounded-lg border border-slate-700 transition-colors cursor-pointer"
+                        className="px-2 py-1 bg-slate-800 hover:bg-blue-600 text-slate-200 hover:text-white text-[11px] font-bold rounded-lg border border-slate-700 transition-colors cursor-pointer"
                       >
                         8 (ورقة 1)
                       </button>
@@ -645,7 +718,7 @@ export const TeacherBadgesModal: React.FC<TeacherBadgesModalProps> = ({
                           setSelectedTeacherIds(new Set(subset.map(t => t.id)));
                           toast.success(`تم تحديد أول 16 أستاذ (ورقتان A4)`);
                         }}
-                        className="px-2.5 py-1 bg-slate-800 hover:bg-blue-600 text-slate-200 hover:text-white text-xs font-bold rounded-lg border border-slate-700 transition-colors cursor-pointer"
+                        className="px-2 py-1 bg-slate-800 hover:bg-blue-600 text-slate-200 hover:text-white text-[11px] font-bold rounded-lg border border-slate-700 transition-colors cursor-pointer"
                       >
                         16 (ورقتان)
                       </button>
@@ -657,23 +730,23 @@ export const TeacherBadgesModal: React.FC<TeacherBadgesModalProps> = ({
                           setSelectedTeacherIds(new Set(subset.map(t => t.id)));
                           toast.success(`تم تحديد أول 24 أستاذ (3 ورقات A4)`);
                         }}
-                        className="px-2.5 py-1 bg-slate-800 hover:bg-blue-600 text-slate-200 hover:text-white text-xs font-bold rounded-lg border border-slate-700 transition-colors cursor-pointer"
+                        className="px-2 py-1 bg-slate-800 hover:bg-blue-600 text-slate-200 hover:text-white text-[11px] font-bold rounded-lg border border-slate-700 transition-colors cursor-pointer"
                       >
                         24 (3 ورقات)
                       </button>
                       <button
                         type="button"
                         onClick={handleSelectAllFiltered}
-                        className="px-3 py-1 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-lg transition-colors cursor-pointer"
+                        className="px-2.5 py-1 bg-blue-600 hover:bg-blue-500 text-white text-[11px] font-bold rounded-lg transition-colors cursor-pointer"
                       >
-                        تحديد الكل ({filteredTeacherList.length})
+                        الكل ({filteredTeacherList.length})
                       </button>
                       <button
                         type="button"
                         onClick={handleDeselectAllFiltered}
-                        className="px-3 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold rounded-lg border border-slate-700 transition-colors cursor-pointer"
+                        className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] font-bold rounded-lg border border-slate-700 transition-colors cursor-pointer"
                       >
-                        إلغاء التحديد
+                        إلغاء
                       </button>
                     </div>
                   </div>
@@ -751,44 +824,44 @@ export const TeacherBadgesModal: React.FC<TeacherBadgesModalProps> = ({
                       return (
                         <label
                           key={t.id}
-                          className={`flex items-center justify-between p-3 transition-colors cursor-pointer ${
+                          className={`flex items-center justify-between gap-2 p-2.5 sm:p-3 transition-colors cursor-pointer ${
                             isSelected ? 'bg-blue-950/40 hover:bg-blue-950/60' : 'hover:bg-slate-900/60'
                           }`}
                         >
-                          <div className="flex items-center gap-3">
+                          <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
                             <input
                               type="checkbox"
                               checked={isSelected}
                               onChange={() => handleToggleTeacher(t.id)}
-                              className="w-4 h-4 rounded border-slate-700 bg-slate-800 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                              className="w-4 h-4 rounded border-slate-700 bg-slate-800 text-blue-600 focus:ring-blue-500 cursor-pointer shrink-0"
                             />
                             
                             {/* Photo / Avatar */}
-                            <div className="w-10 h-10 rounded-xl overflow-hidden bg-slate-800 border border-slate-700 flex items-center justify-center shrink-0">
+                            <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl overflow-hidden bg-slate-800 border border-slate-700 flex items-center justify-center shrink-0">
                               {t.photoUrl ? (
                                 <img src={t.photoUrl} alt={t.fullName} className="w-full h-full object-cover" />
                               ) : (
-                                <span className="text-base font-bold text-slate-400">
+                                <span className="text-sm sm:text-base font-bold text-slate-400">
                                   {t.fullName ? t.fullName.charAt(0) : '👨‍🏫'}
                                 </span>
                               )}
                             </div>
 
-                            <div>
-                              <div className="flex items-center gap-2">
-                                <span className="text-xs font-bold text-white">{t.fullName}</span>
-                                <span className={`text-[9px] font-black px-2 py-0.5 rounded ${cycleInfo.color}`}>
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span className="text-xs font-bold text-white truncate">{t.fullName}</span>
+                                <span className={`text-[9px] font-black px-1.5 py-0.5 rounded shrink-0 ${cycleInfo.color}`}>
                                   {cycleInfo.short}
                                 </span>
                               </div>
-                              <div className="flex items-center gap-3 text-[11px] text-slate-400 mt-0.5">
-                                <span>🏢 {t.workLocation || 'مؤسسة غير محددة'}</span>
-                                {t.leaseNumber && <span>🔢 SOM: {t.leaseNumber}</span>}
+                              <div className="flex flex-wrap items-center gap-x-2.5 gap-y-0.5 text-[10px] sm:text-[11px] text-slate-400 mt-0.5">
+                                <span className="truncate">🏢 {t.workLocation || 'مؤسسة غير محددة'}</span>
+                                {t.leaseNumber && <span className="shrink-0">🔢 SOM: {t.leaseNumber}</span>}
                               </div>
                             </div>
                           </div>
 
-                          <div className="text-left">
+                          <div className="text-left shrink-0">
                             <span className="text-[10px] text-slate-500 font-mono">#{idx + 1}</span>
                           </div>
                         </label>
@@ -802,8 +875,8 @@ export const TeacherBadgesModal: React.FC<TeacherBadgesModalProps> = ({
 
           {/* TAB 2: CUSTOMIZER / SETTINGS PANEL */}
           {activeTab === 'customizer' && (
-            <div className="w-full flex-1 p-4 overflow-y-auto space-y-4 bg-slate-900">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="w-full flex-1 p-2.5 sm:p-4 overflow-y-auto space-y-3 sm:space-y-4 bg-slate-900">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
                 
                 {/* 1. Theme & Font Selector */}
                 <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800 space-y-3">
@@ -1023,7 +1096,7 @@ export const TeacherBadgesModal: React.FC<TeacherBadgesModalProps> = ({
                     <span>التحكم في أحجام الخطوط (Font Sizes)</span>
                   </h4>
 
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                     <div>
                       <label className="block text-[10px] font-bold text-slate-400 mb-1">اسم الأستاذ(ة): {nameFontSize}pt</label>
                       <input
@@ -1084,22 +1157,22 @@ export const TeacherBadgesModal: React.FC<TeacherBadgesModalProps> = ({
             <div className="w-full flex-1 flex flex-col overflow-hidden bg-slate-950">
               
               {/* Preview Toolbar */}
-              <div className="px-4 py-2.5 bg-slate-900 border-b border-slate-800 flex flex-wrap items-center justify-between gap-3 text-xs shrink-0">
-                <div className="flex items-center gap-2">
-                  <span className="text-slate-400 font-bold">معاينة ورقة A4:</span>
+              <div className="px-2.5 sm:px-4 py-2 sm:py-2.5 bg-slate-900 border-b border-slate-800 flex flex-wrap items-center justify-between gap-2 text-xs shrink-0">
+                <div className="flex items-center gap-1.5 sm:gap-2 text-[11px] sm:text-xs">
+                  <span className="hidden sm:inline text-slate-400 font-bold">معاينة ورقة A4:</span>
                   <span className="text-emerald-400 font-black">
-                    ورقة {currentPreviewPage} من {totalPages}
+                    ورقة {currentPreviewPage}/{totalPages}
                   </span>
-                  <span className="text-slate-500">|</span>
-                  <span className="text-slate-300">
-                    مجموع الشارات: {activeSelectedTeachers.length} شارة
+                  <span className="text-slate-600">|</span>
+                  <span className="text-slate-300 font-bold">
+                    {activeSelectedTeachers.length} شارة
                   </span>
                 </div>
 
                 {/* Page switchers & Zoom */}
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
                   {/* Pagination Buttons */}
-                  <div className="flex items-center gap-1 bg-slate-800 p-1 rounded-xl border border-slate-700">
+                  <div className="flex items-center gap-0.5 bg-slate-800 p-1 rounded-xl border border-slate-700">
                     <button
                       type="button"
                       disabled={currentPreviewPage <= 1}
@@ -1108,7 +1181,7 @@ export const TeacherBadgesModal: React.FC<TeacherBadgesModalProps> = ({
                     >
                       <ChevronRight className="w-4 h-4" />
                     </button>
-                    <span className="px-2 text-xs font-mono font-bold">
+                    <span className="px-1.5 text-[11px] font-mono font-bold">
                       {currentPreviewPage} / {totalPages}
                     </span>
                     <button
@@ -1122,21 +1195,27 @@ export const TeacherBadgesModal: React.FC<TeacherBadgesModalProps> = ({
                   </div>
 
                   {/* Zoom controls */}
-                  <div className="flex items-center gap-1 bg-slate-800 p-1 rounded-xl border border-slate-700">
+                  <div className="flex items-center gap-0.5 sm:gap-1 bg-slate-800 p-1 rounded-xl border border-slate-700">
                     <button
                       type="button"
-                      onClick={() => setPreviewZoom(z => Math.max(50, z - 15))}
+                      onClick={() => {
+                        setHasManualZoom(true);
+                        setPreviewZoom(z => Math.max(30, z - 10));
+                      }}
                       className="p-1 rounded-lg hover:bg-slate-700 cursor-pointer"
                       title="تصغير"
                     >
                       <ZoomOut className="w-3.5 h-3.5" />
                     </button>
-                    <span className="px-1 text-[11px] font-mono font-bold text-slate-300">
+                    <span className="px-1 text-[10px] sm:text-[11px] font-mono font-bold text-slate-300 min-w-[34px] text-center">
                       {previewZoom}%
                     </span>
                     <button
                       type="button"
-                      onClick={() => setPreviewZoom(z => Math.min(150, z + 15))}
+                      onClick={() => {
+                        setHasManualZoom(true);
+                        setPreviewZoom(z => Math.min(150, z + 10));
+                      }}
                       className="p-1 rounded-lg hover:bg-slate-700 cursor-pointer"
                       title="تكبير"
                     >
@@ -1144,10 +1223,15 @@ export const TeacherBadgesModal: React.FC<TeacherBadgesModalProps> = ({
                     </button>
                     <button
                       type="button"
-                      onClick={() => setPreviewZoom(100)}
-                      className="px-1.5 py-0.5 text-[10px] font-bold text-slate-400 hover:text-white rounded hover:bg-slate-700"
+                      onClick={() => {
+                        setHasManualZoom(false);
+                        const w = previewContainerRef.current?.clientWidth || window.innerWidth;
+                        setPreviewZoom(w < 830 ? computeFitZoom(w) : 100);
+                      }}
+                      className="px-1.5 py-0.5 text-[10px] font-bold text-emerald-300 hover:text-white rounded hover:bg-slate-700 cursor-pointer"
+                      title="ملاءمة حجم الصفحة للشاشة"
                     >
-                      100%
+                      ملاءمة
                     </button>
                   </div>
 
@@ -1156,7 +1240,7 @@ export const TeacherBadgesModal: React.FC<TeacherBadgesModalProps> = ({
                     type="button"
                     onClick={handleDownloadCurrentPageImage}
                     disabled={isExporting}
-                    className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white rounded-xl border border-slate-700 font-bold transition-colors cursor-pointer"
+                    className="flex items-center gap-1 px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white rounded-xl border border-slate-700 font-bold transition-colors cursor-pointer"
                     title="حفظ الصفحة الحالية كصورة PNG عالية الدقة"
                   >
                     <FileImage className="w-3.5 h-3.5 text-amber-400" />
@@ -1166,15 +1250,31 @@ export const TeacherBadgesModal: React.FC<TeacherBadgesModalProps> = ({
               </div>
 
               {/* Preview Canvas Container */}
-              <div className="flex-1 overflow-auto p-4 flex items-start justify-center bg-slate-950">
+              <div ref={previewContainerRef} className="flex-1 overflow-auto p-2.5 sm:p-4 flex items-start justify-center bg-slate-950">
                 <div
+                  dir="ltr"
                   style={{
-                    transform: `scale(${previewZoom / 100})`,
-                    transformOrigin: 'top center',
-                    transition: 'transform 0.15s ease-out'
+                    width: `${Math.round(794 * (previewZoom / 100))}px`,
+                    height: `${Math.round(1123 * (previewZoom / 100))}px`,
+                    position: 'relative',
+                    flexShrink: 0,
+                    margin: '0 auto'
                   }}
-                  className="shadow-2xl"
                 >
+                  <div
+                    dir="rtl"
+                    style={{
+                      position: 'absolute',
+                      top: 0,
+                      left: 0,
+                      width: '210mm',
+                      height: '297mm',
+                      transform: `scale(${previewZoom / 100})`,
+                      transformOrigin: 'top left',
+                      transition: 'transform 0.15s ease-out'
+                    }}
+                    className="shadow-2xl"
+                  >
                   {/* Render Current Preview Sheet */}
                   {paginatedSheets.length > 0 && paginatedSheets[currentPreviewPage - 1] ? (
                     <div
@@ -1369,6 +1469,7 @@ export const TeacherBadgesModal: React.FC<TeacherBadgesModalProps> = ({
                       لم يتم تحديد أي أستاذ للطباعة. يرجى اختيار الأساتذة من تبويب "اختيار الأساتذة".
                     </div>
                   )}
+                  </div>
                 </div>
               </div>
             </div>
@@ -1376,14 +1477,14 @@ export const TeacherBadgesModal: React.FC<TeacherBadgesModalProps> = ({
         </div>
 
         {/* BOTTOM GLOBAL STATUS BAR */}
-        <div className="px-5 py-2.5 bg-slate-950 border-t border-slate-800 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-400 shrink-0">
-          <div className="flex items-center gap-2">
-            <span>✅ الجاهزية:</span>
+        <div className="px-3 sm:px-5 py-2 sm:py-2.5 bg-slate-950 border-t border-slate-800 flex flex-wrap items-center justify-between gap-2 text-[11px] sm:text-xs text-slate-400 shrink-0">
+          <div className="flex items-center gap-1.5 sm:gap-2">
+            <span>✅</span>
             <strong className="text-white font-black">{activeSelectedTeachers.length}</strong>
-            <span>شارات محددة</span>
+            <span>شارة</span>
             <span>•</span>
             <strong className="text-emerald-400 font-black">{totalPages}</strong>
-            <span>ورقة A4 (8 شارات بالورقة)</span>
+            <span>ورقة A4</span>
           </div>
 
           <div className="flex items-center gap-2">
@@ -1391,7 +1492,7 @@ export const TeacherBadgesModal: React.FC<TeacherBadgesModalProps> = ({
               type="button"
               onClick={handlePrint}
               disabled={activeSelectedTeachers.length === 0 || isExporting}
-              className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold cursor-pointer transition-all shadow-xs flex items-center gap-1.5"
+              className="px-3 sm:px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold cursor-pointer transition-all shadow-xs flex items-center gap-1.5 text-[11px] sm:text-xs disabled:opacity-50"
             >
               <Printer className="w-3.5 h-3.5" />
               <span>طباعة الكل ({activeSelectedTeachers.length})</span>

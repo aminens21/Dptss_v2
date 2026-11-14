@@ -142,6 +142,7 @@ export const CreateSchoolModal: React.FC<CreateSchoolModalProps> = ({
                 <option value="تأهيلي">ثانوي تأهيلي</option>
                 <option value="إعدادي">ثانوي إعدادي</option>
                 <option value="ابتدائي">تعليم ابتدائي</option>
+                <option value="خصوصي">التعليم الخصوصي (مؤسسة خاصة)</option>
               </select>
             </div>
 

@@ -58,6 +58,8 @@ export interface User {
   schoolId?: string; // معرف المؤسسة التعليمية المعتمدة لربط الحساب
   leaseNumber?: string; // رقم التأجير
   refereeSpecialty?: string[]; // التخصصات الرياضية في التحكيم
+  refereeDiploma?: string; // الدبلوم أو الشهادة أو مستوى التحكيم العام
+  refereeDiplomas?: Record<string, string>; // الدبلوم أو الشهادة أو مستوى التحكيم حسب كل تخصص رياضي
   isTechCommitteeHead?: boolean; // رئيس لجنة تقنية
   techCommitteeSports?: string[]; // التخصصات الرياضية التي يترأس لجنتها التقنية
   isTechCommitteeMember?: boolean; // عضو لجنة تقنية
@@ -244,6 +246,12 @@ export interface Referee {
   fullName: string;
   phone: string;
   specialty?: string[];
+  diploma?: string;
+  specialtyDiplomas?: Record<string, string>;
+  workLocation?: string;
+  teachingCadre?: string;
+  email?: string;
+  teacherId?: string;
   isActive: boolean;
   isTeacher?: boolean;
   photoUrl?: string;
@@ -266,6 +274,7 @@ export interface Match {
   team1Score?: number;
   team2Score?: number;
   venueName?: string;
+  hostSchoolId?: string;
   ageCategory?: string;
   category?: string; // alias for ageCategory
   gender?: 'Male' | 'Female' | 'Mixed';
@@ -286,8 +295,14 @@ export interface Match {
   winnerId?: string;
   winnerTeamId?: string; // alias for winnerId
   winnerTeamName?: string;
+  affiliationType?: AffiliationType;
   notes?: string;
   scorers?: string;
+  approvalStatus?: 'provisional' | 'approved';
+  recordedByName?: string;
+  recordedByRole?: string;
+  approvedByName?: string;
+  approvedAt?: any;
   updatedBy?: string;
   updatedAt: any;
   directorateId?: string;
@@ -397,6 +412,11 @@ export interface CrossCountryCategoryResult {
   affiliationType?: 'non_club' | 'club_affiliated' | string; // صنف السباق: غير منتمين أو منتمين
   podium: PodiumWinner[];
   status?: 'setup' | 'running' | 'summary' | 'completed';
+  approvalStatus?: 'provisional' | 'approved';
+  recordedByName?: string;
+  approvedBy?: string;
+  approvedByName?: string;
+  approvedAt?: string;
   updatedAt?: any;
   updatedBy?: string;
 }
@@ -423,6 +443,11 @@ export interface AthleticsCategoryResult {
   directorateId?: string;
   podium: AthleticsWinner[];
   status?: 'completed' | 'running' | 'setup';
+  approvalStatus?: 'provisional' | 'approved';
+  isFinallyValidated?: boolean;
+  approvedBy?: string;
+  approvedByName?: string;
+  approvedAt?: string;
   updatedAt?: any;
 }
 

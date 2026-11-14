@@ -71,6 +71,7 @@ import {
   AthleticsAttendanceRecord
 } from '../lib/athleticsConfig';
 import { AthleticsService } from '../lib/athleticsService';
+import { canUserApproveSportResult } from '../lib/dataService';
 import { User, School, Student } from '../types';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
 import { AthleticsBibGeneratorModal } from './AthleticsBibGeneratorModal';
@@ -941,6 +942,9 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
         confirmed: true
       }));
 
+    const canApproveAth = canUserApproveSportResult(currentUser, 'athletics', teachers);
+    const actorName = currentCommitteeAssignment?.teacherName || currentUser?.fullName || 'أستاذ التحكيم';
+
     const eventResult: AthleticsEventResult = {
       id: currentEventKey,
       disciplineId: activeDiscipline.id,
@@ -949,10 +953,12 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
       committeeId: activeDiscipline.committeeId,
       type: 'track',
       status: 'completed',
-      isFinallyValidated: true,
-      finalValidationDate: new Date().toISOString(),
+      isFinallyValidated: canApproveAth,
+      approvalStatus: canApproveAth ? 'approved' : 'provisional',
+      approvedByName: canApproveAth ? actorName : undefined,
+      finalValidationDate: canApproveAth ? new Date().toISOString() : undefined,
       trackLaps: sortedTrackLaps,
-      recordedByTeacherName: currentCommitteeAssignment?.teacherName || currentUser?.fullName || 'أستاذ التحكيم',
+      recordedByTeacherName: actorName,
       directorateName,
       season,
       lastUpdated: new Date().toISOString()
@@ -962,7 +968,11 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
     AthleticsService.clearDraftTrackLaps(currentEventKey);
     const updatedResults = AthleticsService.getAllResults();
     setResults(updatedResults);
-    toast.success(`تمت المصادقة النهائية على نتائج ${activeDiscipline.nameAr} بنجاح! تم اعتماد ونشر النتائج في منصة التتويج وقسم نتائج العموم 🏆`);
+    toast.success(
+      canApproveAth
+        ? `تمت المصادقة النهائية على نتائج ${activeDiscipline.nameAr} بنجاح! 🏆`
+        : `تم حفظ النتائج الأولية لسباق ${activeDiscipline.nameAr} (في انتظار مصادقة رئيس اللجنة التقنية) ⏳`
+    );
     setIsManualTrackEntry(false);
     setIsAssignByOrderModalOpen(false);
     setSelectedDiscipline(activeDiscipline);
@@ -1268,6 +1278,8 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
 
   const handleSaveFieldResultsSilent = () => {
     if (!activeDiscipline || fieldTrials.length === 0) return;
+    const canApproveAth = canUserApproveSportResult(currentUser, 'athletics', teachers);
+    const actorName = currentCommitteeAssignment?.teacherName || currentUser?.fullName || 'أستاذ التحكيم';
     const eventResult: AthleticsEventResult = {
       id: currentEventKey,
       disciplineId: activeDiscipline.id,
@@ -1276,8 +1288,11 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
       committeeId: activeDiscipline.committeeId,
       type: 'field',
       status: 'completed',
+      isFinallyValidated: canApproveAth,
+      approvalStatus: canApproveAth ? 'approved' : 'provisional',
+      approvedByName: canApproveAth ? actorName : undefined,
       fieldEntries: fieldTrials,
-      recordedByTeacherName: currentCommitteeAssignment?.teacherName || currentUser?.fullName || 'أستاذ التحكيم',
+      recordedByTeacherName: actorName,
       directorateName,
       season,
       lastUpdated: new Date().toISOString()
@@ -1356,6 +1371,9 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
       return;
     }
 
+    const canApproveAth = canUserApproveSportResult(currentUser, 'athletics', teachers);
+    const actorName = currentCommitteeAssignment?.teacherName || currentUser?.fullName || 'أستاذ التحكيم';
+
     const eventResult: AthleticsEventResult = {
       id: currentEventKey,
       disciplineId: activeDiscipline.id,
@@ -1364,10 +1382,12 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
       committeeId: activeDiscipline.committeeId,
       type: 'field',
       status: 'completed',
-      isFinallyValidated: true,
-      finalValidationDate: new Date().toISOString(),
+      isFinallyValidated: canApproveAth,
+      approvalStatus: canApproveAth ? 'approved' : 'provisional',
+      approvedByName: canApproveAth ? actorName : undefined,
+      finalValidationDate: canApproveAth ? new Date().toISOString() : undefined,
       fieldEntries: fieldTrials,
-      recordedByTeacherName: currentCommitteeAssignment?.teacherName || currentUser?.fullName || 'أستاذ التحكيم',
+      recordedByTeacherName: actorName,
       directorateName,
       season,
       lastUpdated: new Date().toISOString()
@@ -1376,7 +1396,11 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
     AthleticsService.saveEventResult(eventResult);
     const updatedResults = AthleticsService.getAllResults();
     setResults(updatedResults);
-    toast.success(`تمت المصادقة النهائية وحفظ نتائج ${activeDiscipline.nameAr} بنجاح! تم اعتمادها في منصة التتويج وقسم نتائج العموم 🏆`);
+    toast.success(
+      canApproveAth
+        ? `تمت المصادقة النهائية وحفظ نتائج ${activeDiscipline.nameAr} بنجاح! 🏆`
+        : `تم حفظ النتائج الأولية لمسابقة ${activeDiscipline.nameAr} (في انتظار مصادقة رئيس اللجنة التقنية) ⏳`
+    );
     setSelectedDiscipline(activeDiscipline);
     setSelectedCategory(selectedCategory);
     setSelectedGender(selectedGender);

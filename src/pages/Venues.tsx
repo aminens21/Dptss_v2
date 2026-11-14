@@ -209,7 +209,7 @@ export const Venues: React.FC = () => {
 
         {/* Sport Filter Dropdown */}
         <div className="flex items-center gap-2 w-full lg:w-auto border-t lg:border-t-0 lg:border-r border-slate-100 pt-2 lg:pt-0 lg:pr-3 shrink-0">
-          <label htmlFor="venues-sport-filter" className="text-xs font-bold text-slate-600 whitespace-nowrap flex items-center gap-1.5">
+          <label htmlFor="venues-sport-filter" className="text-xs font-bold text-slate-600 whitespace-nowrap flex items-center gap-1.5 shrink-0">
             <Filter className="h-3.5 w-3.5 text-blue-600" />
             <span>الرياضة:</span>
           </label>
@@ -217,7 +217,7 @@ export const Venues: React.FC = () => {
             id="venues-sport-filter"
             value={selectedSport}
             onChange={(e) => setSelectedSport(e.target.value)}
-            className="text-xs font-bold text-slate-700 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer min-w-[160px]"
+            className="flex-1 lg:flex-initial min-w-0 text-xs font-bold text-slate-700 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer sm:min-w-[160px]"
           >
             <option value="ALL">🏆 جميع الرياضات</option>
             {Object.entries(SPORTS_MAP).map(([id, info]) => (
@@ -228,7 +228,7 @@ export const Venues: React.FC = () => {
           </select>
         </div>
 
-        <div className="flex items-center gap-1.5 overflow-x-auto w-full sm:w-auto pb-1 sm:pb-0">
+        <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-1.5 w-full sm:w-auto">
           {[
             { id: 'ALL', label: `جميع المراكز (${venues.length})` },
             { id: 'تاوريرت', label: 'تاوريرت' },
@@ -238,7 +238,7 @@ export const Venues: React.FC = () => {
             <button
               key={c.id}
               onClick={() => setCityFilter(c.id)}
-              className={`px-3 py-1.5 text-xs font-bold rounded-lg whitespace-nowrap transition-colors cursor-pointer ${
+              className={`px-2.5 sm:px-3 py-1.5 text-[11px] sm:text-xs font-bold rounded-lg text-center transition-colors cursor-pointer ${
                 cityFilter === c.id
                   ? 'bg-slate-900 text-white shadow-xs'
                   : 'bg-slate-100 text-slate-600 hover:bg-slate-200'

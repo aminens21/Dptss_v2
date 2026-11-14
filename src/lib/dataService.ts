@@ -23,6 +23,137 @@ import {
 import { isFlexibleEmailMatch, fixTeacherFieldJumble, normalizeArabicName, normalizeDateToYmd, formatMatchDate } from './utils';
 export { normalizeDateToYmd };
 
+/**
+ * Determines whether a school record belongs to Private Education (التعليم الخصوصي)
+ * based on its explicit type, flag, or official Moroccan school naming conventions.
+ */
+export function isPrivateSchoolRecord(s?: { name?: string; type?: string; isPrivate?: boolean } | null): boolean {
+  if (!s) return false;
+  if ((s as any).isPrivate === true) return true;
+  const rawType = (s.type || '').trim().toLowerCase();
+  const rawName = (s.name || '').trim();
+  const lowerName = rawName.toLowerCase();
+
+  if (
+    rawType.includes('خصوص') ||
+    rawType.includes('خاص') ||
+    rawType.includes('prive') ||
+    rawType.includes('privé') ||
+    rawType.includes('private')
+  ) {
+    return true;
+  }
+
+  if (
+    lowerName.includes('خصوصي') ||
+    lowerName.includes('الخصوصي') ||
+    lowerName.includes('الخصوصية') ||
+    lowerName.includes('للتعليم الخصوصي') ||
+    lowerName.includes('الخاصة') ||
+    lowerName.includes('للتعليم الخاص') ||
+    lowerName.includes('التعليم الخاص') ||
+    /(^|\s)خاص($|\s)/.test(rawName) ||
+    /(^|\s)الخاص($|\s)/.test(rawName) ||
+    lowerName.includes('prive') ||
+    lowerName.includes('privé')
+  ) {
+    return true;
+  }
+
+  // In Moroccan Massar directories, private institutions start with "مؤسسة ..." / "مؤسسات ..."
+  // (excluding generic placeholders or public artistic centers "مؤسسة التفتح")
+  if (
+    (rawName.startsWith('مؤسسة ') || rawName.startsWith('مؤسسات ')) &&
+    !rawName.includes('التفتح') &&
+    !rawName.includes('غير محدد') &&
+    rawName !== 'مؤسسة تعليمية' &&
+    !rawName.includes('عمومي')
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Normalizes a school's cycle strictly into one of the 4 official categories:
+ * 'خصوصي' | 'تأهيلي' | 'إعدادي' | 'ابتدائي'
+ * Private schools are always placed exclusively in 'خصوصي' and excluded from public cycles.
+ */
+export function normalizeSchoolCycleType(s?: { name?: string; type?: string; isPrivate?: boolean } | null): string {
+  if (!s) return 'تأهيلي';
+  if (isPrivateSchoolRecord(s)) return 'خصوصي';
+  const rawType = (s.type || '').trim();
+  const rawName = (s.name || '').trim();
+  if (rawType.includes('إعداد') || rawType.includes('اعداد')) return 'إعدادي';
+  if (rawType.includes('ابتدائ')) return 'ابتدائي';
+  if (rawType.includes('تأهيل') || rawType.includes('تاهيل')) return 'تأهيلي';
+  if (rawName.includes('إعدادي') || rawName.includes('اعدادي') || rawName.includes('إعدادية') || rawName.includes('اعدادية')) return 'إعدادي';
+  if (rawName.includes('ابتدائي') || rawName.includes('مدرسة') || rawName.includes('م.م') || rawName.includes('م/م') || rawName.includes('مجموعة مدارس')) return 'ابتدائي';
+  return 'تأهيلي';
+}
+
+/**
+ * Checks whether the given user has authority to officially approve/homologate results:
+ * - Central Admin / Super Admin: full authority across ALL sports and competitions.
+ * - Technical Committee Head / Sport Manager: authority strictly for their assigned sport(s).
+ * - Referees & Teachers: record provisional results only (false).
+ */
+export function canUserApproveSportResult(
+  user?: User | null,
+  sportId?: string,
+  teachersList?: User[]
+): boolean {
+  if (!user) return false;
+
+  const cleanEmail = (user.email || '').trim().toLowerCase();
+  const isCentralOrSuper =
+    user.role === 'CENTRAL_ADMIN' ||
+    (user.role as string) === 'SUPER_ADMIN' ||
+    user.isSuperAdmin === true ||
+    SUPER_ADMIN_EMAILS.some(e => e.toLowerCase() === cleanEmail);
+
+  if (isCentralOrSuper) return true;
+
+  if (!sportId) return false;
+  const equivalentSportIds = new Set<string>([sportId]);
+  if (sportId === 'athletics' || sportId === 'track_field') {
+    equivalentSportIds.add('athletics');
+    equivalentSportIds.add('track_field');
+  }
+
+  const checkProfileMatchesSport = (u: Partial<User>): boolean => {
+    const isHeadRole =
+      !!u.isTechCommitteeHead ||
+      u.role === 'SPORT_MANAGER' ||
+      (u.role as string) === 'TECH_HEAD' ||
+      (u.role as string) === 'TECH_COMMITTEE_HEAD';
+    if (!isHeadRole) return false;
+    const assigned = new Set<string>([
+      ...(Array.isArray(u.techCommitteeSports) ? u.techCommitteeSports : []),
+      ...(u.sportId ? [u.sportId] : [])
+    ]);
+    for (const eq of equivalentSportIds) {
+      if (assigned.has(eq)) return true;
+    }
+    return false;
+  };
+
+  if (checkProfileMatchesSport(user)) return true;
+
+  if (Array.isArray(teachersList) && teachersList.length > 0) {
+    const matchedTeacher = teachersList.find(t =>
+      (t.id && user.id && t.id === user.id) ||
+      (t.email && cleanEmail && isFlexibleEmailMatch(t.email, cleanEmail))
+    );
+    if (matchedTeacher && checkProfileMatchesSport(matchedTeacher)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 const CLOUD_SYNC_PAUSED_KEY = 'app_cloud_sync_paused_v1';
 const EXCEL_CLOUD_SYNC_QUEUE_KEY = 'taourirt_excel_pending_cloud_sync_v1';
 
@@ -1957,6 +2088,11 @@ export const DataService = {
       notes?: string;
       scorers?: string;
       updatedBy?: string;
+      approvalStatus?: 'provisional' | 'approved';
+      recordedByName?: string;
+      recordedByRole?: string;
+      approvedByName?: string;
+      approvedAt?: string;
     }
   ): Promise<void> {
     const localList = getLocal<Match>(STORAGE_KEYS.MATCHES, []);
@@ -1995,9 +2131,55 @@ export const DataService = {
     }
 
     const fullMatch = updated.find(m => m.id === matchId);
-    if (fullMatch) {
+    if (fullMatch && extras?.approvalStatus !== 'provisional') {
       this.triggerMatchNotification('result', fullMatch);
     }
+  },
+
+  async approveMatchResult(matchId: string, approverName: string): Promise<Match | null> {
+    const approvedAt = new Date().toISOString();
+    const localList = getLocal<Match>(STORAGE_KEYS.MATCHES, []);
+    let approvedMatch: Match | null = null;
+    const updated = localList.map(m => {
+      if (m.id === matchId) {
+        approvedMatch = {
+          ...m,
+          status: 'Completed',
+          approvalStatus: 'approved',
+          approvedByName: approverName,
+          approvedAt
+        };
+        return approvedMatch;
+      }
+      return m;
+    });
+    setLocal(STORAGE_KEYS.MATCHES, updated);
+    markPendingWrite('matches', matchId);
+
+    try {
+      await setDoc(doc(db, 'matches', matchId), {
+        id: matchId,
+        status: 'Completed',
+        approvalStatus: 'approved',
+        approvedByName: approverName,
+        approvedAt,
+        updatedAt: serverTimestamp()
+      }, { merge: true });
+      clearPendingWrite('matches', matchId);
+    } catch (e) {
+      console.warn("Match approval saved locally; Firestore sync pending:", e);
+    }
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('matchesDataChanged'));
+      window.dispatchEvent(new CustomEvent('matchesUpdated'));
+      window.dispatchEvent(new CustomEvent('resultsChanged'));
+    }
+
+    if (approvedMatch) {
+      this.triggerMatchNotification('result', approvedMatch);
+    }
+    return approvedMatch;
   },
 
   async deleteMatch(id: string): Promise<void> {
@@ -2029,18 +2211,22 @@ export const DataService = {
           .map(d => ({ id: d.id, ...d.data(), directorateId: d.data().directorateId || 'taourirt' } as School))
           .filter(s => s && s.name && !s.name.includes('غير محدد'));
 
-        // Auto-heal accessCode for legacy schools
+        // Auto-heal accessCode and migrate private schools into dedicated 'خصوصي' cycle
         const listWithCodes = firestoreList.map(s => {
-          if (s.accessCode && s.accessCode.trim().length === 6) {
-            return s;
-          }
-          const accessCode = generateSecureAccessCode();
-          if (s.id) {
-            setDoc(doc(db, 'schools', s.id), { accessCode }, { merge: true }).catch(err => 
-              console.warn(`Failed to auto-update school ${s.name} accessCode:`, err)
+          const normalizedType = normalizeSchoolCycleType(s);
+          const hasValidCode = !!(s.accessCode && s.accessCode.trim().length === 6);
+          const accessCode = hasValidCode ? s.accessCode! : generateSecureAccessCode();
+          const needsTypeMigration = s.type !== normalizedType;
+
+          if ((!hasValidCode || needsTypeMigration) && s.id && !isCloudSyncPaused()) {
+            const patch: Record<string, any> = {};
+            if (!hasValidCode) patch.accessCode = accessCode;
+            if (needsTypeMigration) patch.type = normalizedType;
+            setDoc(doc(db, 'schools', s.id), patch, { merge: true }).catch(err =>
+              console.warn(`Failed to auto-update school ${s.name}:`, err)
             );
           }
-          return { ...s, accessCode };
+          return { ...s, accessCode, type: normalizedType };
         });
 
         // Merge ONLY genuinely pending local writes (not deleted schools)
@@ -2136,14 +2322,18 @@ export const DataService = {
           .filter((s: School) => s && s.name && !s.name.includes('غير محدد'));
 
         const listWithCodes = firestoreList.map((s: School) => {
-          if (s.accessCode && s.accessCode.trim().length === 6) {
-            return s;
+          const normalizedType = normalizeSchoolCycleType(s);
+          const hasValidCode = !!(s.accessCode && s.accessCode.trim().length === 6);
+          const accessCode = hasValidCode ? s.accessCode! : generateSecureAccessCode();
+          const needsTypeMigration = s.type !== normalizedType;
+
+          if ((!hasValidCode || needsTypeMigration) && s.id && !isCloudSyncPaused()) {
+            const patch: Record<string, any> = {};
+            if (!hasValidCode) patch.accessCode = accessCode;
+            if (needsTypeMigration) patch.type = normalizedType;
+            setDoc(doc(db, 'schools', s.id), patch, { merge: true }).catch(() => {});
           }
-          const accessCode = generateSecureAccessCode();
-          if (s.id && !isCloudSyncPaused()) {
-            setDoc(doc(db, 'schools', s.id), { accessCode }, { merge: true }).catch(() => {});
-          }
-          return { ...s, accessCode };
+          return { ...s, accessCode, type: normalizedType };
         });
 
         const localList = getLocal<School>(STORAGE_KEYS.SCHOOLS, []);
@@ -2567,8 +2757,10 @@ export const DataService = {
         cleanItem[k] = v !== undefined ? v : "";
       });
 
+      const normalizedCycle = normalizeSchoolCycleType({ name: cleanName, type: item.type });
       const itemWithDir = {
         ...cleanItem,
+        type: normalizedCycle,
         directorateId: item.directorateId || effectiveDirId,
         updatedAt: serverTimestamp()
       };
@@ -2771,13 +2963,25 @@ export const DataService = {
     explicitReferees = explicitReferees.map(r => {
       const matchedUser = usersList.find(u => 
         u.id === r.id || 
-        (u.fullName && r.fullName && (norm(u.fullName) === norm(r.fullName) || norm(u.fullName).includes(norm(r.fullName)) || norm(r.fullName).includes(norm(u.fullName))))
+        (r.teacherId && u.id === r.teacherId) ||
+        (u.fullName && r.fullName && (norm(u.fullName) === norm(r.fullName.replace(/\s*\(أستاذ\)\s*/g, '')) || norm(u.fullName).includes(norm(r.fullName.replace(/\s*\(أستاذ\)\s*/g, ''))) || norm(r.fullName.replace(/\s*\(أستاذ\)\s*/g, '')).includes(norm(u.fullName))))
       );
-      if (matchedUser && matchedUser.phone && matchedUser.phone.trim()) {
+      if (matchedUser) {
+        const mergedDiplomas = {
+          ...(matchedUser.refereeDiplomas || {}),
+          ...(r.specialtyDiplomas || {})
+        };
         return {
           ...r,
-          phone: matchedUser.phone.trim(),
-          photoUrl: matchedUser.photoUrl || r.photoUrl
+          phone: (matchedUser.phone && matchedUser.phone.trim()) ? matchedUser.phone.trim() : r.phone,
+          photoUrl: matchedUser.photoUrl || r.photoUrl,
+          workLocation: r.workLocation || matchedUser.workLocation,
+          teachingCadre: r.teachingCadre || matchedUser.teachingCadre,
+          email: r.email || matchedUser.email,
+          teacherId: r.teacherId || matchedUser.id,
+          isTeacher: r.isTeacher ?? (matchedUser.role === 'TEACHER' || !!matchedUser.workLocation),
+          diploma: r.diploma || matchedUser.refereeDiploma,
+          specialtyDiplomas: Object.keys(mergedDiplomas).length > 0 ? mergedDiplomas : undefined
         };
       }
       return r;
@@ -2787,9 +2991,15 @@ export const DataService = {
       .filter(t => !isRecentlyDeleted('referees', t.id) && t.role === 'TEACHER' && (Array.isArray(t.refereeSpecialty) ? t.refereeSpecialty.length > 0 : !!t.refereeSpecialty))
       .map(t => ({
         id: t.id,
+        teacherId: t.id,
         fullName: t.fullName + ' (أستاذ)',
         phone: t.phone || 'غير محدد',
         specialty: Array.isArray(t.refereeSpecialty) ? t.refereeSpecialty : [t.refereeSpecialty || 'كرة القدم'],
+        diploma: t.refereeDiploma,
+        specialtyDiplomas: t.refereeDiplomas,
+        workLocation: t.workLocation,
+        teachingCadre: t.teachingCadre,
+        email: t.email,
         directorateId: t.directorateId || 'taourirt',
         isActive: t.isActive !== false,
         isTeacher: true,
@@ -2807,10 +3017,20 @@ export const DataService = {
           ...(Array.isArray(existing.specialty) ? existing.specialty : (existing.specialty ? [existing.specialty] : [])),
           ...(Array.isArray(r.specialty) ? r.specialty : (r.specialty ? [r.specialty] : []))
         ]));
+        const mergedDiplomas = {
+          ...(r.specialtyDiplomas || {}),
+          ...(existing.specialtyDiplomas || {})
+        };
         idMap.set(r.id, {
           ...existing,
           ...r,
           specialty: mergedSpecialties,
+          diploma: existing.diploma || r.diploma,
+          specialtyDiplomas: Object.keys(mergedDiplomas).length > 0 ? mergedDiplomas : undefined,
+          workLocation: existing.workLocation || r.workLocation,
+          teachingCadre: existing.teachingCadre || r.teachingCadre,
+          photoUrl: existing.photoUrl || r.photoUrl,
+          isTeacher: existing.isTeacher || r.isTeacher,
           phone: (r.phone && r.phone !== 'غير محدد') ? r.phone : existing.phone,
           fullName: existing.fullName || r.fullName
         });
@@ -2820,8 +3040,31 @@ export const DataService = {
     const uniqueMap = new Map<string, Referee>();
     idMap.forEach(r => {
       const key = norm(r.fullName.replace(/\s*\(أستاذ\)\s*/g, ''));
-      if (!uniqueMap.has(key) || (r.phone && r.phone !== 'غير محدد' && !uniqueMap.get(key)?.phone)) {
+      if (!uniqueMap.has(key)) {
         uniqueMap.set(key, r);
+      } else {
+        const prev = uniqueMap.get(key)!;
+        const mergedSpecs = Array.from(new Set([
+          ...(Array.isArray(prev.specialty) ? prev.specialty : (prev.specialty ? [prev.specialty] : [])),
+          ...(Array.isArray(r.specialty) ? r.specialty : (r.specialty ? [r.specialty] : []))
+        ]));
+        const mergedDiplomas = {
+          ...(r.specialtyDiplomas || {}),
+          ...(prev.specialtyDiplomas || {})
+        };
+        uniqueMap.set(key, {
+          ...r,
+          ...prev,
+          specialty: mergedSpecs,
+          diploma: prev.diploma || r.diploma,
+          specialtyDiplomas: Object.keys(mergedDiplomas).length > 0 ? mergedDiplomas : undefined,
+          workLocation: prev.workLocation || r.workLocation,
+          teachingCadre: prev.teachingCadre || r.teachingCadre,
+          photoUrl: prev.photoUrl || r.photoUrl,
+          isTeacher: prev.isTeacher || r.isTeacher,
+          teacherId: prev.teacherId || r.teacherId,
+          phone: (prev.phone && prev.phone !== 'غير محدد') ? prev.phone : r.phone
+        });
       }
     });
 
@@ -2830,7 +3073,8 @@ export const DataService = {
 
   async addReferee(referee: Omit<Referee, 'id'>): Promise<Referee> {
     const activeDirId = this.getActiveDirectorateId() || 'taourirt';
-    const docRef = doc(collection(db, 'referees'));
+    const targetDocId = referee.teacherId || undefined;
+    const docRef = targetDocId ? doc(db, 'referees', targetDocId) : doc(collection(db, 'referees'));
     const realId = docRef.id;
 
     const refereeWithDir = {
@@ -2851,11 +3095,25 @@ export const DataService = {
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp()
       });
-      await setDoc(docRef, cleanPayload);
+      await setDoc(docRef, cleanPayload, { merge: true });
       clearPendingWrite('referees', realId);
     } catch (e) {
       console.warn("Saved referee locally; Firestore sync pending:", e);
     }
+
+    if (referee.teacherId) {
+      try {
+        await this.updateUserProfile(referee.teacherId, {
+          ...(referee.phone && referee.phone !== 'غير محدد' ? { phone: referee.phone } : {}),
+          ...(referee.specialty ? { refereeSpecialty: Array.isArray(referee.specialty) ? referee.specialty : [referee.specialty] } : {}),
+          ...(referee.diploma !== undefined ? { refereeDiploma: referee.diploma } : {}),
+          ...(referee.specialtyDiplomas !== undefined ? { refereeDiplomas: referee.specialtyDiplomas } : {})
+        });
+      } catch (err) {
+        console.warn("Error syncing added referee to teacher profile:", err);
+      }
+    }
+
     window.dispatchEvent(new CustomEvent('refereesUpdated'));
     return newRef;
   },
@@ -2901,14 +3159,16 @@ export const DataService = {
       }
     }
 
-    // Bidirectional sync to user profile (including refereeSpecialty, phone, and fullName)
+    // Bidirectional sync to user profile (including refereeSpecialty, diplomas, phone, and fullName)
     if (matchedTeacherUser) {
       try {
         const cleanTeacherName = updates.fullName ? updates.fullName.replace(/\s*\(أستاذ\)\s*/g, '').trim() : undefined;
         await this.updateUserProfile(matchedTeacherUser.id, {
           ...(updates.phone ? { phone: updates.phone } : {}),
           ...(cleanTeacherName ? { fullName: cleanTeacherName } : {}),
-          ...(updates.specialty !== undefined ? { refereeSpecialty: Array.isArray(updates.specialty) ? updates.specialty : [updates.specialty] } : {})
+          ...(updates.specialty !== undefined ? { refereeSpecialty: Array.isArray(updates.specialty) ? updates.specialty : [updates.specialty] } : {}),
+          ...(updates.diploma !== undefined ? { refereeDiploma: updates.diploma } : {}),
+          ...(updates.specialtyDiplomas !== undefined ? { refereeDiplomas: updates.specialtyDiplomas } : {})
         });
       } catch (err) {
         console.warn("Error syncing referee update to user profile:", err);
@@ -2934,7 +3194,11 @@ export const DataService = {
       const users = await this.getUsers();
       const matchedTeacher = users.find(u => u.id === id);
       if (matchedTeacher && matchedTeacher.refereeSpecialty) {
-        await this.updateUserProfile(matchedTeacher.id, { refereeSpecialty: [] });
+        await this.updateUserProfile(matchedTeacher.id, {
+          refereeSpecialty: [],
+          refereeDiploma: '',
+          refereeDiplomas: {}
+        });
       }
     } catch (e) {
       console.warn("Could not clear teacher refereeSpecialty on referee delete:", e);
@@ -3317,18 +3581,18 @@ export const DataService = {
       }
 
       // Synchronize changes to Referees list
-      if (profileData.phone || profileData.fullName || profileData.refereeSpecialty) {
+      if (profileData.phone || profileData.fullName || profileData.refereeSpecialty || profileData.refereeDiplomas !== undefined || profileData.refereeDiploma !== undefined) {
         const norm = (s?: string) => (s || '').replace(/[\s\-\_\.]/g, '').replace(/[أإآ]/g, 'ا').replace(/ة/g, 'ه').replace(/ى/g, 'ي').toLowerCase();
         const refList = deduplicateById([...getLocal<Referee>('taourirt_referees_data', []), ...getLocal<Referee>('referees', [])]);
         let refChanged = false;
         const targetName = profileData.fullName;
         
         const updatedRefList = refList.map(r => {
-          const matchId = r.id === userId;
+          const matchId = r.id === userId || r.teacherId === userId;
           const matchName = targetName && r.fullName && (
-            norm(r.fullName) === norm(targetName) ||
-            norm(r.fullName).includes(norm(targetName)) ||
-            norm(targetName).includes(norm(r.fullName))
+            norm(r.fullName.replace(/\s*\(أستاذ\)\s*/g, '')) === norm(targetName) ||
+            norm(r.fullName.replace(/\s*\(أستاذ\)\s*/g, '')).includes(norm(targetName)) ||
+            norm(targetName).includes(norm(r.fullName.replace(/\s*\(أستاذ\)\s*/g, '')))
           );
 
           if (matchId || matchName) {
@@ -3337,7 +3601,9 @@ export const DataService = {
               ...r,
               ...(profileData.phone ? { phone: profileData.phone } : {}),
               ...(profileData.fullName ? { fullName: profileData.fullName } : {}),
-              ...(profileData.refereeSpecialty ? { specialty: Array.isArray(profileData.refereeSpecialty) ? profileData.refereeSpecialty : [profileData.refereeSpecialty] } : {})
+              ...(profileData.refereeSpecialty ? { specialty: Array.isArray(profileData.refereeSpecialty) ? profileData.refereeSpecialty : [profileData.refereeSpecialty] } : {}),
+              ...(profileData.refereeDiploma !== undefined ? { diploma: profileData.refereeDiploma } : {}),
+              ...(profileData.refereeDiplomas !== undefined ? { specialtyDiplomas: profileData.refereeDiplomas } : {})
             };
           }
           return r;
@@ -3348,14 +3614,16 @@ export const DataService = {
           setLocal('referees', updatedRefList);
           try {
             const matched = updatedRefList.filter(r => {
-              const matchId = r.id === userId;
-              const matchName = targetName && r.fullName && (norm(r.fullName) === norm(targetName) || norm(r.fullName).includes(norm(targetName)));
+              const matchId = r.id === userId || r.teacherId === userId;
+              const matchName = targetName && r.fullName && (norm(r.fullName.replace(/\s*\(أستاذ\)\s*/g, '')) === norm(targetName) || norm(r.fullName.replace(/\s*\(أستاذ\)\s*/g, '')).includes(norm(targetName)));
               return matchId || matchName;
             });
             for (const mr of matched) {
               await setDoc(doc(db, 'referees', mr.id), stripUndefinedDeep({
                 ...(profileData.phone ? { phone: profileData.phone } : {}),
                 ...(profileData.fullName ? { fullName: profileData.fullName } : {}),
+                ...(profileData.refereeDiploma !== undefined ? { diploma: profileData.refereeDiploma } : {}),
+                ...(profileData.refereeDiplomas !== undefined ? { specialtyDiplomas: profileData.refereeDiplomas } : {}),
                 updatedAt: Timestamp.now()
               }), { merge: true }).catch(() => {});
             }
@@ -4062,6 +4330,32 @@ export const DataService = {
     } catch (e) {
       console.warn("Updated sport categories locally, Firestore pending:", e);
     }
+    window.dispatchEvent(new Event('sportsConfigUpdated'));
+  },
+
+  async updateSportRosterLimit(sportId: string, studentLimit: number): Promise<void> {
+    const cleanLimit = Math.max(0, Math.floor(Number(studentLimit) || 0));
+    const list = await this.getSportsConfig();
+    const updated = list.map(s => {
+      if (s.id !== sportId) return s;
+      return {
+        ...s,
+        studentLimit: cleanLimit,
+        categoryStudentLimits: {}
+      };
+    });
+    setLocal('taourirt_sports_config', updated);
+
+    try {
+      await setDoc(doc(db, 'sports', sportId), {
+        studentLimit: cleanLimit,
+        categoryStudentLimits: {},
+        updatedAt: serverTimestamp()
+      }, { merge: true });
+    } catch (e) {
+      console.warn("Updated sport roster limit locally, Firestore pending:", e);
+    }
+    window.dispatchEvent(new Event('sportsConfigUpdated'));
   },
 
   // STUDENTS / TEAM ROSTERS
@@ -5416,6 +5710,20 @@ export const DataService = {
     }
 
     this._notifyCCUpdate(resultWithDir);
+  },
+
+  async approveCrossCountryCategoryResult(categoryId: string, approverName: string): Promise<CrossCountryCategoryResult | null> {
+    const current = await this.getCrossCountryResults();
+    const existing = current[categoryId];
+    if (!existing) return null;
+    const approved: CrossCountryCategoryResult = {
+      ...existing,
+      approvalStatus: 'approved',
+      approvedByName: approverName,
+      approvedAt: new Date().toISOString()
+    };
+    await this.saveCrossCountryCategoryResult(approved);
+    return approved;
   },
 
   /**

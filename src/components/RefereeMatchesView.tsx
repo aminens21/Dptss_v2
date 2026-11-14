@@ -359,13 +359,21 @@ export const RefereeMatchesView: React.FC<RefereeMatchesViewProps> = ({
                       "px-2.5 py-1 rounded-full text-[10px] font-black inline-flex items-center gap-1 border",
                       isOngoing
                         ? "bg-red-50 text-red-700 border-red-200 animate-pulse"
+                        : isCompleted && m.approvalStatus === 'provisional'
+                        ? "bg-amber-50 text-amber-800 border-amber-300"
                         : isCompleted
                         ? "bg-emerald-50 text-emerald-800 border-emerald-200"
                         : "bg-blue-50 text-blue-700 border-blue-150"
                     )}
                   >
                     {isOngoing && <span className="w-1.5 h-1.5 rounded-full bg-red-600 animate-ping" />}
-                    {isOngoing ? '🔴 جارية الآن' : isCompleted ? '🏆 منتهية' : '📅 مبرمجة'}
+                    {isOngoing
+                      ? '🔴 جارية الآن'
+                      : isCompleted && m.approvalStatus === 'provisional'
+                      ? '⏳ نتيجة أولية (بانتظار المصادقة)'
+                      : isCompleted
+                      ? '✅ نتيجة مصادق عليها'
+                      : '📅 مبرمجة'}
                   </span>
                 </div>
 
@@ -468,19 +476,28 @@ export const RefereeMatchesView: React.FC<RefereeMatchesViewProps> = ({
                 </div>
 
                 {/* Match Actions for Referee */}
-                <div className="pt-2 border-t border-slate-100 flex items-center justify-between">
+                <div className="pt-2 border-t border-slate-100 flex items-center justify-between gap-2">
                   <span className="text-[10px] text-slate-400 font-bold">
-                    طاقم التحكيم المعين لاسمك
+                    {isCompleted && m.approvalStatus === 'approved'
+                      ? `تمت المصادقة النهائية (${m.approvedByName || 'رئيس اللجنة'})`
+                      : 'طاقم التحكيم المعين لاسمك'}
                   </span>
 
-                  <button
-                    type="button"
-                    onClick={() => onEditScore(m)}
-                    className="inline-flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black shadow-3xs hover:shadow-xs transition-all cursor-pointer"
-                  >
-                    <Edit3 className="w-3.5 h-3.5" />
-                    <span>{isCompleted ? 'تعديل نتيجة المقابلة' : 'تسجيل وتثبيت النتيجة 📝'}</span>
-                  </button>
+                  {isCompleted && m.approvalStatus === 'approved' ? (
+                    <span className="inline-flex items-center gap-1 px-3 py-1.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-xl text-[11px] font-black">
+                      <CheckCircle className="w-3.5 h-3.5" />
+                      <span>نتيجة معتمدة رسمياً</span>
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => onEditScore(m)}
+                      className="inline-flex items-center gap-1.5 px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-black shadow-3xs hover:shadow-xs transition-all cursor-pointer"
+                    >
+                      <Edit3 className="w-3.5 h-3.5" />
+                      <span>{isCompleted ? 'تعديل النتيجة الأولية' : 'تدوين النتيجة الأولية 📝'}</span>
+                    </button>
+                  )}
                 </div>
               </div>
             );

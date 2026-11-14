@@ -44,7 +44,8 @@ import toast from 'react-hot-toast';
 import * as XLSX from 'xlsx';
 import { CROSS_COUNTRY_CATEGORIES, CrossCountryCategoryDef, calculateTeamRankings, resolveRunnerParticipationType } from '../lib/crossCountryConfig';
 import { CrossCountryCategoryResult, PodiumWinner, Student } from '../types';
-import { DataService } from '../lib/dataService';
+import { DataService, canUserApproveSportResult } from '../lib/dataService';
+import { useAuth } from '../contexts/AuthContext';
 
 interface FinishLineScannerModalProps {
   isOpen: boolean;
@@ -65,6 +66,7 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
   existingResults = EMPTY_RESULTS,
   onResultsUpdated
 }) => {
+  const { userProfile } = useAuth();
   // Phase State: 'setup' | 'running' | 'summary'
   const [phase, setPhase] = useState<'setup' | 'running' | 'summary'>('setup');
 
@@ -1103,6 +1105,19 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
 
       const targetActiveKey = raceAffiliation === 'club_affiliated' ? `${activeCategory.id}_club` : activeCategory.id;
       const affSuffix = raceAffiliation === 'club_affiliated' ? ' (المنتمين للأندية)' : ' (مدرسي)';
+      const canApproveCC = canUserApproveSportResult(userProfile, 'cross_country');
+      const actorName = userProfile?.fullName || userProfile?.email || (canApproveCC ? 'رئيس اللجنة التقنية' : 'حكم خط الوصول');
+      const approvalMeta = canApproveCC
+        ? {
+            approvalStatus: 'approved' as const,
+            approvedByName: actorName,
+            approvedAt: new Date().toISOString()
+          }
+        : {
+            approvalStatus: 'provisional' as const,
+            recordedByName: actorName,
+            recordedByRole: userProfile?.role || 'REFEREE'
+          };
 
       // 1. Save all arrivals for the activeCategory
       const categoryResult: CrossCountryCategoryResult = {
@@ -1115,6 +1130,7 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
         affiliationType: raceAffiliation,
         podium: updatedArrivals,
         status: finalStatus,
+        ...approvalMeta,
         updatedAt: new Date().toISOString()
       };
 
@@ -1147,6 +1163,7 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
               affiliationType: raceAffiliation,
               podium: catArrivals.map((arr, i) => ({ ...arr, rank: i + 1 })),
               status: finalStatus,
+              ...approvalMeta,
               updatedAt: new Date().toISOString()
             };
             await DataService.saveCrossCountryCategoryResult(multiRes);
@@ -1178,6 +1195,7 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
                 affiliationType: raceAffiliation,
                 podium: catArrivals.map((arr, i) => ({ ...arr, rank: i + 1 })),
                 status: finalStatus,
+                ...approvalMeta,
                 updatedAt: new Date().toISOString()
               });
               // Update local resultsMap for instant feedback

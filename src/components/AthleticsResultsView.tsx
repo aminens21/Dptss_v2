@@ -20,7 +20,10 @@ import {
   AthleticsEventResult
 } from '../lib/athleticsConfig';
 import { AthleticsService } from '../lib/athleticsService';
+import { canUserApproveSportResult } from '../lib/dataService';
+import { useAuth } from '../contexts/AuthContext';
 import { School, Student, User } from '../types';
+import toast from 'react-hot-toast';
 
 interface AthleticsResultsViewProps {
   onBack?: () => void;
@@ -47,15 +50,28 @@ export const AthleticsResultsView: React.FC<AthleticsResultsViewProps> = ({
   const [selectedCategory, setSelectedCategory] = useState<'U12' | 'U15' | 'U18' | 'U20'>('U18');
   const [selectedGender, setSelectedGender] = useState<'Male' | 'Female'>('Male');
 
+  const { userProfile } = useAuth();
+  const effectiveUser = currentUser || userProfile;
+  const canApproveAth = useMemo(
+    () => canUserApproveSportResult(effectiveUser, 'athletics'),
+    [effectiveUser]
+  );
+
   useEffect(() => {
-    const loadedDisciplines = AthleticsService.getDisciplines();
-    const loadedResults = AthleticsService.getAllResults();
-    setDisciplines(loadedDisciplines);
-    setResults(loadedResults);
-    if (loadedDisciplines.length > 0 && !selectedDisciplineId) {
-      setSelectedDisciplineId(loadedDisciplines[0].id);
-    }
-  }, []);
+    const refreshData = () => {
+      const loadedDisciplines = AthleticsService.getDisciplines();
+      const loadedResults = AthleticsService.getAllResults();
+      setDisciplines(loadedDisciplines);
+      setResults(loadedResults);
+      if (loadedDisciplines.length > 0 && !selectedDisciplineId) {
+        setSelectedDisciplineId(loadedDisciplines[0].id);
+      }
+    };
+
+    refreshData();
+    window.addEventListener('athleticsResultsUpdated', refreshData);
+    return () => window.removeEventListener('athleticsResultsUpdated', refreshData);
+  }, [selectedDisciplineId]);
 
   const activeDiscipline = useMemo(() => {
     return disciplines.find(d => d.id === selectedDisciplineId) || disciplines[0];
@@ -63,6 +79,17 @@ export const AthleticsResultsView: React.FC<AthleticsResultsViewProps> = ({
 
   const currentEventKey = activeDiscipline ? `${activeDiscipline.id}_${selectedCategory}_${selectedGender}` : '';
   const currentResult = results[currentEventKey];
+  const isCurrentProvisional = Boolean(
+    currentResult && (currentResult.approvalStatus === 'provisional' || currentResult.isFinallyValidated === false)
+  );
+
+  const handleApproveCurrentEvent = () => {
+    if (!currentResult) return;
+    const approverName = effectiveUser?.fullName || effectiveUser?.name || 'رئيس اللجنة التقنية';
+    AthleticsService.approveEventResult(currentResult.id, approverName);
+    setResults(AthleticsService.getAllResults());
+    toast.success('تمت المصادقة النهائية على نتائج المسابقة بنجاح ✅');
+  };
 
   // Count of completed events
   const completedEventsCount = (Object.values(results) as AthleticsEventResult[]).filter(r => r && r.status === 'completed').length;
@@ -172,10 +199,35 @@ export const AthleticsResultsView: React.FC<AthleticsResultsViewProps> = ({
           
           {/* PODIUM */}
           <div className="bg-white border border-slate-200 rounded-3xl p-6 text-center shadow-xs">
-            <h3 className="text-base font-black text-slate-900 flex items-center justify-center gap-2 mb-6">
-              <Trophy className="w-5 h-5 text-amber-500" />
-              <span>منصة التتويج: {activeDiscipline?.nameAr} ({selectedCategory} - {selectedGender === 'Male' ? 'ذكور' : 'إناث'})</span>
-            </h3>
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-3 mb-6 pb-4 border-b border-slate-100">
+              <h3 className="text-base font-black text-slate-900 flex items-center justify-center gap-2">
+                <Trophy className="w-5 h-5 text-amber-500" />
+                <span>منصة التتويج: {activeDiscipline?.nameAr} ({selectedCategory} - {selectedGender === 'Male' ? 'ذكور' : 'إناث'})</span>
+              </h3>
+
+              <div className="flex items-center gap-2 flex-wrap justify-center">
+                {isCurrentProvisional ? (
+                  <span className="px-3 py-1 rounded-full text-xs font-black bg-amber-100 text-amber-800 border border-amber-300">
+                    ⏳ نتائج أولية (في انتظار المصادقة)
+                  </span>
+                ) : (
+                  <span className="px-3 py-1 rounded-full text-xs font-black bg-emerald-100 text-emerald-800 border border-emerald-300">
+                    ✅ نتائج مصادق عليها رسمياً
+                  </span>
+                )}
+
+                {isCurrentProvisional && canApproveAth && (
+                  <button
+                    type="button"
+                    onClick={handleApproveCurrentEvent}
+                    className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
+                  >
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    <span>المصادقة النهائية على النتائج</span>
+                  </button>
+                )}
+              </div>
+            </div>
 
             <div className="flex items-end justify-center gap-3 sm:gap-6 max-w-xl mx-auto pt-4 pb-2">
               

@@ -41,6 +41,7 @@ export const TeacherProfileModal: React.FC = () => {
   const [leaseNumber, setLeaseNumber] = useState('');
   const [teachingCadre, setTeachingCadre] = useState<'PRIMARY' | 'MIDDLE' | 'HIGH' | string>('HIGH');
   const [refereeSpecialty, setRefereeSpecialty] = useState<string[]>([]);
+  const [refereeDiplomas, setRefereeDiplomas] = useState<Record<string, string>>({});
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
   const [photoUrl, setPhotoUrl] = useState('');
@@ -172,13 +173,19 @@ export const TeacherProfileModal: React.FC = () => {
       setShowAccessCodeField(false);
       setLeaseNumber(userProfile.leaseNumber || '');
       setTeachingCadre(userProfile.teachingCadre || 'HIGH');
-      setRefereeSpecialty(
-        Array.isArray(userProfile.refereeSpecialty)
-          ? userProfile.refereeSpecialty
-          : userProfile.refereeSpecialty
-          ? [userProfile.refereeSpecialty]
-          : []
-      );
+      const specs = Array.isArray(userProfile.refereeSpecialty)
+        ? userProfile.refereeSpecialty
+        : userProfile.refereeSpecialty
+        ? [userProfile.refereeSpecialty]
+        : [];
+      setRefereeSpecialty(specs);
+      const initDiplomas: Record<string, string> = { ...(userProfile.refereeDiplomas || {}) };
+      if (userProfile.refereeDiploma && specs.length > 0) {
+        specs.forEach(sp => {
+          if (!initDiplomas[sp]) initDiplomas[sp] = userProfile.refereeDiploma || '';
+        });
+      }
+      setRefereeDiplomas(initDiplomas);
       setPhone(userProfile.phone || '');
       setEmail(userProfile.email || '');
       setPhotoUrl(userProfile.photoUrl || '');
@@ -275,6 +282,13 @@ export const TeacherProfileModal: React.FC = () => {
       const matchedSchool = schools.find(s => s.name === workLocation.trim());
       const schoolId = matchedSchool ? matchedSchool.id : null;
 
+      const cleanedDiplomas: Record<string, string> = {};
+      (refereeSpecialty || []).forEach(sp => {
+        const val = (refereeDiplomas[sp] || '').trim();
+        if (val) cleanedDiplomas[sp] = val;
+      });
+      const summaryDiploma = Object.values(cleanedDiplomas).filter(Boolean).join(' • ');
+
       // Update basic profile info in current directorate (remains in current directorate until manager approval)
       const updatedData: Partial<User> = {
         fullName: fullName.trim(),
@@ -283,6 +297,8 @@ export const TeacherProfileModal: React.FC = () => {
         leaseNumber: leaseNumber.trim(),
         teachingCadre: (teachingCadre as any) || 'HIGH',
         refereeSpecialty: refereeSpecialty || [],
+        refereeDiplomas: cleanedDiplomas,
+        refereeDiploma: summaryDiploma,
         phone: phone.trim(),
         photoUrl: photoUrl || '',
         email: userProfile.email || email.trim(),
@@ -785,8 +801,8 @@ export const TeacherProfileModal: React.FC = () => {
             </div>
 
             {/* Sports Specialization in Refereeing */}
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-2 flex items-center gap-1.5">
+            <div className="space-y-3">
+              <label className="block text-xs font-bold text-slate-700 flex items-center gap-1.5">
                 <Award className="h-3.5 w-3.5 text-slate-400" />
                 <span>التخصصات الرياضية في التحكيم (يمكن اختيار أكثر من تخصص)</span>
               </label>
@@ -813,6 +829,53 @@ export const TeacherProfileModal: React.FC = () => {
                   </button>
                 ))}
               </div>
+
+              {refereeSpecialty.length > 0 && (
+                <div className="p-3.5 bg-amber-50/70 border border-amber-200/90 rounded-xl space-y-2.5 animate-in fade-in duration-150">
+                  <span className="text-xs font-black text-amber-950 flex items-center gap-1.5">
+                    <Award className="h-4 w-4 text-amber-600 shrink-0" />
+                    <span>الدبلوم أو الشهادة أو مستوى التحكيم للتخصصات المختارة:</span>
+                  </span>
+                  <div className="space-y-2">
+                    {refereeSpecialty.map(spId => {
+                      const spInfo = SPORTS_MAP[spId] || { name: spId, icon: '🏆' };
+                      const currentVal = refereeDiplomas[spId] || '';
+                      const presets = ['حكم وطني', 'حكم فدرالي', 'حكم جهوي', 'حكم عصبة', 'حكم إقليمي / مدرسي'];
+                      return (
+                        <div key={`prof-dip-${spId}`} className="bg-white p-2.5 rounded-xl border border-amber-200/80 space-y-1.5">
+                          <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                            <span>{spInfo.icon}</span>
+                            <span>{spInfo.name}:</span>
+                          </span>
+                          <input
+                            type="text"
+                            value={currentVal}
+                            onChange={(e) => setRefereeDiplomas(prev => ({ ...prev, [spId]: e.target.value }))}
+                            placeholder="اكتب الدبلوم أو الشهادة أو مستوى التحكيم (مثال: حكم جهوي، شهادة فدرالية...)"
+                            className="w-full px-3 py-2 text-xs font-bold text-slate-800 bg-slate-50 focus:bg-white border border-slate-200 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-amber-500"
+                          />
+                          <div className="flex flex-wrap gap-1">
+                            {presets.map(preset => (
+                              <button
+                                key={preset}
+                                type="button"
+                                onClick={() => setRefereeDiplomas(prev => ({ ...prev, [spId]: preset }))}
+                                className={`px-2 py-0.5 rounded-md text-[10px] font-bold border transition-colors cursor-pointer ${
+                                  currentVal === preset
+                                    ? 'bg-amber-600 text-white border-amber-600'
+                                    : 'bg-amber-50/70 hover:bg-amber-100 text-amber-900 border-amber-200'
+                                }`}
+                              >
+                                {preset}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 

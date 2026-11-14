@@ -2,8 +2,8 @@ import React, { useEffect, useState, useMemo } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import clsx from 'clsx';
 import { useAuth } from '../contexts/AuthContext';
-import { DataService, SPORTS_MAP, deduplicateById, AGE_CATEGORIES, isClubTournament, getAgeCategoriesForSeason, normalizeCategoryKey, getCustomCategoryName, getCustomCategoryDetails } from '../lib/dataService';
-import { Match, School, Venue, Tournament, Sport, Student, User } from '../types';
+import { DataService, SPORTS_MAP, GENDER_MAP, deduplicateById, AGE_CATEGORIES, isClubTournament, getAgeCategoriesForSeason, normalizeCategoryKey, getCustomCategoryName, getCustomCategoryDetails, canUserApproveSportResult } from '../lib/dataService';
+import { Match, School, Venue, Tournament, Sport, Student, User, Referee } from '../types';
 import { CountdownTimer } from '../components/CountdownTimer';
 import {
   Plus,
@@ -32,7 +32,6 @@ import {
   Award,
   Medal,
   Layers,
-  Sparkles,
   ChevronRight,
   Settings,
   Star,
@@ -48,13 +47,14 @@ import { SportResultsModal } from '../components/SportResultsModal';
 import { EditTournamentModal } from '../components/EditTournamentModal';
 import { EditTournamentScheduleModal } from '../components/EditTournamentScheduleModal';
 import { RefereeMatchesView } from '../components/RefereeMatchesView';
-import { DemoDataModal } from '../components/DemoDataModal';
 import { ElectronicDrawModal } from '../components/ElectronicDrawModal';
 import { CrossCountryCategoryResult } from '../types';
 import { CROSS_COUNTRY_CATEGORIES, INITIAL_CROSS_COUNTRY_RESULTS } from '../lib/crossCountryConfig';
 import { AthleticsService } from '../lib/athleticsService';
 import { AthleticsEventResult } from '../lib/athleticsConfig';
-import { cn } from '../lib/utils';
+import { cn, formatMatchDate } from '../lib/utils';
+import { resolveHostSchoolForMatch } from '../lib/whatsappService';
+import { MatchBroadcastDiffusionModal, MatchBroadcastDiffusionTarget } from '../components/MatchBroadcastDiffusionModal';
 import toast from 'react-hot-toast';
 
 export const Matches: React.FC = () => {
@@ -65,6 +65,7 @@ export const Matches: React.FC = () => {
   const [tournaments, setTournaments] = useState<Tournament[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
   const [teachers, setTeachers] = useState<User[]>([]);
+  const [referees, setReferees] = useState<Referee[]>([]);
   const [sportsConfig, setSportsConfig] = useState<Sport[]>([]);
   const [crossCountryResults, setCrossCountryResults] = useState<Record<string, CrossCountryCategoryResult>>(INITIAL_CROSS_COUNTRY_RESULTS);
   const [athleticsResults, setAthleticsResults] = useState<Record<string, AthleticsEventResult>>(() => AthleticsService.getAllResults());
@@ -93,7 +94,6 @@ export const Matches: React.FC = () => {
   // Selected sport for detailed results modal (Level 2 & 3)
   const [selectedSportForResults, setSelectedSportForResults] = useState<Sport | null>(null);
   const [isResultsModalOpen, setIsResultsModalOpen] = useState(false);
-  const [isDemoDataModalOpen, setIsDemoDataModalOpen] = useState(false);
   const [isDrawModalOpen, setIsDrawModalOpen] = useState(false);
   const [selectedSportForDraw, setSelectedSportForDraw] = useState<string | undefined>(undefined);
 
@@ -103,6 +103,7 @@ export const Matches: React.FC = () => {
   const [createMatchInitialAffiliation, setCreateMatchInitialAffiliation] = useState<'non_club' | 'club_affiliated' | 'open' | undefined>(undefined);
   const [editingMatch, setEditingMatch] = useState<Match | null>(null);
   const [selectedMatchForScore, setSelectedMatchForScore] = useState<Match | null>(null);
+  const [scoreDiffusionTarget, setScoreDiffusionTarget] = useState<MatchBroadcastDiffusionTarget | null>(null);
 
   // Edit / Delete tournament modals
   const [editingTournament, setEditingTournament] = useState<Tournament | null>(null);
@@ -380,13 +381,55 @@ export const Matches: React.FC = () => {
         await DataService.addMatch(matchData);
         toast.success('تمت برمجة المقابلة بنجاح');
       }
-      setIsCreateMatchOpen(false);
-      setEditingMatch(null);
       await loadData();
     } catch (error: any) {
       console.error('Error saving match:', error);
       toast.error(error.message || 'فشل في حفظ بيانات المقابلة');
+      throw error;
     }
+  };
+
+  const openMatchDiffusionModal = (m: Match, mode: 'schedule' | 'result') => {
+    const t1Name = schools.find(s => s.id === m.team1Id)?.name || m.team1Name || m.team1Id || 'المؤسسة 1';
+    const t2Name = schools.find(s => s.id === m.team2Id)?.name || m.team2Name || m.team2Id || 'المؤسسة 2';
+    const vName = venues.find(v => v.id === m.venueId)?.name || m.venueName || m.venueId || 'ملعب غير محدد';
+    const hostSchoolObj = resolveHostSchoolForMatch(m, schools);
+    const rawRefs = [
+      ...(m.referees || []),
+      ...(m.referee1Id ? [m.referee1Id] : []),
+      ...(m.referee2Id ? [m.referee2Id] : [])
+    ].map(r => (r || '').trim()).filter(Boolean);
+
+    if (referees.length === 0) {
+      DataService.getReferees().then(setReferees).catch(() => {});
+    }
+
+    setScoreDiffusionTarget({
+      matchId: m.id,
+      mode,
+      sportId: m.sportId,
+      sportName: SPORTS_MAP[m.sportId]?.name || m.sportId || '',
+      ageCategory: m.ageCategory,
+      gender: m.gender && GENDER_MAP[m.gender] ? GENDER_MAP[m.gender].name : m.gender,
+      stageName: m.stage,
+      team1Id: m.team1Id,
+      team2Id: m.team2Id,
+      team1Name: t1Name,
+      team2Name: t2Name,
+      hostSchoolId: m.hostSchoolId || hostSchoolObj?.id,
+      venueId: m.venueId,
+      venueName: vName,
+      dateStr: formatMatchDate(m.date),
+      timeStr: m.startTime || '10:00',
+      referees: Array.from(new Set(rawRefs)),
+      notes: m.notes,
+      score1: m.score1 ?? m.team1Score ?? 0,
+      score2: m.score2 ?? m.team2Score ?? 0,
+      penalty1: m.penalty1,
+      penalty2: m.penalty2,
+      scorers: m.scorers,
+      approvedByName: m.approvedByName || effectiveUserProfile?.fullName || 'رئيس اللجنة التقنية'
+    });
   };
 
   // Save match score
@@ -399,16 +442,22 @@ export const Matches: React.FC = () => {
       scorers?: string;
       penalty1?: number;
       penalty2?: number;
-      isWalkover?: boolean;
-      walkoverWinner?: 'team1' | 'team2';
-      winnerTeamId?: string;
-      school1Qualified?: boolean;
-      school2Qualified?: boolean;
+      winnerId?: string;
+      notes?: string;
+      approvalStatus?: 'provisional' | 'approved';
+      recordedByName?: string;
+      recordedByRole?: string;
+      approvedByName?: string;
+      approvedAt?: string;
     }
   ) => {
     try {
       await DataService.updateMatchScore(matchId, score1, score2, status, options);
-      toast.success('تم تسجيل وتحيين نتيجة المقابلة بنجاح');
+      if (options?.approvalStatus === 'provisional') {
+        toast.success('تم تدوين النتيجة الأولية للمقابلة (في انتظار مصادقة رئيس اللجنة التقنية) ⏳');
+      } else {
+        toast.success('تم تسجيل والمصادقة على نتيجة المقابلة بنجاح ✅');
+      }
       setSelectedMatchForScore(null);
       await loadData();
     } catch (error: any) {
@@ -803,78 +852,64 @@ export const Matches: React.FC = () => {
           </p>
         </div>
 
-        <div className="flex flex-col md:flex-row items-stretch md:items-center gap-3 shrink-0">
-          {/* Main Tab Toggle: Sports List vs Calendar - Scrollable on very small devices */}
-          <div className="flex items-center bg-slate-100 dark:bg-slate-800 p-1 rounded-2xl border border-slate-200 dark:border-slate-700 overflow-x-auto no-scrollbar">
+        <div className="flex flex-col md:flex-row items-stretch md:items-center gap-2.5 w-full lg:w-auto shrink-0">
+          {/* Main Tab Toggle: Sports List vs Calendar - Wraps cleanly on mobile */}
+          <div className="flex flex-wrap sm:flex-nowrap items-center justify-center gap-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-2xl border border-slate-200 dark:border-slate-700 w-full md:w-auto">
             <button
               onClick={() => handleTabChange('list')}
               className={cn(
-                "px-3 py-1.5 rounded-xl text-[11px] sm:text-xs font-black transition-all cursor-pointer flex items-center gap-1.5 shrink-0 whitespace-nowrap",
+                "flex-1 sm:flex-initial justify-center px-2.5 sm:px-3 py-1.5 rounded-xl text-[11px] sm:text-xs font-black transition-all cursor-pointer flex items-center gap-1.5",
                 activeTab === 'list'
                   ? "bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 shadow-xs"
                   : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200"
               )}
             >
-              <Trophy className="w-3.5 h-3.5" />
+              <Trophy className="w-3.5 h-3.5 shrink-0" />
               <span>نتائج الرياضات</span>
             </button>
             <button
               onClick={() => handleTabChange('calendar')}
               className={cn(
-                "px-3 py-1.5 rounded-xl text-[11px] sm:text-xs font-black transition-all cursor-pointer flex items-center gap-1.5 shrink-0 whitespace-nowrap",
+                "flex-1 sm:flex-initial justify-center px-2.5 sm:px-3 py-1.5 rounded-xl text-[11px] sm:text-xs font-black transition-all cursor-pointer flex items-center gap-1.5",
                 activeTab === 'calendar'
                   ? "bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 shadow-xs"
                   : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200"
               )}
             >
-              <CalendarIcon className="w-3.5 h-3.5" />
+              <CalendarIcon className="w-3.5 h-3.5 shrink-0" />
               <span>الرزنامة الإقليمية</span>
             </button>
             {(userProfile?.role === 'TEACHER' || userProfile?.role === 'REFEREE' || isCentralAdmin) && (
               <button
                 onClick={() => handleTabChange('referee')}
                 className={cn(
-                  "px-3 py-1.5 rounded-xl text-[11px] sm:text-xs font-black transition-all cursor-pointer flex items-center gap-1.5 shrink-0 whitespace-nowrap",
+                  "flex-1 sm:flex-initial justify-center px-2.5 sm:px-3 py-1.5 rounded-xl text-[11px] sm:text-xs font-black transition-all cursor-pointer flex items-center gap-1.5",
                   activeTab === 'referee'
                     ? "bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 shadow-xs"
                     : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200"
                 )}
               >
-                <Users className="w-3.5 h-3.5" />
+                <Users className="w-3.5 h-3.5 shrink-0" />
                 <span>أنشطتي التحكيمية 🏁</span>
               </button>
             )}
           </div>
 
           {/* Actions */}
-          <div className="flex flex-wrap items-center gap-2">
-            {canCreate && (
+          {canCreate && (
+            <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2 w-full sm:w-auto">
               <button
                 onClick={() => {
                   setSelectedSportForDraw(undefined);
                   setIsDrawModalOpen(true);
                 }}
-                className="flex-1 sm:flex-none inline-flex items-center justify-center gap-1.5 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 px-3.5 py-2 text-[11px] sm:text-xs font-black text-white shadow-xs transition-colors cursor-pointer whitespace-nowrap"
+                className="inline-flex items-center justify-center gap-1.5 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 px-3 py-2 text-[11px] sm:text-xs font-black text-white shadow-xs transition-colors cursor-pointer text-center"
                 title="إجراء القرعة الإلكترونية وبرمجة المباريات وتعيين الحكام"
               >
-                <Shuffle className="h-3.5 w-3.5" />
+                <Shuffle className="h-3.5 w-3.5 shrink-0" />
                 <span>القرعة الإلكترونية</span>
               </button>
-            )}
 
-            {!isTeacher && userProfile?.role !== 'TEACHER' && (
-              <button
-                onClick={() => setIsDemoDataModalOpen(true)}
-                className="flex-1 sm:flex-none inline-flex items-center justify-center gap-1.5 rounded-2xl bg-gradient-to-r from-slate-800 to-slate-900 dark:from-slate-700 dark:to-slate-800 px-3.5 py-2 text-[11px] sm:text-xs font-black text-white shadow-xs transition-colors cursor-pointer whitespace-nowrap"
-                title="توليد وتعبئة نتائج ومباريات افتراضية لكافة الرياضات الجماعية"
-              >
-                <Sparkles className="h-3.5 w-3.5 text-emerald-300" />
-                <span className="hidden xs:inline">بيانات افتراضية</span>
-                <span className="inline xs:hidden">بيانات ⚡</span>
-              </button>
-            )}
-
-            {canCreate && (
               <button
                 onClick={() => {
                   setEditingMatch(null);
@@ -885,13 +920,13 @@ export const Matches: React.FC = () => {
                   );
                   setIsCreateMatchOpen(true);
                 }}
-                className="flex-1 sm:flex-none inline-flex items-center justify-center gap-1.5 rounded-2xl bg-blue-600 dark:bg-blue-700 px-3.5 py-2 text-[11px] sm:text-xs font-black text-white shadow-xs hover:bg-blue-700 dark:hover:bg-blue-600 transition-colors cursor-pointer whitespace-nowrap"
+                className="inline-flex items-center justify-center gap-1.5 rounded-2xl bg-blue-600 dark:bg-blue-700 px-3 py-2 text-[11px] sm:text-xs font-black text-white shadow-xs hover:bg-blue-700 dark:hover:bg-blue-600 transition-colors cursor-pointer text-center"
               >
-                <Plus className="h-4 w-4" />
-                <span>برمجة مباراة جديد</span>
+                <Plus className="h-4 w-4 shrink-0" />
+                <span>برمجة مباراة جديدة</span>
               </button>
-            )}
-          </div>
+            </div>
+          )}
         </div>
       </div>
 
@@ -903,7 +938,9 @@ export const Matches: React.FC = () => {
           schools={schools}
           venues={venues}
           activeSeason={activeSeason}
-          userProfile={userProfile}
+          userProfile={effectiveUserProfile}
+          isCentralAdmin={isCentralAdmin}
+          allowedSportIds={techCommitteeAllowedSports}
           onOpenMatchDetail={(match) => {
             if (canManageSport(match.sportId)) {
               setEditingMatch(match);
@@ -990,12 +1027,12 @@ export const Matches: React.FC = () => {
               />
             </div>
 
-            <div className="flex flex-wrap items-center gap-2 w-full md:w-auto shrink-0">
+            <div className="grid grid-cols-1 sm:flex sm:flex-wrap items-center gap-2 w-full md:w-auto shrink-0">
               {/* Affiliation Selector */}
               <select
                 value={affiliationFilter}
                 onChange={(e) => setAffiliationFilter(e.target.value)}
-                className="px-3 py-2 text-xs font-bold bg-slate-50 border border-slate-200 rounded-xl text-slate-700 focus:outline-none focus:ring-1 focus:ring-blue-400"
+                className="w-full sm:w-auto min-w-0 px-3 py-2 text-xs font-bold bg-slate-50 border border-slate-200 rounded-xl text-slate-700 focus:outline-none focus:ring-1 focus:ring-blue-400"
               >
                 <option value="ALL">جميع أنواع البطولات</option>
                 <option value="non_club">⚪ بطولات غير المنتمين للأندية</option>
@@ -1007,7 +1044,7 @@ export const Matches: React.FC = () => {
               <select
                 value={selectedSportFilter}
                 onChange={(e) => setSelectedSportFilter(e.target.value)}
-                className="px-3 py-2 text-xs font-bold bg-slate-50 border border-slate-200 rounded-xl text-slate-700 focus:outline-none"
+                className="w-full sm:w-auto min-w-0 px-3 py-2 text-xs font-bold bg-slate-50 border border-slate-200 rounded-xl text-slate-700 focus:outline-none"
               >
                 <option value="ALL">🏆 جميع الرياضات الإقليمية</option>
                 {sportsConfig.map(s => (
@@ -1021,7 +1058,7 @@ export const Matches: React.FC = () => {
               <select
                 value={statusFilter}
                 onChange={(e) => setStatusFilter(e.target.value)}
-                className="px-3 py-2 text-xs font-bold bg-slate-50 border border-slate-200 rounded-xl text-slate-700 focus:outline-none"
+                className="w-full sm:w-auto min-w-0 px-3 py-2 text-xs font-bold bg-slate-50 border border-slate-200 rounded-xl text-slate-700 focus:outline-none"
               >
                 <option value="ALL">جميع الحالات</option>
                 <option value="OPEN">🟢 البطولات المفتوحة / المبرمجة</option>
@@ -1030,33 +1067,33 @@ export const Matches: React.FC = () => {
                 <option value="Completed">🏆 مكتملة النتائج</option>
               </select>
 
-              {/* View Mode Switcher */}
-              <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200 shrink-0">
+              {/* View Mode Switcher (Icon-only) */}
+              <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200 w-fit shrink-0 self-end sm:self-auto">
                 <button
                   type="button"
                   onClick={() => setViewMode('cards')}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-extrabold transition-all cursor-pointer ${
+                  className={`flex items-center justify-center p-2 rounded-lg transition-all cursor-pointer ${
                     viewMode === 'cards'
                       ? 'bg-white text-blue-700 shadow-2xs border border-slate-200/80'
                       : 'text-slate-600 hover:text-slate-900'
                   }`}
                   title="عرض الرياضات على شكل بطاقات"
+                  aria-label="عرض البطاقات"
                 >
-                  <LayoutGrid className="h-3.5 w-3.5" />
-                  <span>بطاقات 🎴</span>
+                  <LayoutGrid className="h-4 w-4" />
                 </button>
                 <button
                   type="button"
                   onClick={() => setViewMode('table')}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-extrabold transition-all cursor-pointer ${
+                  className={`flex items-center justify-center p-2 rounded-lg transition-all cursor-pointer ${
                     viewMode === 'table'
                       ? 'bg-white text-blue-700 shadow-2xs border border-slate-200/80'
                       : 'text-slate-600 hover:text-slate-900'
                   }`}
                   title="عرض الرياضات على شكل جدول"
+                  aria-label="عرض الجدول"
                 >
-                  <TableIcon className="h-3.5 w-3.5" />
-                  <span>جدول 📊</span>
+                  <TableIcon className="h-4 w-4" />
                 </button>
               </div>
             </div>
@@ -1747,6 +1784,25 @@ export const Matches: React.FC = () => {
         onSave={handleSaveScore}
         schools={schools}
         venues={venues}
+        canApprove={
+          selectedMatchForScore
+            ? canUserApproveSportResult(effectiveUserProfile, selectedMatchForScore.sportId, teachers)
+            : false
+        }
+        currentUserName={effectiveUserProfile?.fullName}
+        onNotifySchedule={(m) => openMatchDiffusionModal(m, 'schedule')}
+        onNotifyApprovedResult={(m) => openMatchDiffusionModal(m, 'result')}
+      />
+
+      {/* UNIFIED WHATSAPP BROADCAST MODAL (SCHEDULE OR APPROVED RESULT) */}
+      <MatchBroadcastDiffusionModal
+        isOpen={Boolean(scoreDiffusionTarget)}
+        onClose={() => setScoreDiffusionTarget(null)}
+        target={scoreDiffusionTarget}
+        schools={schools}
+        refereesList={referees}
+        teachersList={teachers}
+        studentsList={students}
       />
 
       {/* EDIT TOURNAMENT MODAL (CENTRAL ADMIN) */}
@@ -1913,14 +1969,6 @@ export const Matches: React.FC = () => {
           </div>
         </div>
       )}
-      <DemoDataModal
-        isOpen={isDemoDataModalOpen}
-        onClose={() => setIsDemoDataModalOpen(false)}
-        activeDirectorateId={DataService.getActiveDirectorateId() || 'taourirt'}
-        activeDirectorateName="المديرية الإقليمية بتاوريرت"
-        activeSeason={activeSeason}
-        onDataLoaded={loadData}
-      />
       {/* Electronic Draw and Match Scheduling Modal */}
       <ElectronicDrawModal
         isOpen={isDrawModalOpen}

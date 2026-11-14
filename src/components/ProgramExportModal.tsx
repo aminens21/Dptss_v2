@@ -20,7 +20,8 @@ import {
   downloadProgramAsPdf,
   downloadProgramAsWord,
   printProgram,
-  CalendarExportEvent
+  ProgramAffiliationFilter,
+  AFFILIATION_LABELS
 } from '../lib/programExportService';
 import toast from 'react-hot-toast';
 
@@ -36,6 +37,9 @@ interface ProgramExportModalProps {
   activeSeason: string;
   initialSelectedSportIds?: string[];
   initialScopeFilter?: 'ALL' | 'provincial' | 'regional' | 'national';
+  initialAffiliationFilter?: ProgramAffiliationFilter;
+  allowedSportIds?: string[] | null;
+  isCentralAdmin?: boolean;
 }
 
 type ExportMode = 'ALL_SPORTS' | 'SINGLE_SPORT' | 'MULTI_SPORTS';
@@ -51,10 +55,18 @@ export const ProgramExportModal: React.FC<ProgramExportModalProps> = ({
   teachers: propTeachers,
   activeSeason,
   initialSelectedSportIds,
-  initialScopeFilter = 'ALL'
+  initialScopeFilter = 'ALL',
+  initialAffiliationFilter = 'ALL',
+  allowedSportIds = null,
+  isCentralAdmin = false
 }) => {
+  const isScopedToTechHead = !isCentralAdmin && Array.isArray(allowedSportIds);
+
   // Mode: All sports vs single sport vs custom multi-sports
   const [mode, setMode] = useState<ExportMode>(() => {
+    if (isScopedToTechHead && allowedSportIds!.length <= 1) {
+      return 'SINGLE_SPORT';
+    }
     if (initialSelectedSportIds && initialSelectedSportIds.length === 1 && initialSelectedSportIds[0] !== 'ALL') {
       return 'SINGLE_SPORT';
     }
@@ -65,6 +77,9 @@ export const ProgramExportModal: React.FC<ProgramExportModalProps> = ({
   });
 
   const [selectedSingleSport, setSelectedSingleSport] = useState<string>(() => {
+    if (isScopedToTechHead && allowedSportIds!.length > 0) {
+      return allowedSportIds![0];
+    }
     if (initialSelectedSportIds && initialSelectedSportIds.length === 1 && initialSelectedSportIds[0] !== 'ALL') {
       return initialSelectedSportIds[0];
     }
@@ -72,6 +87,9 @@ export const ProgramExportModal: React.FC<ProgramExportModalProps> = ({
   });
 
   const [selectedMultiSports, setSelectedMultiSports] = useState<string[]>(() => {
+    if (isScopedToTechHead && allowedSportIds!.length > 0) {
+      return allowedSportIds!;
+    }
     if (initialSelectedSportIds && initialSelectedSportIds.length > 0 && !initialSelectedSportIds.includes('ALL')) {
       return initialSelectedSportIds;
     }
@@ -79,6 +97,7 @@ export const ProgramExportModal: React.FC<ProgramExportModalProps> = ({
   });
 
   const [scopeFilter, setScopeFilter] = useState<'ALL' | 'provincial' | 'regional' | 'national'>(initialScopeFilter);
+  const [affiliationFilter, setAffiliationFilter] = useState<ProgramAffiliationFilter>(initialAffiliationFilter);
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
   const [loadedVenues, setLoadedVenues] = useState<Venue[]>([]);
   const [loadedReferees, setLoadedReferees] = useState<Referee[]>([]);
@@ -87,7 +106,25 @@ export const ProgramExportModal: React.FC<ProgramExportModalProps> = ({
   // Sync initial props and load venues / referees / teachers if not passed
   useEffect(() => {
     if (isOpen) {
-      if (initialSelectedSportIds && initialSelectedSportIds.length === 1 && initialSelectedSportIds[0] !== 'ALL') {
+      if (isScopedToTechHead) {
+        const scoped = allowedSportIds || [];
+        if (scoped.length <= 1) {
+          setMode('SINGLE_SPORT');
+          if (scoped[0]) {
+            setSelectedSingleSport(scoped[0]);
+            setSelectedMultiSports([scoped[0]]);
+          }
+        } else {
+          if (initialSelectedSportIds && initialSelectedSportIds.length === 1 && scoped.includes(initialSelectedSportIds[0])) {
+            setMode('SINGLE_SPORT');
+            setSelectedSingleSport(initialSelectedSportIds[0]);
+          } else {
+            setMode('ALL_SPORTS');
+            setSelectedSingleSport(scoped[0]);
+          }
+          setSelectedMultiSports(scoped);
+        }
+      } else if (initialSelectedSportIds && initialSelectedSportIds.length === 1 && initialSelectedSportIds[0] !== 'ALL') {
         setMode('SINGLE_SPORT');
         setSelectedSingleSport(initialSelectedSportIds[0]);
       } else if (initialSelectedSportIds && initialSelectedSportIds.length > 1) {
@@ -99,6 +136,7 @@ export const ProgramExportModal: React.FC<ProgramExportModalProps> = ({
       if (initialScopeFilter) {
         setScopeFilter(initialScopeFilter);
       }
+      setAffiliationFilter(initialAffiliationFilter || 'ALL');
 
       if (!propVenues || propVenues.length === 0) {
         DataService.getVenues().then(setLoadedVenues).catch(() => {});
@@ -110,49 +148,143 @@ export const ProgramExportModal: React.FC<ProgramExportModalProps> = ({
         DataService.getTeachers().then(setLoadedTeachers).catch(() => {});
       }
     }
-  }, [isOpen, initialSelectedSportIds, initialScopeFilter, propVenues, propReferees, propTeachers]);
+  }, [isOpen, initialSelectedSportIds, initialScopeFilter, initialAffiliationFilter, isScopedToTechHead, allowedSportIds, propVenues, propReferees, propTeachers]);
 
   const effectiveVenues = propVenues && propVenues.length > 0 ? propVenues : loadedVenues;
   const effectiveReferees = propReferees && propReferees.length > 0 ? propReferees : loadedReferees;
   const effectiveTeachers = propTeachers && propTeachers.length > 0 ? propTeachers : loadedTeachers;
 
-  // Build unified calendar events
+  // Build unified calendar events (strictly scoped to assigned sport(s) when Technical Committee Head)
   const allEvents = useMemo(() => {
-    return buildAllCalendarEvents(tournaments, matches, schools, effectiveVenues, effectiveReferees, effectiveTeachers);
-  }, [tournaments, matches, schools, effectiveVenues, effectiveReferees, effectiveTeachers]);
+    const built = buildAllCalendarEvents(tournaments, matches, schools, effectiveVenues, effectiveReferees, effectiveTeachers);
+    if (!isScopedToTechHead) return built;
+    const allowedSet = new Set(allowedSportIds || []);
+    return built.filter(ev => allowedSet.has(ev.sportId));
+  }, [tournaments, matches, schools, effectiveVenues, effectiveReferees, effectiveTeachers, isScopedToTechHead, allowedSportIds]);
 
-  // Determine active selected sport IDs based on current mode
-  const activeSelectedSportIds = useMemo<string[]>(() => {
-    if (mode === 'ALL_SPORTS') return [];
-    if (mode === 'SINGLE_SPORT') return [selectedSingleSport];
-    if (mode === 'MULTI_SPORTS') return selectedMultiSports;
-    return [];
-  }, [mode, selectedSingleSport, selectedMultiSports]);
-
-  // Filter events for preview and count
-  const filteredEvents = useMemo(() => {
-    let list = allEvents.slice();
-
-    if (activeSelectedSportIds.length > 0) {
-      list = list.filter(ev => activeSelectedSportIds.includes(ev.sportId));
-    }
-
-    if (scopeFilter !== 'ALL') {
-      list = list.filter(ev => ev.scope === scopeFilter);
-    }
-
-    list.sort((a, b) => a.date.localeCompare(b.date));
-    return list;
-  }, [allEvents, activeSelectedSportIds, scopeFilter]);
-
-  // Available sports list from configuration
+  // Available sports:
+  // - Central Admin: ONLY sports that actually have scheduled matches
+  // - Tech Head: strictly their assigned sport(s) (preserving lock even if empty after reset)
   const availableSports = useMemo(() => {
-    return SPORTS_CONFIG.map(s => ({
+    const base = SPORTS_CONFIG.map(s => ({
       id: s.id,
       name: s.name,
       icon: s.icon || '🏆'
     }));
-  }, []);
+
+    if (isScopedToTechHead) {
+      const allowedSet = new Set(allowedSportIds || []);
+      const filtered = base.filter(s => allowedSet.has(s.id));
+      (allowedSportIds || []).forEach(id => {
+        if (!filtered.some(s => s.id === id)) {
+          filtered.push({
+            id,
+            name: SPORTS_MAP[id]?.name || id,
+            icon: SPORTS_MAP[id]?.icon || '🏆'
+          });
+        }
+      });
+      return filtered;
+    }
+
+    const sportsWithMatches = new Set(allEvents.map(ev => ev.sportId));
+    const filtered = base.filter(s => sportsWithMatches.has(s.id));
+    allEvents.forEach(ev => {
+      if (!filtered.some(s => s.id === ev.sportId)) {
+        filtered.push({
+          id: ev.sportId,
+          name: ev.sportName || SPORTS_MAP[ev.sportId]?.name || ev.sportId,
+          icon: ev.sportIcon || SPORTS_MAP[ev.sportId]?.icon || '🏆'
+        });
+      }
+    });
+    return filtered;
+  }, [isScopedToTechHead, allowedSportIds, allEvents]);
+
+  // Keep selectedSingleSport / selectedMultiSports valid when availableSports changes
+  useEffect(() => {
+    if (availableSports.length > 0 && !availableSports.some(s => s.id === selectedSingleSport)) {
+      setSelectedSingleSport(availableSports[0].id);
+    }
+  }, [availableSports, selectedSingleSport]);
+
+  // Determine active selected sport IDs based on current mode
+  const activeSelectedSportIds = useMemo<string[]>(() => {
+    if (isScopedToTechHead) {
+      const scoped = allowedSportIds || [];
+      if (scoped.length === 0) return ['__none__'];
+      if (mode === 'SINGLE_SPORT') {
+        return scoped.includes(selectedSingleSport) ? [selectedSingleSport] : [scoped[0]];
+      }
+      if (mode === 'MULTI_SPORTS') {
+        const valid = selectedMultiSports.filter(id => scoped.includes(id));
+        return valid.length > 0 ? valid : scoped;
+      }
+      return scoped;
+    }
+    if (mode === 'ALL_SPORTS') return [];
+    if (mode === 'SINGLE_SPORT') return [selectedSingleSport];
+    if (mode === 'MULTI_SPORTS') return selectedMultiSports;
+    return [];
+  }, [mode, selectedSingleSport, selectedMultiSports, isScopedToTechHead, allowedSportIds]);
+
+  // Base events matching selected sports + scope (before affiliation class filter)
+  const sportAndScopeEvents = useMemo(() => {
+    let list = allEvents.slice();
+    if (activeSelectedSportIds.length > 0) {
+      list = list.filter(ev => activeSelectedSportIds.includes(ev.sportId));
+    }
+    if (scopeFilter !== 'ALL') {
+      list = list.filter(ev => ev.scope === scopeFilter);
+    }
+    return list;
+  }, [allEvents, activeSelectedSportIds, scopeFilter]);
+
+  // Only tournament types/classes that actually contain matches
+  const availableAffiliationOptions = useMemo(() => {
+    const counts: Record<'non_club' | 'club_affiliated' | 'open', number> = {
+      non_club: 0,
+      club_affiliated: 0,
+      open: 0
+    };
+    sportAndScopeEvents.forEach(ev => {
+      const aff = ev.affiliationType || 'non_club';
+      counts[aff] += 1;
+    });
+    const options: { id: 'non_club' | 'club_affiliated' | 'open'; label: string; count: number; icon: string }[] = [];
+    if (counts.non_club > 0) {
+      options.push({ id: 'non_club', label: AFFILIATION_LABELS.non_club, count: counts.non_club, icon: '🏫' });
+    }
+    if (counts.club_affiliated > 0) {
+      options.push({ id: 'club_affiliated', label: AFFILIATION_LABELS.club_affiliated, count: counts.club_affiliated, icon: '🏅' });
+    }
+    if (counts.open > 0) {
+      options.push({ id: 'open', label: AFFILIATION_LABELS.open, count: counts.open, icon: '🌍' });
+    }
+    return options;
+  }, [sportAndScopeEvents]);
+
+  // Reset affiliationFilter if selected class has 0 matches
+  useEffect(() => {
+    if (affiliationFilter !== 'ALL' && !availableAffiliationOptions.some(o => o.id === affiliationFilter)) {
+      setAffiliationFilter('ALL');
+    }
+  }, [affiliationFilter, availableAffiliationOptions]);
+
+  // Filter events for preview and count
+  const filteredEvents = useMemo(() => {
+    let list = sportAndScopeEvents.slice();
+    if (affiliationFilter !== 'ALL') {
+      list = list.filter(ev => (ev.affiliationType || 'non_club') === affiliationFilter);
+    }
+    list.sort((a, b) => a.date.localeCompare(b.date));
+    return list;
+  }, [sportAndScopeEvents, affiliationFilter]);
+
+  const showNotesColumn = useMemo(
+    () => filteredEvents.some(ev => Boolean(ev.notes && ev.notes.trim().length > 0)),
+    [filteredEvents]
+  );
 
   const toggleMultiSport = (sportId: string) => {
     setSelectedMultiSports(prev => {
@@ -173,6 +305,7 @@ export const ProgramExportModal: React.FC<ProgramExportModalProps> = ({
     events: allEvents,
     selectedSportIds: activeSelectedSportIds,
     scopeFilter,
+    affiliationFilter,
     activeSeason
   });
 
@@ -245,74 +378,97 @@ export const ProgramExportModal: React.FC<ProgramExportModalProps> = ({
         <div className="p-4 sm:p-6 overflow-y-auto space-y-5 text-slate-800 text-xs">
           
           {/* Section 1: Selection Mode (الشامل vs بطولة واحدة vs بطولتان أو أكثر) */}
-          <div className="space-y-2.5">
-            <label className="text-xs font-black text-slate-800 flex items-center gap-2">
-              <Layers className="h-4 w-4 text-blue-600" />
-              <span>نطاق الرياضات المراد استخراج برنامجها:</span>
-            </label>
-
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-              {/* Option 1: ALL SPORTS */}
-              <button
-                type="button"
-                onClick={() => setMode('ALL_SPORTS')}
-                className={`p-3 rounded-xl border text-right transition-all cursor-pointer flex flex-col justify-between gap-1.5 ${
-                  mode === 'ALL_SPORTS'
-                    ? 'border-blue-600 bg-blue-50/80 ring-2 ring-blue-500/20 shadow-xs'
-                    : 'border-slate-200 hover:border-slate-300 bg-white'
-                }`}
-              >
-                <div className="flex items-center justify-between">
-                  <span className="text-base">🌐</span>
-                  {mode === 'ALL_SPORTS' && <CheckCircle2 className="h-4 w-4 text-blue-600" />}
-                </div>
+          {isScopedToTechHead && availableSports.length <= 1 ? (
+            <div className="p-3.5 rounded-xl border border-amber-200 bg-amber-50/80 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2.5">
+                <span className="text-xl">{availableSports[0]?.icon || '🏆'}</span>
                 <div>
-                  <h4 className="font-bold text-slate-900 text-xs">البرنامج الشامل</h4>
-                  <p className="text-[11px] text-slate-500 mt-0.5">كافة الرياضات والبطولات المدرسية</p>
+                  <h4 className="font-black text-amber-950 text-xs">
+                    برنامج رياضتك المسندة: {availableSports[0]?.name || SPORTS_MAP[selectedSingleSport]?.name || selectedSingleSport}
+                  </h4>
+                  <p className="text-[11px] text-amber-800 mt-0.5">
+                    بصفتك رئيس اللجنة التقنية، يقتصر الاستخراج والمعاينة على برنامج هذه الرياضة فقط.
+                  </p>
                 </div>
-              </button>
-
-              {/* Option 2: SINGLE SPORT */}
-              <button
-                type="button"
-                onClick={() => setMode('SINGLE_SPORT')}
-                className={`p-3 rounded-xl border text-right transition-all cursor-pointer flex flex-col justify-between gap-1.5 ${
-                  mode === 'SINGLE_SPORT'
-                    ? 'border-blue-600 bg-blue-50/80 ring-2 ring-blue-500/20 shadow-xs'
-                    : 'border-slate-200 hover:border-slate-300 bg-white'
-                }`}
-              >
-                <div className="flex items-center justify-between">
-                  <span className="text-base">🎯</span>
-                  {mode === 'SINGLE_SPORT' && <CheckCircle2 className="h-4 w-4 text-blue-600" />}
-                </div>
-                <div>
-                  <h4 className="font-bold text-slate-900 text-xs">بطولة واحدة فقط</h4>
-                  <p className="text-[11px] text-slate-500 mt-0.5">تحديد رياضة معينة بذاتها</p>
-                </div>
-              </button>
-
-              {/* Option 3: MULTI SPORTS */}
-              <button
-                type="button"
-                onClick={() => setMode('MULTI_SPORTS')}
-                className={`p-3 rounded-xl border text-right transition-all cursor-pointer flex flex-col justify-between gap-1.5 ${
-                  mode === 'MULTI_SPORTS'
-                    ? 'border-blue-600 bg-blue-50/80 ring-2 ring-blue-500/20 shadow-xs'
-                    : 'border-slate-200 hover:border-slate-300 bg-white'
-                }`}
-              >
-                <div className="flex items-center justify-between">
-                  <span className="text-base">⚡</span>
-                  {mode === 'MULTI_SPORTS' && <CheckCircle2 className="h-4 w-4 text-blue-600" />}
-                </div>
-                <div>
-                  <h4 className="font-bold text-slate-900 text-xs">بطولتان أو أكثر</h4>
-                  <p className="text-[11px] text-slate-500 mt-0.5">تخصيص رياضتين أو ثلاث مجتمعة</p>
-                </div>
-              </button>
+              </div>
+              <CheckCircle2 className="h-5 w-5 text-amber-700 shrink-0" />
             </div>
-          </div>
+          ) : (
+            <div className="space-y-2.5">
+              <label className="text-xs font-black text-slate-800 flex items-center gap-2">
+                <Layers className="h-4 w-4 text-blue-600" />
+                <span>نطاق الرياضات المراد استخراج برنامجها:</span>
+              </label>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                {/* Option 1: ALL SPORTS (or All Assigned Sports for multi-sport Tech Head) */}
+                <button
+                  type="button"
+                  onClick={() => setMode('ALL_SPORTS')}
+                  className={`p-3 rounded-xl border text-right transition-all cursor-pointer flex flex-col justify-between gap-1.5 ${
+                    mode === 'ALL_SPORTS'
+                      ? 'border-blue-600 bg-blue-50/80 ring-2 ring-blue-500/20 shadow-xs'
+                      : 'border-slate-200 hover:border-slate-300 bg-white'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-base">🌐</span>
+                    {mode === 'ALL_SPORTS' && <CheckCircle2 className="h-4 w-4 text-blue-600" />}
+                  </div>
+                  <div>
+                    <h4 className="font-bold text-slate-900 text-xs">
+                      {isScopedToTechHead ? 'جميع رياضاتي المسندة' : 'البرنامج الشامل'}
+                    </h4>
+                    <p className="text-[11px] text-slate-500 mt-0.5">
+                      {isScopedToTechHead
+                        ? `كافة الرياضات المسندة إليك (${availableSports.length})`
+                        : 'كافة الرياضات والبطولات المدرسية'}
+                    </p>
+                  </div>
+                </button>
+
+                {/* Option 2: SINGLE SPORT */}
+                <button
+                  type="button"
+                  onClick={() => setMode('SINGLE_SPORT')}
+                  className={`p-3 rounded-xl border text-right transition-all cursor-pointer flex flex-col justify-between gap-1.5 ${
+                    mode === 'SINGLE_SPORT'
+                      ? 'border-blue-600 bg-blue-50/80 ring-2 ring-blue-500/20 shadow-xs'
+                      : 'border-slate-200 hover:border-slate-300 bg-white'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-base">🎯</span>
+                    {mode === 'SINGLE_SPORT' && <CheckCircle2 className="h-4 w-4 text-blue-600" />}
+                  </div>
+                  <div>
+                    <h4 className="font-bold text-slate-900 text-xs">بطولة واحدة فقط</h4>
+                    <p className="text-[11px] text-slate-500 mt-0.5">تحديد رياضة معينة بذاتها</p>
+                  </div>
+                </button>
+
+                {/* Option 3: MULTI SPORTS */}
+                <button
+                  type="button"
+                  onClick={() => setMode('MULTI_SPORTS')}
+                  className={`p-3 rounded-xl border text-right transition-all cursor-pointer flex flex-col justify-between gap-1.5 ${
+                    mode === 'MULTI_SPORTS'
+                      ? 'border-blue-600 bg-blue-50/80 ring-2 ring-blue-500/20 shadow-xs'
+                      : 'border-slate-200 hover:border-slate-300 bg-white'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-base">⚡</span>
+                    {mode === 'MULTI_SPORTS' && <CheckCircle2 className="h-4 w-4 text-blue-600" />}
+                  </div>
+                  <div>
+                    <h4 className="font-bold text-slate-900 text-xs">بطولتان أو أكثر</h4>
+                    <p className="text-[11px] text-slate-500 mt-0.5">تخصيص رياضتين أو ثلاث مجتمعة</p>
+                  </div>
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* Conditional Sub-selector based on mode */}
           {mode === 'SINGLE_SPORT' && (
@@ -410,6 +566,48 @@ export const ProgramExportModal: React.FC<ProgramExportModalProps> = ({
             </div>
           </div>
 
+          {/* Section 3: Tournament Type / Affiliation Filter (Only types with matches) */}
+          {availableAffiliationOptions.length > 0 && (
+            <div className="space-y-2">
+              <label className="text-xs font-black text-slate-800 flex items-center gap-2">
+                <Sparkles className="h-4 w-4 text-amber-600" />
+                <span>نوع البطولة المراد إصدار برنامجها (تظهر الأصناف التي تتوفر على مباريات فقط):</span>
+              </label>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setAffiliationFilter('ALL')}
+                  className={`py-2 px-3 rounded-xl font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer border ${
+                    affiliationFilter === 'ALL'
+                      ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
+                      : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                  }`}
+                >
+                  <span>🌐</span>
+                  <span>الكل ({sportAndScopeEvents.length})</span>
+                </button>
+                {availableAffiliationOptions.map(opt => {
+                  const isActive = affiliationFilter === opt.id;
+                  return (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      onClick={() => setAffiliationFilter(opt.id)}
+                      className={`py-2 px-3 rounded-xl font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer border ${
+                        isActive
+                          ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
+                          : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                      }`}
+                    >
+                      <span>{opt.icon}</span>
+                      <span>{opt.label} ({opt.count})</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           {/* Summary Indicator Box */}
           <div className="bg-gradient-to-r from-blue-50 via-indigo-50 to-slate-50 p-3.5 rounded-xl border border-blue-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div className="flex items-center gap-2.5">
@@ -418,7 +616,7 @@ export const ProgramExportModal: React.FC<ProgramExportModalProps> = ({
               </span>
               <div>
                 <h5 className="font-black text-slate-900 text-xs">
-                  {filteredEvents.length > 0 ? 'أنشطة ومواعيد جاهزة للتصدير' : 'لا توجد أنشطة مسجلة بهذه الفلاتر'}
+                  {filteredEvents.length > 0 ? 'مباريات ومواعيد جاهزة للتصدير' : 'البرنامج فارغ حالياً — لا توجد مباريات مبرمجة'}
                 </h5>
                 <p className="text-[11px] text-slate-500">
                   {mode === 'ALL_SPORTS'
@@ -428,6 +626,7 @@ export const ProgramExportModal: React.FC<ProgramExportModalProps> = ({
                     : `برنامج ${selectedMultiSports.length} رياضات محددة`}
                   {' • '}
                   {scopeFilter === 'ALL' ? 'جميع المستويات' : scopeFilter === 'provincial' ? 'إقليمي' : scopeFilter === 'regional' ? 'جهوي' : 'وطني'}
+                  {affiliationFilter !== 'ALL' ? ` • ${AFFILIATION_LABELS[affiliationFilter]}` : ''}
                 </p>
               </div>
             </div>
@@ -438,11 +637,15 @@ export const ProgramExportModal: React.FC<ProgramExportModalProps> = ({
             </div>
           </div>
 
-          {/* Preview Table of First few events */}
-          {filteredEvents.length > 0 && (
+          {/* Preview Table or Empty Notice */}
+          {filteredEvents.length === 0 ? (
+            <div className="border border-dashed border-slate-200 rounded-xl p-6 text-center bg-slate-50 text-slate-500 text-xs font-bold">
+              لا توجد مباريات مبرمجة حالياً لهذه الرياضة أو الفئة (البرنامج فارغ).
+            </div>
+          ) : (
             <div className="border border-slate-200 rounded-xl overflow-hidden">
               <div className="bg-slate-100 px-3 py-2 border-b border-slate-200 font-bold text-slate-700 flex items-center justify-between text-[11px]">
-                <span>معاينة محتوى الجدول الرسمي (أول {Math.min(filteredEvents.length, 5)} أنشطة من أصل {filteredEvents.length}):</span>
+                <span>معاينة محتوى الجدول الرسمي (أول {Math.min(filteredEvents.length, 5)} مواعيد من أصل {filteredEvents.length}):</span>
                 <span className="text-blue-700 font-bold">جاهز للتوليد 📄</span>
               </div>
               <div className="max-h-36 overflow-y-auto">
@@ -450,11 +653,12 @@ export const ProgramExportModal: React.FC<ProgramExportModalProps> = ({
                   <thead className="bg-slate-50 text-slate-600 border-b border-slate-200">
                     <tr>
                       <th className="p-2">التاريخ</th>
-                      <th className="p-2">البطولة أو التظاهرة</th>
+                      <th className="p-2">المقابلة (مؤسسة ضد مؤسسة)</th>
                       {mode !== 'SINGLE_SPORT' && <th className="p-2">الرياضة</th>}
                       <th className="p-2">المستوى</th>
                       <th className="p-2">المكان</th>
                       <th className="p-2">الحكام</th>
+                      {showNotesColumn && <th className="p-2">ملاحظات</th>}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
@@ -472,6 +676,9 @@ export const ProgramExportModal: React.FC<ProgramExportModalProps> = ({
                         </td>
                         <td className="p-2 text-slate-600 truncate max-w-[150px]">{ev.venue}</td>
                         <td className="p-2 text-slate-600 truncate max-w-[140px]">{ev.refereesText || '-'}</td>
+                        {showNotesColumn && (
+                          <td className="p-2 text-slate-600 truncate max-w-[140px]">{ev.notes?.trim() || '-'}</td>
+                        )}
                       </tr>
                     ))}
                   </tbody>
