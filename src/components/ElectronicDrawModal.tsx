@@ -32,8 +32,9 @@ import {
   MessageCircle,
   Share2
 } from 'lucide-react';
-import { Tournament, School, Team, Match, User, Venue, Sport, Referee, SchoolTournamentConfirmation } from '../types';
-import { DataService, SPORTS_MAP, GENDER_MAP, deduplicateById, normalizeCategoryKey, getCustomCategoryName, doesConfirmationMatchBranch } from '../lib/dataService';
+import { Tournament, School, Team, Match, User, Venue, Sport, Referee, SchoolTournamentConfirmation, BlockedSchedulePeriod } from '../types';
+import { DataService, SPORTS_MAP, GENDER_MAP, deduplicateById, normalizeCategoryKey, getCustomCategoryName, doesConfirmationMatchBranch, EDUCATIONAL_CYCLE_LABELS, getMatchEducationalCycles, findBlockedPeriodForDate } from '../lib/dataService';
+import { isSuperAdminEmail } from '../contexts/AuthContext';
 import {
   resolveHostSchoolForMatch,
   findRefereeContact,
@@ -208,6 +209,25 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
   const [bulkRefereeIds, setBulkRefereeIds] = useState<string[]>([]);
   const [showAllRefereesFallback, setShowAllRefereesFallback] = useState<boolean>(false);
   const [diffusionTarget, setDiffusionTarget] = useState<MatchBroadcastDiffusionTarget | null>(null);
+  const [blockedPeriods, setBlockedPeriods] = useState<BlockedSchedulePeriod[]>([]);
+
+  const isRegionalOrCentralAdmin = useMemo(() => {
+    if (!currentUser) return false;
+    return (
+      currentUser.role === 'CENTRAL_ADMIN' ||
+      currentUser.role === 'SUPER_ADMIN' ||
+      currentUser.isSuperAdmin === true ||
+      isSuperAdminEmail(currentUser.email)
+    );
+  }, [currentUser]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const unsub = DataService.subscribeToBlockedScheduleDates((periods) => {
+      setBlockedPeriods(periods);
+    });
+    return () => unsub();
+  }, [isOpen]);
 
   // Load Tournaments, Referees, Teachers & Data
   useEffect(() => {
@@ -1100,6 +1120,31 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
     toast.success('تم تعميم التوقيت والمكان والحكام المتخصصين على جميع المباريات');
   };
 
+  // Blocked date lookup helper for any generated match
+  const getBlockedConflictForMatch = (match: GeneratedDrawMatch): BlockedSchedulePeriod | null => {
+    if (!match.date || blockedPeriods.length === 0) return null;
+    const cycles = getMatchEducationalCycles(
+      {
+        team1Id: match.team1Id,
+        team2Id: match.team2Id,
+        ageCategory: selectedTournament?.ageCategory,
+        level: selectedTournament?.level,
+        tournamentId: selectedTournament?.id
+      },
+      schools,
+      selectedTournament ? [selectedTournament] : []
+    );
+    return findBlockedPeriodForDate(match.date, cycles, blockedPeriods);
+  };
+
+  const blockedGeneratedMatches = useMemo(() => {
+    return generatedMatches
+      .map((m) => ({ match: m, period: getBlockedConflictForMatch(m) }))
+      .filter((x): x is { match: GeneratedDrawMatch; period: BlockedSchedulePeriod } => Boolean(x.period));
+  }, [generatedMatches, blockedPeriods, selectedTournament, schools]);
+
+  const hasBlockedMatchesRestriction = blockedGeneratedMatches.length > 0 && !isRegionalOrCentralAdmin;
+
   // Save all matches to database
   const handleSaveMatchesToDatabase = async () => {
     if (!selectedTournament) {
@@ -1108,6 +1153,15 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
     }
     if (generatedMatches.length === 0) {
       toast.error('لا توجد مباريات لحفظها');
+      return;
+    }
+    if (blockedGeneratedMatches.length > 0 && !isRegionalOrCentralAdmin) {
+      const first = blockedGeneratedMatches[0];
+      const kindLabel = first.period.type === 'exams' ? 'فترة الفروض والامتحانات' : 'عطلة مدرسية';
+      toast.error(
+        `ممنوع حفظ البرمجة: مقابلة (${first.match.team1Name} ضد ${first.match.team2Name}) بتاريخ ${first.match.date} تصادف ${kindLabel} (${first.period.title}) للسلك المعني.`,
+        { duration: 6000 }
+      );
       return;
     }
 
@@ -2181,12 +2235,28 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
                     const assignedRefIds = match.refereeIds && match.refereeIds.length > 0
                       ? match.refereeIds
                       : (match.refereeId ? [match.refereeId] : []);
+                    const matchBlockedPeriod = getBlockedConflictForMatch(match);
 
                     return (
                       <div
                         key={match.id}
-                        className="p-4 bg-slate-50 border border-slate-200 rounded-2xl flex flex-col gap-3 text-xs shadow-2xs hover:border-slate-300 transition-colors"
+                        className={`p-4 rounded-2xl flex flex-col gap-3 text-xs shadow-2xs transition-colors border ${
+                          matchBlockedPeriod
+                            ? 'bg-rose-50/70 border-rose-300'
+                            : 'bg-slate-50 border-slate-200 hover:border-slate-300'
+                        }`}
                       >
+                        {matchBlockedPeriod && (
+                          <div className="p-2.5 rounded-xl bg-rose-100 border border-rose-300 text-rose-950 text-[11px] font-bold flex items-center gap-2">
+                            <Lock className="w-4 h-4 text-rose-600 shrink-0" />
+                            <span>
+                              ⛔ التاريخ <span className="font-mono font-black" dir="ltr">{match.date}</span> محظور للسلك المعني:{' '}
+                              <strong>
+                                {matchBlockedPeriod.type === 'exams' ? 'فروض / امتحانات' : 'عطلة مدرسية'} ({matchBlockedPeriod.title})
+                              </strong>
+                            </span>
+                          </div>
+                        )}
                         {/* Match Header: Teams & Stage */}
                         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200/70 pb-2.5">
                           <div className="space-y-1">
@@ -2219,7 +2289,9 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
                               type="date"
                               value={match.date}
                               onChange={(e) => handleUpdateMatchField(match.id, 'date', e.target.value)}
-                              className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-xl font-bold text-slate-800"
+                              className={`w-full px-2.5 py-1.5 bg-white border rounded-xl font-bold text-slate-800 ${
+                                matchBlockedPeriod ? 'border-rose-500 ring-1 ring-rose-300' : 'border-slate-200'
+                              }`}
                             />
                           </div>
 
@@ -2434,6 +2506,18 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
                 </div>
               </div>
 
+              {/* Blocked Matches Restriction Summary */}
+              {blockedGeneratedMatches.length > 0 && (
+                <div className="p-3.5 rounded-2xl border-2 border-rose-300 bg-rose-50 text-xs font-bold text-rose-950 flex items-center gap-2.5">
+                  <Lock className="w-4 h-4 text-rose-600 shrink-0" />
+                  <span>
+                    {hasBlockedMatchesRestriction
+                      ? `⛔ توجد ${blockedGeneratedMatches.length} مقابلة مبرمجة في تواريخ عطل أو فروض محظورة للسلك المعني. يرجى تعديل تواريخها قبل الحفظ.`
+                      : `⚠️ تنبيه: توجد ${blockedGeneratedMatches.length} مقابلة تصادف تواريخ عطل أو فروض مسجلة في المنظومة.`}
+                  </span>
+                </div>
+              )}
+
               {/* Final Submit & Save to Database */}
               <div className="flex items-center justify-between pt-4 border-t border-slate-200">
                 <button
@@ -2445,11 +2529,17 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
 
                 <button
                   onClick={handleSaveMatchesToDatabase}
-                  disabled={isSaving || generatedMatches.length === 0}
-                  className="px-7 py-3 bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 text-white rounded-2xl text-xs font-black flex items-center gap-2 shadow-xl shadow-emerald-600/30 cursor-pointer disabled:opacity-50"
+                  disabled={isSaving || generatedMatches.length === 0 || hasBlockedMatchesRestriction}
+                  className="px-7 py-3 bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 text-white rounded-2xl text-xs font-black flex items-center gap-2 shadow-xl shadow-emerald-600/30 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <Save className="w-4 h-4" />
-                  <span>{isSaving ? 'جاري الحفظ والاعتماد...' : 'حفظ واعتماد جدول المباريات والحكام في المنظومة'}</span>
+                  <span>
+                    {isSaving
+                      ? 'جاري الحفظ والاعتماد...'
+                      : hasBlockedMatchesRestriction
+                      ? 'ممنوع الحفظ في تاريخ عطلة أو فروض'
+                      : 'حفظ واعتماد جدول المباريات والحكام في المنظومة'}
+                  </span>
                 </button>
               </div>
 

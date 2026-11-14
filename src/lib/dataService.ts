@@ -1,4 +1,4 @@
-import { Tournament, Match, School, Venue, User, Referee, Student, Sport, AppNotification, RoleSidebarPermissions, Directorate, DirectorateTransferRequest, SUPER_ADMIN_EMAILS, CrossCountryCategoryResult, PodiumWinner, CustomAgeCategory, AthleticsCategoryResult, AthleticsWinner, SchoolTournamentConfirmation, SchoolWithdrawalRecord } from '../types';
+import { Tournament, Match, School, Venue, User, Referee, Student, Sport, AppNotification, RoleSidebarPermissions, Directorate, DirectorateTransferRequest, SUPER_ADMIN_EMAILS, CrossCountryCategoryResult, PodiumWinner, CustomAgeCategory, AthleticsCategoryResult, AthleticsWinner, SchoolTournamentConfirmation, SchoolWithdrawalRecord, InternalMessage, CommunicationRecipientCategory, BlockedSchedulePeriod, EducationalCycleKey } from '../types';
 import { INITIAL_TOURNAMENTS, INITIAL_MATCHES, INITIAL_SCHOOLS, INITIAL_VENUES, INITIAL_DIRECTORATES } from './initialData';
 import { INITIAL_CROSS_COUNTRY_RESULTS } from './crossCountryConfig';
 import { db } from '../firebase/config';
@@ -18,7 +18,8 @@ import {
   onSnapshot as fbOnSnapshot,
   writeBatch as fbWriteBatch,
   disableNetwork,
-  enableNetwork
+  enableNetwork,
+  arrayUnion
 } from 'firebase/firestore';
 import { isFlexibleEmailMatch, fixTeacherFieldJumble, normalizeArabicName, normalizeDateToYmd, formatMatchDate } from './utils';
 export { normalizeDateToYmd };
@@ -4655,13 +4656,137 @@ export const DataService = {
 
     try {
       const docRef = doc(db, 'notifications', id);
-      const readByList = updated.find(n => n.id === id)?.readBy || [userId];
-      await updateDoc(docRef, {
-        readBy: readByList
-      });
+      await fbSetDoc(docRef, {
+        readBy: arrayUnion(userId)
+      }, { merge: true });
     } catch (e) {
       console.warn("Updated notification read state locally:", e);
     }
+  },
+
+  getLocalDeletedNotificationIds(userId: string): string[] {
+    if (!userId) return [];
+    try {
+      const raw = localStorage.getItem(`taourirt_deleted_notifs_${userId}`);
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
+  },
+
+  async deleteNotificationForUser(id: string, userId: string): Promise<void> {
+    if (!id || !userId) return;
+    try {
+      const current = this.getLocalDeletedNotificationIds(userId);
+      if (!current.includes(id)) {
+        localStorage.setItem(`taourirt_deleted_notifs_${userId}`, JSON.stringify([...current, id]));
+      }
+    } catch {}
+
+    const localList = getLocal<AppNotification>('taourirt_notifications_data', []);
+    const updated = localList.map(n => {
+      if (n.id === id) {
+        const deletedBy = n.deletedBy || [];
+        if (!deletedBy.includes(userId)) {
+          return { ...n, deletedBy: [...deletedBy, userId] };
+        }
+      }
+      return n;
+    });
+    setLocal('taourirt_notifications_data', updated);
+
+    try {
+      await fbSetDoc(doc(db, 'notifications', id), {
+        deletedBy: arrayUnion(userId)
+      }, { merge: true });
+    } catch (e) {
+      console.warn("Deleted notification for user locally:", e);
+    }
+  },
+
+  async deleteAllNotificationsForUser(ids: string[], userId: string): Promise<void> {
+    if (!userId || ids.length === 0) return;
+    try {
+      const current = this.getLocalDeletedNotificationIds(userId);
+      const merged = Array.from(new Set([...current, ...ids]));
+      localStorage.setItem(`taourirt_deleted_notifs_${userId}`, JSON.stringify(merged));
+    } catch {}
+
+    const localList = getLocal<AppNotification>('taourirt_notifications_data', []);
+    const updated = localList.map(n => {
+      if (ids.includes(n.id)) {
+        const deletedBy = n.deletedBy || [];
+        if (!deletedBy.includes(userId)) {
+          return { ...n, deletedBy: [...deletedBy, userId] };
+        }
+      }
+      return n;
+    });
+    setLocal('taourirt_notifications_data', updated);
+
+    await Promise.all(
+      ids.map(id =>
+        fbSetDoc(doc(db, 'notifications', id), {
+          deletedBy: arrayUnion(userId)
+        }, { merge: true }).catch(() => {})
+      )
+    );
+  },
+
+  getLocalGlobalNotificationResetAt(): number {
+    try {
+      const raw = localStorage.getItem('taourirt_notifications_global_reset_at');
+      const parsed = raw ? Number(raw) : 0;
+      return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+    } catch {
+      return 0;
+    }
+  },
+
+  async resetAllNotificationsForAllUsers(resetByName?: string): Promise<{ deletedCount: number; resetAtMs: number }> {
+    const resetAtMs = Date.now();
+    // 1. Clear local notification cache immediately & store reset watermark
+    setLocal('taourirt_notifications_data', []);
+    try {
+      localStorage.setItem('taourirt_notifications_global_reset_at', String(resetAtMs));
+    } catch {}
+
+    let deletedCount = 0;
+
+    // 2. Delete all notification documents from Firestore in batches so all supervisors/teachers see empty bells
+    try {
+      const snap = await fbGetDocs(collection(db, 'notifications'));
+      deletedCount = snap.size;
+      if (!snap.empty) {
+        const docs = snap.docs;
+        for (let i = 0; i < docs.length; i += 400) {
+          const chunk = docs.slice(i, i + 400);
+          const batch = fbWriteBatch(db);
+          chunk.forEach(d => batch.delete(d.ref));
+          await batch.commit();
+        }
+      }
+    } catch (e) {
+      console.warn('Error clearing Firestore notifications collection:', e);
+    }
+
+    // 3. Persist server-side globalResetAt timestamp so any offline/cached client also resets immediately on sync
+    try {
+      await fbSetDoc(
+        doc(db, 'settings', 'notifications_meta'),
+        {
+          globalResetAt: serverTimestamp(),
+          resetBy: resetByName || 'المسير المركزي',
+          updatedAt: serverTimestamp()
+        },
+        { merge: true }
+      );
+    } catch (e) {
+      console.warn('Error saving notifications_meta globalResetAt:', e);
+    }
+
+    window.dispatchEvent(new CustomEvent('notificationsGloballyReset', { detail: { resetAtMs } }));
+    return { deletedCount, resetAtMs };
   },
 
   async triggerMatchNotification(type: 'create' | 'update' | 'result', match: Match) {
@@ -6633,6 +6758,450 @@ export const DataService = {
       await Promise.all(removedIds.map(id => deleteDoc(doc(db, 'school_withdrawals', id)).catch(() => {})));
     }
     window.dispatchEvent(new CustomEvent('schoolWithdrawalsUpdated'));
+  },
+
+  // ============================================================================
+  // INTERNAL COMMUNICATION SYSTEM ("تواصل": البريد الوارد والمرسل)
+  // ============================================================================
+  async getInternalMessages(): Promise<InternalMessage[]> {
+    const localList = getLocal<InternalMessage>('taourirt_internal_messages', []);
+    if (this.isCloudSyncPaused()) {
+      return localList;
+    }
+    try {
+      const snap = await fbGetDocs(collection(db, 'announcements'));
+      const cloudMsgs: InternalMessage[] = [];
+      snap.forEach(d => {
+        const data = d.data() as any;
+        if (data && data.recordKind === 'internal_message') {
+          let createdIso = new Date().toISOString();
+          if (typeof data.createdAt === 'string') {
+            createdIso = data.createdAt;
+          } else if (data.createdAt?.toDate) {
+            createdIso = data.createdAt.toDate().toISOString();
+          } else if (data.createdAt?.seconds) {
+            createdIso = new Date(data.createdAt.seconds * 1000).toISOString();
+          }
+          cloudMsgs.push({
+            id: d.id,
+            senderId: data.senderId || '',
+            senderName: data.senderName || 'مستخدم',
+            senderRoleLabel: data.senderRoleLabel || '',
+            senderEmail: data.senderEmail || '',
+            recipientId: data.recipientId || '',
+            recipientName: data.recipientName || '',
+            recipientCategory: (data.recipientCategory || 'TEACHER') as CommunicationRecipientCategory,
+            recipientRoleLabel: data.recipientRoleLabel || '',
+            subject: data.subject || 'رسالة جديدة',
+            content: data.content || '',
+            createdAt: createdIso,
+            readBy: Array.isArray(data.readBy) ? data.readBy : [],
+            deletedBy: Array.isArray(data.deletedBy) ? data.deletedBy : [],
+            directorateId: data.directorateId
+          });
+        }
+      });
+      if (cloudMsgs.length > 0) {
+        const map = new Map<string, InternalMessage>();
+        [...localList, ...cloudMsgs].forEach(m => map.set(m.id, m));
+        const merged = Array.from(map.values()).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+        setLocal('taourirt_internal_messages', merged);
+        return merged;
+      }
+    } catch (e) {
+      console.warn('Firestore getInternalMessages fallback to local:', e);
+    }
+    return localList.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+  },
+
+  subscribeToInternalMessages(callback: (msgs: InternalMessage[]) => void): () => void {
+    const localInitial = getLocal<InternalMessage>('taourirt_internal_messages', []);
+    callback(localInitial.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')));
+
+    const handleLocalUpdate = () => {
+      const updated = getLocal<InternalMessage>('taourirt_internal_messages', []);
+      callback(updated.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')));
+    };
+    window.addEventListener('internalMessagesUpdated', handleLocalUpdate);
+
+    if (this.isCloudSyncPaused()) {
+      return () => {
+        window.removeEventListener('internalMessagesUpdated', handleLocalUpdate);
+      };
+    }
+
+    const unsub = fbOnSnapshot(
+      collection(db, 'announcements'),
+      (snap) => {
+        const cloudMsgs: InternalMessage[] = [];
+        snap.forEach(d => {
+          const data = d.data() as any;
+          if (data && data.recordKind === 'internal_message') {
+            let createdIso = new Date().toISOString();
+            if (typeof data.createdAt === 'string') {
+              createdIso = data.createdAt;
+            } else if (data.createdAt?.toDate) {
+              createdIso = data.createdAt.toDate().toISOString();
+            } else if (data.createdAt?.seconds) {
+              createdIso = new Date(data.createdAt.seconds * 1000).toISOString();
+            }
+            cloudMsgs.push({
+              id: d.id,
+              senderId: data.senderId || '',
+              senderName: data.senderName || 'مستخدم',
+              senderRoleLabel: data.senderRoleLabel || '',
+              senderEmail: data.senderEmail || '',
+              recipientId: data.recipientId || '',
+              recipientName: data.recipientName || '',
+              recipientCategory: (data.recipientCategory || 'TEACHER') as CommunicationRecipientCategory,
+              recipientRoleLabel: data.recipientRoleLabel || '',
+              subject: data.subject || 'رسالة جديدة',
+              content: data.content || '',
+              createdAt: createdIso,
+              readBy: Array.isArray(data.readBy) ? data.readBy : [],
+              deletedBy: Array.isArray(data.deletedBy) ? data.deletedBy : [],
+              directorateId: data.directorateId
+            });
+          }
+        });
+        const currentLocal = getLocal<InternalMessage>('taourirt_internal_messages', []);
+        const map = new Map<string, InternalMessage>();
+        currentLocal.forEach(m => map.set(m.id, m));
+        cloudMsgs.forEach(m => map.set(m.id, m));
+        const merged = Array.from(map.values()).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+        setLocal('taourirt_internal_messages', merged);
+        callback(merged);
+      },
+      () => {
+        handleLocalUpdate();
+      }
+    );
+
+    return () => {
+      window.removeEventListener('internalMessagesUpdated', handleLocalUpdate);
+      try {
+        unsub();
+      } catch {}
+    };
+  },
+
+  async sendInternalMessage(
+    msg: Omit<InternalMessage, 'id' | 'createdAt'>
+  ): Promise<InternalMessage> {
+    const activeDirId = this.getActiveDirectorateId() || 'taourirt';
+    const newId = `msg-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    const nowIso = new Date().toISOString();
+    const record: InternalMessage = {
+      ...msg,
+      id: newId,
+      createdAt: nowIso,
+      readBy: msg.readBy || [msg.senderId],
+      deletedBy: msg.deletedBy || [],
+      directorateId: msg.directorateId || activeDirId
+    };
+
+    const current = getLocal<InternalMessage>('taourirt_internal_messages', []);
+    setLocal('taourirt_internal_messages', [record, ...current]);
+    window.dispatchEvent(new CustomEvent('internalMessagesUpdated'));
+
+    try {
+      await fbSetDoc(doc(db, 'announcements', newId), {
+        ...stripUndefinedDeep(record),
+        recordKind: 'internal_message',
+        createdAt: nowIso
+      });
+    } catch (e) {
+      console.warn('Internal message saved locally; Firestore sync pending:', e);
+    }
+
+    // Trigger a private targeted bell notification to recipient ONLY
+    try {
+      await this.addNotification({
+        title: `📩 رسالة جديدة من: ${msg.senderName}`,
+        body: `${msg.subject ? msg.subject + ' — ' : ''}${msg.content.slice(0, 140)}`,
+        role: 'PRIVATE_MSG',
+        isDirectMessage: true,
+        userIds: [msg.recipientId],
+        directorateId: activeDirId
+      });
+    } catch {}
+
+    return record;
+  },
+
+  async markInternalMessageAsRead(id: string, userId: string): Promise<void> {
+    if (!id || !userId) return;
+    const current = getLocal<InternalMessage>('taourirt_internal_messages', []);
+    const updated = current.map(m => {
+      if (m.id === id) {
+        const readBy = m.readBy || [];
+        if (!readBy.includes(userId)) {
+          return { ...m, readBy: [...readBy, userId] };
+        }
+      }
+      return m;
+    });
+    setLocal('taourirt_internal_messages', updated);
+    window.dispatchEvent(new CustomEvent('internalMessagesUpdated'));
+
+    try {
+      await fbSetDoc(doc(db, 'announcements', id), {
+        readBy: arrayUnion(userId)
+      }, { merge: true });
+    } catch {}
+  },
+
+  async deleteInternalMessageForUser(id: string, userId: string): Promise<void> {
+    if (!id || !userId) return;
+    const current = getLocal<InternalMessage>('taourirt_internal_messages', []);
+    const updated = current.map(m => {
+      if (m.id === id) {
+        const deletedBy = m.deletedBy || [];
+        if (!deletedBy.includes(userId)) {
+          return { ...m, deletedBy: [...deletedBy, userId] };
+        }
+      }
+      return m;
+    });
+    setLocal('taourirt_internal_messages', updated);
+    window.dispatchEvent(new CustomEvent('internalMessagesUpdated'));
+
+    try {
+      await fbSetDoc(doc(db, 'announcements', id), {
+        deletedBy: arrayUnion(userId)
+      }, { merge: true });
+    } catch {}
+  },
+
+  async getCommunicationRecipients(): Promise<Array<{
+    id: string;
+    name: string;
+    category: CommunicationRecipientCategory;
+    roleLabel: string;
+    subtitle: string;
+    email?: string;
+    phone?: string;
+  }>> {
+    const [allUsers, allReferees] = await Promise.all([
+      this.getUsers().catch(() => [] as User[]),
+      this.getReferees().catch(() => [] as Referee[])
+    ]);
+
+    const items: Array<{
+      id: string;
+      name: string;
+      category: CommunicationRecipientCategory;
+      roleLabel: string;
+      subtitle: string;
+      email?: string;
+      phone?: string;
+    }> = [];
+    const seenKeys = new Set<string>();
+
+    allUsers.forEach(u => {
+      if (!u || !u.id || !u.fullName) return;
+
+      const isAdmin =
+        u.role === 'CENTRAL_ADMIN' ||
+        u.role === 'SUPER_ADMIN' ||
+        u.isSuperAdmin === true ||
+        Boolean(u.email && SUPER_ADMIN_EMAILS.some(e => isFlexibleEmailMatch(e, u.email!)));
+
+      if (isAdmin) {
+        const key = `CENTRAL_ADMIN_${u.id}`;
+        if (!seenKeys.has(key)) {
+          seenKeys.add(key);
+          items.push({
+            id: u.id,
+            name: u.fullName,
+            category: 'CENTRAL_ADMIN',
+            roleLabel: u.isSuperAdmin ? 'المسؤول المركزي' : 'المسير المركزي / الإقليمي',
+            subtitle: u.directorateName || u.workLocation || 'المديرية الإقليمية',
+            email: u.email,
+            phone: u.phone
+          });
+        }
+      }
+
+      if (u.isTechCommitteeHead || u.role === 'TECH_HEAD' || (u.role as string) === 'TECH_COMMITTEE_HEAD') {
+        const key = `TECH_COMMITTEE_HEAD_${u.id}`;
+        if (!seenKeys.has(key)) {
+          seenKeys.add(key);
+          const sportsText = (u.techCommitteeSports || [])
+            .map(sid => SPORTS_MAP[sid]?.name || sid)
+            .join('، ');
+          items.push({
+            id: u.id,
+            name: u.fullName,
+            category: 'TECH_COMMITTEE_HEAD',
+            roleLabel: 'رئيس اللجنة التقنية',
+            subtitle: sportsText ? `التخصص: ${sportsText}` : (u.workLocation || 'رئيس لجنة تقنية'),
+            email: u.email,
+            phone: u.phone
+          });
+        }
+      }
+
+      const isRefUser = u.role === 'REFEREE' || (Array.isArray(u.refereeSpecialty) && u.refereeSpecialty.length > 0);
+      if (isRefUser) {
+        const key = `REFEREE_${u.id}`;
+        if (!seenKeys.has(key)) {
+          seenKeys.add(key);
+          const specText = (u.refereeSpecialty || [])
+            .map(sid => SPORTS_MAP[sid]?.name || sid)
+            .join('، ');
+          items.push({
+            id: u.id,
+            name: u.fullName,
+            category: 'REFEREE',
+            roleLabel: 'حكم معتمد',
+            subtitle: specText ? `التحكيم: ${specText}` : (u.workLocation || 'حكم'),
+            email: u.email,
+            phone: u.phone
+          });
+        }
+      }
+
+      if (!u.role || u.role === 'TEACHER' || u.role === 'SPORT_MANAGER') {
+        const key = `TEACHER_${u.id}`;
+        if (!seenKeys.has(key)) {
+          seenKeys.add(key);
+          items.push({
+            id: u.id,
+            name: u.fullName,
+            category: 'TEACHER',
+            roleLabel: u.role === 'SPORT_MANAGER' ? 'منسق / مسير رياضي' : 'أستاذ(ة) التربية البدنية',
+            subtitle: u.workLocation || 'مؤسسة تعليمية',
+            email: u.email,
+            phone: u.phone
+          });
+        }
+      }
+    });
+
+    allReferees.forEach(ref => {
+      if (!ref || !ref.fullName) return;
+      const targetId = ref.teacherId || ref.id;
+      const key = `REFEREE_${targetId}`;
+      const matchedByName = items.some(
+        i => i.category === 'REFEREE' && normalizeArabicName(i.name) === normalizeArabicName(ref.fullName)
+      );
+      if (!seenKeys.has(key) && !matchedByName) {
+        seenKeys.add(key);
+        const specs = Array.isArray(ref.specialty)
+          ? ref.specialty.map(sid => SPORTS_MAP[sid]?.name || sid).join('، ')
+          : '';
+        items.push({
+          id: targetId,
+          name: ref.fullName,
+          category: 'REFEREE',
+          roleLabel: 'حكم معتمد',
+          subtitle: specs ? `التحكيم: ${specs}` : (ref.workLocation || 'حكم معتمد'),
+          email: ref.email,
+          phone: ref.phone
+        });
+      }
+    });
+
+    return items.sort((a, b) => a.name.localeCompare(b.name, 'ar'));
+  },
+
+  // ============================================================================
+  // REGIONAL HOLIDAYS & EXAM DATES BLOCKLIST ("لائحة العطل وتواريخ الفروض")
+  // ============================================================================
+  async getBlockedScheduleDates(directorateId?: string): Promise<BlockedSchedulePeriod[]> {
+    const activeDirId = directorateId || this.getActiveDirectorateId() || 'taourirt';
+    const localKey = `taourirt_blocked_schedule_${activeDirId}`;
+    const localList = getLocal<BlockedSchedulePeriod>(localKey, []);
+
+    if (this.isCloudSyncPaused()) {
+      return localList;
+    }
+
+    try {
+      const snap = await fbGetDoc(doc(db, 'settings', `blocked_schedule_dates_${activeDirId}`));
+      if (snap.exists()) {
+        const data = snap.data() as any;
+        if (Array.isArray(data?.periods)) {
+          setLocal(localKey, data.periods);
+          return data.periods;
+        }
+      }
+    } catch (e) {
+      console.warn('getBlockedScheduleDates fallback to local:', e);
+    }
+
+    return localList;
+  },
+
+  subscribeToBlockedScheduleDates(
+    callback: (periods: BlockedSchedulePeriod[]) => void,
+    directorateId?: string
+  ): () => void {
+    const activeDirId = directorateId || this.getActiveDirectorateId() || 'taourirt';
+    const localKey = `taourirt_blocked_schedule_${activeDirId}`;
+    callback(getLocal<BlockedSchedulePeriod>(localKey, []));
+
+    const handleLocal = () => {
+      callback(getLocal<BlockedSchedulePeriod>(localKey, []));
+    };
+    window.addEventListener('blockedScheduleDatesUpdated', handleLocal);
+
+    if (this.isCloudSyncPaused()) {
+      return () => {
+        window.removeEventListener('blockedScheduleDatesUpdated', handleLocal);
+      };
+    }
+
+    const unsub = fbOnSnapshot(
+      doc(db, 'settings', `blocked_schedule_dates_${activeDirId}`),
+      (snap) => {
+        if (snap.exists()) {
+          const data = snap.data() as any;
+          if (Array.isArray(data?.periods)) {
+            setLocal(localKey, data.periods);
+            callback(data.periods);
+          }
+        }
+      },
+      () => {
+        handleLocal();
+      }
+    );
+
+    return () => {
+      window.removeEventListener('blockedScheduleDatesUpdated', handleLocal);
+      try {
+        unsub();
+      } catch {}
+    };
+  },
+
+  async saveBlockedScheduleDates(
+    periods: BlockedSchedulePeriod[],
+    directorateId?: string
+  ): Promise<void> {
+    const activeDirId = directorateId || this.getActiveDirectorateId() || 'taourirt';
+    const localKey = `taourirt_blocked_schedule_${activeDirId}`;
+    const cleanPeriods = periods.map(p => ({
+      ...p,
+      startDate: normalizeDateToYmd(p.startDate) || p.startDate,
+      endDate: normalizeDateToYmd(p.endDate || p.startDate) || p.endDate || p.startDate,
+      directorateId: activeDirId
+    }));
+
+    setLocal(localKey, cleanPeriods);
+    window.dispatchEvent(new CustomEvent('blockedScheduleDatesUpdated', { detail: cleanPeriods }));
+
+    try {
+      await fbSetDoc(doc(db, 'settings', `blocked_schedule_dates_${activeDirId}`), {
+        periods: cleanPeriods,
+        directorateId: activeDirId,
+        updatedAt: serverTimestamp()
+      });
+    } catch (e) {
+      console.warn('saveBlockedScheduleDates saved locally; Firestore sync pending:', e);
+    }
   }
 };
 
@@ -6770,6 +7339,86 @@ export function formatBranchLabelAr(branch: ConfirmedBranchTuple, sportId?: stri
   const catGenderTitle = getGenderSpecificCategoryTitle(branch.category, branch.gender, sportId);
   return `${affLabel} — ${catGenderTitle}`;
 }
+
+export const EDUCATIONAL_CYCLE_LABELS: Record<EducationalCycleKey, string> = {
+  'ابتدائي': 'التعليم الابتدائي',
+  'إعدادي': 'الثانوي الإعدادي',
+  'تأهيلي': 'الثانوي التأهيلي',
+  'خصوصي': 'التعليم الخصوصي',
+  'ALL': 'جميع الأسلاك التعليمية'
+};
+
+/**
+ * Resolves the educational cycle(s) involved in a match based on the participating schools
+ * and (as fallback) tournament level / age category.
+ */
+export function getMatchEducationalCycles(
+  params: {
+    team1Id?: string;
+    team2Id?: string;
+    ageCategory?: string;
+    level?: string;
+    tournamentId?: string;
+  },
+  schools: School[] = [],
+  tournaments: Tournament[] = []
+): ('ابتدائي' | 'إعدادي' | 'تأهيلي' | 'خصوصي')[] {
+  const cycles = new Set<'ابتدائي' | 'إعدادي' | 'تأهيلي' | 'خصوصي'>();
+
+  const s1 = params.team1Id ? schools.find(s => s.id === params.team1Id || s.name === params.team1Id) : undefined;
+  const s2 = params.team2Id ? schools.find(s => s.id === params.team2Id || s.name === params.team2Id) : undefined;
+
+  if (s1) cycles.add(normalizeSchoolCycleType(s1) as 'ابتدائي' | 'إعدادي' | 'تأهيلي' | 'خصوصي');
+  if (s2) cycles.add(normalizeSchoolCycleType(s2) as 'ابتدائي' | 'إعدادي' | 'تأهيلي' | 'خصوصي');
+
+  if (cycles.size === 0) {
+    const tourn = params.tournamentId ? tournaments.find(t => t.id === params.tournamentId) : undefined;
+    const rawLevel = (params.level || tourn?.level || '').toLowerCase();
+    if (rawLevel.includes('primary') || rawLevel.includes('ابتدائ')) cycles.add('ابتدائي');
+    if (rawLevel.includes('middle') || rawLevel.includes('إعداد') || rawLevel.includes('اعداد')) cycles.add('إعدادي');
+    if (rawLevel.includes('high') || rawLevel.includes('تأهيل') || rawLevel.includes('تاهيل')) cycles.add('تأهيلي');
+
+    if (cycles.size === 0 && (params.ageCategory || tourn?.ageCategory)) {
+      const cat = normalizeCategoryKey(params.ageCategory || tourn?.ageCategory || '');
+      if (cat === 'U12') cycles.add('ابتدائي');
+      else if (cat === 'U15') cycles.add('إعدادي');
+      else if (cat === 'U18' || cat === 'U20') cycles.add('تأهيلي');
+    }
+  }
+
+  return Array.from(cycles);
+}
+
+/**
+ * Checks whether a target date (YYYY-MM-DD) falls inside any blocked holiday or exam period
+ * for the given educational cycle(s).
+ */
+export function findBlockedPeriodForDate(
+  dateStr: string,
+  matchCycles: string[],
+  periods: BlockedSchedulePeriod[]
+): BlockedSchedulePeriod | null {
+  const ymd = normalizeDateToYmd(dateStr);
+  if (!ymd || !Array.isArray(periods) || periods.length === 0) return null;
+
+  for (const period of periods) {
+    const start = normalizeDateToYmd(period.startDate) || period.startDate;
+    const end = normalizeDateToYmd(period.endDate || period.startDate) || period.endDate || start;
+    if (!start || !end) continue;
+
+    if (ymd >= start && ymd <= end) {
+      const targets = Array.isArray(period.targetCycles) && period.targetCycles.length > 0
+        ? period.targetCycles
+        : (['ALL'] as EducationalCycleKey[]);
+      if (targets.includes('ALL') || matchCycles.some(c => targets.includes(c as EducationalCycleKey))) {
+        return period;
+      }
+    }
+  }
+
+  return null;
+}
+
 
 
 

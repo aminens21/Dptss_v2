@@ -371,11 +371,48 @@ export interface AppNotification {
   title: string;
   body: string;
   sportId?: string; // التخصص الرياضي المعني
-  role?: Role | 'ALL'; // الصفة المعنية (أستاذ، حكم، إلخ)
+  role?: Role | 'ALL' | 'PRIVATE_MSG'; // الصفة المعنية (أستاذ، حكم، إلخ)
   userIds?: string[]; // مستخدمين محددين مستهدفين بالخصوص
   createdAt: any;
   readBy?: string[]; // قائمة معرفات المستخدمين الذين قرأوا الإشعار
+  deletedBy?: string[]; // قائمة معرفات المستخدمين الذين حذفوا الإشعار من حسابهم فقط
+  isDirectMessage?: boolean;
   directorateId?: string;
+}
+
+export type CommunicationRecipientCategory = 'CENTRAL_ADMIN' | 'TECH_COMMITTEE_HEAD' | 'TEACHER' | 'REFEREE';
+
+export interface InternalMessage {
+  id: string;
+  senderId: string;
+  senderName: string;
+  senderRoleLabel?: string;
+  senderEmail?: string;
+  recipientId: string;
+  recipientName: string;
+  recipientCategory: CommunicationRecipientCategory;
+  recipientRoleLabel?: string;
+  subject: string;
+  content: string;
+  createdAt: string;
+  readBy?: string[];
+  deletedBy?: string[];
+  directorateId?: string;
+}
+
+export type EducationalCycleKey = 'ابتدائي' | 'إعدادي' | 'تأهيلي' | 'خصوصي' | 'ALL';
+
+export interface BlockedSchedulePeriod {
+  id: string;
+  title: string;
+  type: 'holiday' | 'exams';
+  startDate: string; // YYYY-MM-DD
+  endDate: string;   // YYYY-MM-DD
+  targetCycles: EducationalCycleKey[];
+  notes?: string;
+  directorateId?: string;
+  createdBy?: string;
+  createdAt?: string;
 }
 
 export interface PodiumWinner {

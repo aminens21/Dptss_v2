@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom';
-import { useAuth } from '../../contexts/AuthContext';
+import { useAuth, isSuperAdminEmail } from '../../contexts/AuthContext';
 import { useTheme } from '../../contexts/ThemeContext';
 import { auth } from '../../firebase/config';
 import { signOut } from 'firebase/auth';
@@ -42,11 +42,14 @@ import {
   Wrench,
   Boxes,
   Sun,
-  Moon
+  Moon,
+  Trash2,
+  BellOff
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import toast from 'react-hot-toast';
 import { TeacherProfileModal } from '../TeacherProfileModal';
+import { CommunicationWidget } from '../CommunicationWidget';
 import { DataService } from '../../lib/dataService';
 import {
   syncPendingLocalImportsToCloud,
@@ -66,6 +69,23 @@ export const AppLayout: React.FC = () => {
   const location = useLocation();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [isSidebarFooterExpanded, setIsSidebarFooterExpanded] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem('taourirt_sidebar_footer_expanded');
+      return saved !== null ? saved === 'true' : true;
+    } catch {
+      return true;
+    }
+  });
+  const toggleSidebarFooter = () => {
+    setIsSidebarFooterExpanded((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem('taourirt_sidebar_footer_expanded', String(next));
+      } catch {}
+      return next;
+    });
+  };
   const [isSettingsOpen, setIsSettingsOpen] = useState(location.pathname === '/sports-config');
   const [isTournamentsExpanded, setIsTournamentsExpanded] = useState(location.pathname.startsWith('/tournaments'));
   const [isTeachersExpanded, setIsTeachersExpanded] = useState(location.pathname.startsWith('/teachers'));
@@ -437,8 +457,20 @@ export const AppLayout: React.FC = () => {
     }
   }, [location.pathname]);
 
-  const { notifications, unreadCount, permission, requestPermission, markAsRead, markAllAsRead } = useNotifications();
+  const {
+    notifications,
+    unreadCount,
+    permission,
+    requestPermission,
+    markAsRead,
+    markAllAsRead,
+    deleteNotification,
+    deleteAllNotifications,
+    resetAllBellsForAllUsers
+  } = useNotifications();
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
+  const [confirmGlobalBellReset, setConfirmGlobalBellReset] = useState(false);
+  const [isResettingGlobalBells, setIsResettingGlobalBells] = useState(false);
   const notificationsRef = useRef<HTMLDivElement>(null);
 
   const formatNotificationTime = (isoString?: string) => {
@@ -482,7 +514,8 @@ export const AppLayout: React.FC = () => {
   const isSuperOrCentral =
     isCentralAdmin ||
     userProfile?.isSuperAdmin === true ||
-    userProfile?.role === 'SUPER_ADMIN';
+    userProfile?.role === 'SUPER_ADMIN' ||
+    isSuperAdminEmail(userProfile?.email);
   const isTechCommitteeHead =
     userProfile?.isTechCommitteeHead === true ||
     userProfile?.role === 'TECH_HEAD' ||
@@ -832,74 +865,123 @@ export const AppLayout: React.FC = () => {
           })}
         </nav>
 
-        {/* About App Button */}
-        {!isSidebarCollapsed && (
-          <div className="px-3 py-1">
+        {/* Collapsible Sidebar Footer Section (Desktop) */}
+        {!isSidebarCollapsed ? (
+          <div className="border-t border-slate-200 dark:border-slate-700/80 bg-slate-50/80 dark:bg-slate-900/70 shrink-0">
             <button
               type="button"
-              onClick={() => setIsAboutModalOpen(true)}
-              className="flex w-full items-center gap-2.5 px-3 py-2 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:text-emerald-800 dark:hover:text-white hover:bg-emerald-50 dark:hover:bg-slate-800 rounded-xl transition-all cursor-pointer border border-transparent hover:border-slate-200 dark:hover:border-slate-700"
+              onClick={toggleSidebarFooter}
+              aria-expanded={isSidebarFooterExpanded}
+              title={isSidebarFooterExpanded ? 'إخفاء هذا الجزء' : 'إظهار الحساب وتثبيت التطبيق'}
+              className="w-full px-3 py-2 flex items-center justify-between text-[11px] font-black text-slate-600 dark:text-slate-300 hover:bg-slate-100/80 dark:hover:bg-slate-800/80 transition-colors cursor-pointer"
             >
-              <ShieldCheck className="h-4 w-4 text-emerald-600 shrink-0" />
-              <span>حول المنظومة الرقمية ℹ️</span>
+              <span className="truncate">
+                {isSidebarFooterExpanded
+                  ? 'إخفاء الحساب وخيارات التطبيق'
+                  : (userProfile?.fullName || 'الحساب وخيارات التطبيق')}
+              </span>
+              <ChevronDown
+                className={cn(
+                  'w-4 h-4 text-slate-500 dark:text-slate-400 transition-transform duration-200 shrink-0',
+                  !isSidebarFooterExpanded && 'rotate-180'
+                )}
+              />
             </button>
-          </div>
-        )}
 
-        {/* PWA Install Sidebar Button */}
-        {!isSidebarCollapsed && (
-          <div className="px-3 py-2 border-t border-slate-200 dark:border-slate-800">
-            <PWAInstallButton variant="sidebar" />
-          </div>
-        )}
+            {isSidebarFooterExpanded && (
+              <div className="animate-in fade-in duration-150">
+                {/* About App Button */}
+                <div className="px-3 py-1">
+                  <button
+                    type="button"
+                    onClick={() => setIsAboutModalOpen(true)}
+                    className="flex w-full items-center gap-2.5 px-3 py-2 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:text-emerald-800 dark:hover:text-white hover:bg-emerald-50 dark:hover:bg-slate-800 rounded-xl transition-all cursor-pointer border border-transparent hover:border-slate-200 dark:hover:border-slate-700"
+                  >
+                    <ShieldCheck className="h-4 w-4 text-emerald-600 shrink-0" />
+                    <span>حول المنظومة الرقمية ℹ️</span>
+                  </button>
+                </div>
 
-        {/* User Profile Footer */}
-        <div className="p-3 border-t border-slate-200 dark:border-slate-700/80 bg-slate-50/80 dark:bg-slate-900/70">
-          <div className={cn('flex items-center', isSidebarCollapsed ? 'justify-center' : 'justify-between')}>
-            <button
-              type="button"
-              onClick={openProfileModal}
-              title="تعديل البيانات الشخصية"
-              className="flex items-center gap-2.5 min-w-0 text-right hover:opacity-90 cursor-pointer group flex-1"
-            >
-              {userProfile?.photoUrl ? (
-                <img
-                  src={userProfile.photoUrl}
-                  alt={userProfile.fullName || 'User'}
-                  className="w-8 h-8 rounded-full object-cover border border-emerald-500 shrink-0"
-                />
-              ) : (
-                <div className="w-8 h-8 rounded-full bg-emerald-50 dark:bg-slate-700 border border-emerald-200 dark:border-slate-600 flex items-center justify-center text-xs font-bold text-emerald-700 dark:text-slate-200 group-hover:border-emerald-500 group-hover:text-emerald-800 transition-colors shrink-0">
-                  {userProfile?.fullName?.[0] || 'U'}
+                {/* PWA Install Sidebar Button */}
+                <div className="px-3 py-2 border-t border-slate-200 dark:border-slate-800">
+                  <PWAInstallButton variant="sidebar" />
                 </div>
-              )}
-              {!isSidebarCollapsed && (
-                <div className="min-w-0 flex-1">
-                  <p className="text-xs font-black text-slate-800 dark:text-slate-200 truncate group-hover:text-emerald-700 dark:group-hover:text-emerald-300 transition-colors flex items-center gap-1">
-                    <span>{userProfile?.fullName || 'المسير'}</span>
-                    <Edit3 className="h-2.5 w-2.5 opacity-0 group-hover:opacity-100 text-emerald-600 transition-opacity" />
-                  </p>
-                  <p className="text-[10px] text-slate-500 dark:text-slate-400 font-medium truncate">{getRoleLabel(userProfile)}</p>
+
+                {/* User Profile Footer */}
+                <div className="p-3 border-t border-slate-200 dark:border-slate-700/80">
+                  <div className="flex items-center justify-between">
+                    <button
+                      type="button"
+                      onClick={openProfileModal}
+                      title="تعديل البيانات الشخصية"
+                      className="flex items-center gap-2.5 min-w-0 text-right hover:opacity-90 cursor-pointer group flex-1"
+                    >
+                      {userProfile?.photoUrl ? (
+                        <img
+                          src={userProfile.photoUrl}
+                          alt={userProfile.fullName || 'User'}
+                          className="w-8 h-8 rounded-full object-cover border border-emerald-500 shrink-0"
+                        />
+                      ) : (
+                        <div className="w-8 h-8 rounded-full bg-emerald-50 dark:bg-slate-700 border border-emerald-200 dark:border-slate-600 flex items-center justify-center text-xs font-bold text-emerald-700 dark:text-slate-200 group-hover:border-emerald-500 group-hover:text-emerald-800 transition-colors shrink-0">
+                          {userProfile?.fullName?.[0] || 'U'}
+                        </div>
+                      )}
+                      <div className="min-w-0 flex-1">
+                        <p className="text-xs font-black text-slate-800 dark:text-slate-200 truncate group-hover:text-emerald-700 dark:group-hover:text-emerald-300 transition-colors flex items-center gap-1">
+                          <span>{userProfile?.fullName || 'المسير'}</span>
+                          <Edit3 className="h-2.5 w-2.5 opacity-0 group-hover:opacity-100 text-emerald-600 transition-opacity" />
+                        </p>
+                        <p className="text-[10px] text-slate-500 dark:text-slate-400 font-medium truncate">{getRoleLabel(userProfile)}</p>
+                      </div>
+                    </button>
+                    <button
+                      onClick={handleLogout}
+                      title="تسجيل الخروج"
+                      className="p-1.5 rounded-md text-slate-400 hover:text-red-500 hover:bg-slate-200/60 dark:hover:bg-slate-800 transition-colors cursor-pointer shrink-0 mr-1"
+                    >
+                      <LogOut className="h-4 w-4" />
+                    </button>
+                  </div>
+                  <div className="mt-2.5 pt-2 border-t border-slate-200/80 dark:border-slate-800 text-center">
+                    <p className="text-[10px] font-black text-emerald-800 dark:text-emerald-300 leading-snug">
+                      برمجة المفتش أمين سنوسي والأستاذ عمر حماني
+                    </p>
+                  </div>
                 </div>
-              )}
-            </button>
-            {!isSidebarCollapsed && (
-              <button
-                onClick={handleLogout}
-                title="تسجيل الخروج"
-                className="p-1.5 rounded-md text-slate-400 hover:text-red-500 hover:bg-slate-200/60 dark:hover:bg-slate-800 transition-colors cursor-pointer shrink-0 mr-1"
-              >
-                <LogOut className="h-4 w-4" />
-              </button>
+              </div>
             )}
           </div>
-        </div>
+        ) : (
+          <div className="p-3 border-t border-slate-200 dark:border-slate-700/80 bg-slate-50/80 dark:bg-slate-900/70">
+            <div className="flex items-center justify-center">
+              <button
+                type="button"
+                onClick={openProfileModal}
+                title="تعديل البيانات الشخصية"
+                className="flex items-center justify-center hover:opacity-90 cursor-pointer group"
+              >
+                {userProfile?.photoUrl ? (
+                  <img
+                    src={userProfile.photoUrl}
+                    alt={userProfile.fullName || 'User'}
+                    className="w-8 h-8 rounded-full object-cover border border-emerald-500 shrink-0"
+                  />
+                ) : (
+                  <div className="w-8 h-8 rounded-full bg-emerald-50 dark:bg-slate-700 border border-emerald-200 dark:border-slate-600 flex items-center justify-center text-xs font-bold text-emerald-700 dark:text-slate-200 group-hover:border-emerald-500 group-hover:text-emerald-800 transition-colors shrink-0">
+                    {userProfile?.fullName?.[0] || 'U'}
+                  </div>
+                )}
+              </button>
+            </div>
+          </div>
+        )}
       </aside>
 
       {/* Main App Container */}
       <div className="flex flex-1 flex-col min-w-0 overflow-hidden bg-slate-50 dark:bg-[#0b0f1a] transition-colors duration-300">
         {/* Top Header - High Density Crisp Style */}
-        <header className="h-16 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between gap-2 px-2.5 sm:px-4 md:px-8 z-10 shadow-[0_1px_3px_rgba(0,0,0,0.02)] transition-colors">
+        <header className="h-16 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between gap-2 px-2.5 sm:px-4 md:px-8 z-30 shadow-[0_1px_3px_rgba(0,0,0,0.02)] transition-colors">
           <div className="flex items-center gap-2 sm:gap-3 min-w-0">
             {/* Mobile menu trigger & AppLogo */}
             <div className="flex items-center gap-1.5 md:hidden shrink-0">
@@ -1088,71 +1170,181 @@ export const AppLayout: React.FC = () => {
                 )}
               </button>
 
-              {/* Dropdown Panel */}
+              {/* Mobile Backdrop & Centered/Anchored Dropdown Panel */}
               {isNotificationsOpen && (
-                <div className="absolute left-0 mt-2 w-80 bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 p-3 z-50 animate-in fade-in zoom-in-95 duration-100 text-right" dir="rtl">
-                  <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-2 mb-2">
-                    <div className="flex items-center gap-1.5 font-black text-slate-800 dark:text-white text-xs">
-                      <Bell className="w-4 h-4 text-emerald-600" />
-                      <span>الإشعارات والتنبيهات</span>
-                    </div>
-                    {unreadCount > 0 && (
-                      <button
-                        type="button"
-                        onClick={async () => {
-                          await markAllAsRead();
-                          toast.success('تم تحديد جميع الإشعارات كمقروءة');
-                        }}
-                        className="text-[10px] font-bold text-emerald-600 hover:text-emerald-800 hover:underline cursor-pointer"
-                      >
-                        قراءة الكل
-                      </button>
-                    )}
-                  </div>
-
-                  <div className="max-h-72 overflow-y-auto space-y-1.5 pr-1">
-                    {notifications.length === 0 ? (
-                      <div className="py-8 text-center text-slate-400 space-y-2">
-                        <div className="text-2xl">🔔</div>
-                        <p className="text-[10px] font-bold">لا توجد أي إشعارات أو تنبيهات حالياً</p>
+                <>
+                  <div
+                    className="sm:hidden fixed inset-0 bg-slate-900/45 backdrop-blur-[1px] z-[120]"
+                    onClick={() => setIsNotificationsOpen(false)}
+                  />
+                  <div
+                    className="fixed inset-x-3 top-[68px] mx-auto w-auto max-w-md sm:inset-x-auto sm:left-6 sm:top-[68px] sm:mx-0 sm:w-96 bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 p-3.5 z-[130] animate-in fade-in zoom-in-95 duration-100 text-right"
+                    dir="rtl"
+                  >
+                    <div className="flex items-center justify-between gap-2 border-b border-slate-100 dark:border-slate-800 pb-2.5 mb-2.5">
+                      <div className="flex items-center gap-1.5 font-black text-slate-800 dark:text-white text-xs min-w-0">
+                        <Bell className="w-4 h-4 text-emerald-600 shrink-0" />
+                        <span className="truncate">الإشعارات والتنبيهات</span>
+                        {notifications.length > 0 && (
+                          <span className="px-1.5 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-[10px] font-black tabular-nums">
+                            {notifications.length}
+                          </span>
+                        )}
                       </div>
-                    ) : (
-                      notifications.map((n) => {
-                        const isUnread = !n.readBy?.includes(userProfile?.id || '');
-                        return (
-                          <div
-                            key={n.id}
+
+                      <div className="flex items-center gap-2 shrink-0">
+                        {unreadCount > 0 && (
+                          <button
+                            type="button"
                             onClick={async () => {
-                              if (isUnread) {
-                                await markAsRead(n.id);
-                              }
+                              await markAllAsRead();
+                              toast.success('تم تحديد جميع الإشعارات كمقروءة');
                             }}
-                            className={`p-2.5 rounded-xl border text-right transition-all cursor-pointer flex flex-col gap-1 ${
-                              isUnread
-                                ? 'bg-emerald-50/60 dark:bg-emerald-950/40 border-emerald-100 dark:border-emerald-800 hover:bg-emerald-50'
-                                : 'bg-slate-50/50 dark:bg-slate-800/40 border-slate-100 dark:border-slate-800 hover:bg-slate-50'
-                            }`}
+                            className="text-[10px] font-bold text-emerald-600 hover:text-emerald-800 hover:underline cursor-pointer"
                           >
-                            <div className="flex items-start justify-between gap-2">
-                              <h4 className={`text-xs leading-snug font-black ${isUnread ? 'text-emerald-950 dark:text-emerald-200' : 'text-slate-700 dark:text-slate-200'}`}>
-                                {n.title}
-                              </h4>
-                              {isUnread && (
-                                <span className="w-2 h-2 rounded-full bg-emerald-600 shrink-0 mt-1 animate-ping" />
-                              )}
+                            قراءة الكل
+                          </button>
+                        )}
+                        {notifications.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              await deleteAllNotifications();
+                              toast.success('تم حذف جميع الإشعارات من حسابك فقط');
+                            }}
+                            className="text-[10px] font-bold text-rose-600 hover:text-rose-800 hover:underline cursor-pointer flex items-center gap-0.5"
+                            title="حذف كافة الإشعارات من حسابي فقط"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                            <span>حذف الكل</span>
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => setIsNotificationsOpen(false)}
+                          aria-label="إغلاق الإشعارات"
+                          className="p-1 text-slate-400 hover:text-slate-700 dark:hover:text-white rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="max-h-[62vh] sm:max-h-80 overflow-y-auto space-y-1.5 pr-0.5">
+                      {notifications.length === 0 ? (
+                        <div className="py-8 text-center text-slate-400 space-y-2">
+                          <div className="text-2xl">🔔</div>
+                          <p className="text-[11px] font-bold">لا توجد أي إشعارات أو تنبيهات حالياً</p>
+                        </div>
+                      ) : (
+                        notifications.map((n) => {
+                          const isUnread = !n.readBy?.includes(userProfile?.id || '');
+                          return (
+                            <div
+                              key={n.id}
+                              onClick={async () => {
+                                if (isUnread) {
+                                  await markAsRead(n.id);
+                                }
+                              }}
+                              className={`p-2.5 rounded-xl border text-right transition-all cursor-pointer flex flex-col gap-1 ${
+                                isUnread
+                                  ? 'bg-emerald-50/70 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-800 hover:bg-emerald-50'
+                                  : 'bg-slate-50/60 dark:bg-slate-800/40 border-slate-100 dark:border-slate-800 hover:bg-slate-100/70 dark:hover:bg-slate-800'
+                              }`}
+                            >
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="flex items-start gap-1.5 min-w-0 flex-1">
+                                  {isUnread && (
+                                    <span className="w-2 h-2 rounded-full bg-emerald-600 shrink-0 mt-1.5" />
+                                  )}
+                                  <h4 className={`text-xs leading-snug font-black break-words ${isUnread ? 'text-emerald-950 dark:text-emerald-200' : 'text-slate-700 dark:text-slate-200'}`}>
+                                    {n.title}
+                                  </h4>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={async (e) => {
+                                    e.stopPropagation();
+                                    await deleteNotification(n.id);
+                                    toast.success('تم حذف الإشعار من حسابك فقط');
+                                  }}
+                                  title="حذف هذا الإشعار من حسابي فقط"
+                                  aria-label="حذف الإشعار"
+                                  className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/50 transition-colors cursor-pointer shrink-0"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                              <p className="text-[11px] text-slate-600 dark:text-slate-300 leading-relaxed font-semibold break-words">
+                                {n.body}
+                              </p>
+                              <span className="text-[9px] text-slate-400 self-start font-medium mt-0.5 tabular-nums">
+                                {formatNotificationTime(n.createdAt)}
+                              </span>
                             </div>
-                            <p className="text-[10px] text-slate-500 dark:text-slate-400 leading-relaxed font-semibold">
-                              {n.body}
+                          );
+                        })
+                      )}
+                    </div>
+
+                    {/* Central Admin Global Bell Reset Bar */}
+                    {isSuperOrCentral && (
+                      <div className="mt-2.5 pt-2.5 border-t border-slate-100 dark:border-slate-800">
+                        {!confirmGlobalBellReset ? (
+                          <button
+                            type="button"
+                            onClick={() => setConfirmGlobalBellReset(true)}
+                            className="w-full py-2 px-3 rounded-xl text-[11px] font-black bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 dark:bg-rose-950/40 dark:hover:bg-rose-900/50 dark:text-rose-300 dark:border-rose-800 transition-colors cursor-pointer flex items-center justify-center gap-1.5"
+                            title="تصفير ومسح جميع إشعارات الجرس لدى كافة المشرفين والأساتذة والحكام"
+                          >
+                            <BellOff className="w-3.5 h-3.5 shrink-0" />
+                            <span>تصفير الجرس لكل المشرفين والأساتذة</span>
+                          </button>
+                        ) : (
+                          <div className="p-2.5 rounded-xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800 space-y-2">
+                            <p className="text-[10px] font-bold text-rose-900 dark:text-rose-200 leading-relaxed">
+                              تأكيد: سيتم مسح جميع تنبيهات الجرس لدى كافة الأساتذة والمشرفين والحكام (لن تحذف رسائل منصة تواصل).
                             </p>
-                            <span className="text-[8px] text-slate-400 self-start font-medium mt-0.5">
-                              {formatNotificationTime(n.createdAt)}
-                            </span>
+                            <div className="flex items-center justify-end gap-1.5">
+                              <button
+                                type="button"
+                                disabled={isResettingGlobalBells}
+                                onClick={() => setConfirmGlobalBellReset(false)}
+                                className="px-2.5 py-1 rounded-lg text-[10px] font-bold bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 cursor-pointer disabled:opacity-50"
+                              >
+                                إلغاء
+                              </button>
+                              <button
+                                type="button"
+                                disabled={isResettingGlobalBells}
+                                onClick={async () => {
+                                  setIsResettingGlobalBells(true);
+                                  try {
+                                    const res = await resetAllBellsForAllUsers();
+                                    setConfirmGlobalBellReset(false);
+                                    toast.success(
+                                      res.deletedCount > 0
+                                        ? `تم تصفير الجرس لجميع المشرفين والأساتذة بنجاح (حذف ${res.deletedCount} إشعار)`
+                                        : 'تم تصفير الجرس لجميع المشرفين والأساتذة بنجاح'
+                                    );
+                                  } catch {
+                                    toast.error('تعذر تصفير الأجراس، يرجى المحاولة مجدداً');
+                                  } finally {
+                                    setIsResettingGlobalBells(false);
+                                  }
+                                }}
+                                className="px-3 py-1 rounded-lg text-[10px] font-black bg-rose-600 hover:bg-rose-700 text-white cursor-pointer disabled:opacity-50"
+                              >
+                                {isResettingGlobalBells ? 'جاري التصفير...' : 'نعم، تصفير للجميع'}
+                              </button>
+                            </div>
                           </div>
-                        );
-                      })
+                        )}
+                      </div>
                     )}
                   </div>
-                </div>
+                </>
               )}
             </div>
 
@@ -1397,36 +1589,65 @@ export const AppLayout: React.FC = () => {
                   );
                 })}
               </div>
-              <div className="p-4 border-t border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50 space-y-3">
-                <PWAInstallButton variant="sidebar" className="mb-2" />
+              <div className="border-t border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50 shrink-0">
+                <button
+                  type="button"
+                  onClick={toggleSidebarFooter}
+                  aria-expanded={isSidebarFooterExpanded}
+                  title={isSidebarFooterExpanded ? 'إخفاء هذا الجزء' : 'إظهار هذا الجزء'}
+                  className="w-full px-4 py-2.5 flex items-center justify-between text-xs font-black text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800/70 transition-colors cursor-pointer"
+                >
+                  <span className="truncate">
+                    {isSidebarFooterExpanded
+                      ? 'إخفاء الحساب وخيارات التطبيق'
+                      : (userProfile?.fullName || 'الحساب وخيارات التطبيق')}
+                  </span>
+                  <ChevronDown
+                    className={cn(
+                      'w-4 h-4 text-slate-500 dark:text-slate-400 transition-transform duration-200 shrink-0',
+                      !isSidebarFooterExpanded && 'rotate-180'
+                    )}
+                  />
+                </button>
 
-                <button
-                  onClick={() => {
-                    setIsMobileMenuOpen(false);
-                    setIsAboutModalOpen(true);
-                  }}
-                  className="flex w-full items-center gap-3 px-3 py-3 text-xs font-black text-emerald-700 dark:text-emerald-300 hover:bg-emerald-50 dark:hover:bg-slate-800 rounded-xl transition-all cursor-pointer mb-1"
-                >
-                  <ShieldCheck className="h-5 w-5" />
-                  <span>حول المنظومة الرقمية ℹ️</span>
-                </button>
-                <button
-                  onClick={() => {
-                    setIsMobileMenuOpen(false);
-                    openProfileModal();
-                  }}
-                  className="flex w-full items-center gap-2 text-xs font-semibold text-emerald-700 dark:text-emerald-300 hover:text-emerald-800 cursor-pointer"
-                >
-                  <UserIcon className="h-4 w-4" />
-                  <span>تعديل البيانات الشخصية</span>
-                </button>
-                <button
-                  onClick={handleLogout}
-                  className="flex w-full items-center gap-2 text-xs font-semibold text-red-500 hover:text-red-600 cursor-pointer"
-                >
-                  <LogOut className="h-4 w-4" />
-                  <span>تسجيل الخروج</span>
-                </button>
+                {isSidebarFooterExpanded && (
+                  <div className="px-4 pb-4 pt-1 space-y-3 animate-in fade-in duration-150">
+                    <PWAInstallButton variant="sidebar" className="mb-2" />
+
+                    <button
+                      onClick={() => {
+                        setIsMobileMenuOpen(false);
+                        setIsAboutModalOpen(true);
+                      }}
+                      className="flex w-full items-center gap-3 px-3 py-3 text-xs font-black text-emerald-700 dark:text-emerald-300 hover:bg-emerald-50 dark:hover:bg-slate-800 rounded-xl transition-all cursor-pointer mb-1"
+                    >
+                      <ShieldCheck className="h-5 w-5" />
+                      <span>حول المنظومة الرقمية ℹ️</span>
+                    </button>
+                    <button
+                      onClick={() => {
+                        setIsMobileMenuOpen(false);
+                        openProfileModal();
+                      }}
+                      className="flex w-full items-center gap-2 text-xs font-semibold text-emerald-700 dark:text-emerald-300 hover:text-emerald-800 cursor-pointer"
+                    >
+                      <UserIcon className="h-4 w-4" />
+                      <span>تعديل البيانات الشخصية</span>
+                    </button>
+                    <button
+                      onClick={handleLogout}
+                      className="flex w-full items-center gap-2 text-xs font-semibold text-red-500 hover:text-red-600 cursor-pointer"
+                    >
+                      <LogOut className="h-4 w-4" />
+                      <span>تسجيل الخروج</span>
+                    </button>
+                    <div className="pt-2.5 mt-1 border-t border-slate-200 dark:border-slate-800 text-center">
+                      <p className="text-[10px] font-black text-emerald-800 dark:text-emerald-300 leading-snug">
+                        برمجة المفتش أمين سنوسي والأستاذ عمر حماني
+                      </p>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -1550,55 +1771,121 @@ export const AppLayout: React.FC = () => {
         </div>
       )}
 
-      {/* ABOUT APPLICATION MODAL */}
+      {/* ABOUT APPLICATION MODAL - DETAILED */}
       {isAboutModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-200" dir="rtl">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 max-w-md w-full space-y-4 shadow-2xl animate-in zoom-in-95 duration-150 relative overflow-hidden text-right">
+        <div
+          className="fixed inset-0 z-[140] flex items-center justify-center p-3 sm:p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-200"
+          dir="rtl"
+          onClick={() => setIsAboutModalOpen(false)}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 sm:p-6 max-w-xl w-full max-h-[88vh] overflow-y-auto space-y-4 shadow-2xl animate-in zoom-in-95 duration-150 relative text-right"
+          >
             <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-emerald-500 via-teal-500 to-amber-500" />
-            
-            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
-              <div className="flex items-center gap-2">
-                <ShieldCheck className="w-5 h-5 text-emerald-600" />
-                <h3 className="text-base font-black text-slate-900 dark:text-white">
-                  حول المنظومة الرقمية 2026
-                </h3>
+
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3 pt-1">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800 flex items-center justify-center shrink-0">
+                  <ShieldCheck className="w-5 h-5 text-emerald-600" />
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-slate-900 dark:text-white">
+                    حول المنظومة الرقمية للرياضة المدرسية 2026
+                  </h3>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 font-bold">
+                    الإصدار 1.4.0 — منصة التدبير الرياضي الموحد بالمديرية الإقليمية
+                  </p>
+                </div>
               </div>
               <button
                 type="button"
                 onClick={() => setIsAboutModalOpen(false)}
-                className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-lg cursor-pointer"
+                className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-lg cursor-pointer"
+                aria-label="إغلاق"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <div className="space-y-3.5 text-xs text-slate-700 dark:text-slate-300 leading-relaxed font-bold">
-              <p className="text-sm font-black text-emerald-800 dark:text-emerald-400">
-                المنظومة الرقمية لتتبع نتائج البطولات المدرسية الاقليمية 2026
-              </p>
-              <p className="text-slate-500 dark:text-slate-400 font-semibold leading-relaxed">
-                تم تطوير هذه المنظومة بالكامل باللغة العربية لدعم وتدبير الأنشطة والبطولات المدرسية المغربية بالمديرية الإقليمية.
-              </p>
-              <p className="text-slate-600 dark:text-slate-300 font-medium">
-                تتيح المنصة الرقمية الموحدة تسجيل المشاركين والفرق، طباعة الصدريات الذكية مع الباركود والماسح الضوئي الرقمي، إدارة وتعيين الملاعب والحكام المعتمدين، ونشر التحديثات الفورية والنتائج الرسمية لجميع الرياضات المدرسية (ألعاب جماعية، عدو ريفي، ألعاب قوى، كرة طاولة...) بدقة وسرعة متناهية.
-              </p>
-              <div className="p-3 bg-slate-50 dark:bg-slate-800 rounded-2xl border border-slate-100 dark:border-slate-700 text-[11px] space-y-1 text-slate-500 dark:text-slate-400">
-                <p>• الإصدار: 1.3.4 (نسخة مستقرة)</p>
-                <p>• الفئة المستهدفة: أطر التربية البدنية، اللجان التقنية والجمهور الكريم</p>
-                <p>• المنصة متكاملة بنظام إشعارات الواتساب الذكية والعمل أوفلاين</p>
+            <div className="space-y-3.5 text-xs text-slate-700 dark:text-slate-300 leading-relaxed">
+              {/* Overview & Objectives */}
+              <div className="p-3.5 rounded-2xl bg-emerald-50/70 dark:bg-emerald-950/30 border border-emerald-200/80 dark:border-emerald-800/70 space-y-1.5">
+                <h4 className="text-xs font-black text-emerald-950 dark:text-emerald-200">
+                  🎯 أهداف المنظومة ورؤيتها الرقمية
+                </h4>
+                <p className="font-semibold text-slate-700 dark:text-slate-300 leading-relaxed">
+                  منظومة رقمية متكاملة باللغة العربية مصممة لرقمنة تدبير البطولات المدرسية الإقليمية والجهوية والوطنية، وتسهيل التنسيق بين الإدارة الإقليمية واللجان التقنية وأطر التربية البدنية والحكام والمؤسسات التعليمية (العمومية والخصوصية) بشفافية وسرعة ودقة عالية.
+                </p>
+              </div>
+
+              {/* Roles & Beneficiaries */}
+              <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 space-y-2">
+                <h4 className="text-xs font-black text-slate-900 dark:text-white">
+                  👥 الفئات المستفيدة وصلاحيات الأدوار
+                </h4>
+                <ul className="space-y-1.5 text-[11px] font-semibold text-slate-600 dark:text-slate-300 list-disc pr-4">
+                  <li><strong>المسير المركزي / الإقليمي:</strong> الإشراف العام، إعداد المواسم والبطولات، تدبير المديريات، ضبط لائحة العطل وتواريخ الفروض، والاعتماد النهائي للنتائج.</li>
+                  <li><strong>رؤساء اللجن التقنية الإقليمية:</strong> إجراء القرعة الإلكترونية، برمجة المقابلات وفق الرزنامة المحمية، وتعيين طاقم التحكيم وتدقيق النتائج.</li>
+                  <li><strong>أساتذة ومنسقو التربية البدنية:</strong> تأكيد مشاركة المؤسسات، تسجيل التلاميذ، إصدار لوائح المشاركة والصدريات الذكية، وإدخال النتائج المؤقتة.</li>
+                  <li><strong>الحكام المعتمدون والتلاميذ والجمهور:</strong> متابعة التعيينات التحكيمية، جدول المقابلات والترتيب، والشواهد والملصقات.</li>
+                </ul>
+              </div>
+
+              {/* Key Features */}
+              <div className="p-3.5 rounded-2xl bg-indigo-50/60 dark:bg-indigo-950/30 border border-indigo-200/80 dark:border-indigo-800/70 space-y-2">
+                <h4 className="text-xs font-black text-indigo-950 dark:text-indigo-200">
+                  ⚙️ أهم المزايا والقدرات التقنية والتربوية
+                </h4>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px] font-semibold">
+                  <div className="p-2 rounded-xl bg-white dark:bg-slate-900 border border-indigo-100 dark:border-indigo-900/60">
+                    <span className="font-black text-indigo-900 dark:text-indigo-300 block">🏫 تغطية الأسلاك الأربعة</span>
+                    <span className="text-slate-500 dark:text-slate-400">الابتدائي، الثانوي الإعدادي، التأهيلي، والتعليم الخصوصي بإحصائيات مستقلة.</span>
+                  </div>
+                  <div className="p-2 rounded-xl bg-white dark:bg-slate-900 border border-indigo-100 dark:border-indigo-900/60">
+                    <span className="font-black text-indigo-900 dark:text-indigo-300 block">🔀 القرعة الإلكترونية والبرمجة</span>
+                    <span className="text-slate-500 dark:text-slate-400">سحب المجموعات والإقصاء المباشر مع الحماية من التعارض وتواريخ العطل والفروض.</span>
+                  </div>
+                  <div className="p-2 rounded-xl bg-white dark:bg-slate-900 border border-indigo-100 dark:border-indigo-900/60">
+                    <span className="font-black text-indigo-900 dark:text-indigo-300 block">🏷️ الصدريات الذكية QR والماسح</span>
+                    <span className="text-slate-500 dark:text-slate-400">توليد صدريات العدو الريفي وألعاب القوى مع ماسح ضوئي لخط النهاية.</span>
+                  </div>
+                  <div className="p-2 rounded-xl bg-white dark:bg-slate-900 border border-indigo-100 dark:border-indigo-900/60">
+                    <span className="font-black text-indigo-900 dark:text-indigo-300 block">📩 التواصل وبث الواتساب</span>
+                    <span className="text-slate-500 dark:text-slate-400">تراسل داخلي موجه + إشعار المعنيين الـ6 عبر الواتساب (Nouvelle diffusion).</span>
+                  </div>
+                  <div className="p-2 rounded-xl bg-white dark:bg-slate-900 border border-indigo-100 dark:border-indigo-900/60">
+                    <span className="font-black text-indigo-900 dark:text-indigo-300 block">✅ النتائج المؤقتة والاعتماد</span>
+                    <span className="text-slate-500 dark:text-slate-400">مسك النتائج مؤقتاً ثم المصادقة الرسمية قبل النشر والترتيب العام.</span>
+                  </div>
+                  <div className="p-2 rounded-xl bg-white dark:bg-slate-900 border border-indigo-100 dark:border-indigo-900/60">
+                    <span className="font-black text-indigo-900 dark:text-indigo-300 block">📱 العمل أوفلاين والتصدير</span>
+                    <span className="text-slate-500 dark:text-slate-400">تثبيت كتطبيق (PWA) ومزامنة سحابية وتصدير رسمي بصيغ PDF وExcel.</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Programming Attribution Box */}
+              <div className="p-3.5 rounded-2xl bg-amber-50/90 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 text-center space-y-1">
+                <p className="text-[10px] font-bold text-amber-800 dark:text-amber-300">
+                  التصميم والتطوير والبرمجة التربوية والتقنية
+                </p>
+                <p className="text-sm font-black text-amber-950 dark:text-amber-100">
+                  برمجة المفتش أمين سنوسي والأستاذ عمر حماني
+                </p>
               </div>
             </div>
 
-            <div className="flex flex-col gap-2 pt-2">
+            <div className="flex flex-col gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
               <button
                 type="button"
                 onClick={() => setIsAboutModalOpen(false)}
                 className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-black rounded-xl text-xs cursor-pointer shadow-md shadow-emerald-600/20 text-center active:scale-98 transition-all"
               >
-                حسناً، فهمت
+                إغلاق
               </button>
-              <p className="text-[10px] text-center text-slate-400 dark:text-slate-500">
-                كل الحقوق محفوظة &copy; 2026
+              <p className="text-[10px] text-center text-slate-400 dark:text-slate-500 font-semibold">
+                جميع الحقوق محفوظة &copy; 2026 — المنظومة الرقمية للرياضة المدرسية
               </p>
             </div>
           </div>
@@ -1606,6 +1893,7 @@ export const AppLayout: React.FC = () => {
       )}
 
       <TeacherProfileModal />
+      <CommunicationWidget />
     </div>
   );
 };

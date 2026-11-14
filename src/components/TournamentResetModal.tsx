@@ -10,10 +10,12 @@ import {
   CheckCircle2,
   Filter,
   Loader2,
-  Eraser
+  Eraser,
+  BellOff
 } from 'lucide-react';
 import { Match, Sport, Tournament } from '../types';
 import { DataService, SPORTS_MAP, normalizeCategoryKey } from '../lib/dataService';
+import { useNotifications } from '../contexts/NotificationContext';
 import toast from 'react-hot-toast';
 
 interface TournamentResetModalProps {
@@ -30,7 +32,8 @@ interface TournamentResetModalProps {
 type ResetActionKind =
   | 'ALL_MATCH_RESULTS'
   | 'SPECIFIC_TOURNAMENT_RESULTS'
-  | 'ALL_SCHEDULED_MATCHES';
+  | 'ALL_SCHEDULED_MATCHES'
+  | 'ALL_BELLS_FOR_SUPERVISORS';
 
 export const TournamentResetModal: React.FC<TournamentResetModalProps> = ({
   isOpen,
@@ -42,6 +45,7 @@ export const TournamentResetModal: React.FC<TournamentResetModalProps> = ({
   allowedSportIds,
   onResetComplete
 }) => {
+  const { resetAllBellsForAllUsers } = useNotifications();
   const isScopedToTechHead = !isCentralAdmin && Array.isArray(allowedSportIds);
 
   // Allowed sports list for dropdown & display
@@ -200,6 +204,18 @@ export const TournamentResetModal: React.FC<TournamentResetModalProps> = ({
         await onResetComplete();
         toast.success(
           `تم تصفير ومسح جميع المباريات المبرمجة بنجاح (${res.deletedMatchesCount} مباراة).`
+        );
+      } else if (action === 'ALL_BELLS_FOR_SUPERVISORS') {
+        if (!isCentralAdmin) {
+          toast.error('هذه الصلاحية مقتصرة على المسير المركزي فقط.');
+          setIsExecuting(false);
+          return;
+        }
+        const res = await resetAllBellsForAllUsers();
+        toast.success(
+          res.deletedCount > 0
+            ? `تم تصفير الجرس لجميع المشرفين والأساتذة والحكام بنجاح (حذف ${res.deletedCount} إشعار).`
+            : 'تم تصفير الجرس لجميع المشرفين والأساتذة والحكام بنجاح.'
         );
       }
 
@@ -502,6 +518,42 @@ export const TournamentResetModal: React.FC<TournamentResetModalProps> = ({
                     : `تحذير: سيتم حذف جميع المباريات المبرمجة الخاصة برياضتك (${assignedSportNames.join('، ')}) وعددها ${scopedMatches.length} مباراة نهائياً. هل تريد المتابعة؟`
                 )}
               </div>
+
+              {/* Action 4: تصفير جرس الإشعارات لجميع المشرفين والأساتذة (حصري للمسير المركزي) */}
+              {isCentralAdmin && (
+                <div className="bg-white rounded-2xl border border-indigo-200 p-4 shadow-2xs space-y-2">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <span className="w-8 h-8 rounded-xl bg-indigo-100 text-indigo-700 flex items-center justify-center shrink-0">
+                          <BellOff className="w-4 h-4" />
+                        </span>
+                        <h3 className="text-sm font-black text-indigo-950">
+                          4. تصفير جرس الإشعارات لكل المشرفين والأساتذة
+                        </h3>
+                      </div>
+                      <p className="text-xs text-slate-600 leading-relaxed pr-10">
+                        مسح وتصفير كافة إشعارات الجرس المتراكمة لدى جميع الأساتذة، رؤساء اللجن التقنية، الحكام والمشرفين دفعة واحدة (دون مسح رسائل منصة تواصل).
+                      </p>
+                    </div>
+
+                    <button
+                      type="button"
+                      disabled={isExecuting}
+                      onClick={() => setPendingConfirm('ALL_BELLS_FOR_SUPERVISORS')}
+                      className="px-4 py-2 rounded-xl text-xs font-black bg-indigo-600 hover:bg-indigo-700 text-white shadow-xs transition-all cursor-pointer shrink-0 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
+                    >
+                      <BellOff className="w-3.5 h-3.5" />
+                      <span>تصفير الجرس للجميع</span>
+                    </button>
+                  </div>
+
+                  {renderConfirmBar(
+                    'ALL_BELLS_FOR_SUPERVISORS',
+                    'هل أنت متأكد من تصفير جرس الإشعارات ومسح كافة التنبيهات القديمة لدى جميع الأساتذة والمشرفين والحكام؟'
+                  )}
+                </div>
+              )}
             </>
           )}
         </div>

@@ -1,8 +1,9 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { Match, School, Venue, Tournament, Referee, Student, User } from '../types';
+import { Match, School, Venue, Tournament, Referee, Student, User, BlockedSchedulePeriod } from '../types';
 import { X, CalendarDays, Clock, MapPin, Trophy, AlertTriangle, AlertCircle, Calendar, ArrowRight, ShieldCheck, Lock, Users, Tag, UserCheck, Plus, Building, Info, Search, CheckCircle2, MessageCircle } from 'lucide-react';
-import { SPORTS_MAP, AGE_CATEGORIES, GENDER_MAP, DataService, getAgeCategoriesForSeason, normalizeCategoryKey, normalizeDateToYmd } from '../lib/dataService';
+import { SPORTS_MAP, AGE_CATEGORIES, GENDER_MAP, DataService, getAgeCategoriesForSeason, normalizeCategoryKey, normalizeDateToYmd, EDUCATIONAL_CYCLE_LABELS, getMatchEducationalCycles, findBlockedPeriodForDate } from '../lib/dataService';
+import { useAuth, isSuperAdminEmail } from '../contexts/AuthContext';
 import { resolveHostSchoolForMatch, findRefereeContact, generateRefereeMatchNotificationMessage, getWhatsAppUrl } from '../lib/whatsappService';
 import { MatchBroadcastDiffusionModal, MatchBroadcastDiffusionTarget } from './MatchBroadcastDiffusionModal';
 import toast from 'react-hot-toast';
@@ -107,6 +108,15 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
   const [currentSeason, setCurrentSeason] = useState('2026/2027');
   const [showAllSchools, setShowAllSchools] = useState<boolean>(false);
 
+  const { userProfile } = useAuth();
+  const isRegionalOrCentralAdmin =
+    userProfile?.role === 'CENTRAL_ADMIN' ||
+    userProfile?.role === 'SUPER_ADMIN' ||
+    userProfile?.isSuperAdmin === true ||
+    isSuperAdminEmail(userProfile?.email);
+
+  const [blockedPeriods, setBlockedPeriods] = useState<BlockedSchedulePeriod[]>([]);
+
   // Post-scheduling unified WhatsApp Nouvelle diffusion state
   const [savedMatchSummary, setSavedMatchSummary] = useState<MatchBroadcastDiffusionTarget | null>(null);
 
@@ -119,6 +129,15 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
         .then(season => setCurrentSeason(season))
         .catch(err => console.warn("Error loading season in match modal:", err));
     }
+  }, [isOpen]);
+
+  // Subscribe to blocked holidays / exam periods
+  useEffect(() => {
+    if (!isOpen) return;
+    const unsub = DataService.subscribeToBlockedScheduleDates((periods) => {
+      setBlockedPeriods(periods);
+    });
+    return () => unsub();
   }, [isOpen]);
 
   // Load referees from DataService
@@ -323,6 +342,28 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
   const hasConflict = conflictingMatches.length > 0;
   const [forceScheduleDespiteConflict, setForceScheduleDespiteConflict] = useState(false);
 
+  const matchCycles = useMemo(() => {
+    const selectedTourn = availableTournaments.find(t => t.id === tournamentId);
+    return getMatchEducationalCycles(
+      {
+        team1Id,
+        team2Id,
+        ageCategory,
+        level: selectedTourn?.level,
+        tournamentId
+      },
+      schools,
+      availableTournaments
+    );
+  }, [team1Id, team2Id, ageCategory, tournamentId, schools, availableTournaments]);
+
+  const blockedDateConflict = useMemo(() => {
+    if (!date || blockedPeriods.length === 0) return null;
+    return findBlockedPeriodForDate(date, matchCycles, blockedPeriods);
+  }, [date, matchCycles, blockedPeriods]);
+
+  const isBlockedByHolidayOrExam = Boolean(blockedDateConflict) && !isRegionalOrCentralAdmin;
+
   useEffect(() => {
     setForceScheduleDespiteConflict(false);
   }, [effectiveVenueKey, date, startTime, isOpen]);
@@ -512,6 +553,17 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
     if (effectiveAllowedSportIds && !effectiveAllowedSportIds.includes(resolvedCheckSportId)) {
       const allowedNames = effectiveAllowedSportIds.map(id => SPORTS_MAP[id]?.name || id).join('، ');
       toast.error(`أنت مخول لبرمجة وتعديل مباريات (${allowedNames}) فقط.`);
+      return;
+    }
+
+    // Block Tech Committee Head / non-Central Admins on Regional Holiday & Exam Dates
+    if (blockedDateConflict && !isRegionalOrCentralAdmin) {
+      const kindLabel = blockedDateConflict.type === 'exams' ? 'فترة الفروض والامتحانات' : 'عطلة مدرسية';
+      const cyclesLabel = matchCycles.map(c => EDUCATIONAL_CYCLE_LABELS[c] || c).join('، ');
+      toast.error(
+        `ممنوع برمجة المقابلة في تاريخ ${date}: يصادف ${kindLabel} (${blockedDateConflict.title}) المحددة لسلك ${cyclesLabel || 'المعني'}.`,
+        { duration: 5000 }
+      );
       return;
     }
 
@@ -1079,7 +1131,11 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
                 value={date}
                 onChange={(e) => setDate(e.target.value)}
                 className={`w-full text-xs rounded-lg border px-3 py-2 text-slate-800 focus:outline-none focus:ring-2 ${
-                  hasConflict ? 'border-amber-400 bg-amber-50/30 ring-2 ring-amber-300' : 'border-slate-200 focus:ring-blue-500'
+                  blockedDateConflict
+                    ? 'border-rose-500 bg-rose-50/40 ring-2 ring-rose-300'
+                    : hasConflict
+                    ? 'border-amber-400 bg-amber-50/30 ring-2 ring-amber-300'
+                    : 'border-slate-200 focus:ring-blue-500'
                 }`}
               />
             </div>
@@ -1094,6 +1150,34 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
               />
             </div>
           </div>
+
+          {/* REGIONAL HOLIDAY / EXAM BLOCKED DATE ALERT */}
+          {blockedDateConflict && (
+            <div className="rounded-2xl border-2 border-rose-300 bg-rose-50 p-3.5 space-y-1.5 text-xs animate-in fade-in duration-150">
+              <div className="flex items-start gap-2.5">
+                <Lock className="h-4 w-4 text-rose-600 shrink-0 mt-0.5" />
+                <div className="flex-1 space-y-1">
+                  <h4 className="font-black text-rose-950">
+                    {isBlockedByHolidayOrExam
+                      ? '⛔ تاريخ محظور: لا يمكن لرئيس اللجنة التقنية برمجة مقابلة في هذا التاريخ'
+                      : '⚠️ تنبيه إقليمي: هذا التاريخ يوافق فترة عطلة أو فروض مسجلة'}
+                  </h4>
+                  <p className="text-[11px] font-bold text-rose-800 leading-relaxed">
+                    التاريخ <span className="font-mono font-black" dir="ltr">{date}</span> يندرج ضمن{' '}
+                    <strong>
+                      {blockedDateConflict.type === 'exams' ? 'فترة الفروض / الامتحانات' : 'عطلة مدرسية'} ({blockedDateConflict.title})
+                    </strong>{' '}
+                    ({blockedDateConflict.startDate} ← {blockedDateConflict.endDate}) للسلك التعليمي:{' '}
+                    <strong>
+                      {(blockedDateConflict.targetCycles || ['ALL'])
+                        .map(c => EDUCATIONAL_CYCLE_LABELS[c] || c)
+                        .join('، ')}
+                    </strong>.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Referees Assignment Section */}
           <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 space-y-3">
@@ -1350,9 +1434,11 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
               </button>
               <button
                 type="submit"
-                disabled={isSubmitting}
-                className={`px-5 py-2.5 text-xs font-bold text-white rounded-xl transition-all shadow-md active:scale-95 disabled:bg-slate-300 cursor-pointer ${
-                  hasConflict
+                disabled={isSubmitting || isBlockedByHolidayOrExam}
+                className={`px-5 py-2.5 text-xs font-bold text-white rounded-xl transition-all shadow-md active:scale-95 disabled:bg-slate-300 disabled:cursor-not-allowed cursor-pointer ${
+                  isBlockedByHolidayOrExam
+                    ? 'bg-slate-400'
+                    : hasConflict
                     ? forceScheduleDespiteConflict
                       ? 'bg-red-600 hover:bg-red-700 shadow-red-600/20'
                       : 'bg-amber-600 hover:bg-amber-700 shadow-amber-600/20'
@@ -1361,6 +1447,8 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
               >
                 {isSubmitting
                   ? 'جاري الحفظ...'
+                  : isBlockedByHolidayOrExam
+                  ? 'ممنوع البرمجة في تاريخ العطلة / الفروض'
                   : hasConflict
                   ? forceScheduleDespiteConflict
                     ? 'نعم، تثبيت البرمجة رغم التعارض'

@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useEffect, useState, useRef } from 'react';
 import { useAuth } from './AuthContext';
 import { db } from '../firebase/config';
-import { collection, query, orderBy, limit, onSnapshot } from 'firebase/firestore';
+import { collection, doc, query, orderBy, limit, onSnapshot } from 'firebase/firestore';
 import { AppNotification } from '../types';
 import { DataService } from '../lib/dataService';
 import toast from 'react-hot-toast';
@@ -13,6 +13,9 @@ interface NotificationContextType {
   requestPermission: () => Promise<boolean>;
   markAsRead: (id: string) => Promise<void>;
   markAllAsRead: () => Promise<void>;
+  deleteNotification: (id: string) => Promise<void>;
+  deleteAllNotifications: () => Promise<void>;
+  resetAllBellsForAllUsers: () => Promise<{ deletedCount: number }>;
 }
 
 const NotificationContext = createContext<NotificationContextType>({
@@ -22,6 +25,9 @@ const NotificationContext = createContext<NotificationContextType>({
   requestPermission: async () => false,
   markAsRead: async () => {},
   markAllAsRead: async () => {},
+  deleteNotification: async () => {},
+  deleteAllNotifications: async () => {},
+  resetAllBellsForAllUsers: async () => ({ deletedCount: 0 }),
 });
 
 export const useNotifications = () => useContext(NotificationContext);
@@ -89,6 +95,9 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
   const [allRawNotifications, setAllRawNotifications] = useState<AppNotification[]>([]);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [globalResetAtMs, setGlobalResetAtMs] = useState<number>(() =>
+    DataService.getLocalGlobalNotificationResetAt()
+  );
   const [permission, setPermission] = useState<NotificationPermission>(
     typeof window !== 'undefined' && 'Notification' in window ? Notification.permission : 'default'
   );
@@ -153,6 +162,17 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
     }
 
     let unsubscribeFirestore: (() => void) | null = null;
+    let unsubscribeResetMeta: (() => void) | null = null;
+
+    const handleGlobalResetEvent = (e: Event) => {
+      const custom = e as CustomEvent<{ resetAtMs?: number }>;
+      const ts = custom.detail?.resetAtMs || Date.now();
+      setGlobalResetAtMs(ts);
+      setAllRawNotifications([]);
+      setNotifications([]);
+      setUnreadCount(0);
+    };
+    window.addEventListener('notificationsGloballyReset', handleGlobalResetEvent);
 
     const setupSubscription = () => {
       if (unsubscribeFirestore) {
@@ -161,6 +181,12 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
         } catch {}
         unsubscribeFirestore = null;
       }
+      if (unsubscribeResetMeta) {
+        try {
+          unsubscribeResetMeta();
+        } catch {}
+        unsubscribeResetMeta = null;
+      }
 
       if (DataService.isCloudSyncPaused()) {
         DataService.getNotifications().then((localData) => {
@@ -168,6 +194,32 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
         });
         return;
       }
+
+      unsubscribeResetMeta = onSnapshot(
+        doc(db, 'settings', 'notifications_meta'),
+        (metaSnap) => {
+          if (DataService.isCloudSyncPaused() || !metaSnap.exists()) return;
+          const data = metaSnap.data();
+          let resetMs = 0;
+          if (data?.globalResetAt) {
+            if (typeof data.globalResetAt.toDate === 'function') {
+              resetMs = data.globalResetAt.toDate().getTime();
+            } else if (data.globalResetAt.seconds) {
+              resetMs = data.globalResetAt.seconds * 1000;
+            } else {
+              const parsed = new Date(data.globalResetAt).getTime();
+              if (Number.isFinite(parsed)) resetMs = parsed;
+            }
+          }
+          if (resetMs > 0) {
+            setGlobalResetAtMs(resetMs);
+            try {
+              localStorage.setItem('taourirt_notifications_global_reset_at', String(resetMs));
+            } catch {}
+          }
+        },
+        () => {}
+      );
 
       const q = query(
         collection(db, 'notifications'),
@@ -181,8 +233,8 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
           if (DataService.isCloudSyncPaused()) return;
           if (snapshot.empty && snapshot.metadata?.fromCache) return;
           const fetched: AppNotification[] = [];
-          snapshot.forEach((doc) => {
-            const data = doc.data();
+          snapshot.forEach((docItem) => {
+            const data = docItem.data();
             let createdAtStr = new Date().toISOString();
             if (data.createdAt) {
               if (typeof data.createdAt.toDate === 'function') {
@@ -194,7 +246,7 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
               }
             }
             fetched.push({
-              id: doc.id,
+              id: docItem.id,
               title: data.title || '',
               body: data.body || '',
               sportId: data.sportId,
@@ -202,6 +254,8 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
               userIds: data.userIds || [],
               createdAt: createdAtStr,
               readBy: data.readBy || [],
+              deletedBy: data.deletedBy || [],
+              isDirectMessage: Boolean(data.isDirectMessage),
             });
           });
 
@@ -221,9 +275,15 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
 
     return () => {
       window.removeEventListener('cloudSyncPausedChanged', setupSubscription);
+      window.removeEventListener('notificationsGloballyReset', handleGlobalResetEvent);
       if (unsubscribeFirestore) {
         try {
           unsubscribeFirestore();
+        } catch {}
+      }
+      if (unsubscribeResetMeta) {
+        try {
+          unsubscribeResetMeta();
         } catch {}
       }
     };
@@ -243,8 +303,28 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
     const techSports = userProfile.techCommitteeSports || [];
     const techSportsMemberOf = userProfile.techCommitteeSportsMemberOf || [];
 
+    const localDeletedIds = DataService.getLocalDeletedNotificationIds(userId);
+
     // Filter logic based on user's role and assigned sports
     const filtered = allRawNotifications.filter((notif) => {
+      // Global reset watermark set by Central Admin
+      if (globalResetAtMs > 0) {
+        const notifMs = new Date(notif.createdAt).getTime();
+        if (Number.isFinite(notifMs) && notifMs <= globalResetAtMs) {
+          return false;
+        }
+      }
+
+      // Per-user deletion: hide strictly for the user who deleted it
+      if (localDeletedIds.includes(notif.id) || notif.deletedBy?.includes(userId)) {
+        return false;
+      }
+
+      // Direct private messages ONLY go to the intended recipient userIds
+      if (notif.role === 'PRIVATE_MSG' || notif.isDirectMessage) {
+        return Array.isArray(notif.userIds) && notif.userIds.includes(userId);
+      }
+
       // Central Admins see all announcements and sports notifications
       if (userRole === 'CENTRAL_ADMIN') return true;
 
@@ -319,7 +399,7 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
     if (isFirstLoad.current) {
       isFirstLoad.current = false;
     }
-  }, [allRawNotifications, userProfile]);
+  }, [allRawNotifications, userProfile, globalResetAtMs]);
 
   const markAsRead = async (id: string) => {
     if (!userProfile) return;
@@ -386,6 +466,48 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
     await Promise.all(unreadNotifs.map((n) => DataService.markNotificationAsRead(n.id, userProfile.id)));
   };
 
+  const deleteNotification = async (id: string) => {
+    if (!userProfile) return;
+    setNotifications((prev) => {
+      const updated = prev.filter((n) => n.id !== id);
+      const unread = updated.filter((n) => !n.readBy?.includes(userProfile.id)).length;
+      setUnreadCount(unread);
+      return updated;
+    });
+    setAllRawNotifications((prev) =>
+      prev.map((n) =>
+        n.id === id
+          ? { ...n, deletedBy: [...(n.deletedBy || []), userProfile.id] }
+          : n
+      )
+    );
+    await DataService.deleteNotificationForUser(id, userProfile.id);
+  };
+
+  const deleteAllNotifications = async () => {
+    if (!userProfile || notifications.length === 0) return;
+    const idsToDelete = notifications.map((n) => n.id);
+    setNotifications([]);
+    setUnreadCount(0);
+    setAllRawNotifications((prev) =>
+      prev.map((n) =>
+        idsToDelete.includes(n.id)
+          ? { ...n, deletedBy: [...(n.deletedBy || []), userProfile.id] }
+          : n
+      )
+    );
+    await DataService.deleteAllNotificationsForUser(idsToDelete, userProfile.id);
+  };
+
+  const resetAllBellsForAllUsers = async (): Promise<{ deletedCount: number }> => {
+    const res = await DataService.resetAllNotificationsForAllUsers(userProfile?.fullName);
+    setGlobalResetAtMs(res.resetAtMs);
+    setAllRawNotifications([]);
+    setNotifications([]);
+    setUnreadCount(0);
+    return { deletedCount: res.deletedCount };
+  };
+
   return (
     <NotificationContext.Provider
       value={{
@@ -395,6 +517,9 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
         requestPermission,
         markAsRead,
         markAllAsRead,
+        deleteNotification,
+        deleteAllNotifications,
+        resetAllBellsForAllUsers,
       }}
     >
       {children}
