@@ -311,7 +311,8 @@ export const RegisterStudentModal: React.FC<RegisterStudentModalProps> = ({
         const relevantTournament = tournaments.find(t => 
           t.sportId === sport.id && 
           (normalizeCategoryKey(t.ageCategory) === normCategory || normalizeCategoryKey(t.ageCategory) === 'جميع الفئات') &&
-          (t.gender === gender || t.gender === 'Mixed')
+          (t.gender === gender || t.gender === 'Mixed') &&
+          ((t.affiliationType || 'non_club') === affiliationType || t.affiliationType === 'open')
         );
         if (relevantTournament) {
           if (relevantTournament.level) {

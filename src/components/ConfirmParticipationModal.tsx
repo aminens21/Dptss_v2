@@ -715,6 +715,15 @@ export const ConfirmParticipationModal: React.FC<ConfirmParticipationModalProps>
                       </div>
                     </div>
 
+                    {isClubGroup && (
+                      <div className="p-2.5 rounded-xl bg-amber-100/90 border border-amber-300 text-amber-950 flex items-start gap-2 text-[11px] font-bold leading-relaxed shadow-2xs">
+                        <AlertCircle className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
+                        <span>
+                          تذكير: هذه الفئة خاصة بتلاميذ <strong className="font-black underline">مسار دراسة ورياضة</strong> و<strong className="font-black underline">أقسام الأمل الرياضي</strong> <strong className="font-black">المنتمين للأندية فقط</strong>.
+                        </span>
+                      </div>
+                    )}
+
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                       {affGroup.items.map(item => {
                         const checked = isBranchChecked(item);

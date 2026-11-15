@@ -53,7 +53,7 @@ import toast from 'react-hot-toast';
 import { useRolePermissions } from '../hooks/useRolePermissions';
 
 export const Tournaments: React.FC = () => {
-  const { userProfile } = useAuth();
+  const { userProfile, impersonationScopedSportIds } = useAuth();
   const { canDo } = useRolePermissions();
   const [searchParams, setSearchParams] = useSearchParams();
   const urlTab = searchParams.get('tab') || searchParams.get('level');
@@ -118,6 +118,9 @@ export const Tournaments: React.FC = () => {
   const [isResetModalOpen, setIsResetModalOpen] = useState(false);
   const [pendingCloudSyncCount, setPendingCloudSyncCount] = useState<number>(() => getPendingCloudSyncCount());
   const [isSyncingPendingCloud, setIsSyncingPendingCloud] = useState(false);
+  const [isConvertingParticipations, setIsConvertingParticipations] = useState(false);
+  const [isCleaningOrphaned, setIsCleaningOrphaned] = useState(false);
+  const autoMigratedDirsRef = useRef<Set<string>>(new Set());
 
   // Program Export Modal State
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
@@ -381,6 +384,103 @@ export const Tournaments: React.FC = () => {
     }
   };
 
+  const handleConvertParticipationsToNonClub = async (silent = false) => {
+    if (isConvertingParticipations) return;
+    if (DataService.isCloudSyncPaused()) {
+      if (!silent) {
+        toast.error('المزامنة السحابية متوقفة حالياً — يرجى تفعيلها أولاً لتحديث قاعدة البيانات.');
+      }
+      return;
+    }
+    const activeDirId = DataService.getActiveDirectorateId() || 'taourirt';
+    const isAllDirs = !activeDirId || activeDirId === 'all';
+    setIsConvertingParticipations(true);
+    try {
+      const res = await DataService.convertAllParticipationsToNonClubAndDeduplicate({
+        targetDirectorateId: isAllDirs ? 'all' : activeDirId,
+        onlyIfNotMigrated: silent
+      });
+      if (res.alreadyMigrated) return;
+
+      const totalChanged =
+        res.convertedConfirmationsCount +
+        res.deletedDuplicateConfirmationsCount +
+        res.convertedStudentsCount +
+        res.deletedDuplicateStudentsCount;
+
+      if (totalChanged > 0) {
+        await Promise.all([loadData(true), refreshConfirmations()]);
+        toast.success(
+          `تم تحويل جميع المشاركات إلى غير المنتمين للأندية وحذف التكرار (تأكيدات: ${res.convertedConfirmationsCount}، تكرارات محذوفة: ${res.deletedDuplicateConfirmationsCount + res.deletedDuplicateStudentsCount}، مشاركون محولون: ${res.convertedStudentsCount})`,
+          { duration: 5500 }
+        );
+      } else if (!silent) {
+        toast.success('جميع المشاركات مسجلة بالفعل ضمن غير المنتمين للأندية ولا توجد مشاركات مكررة.');
+      }
+    } catch (err) {
+      console.error(err);
+      if (!silent) {
+        toast.error('حدث خطأ أثناء تحويل المشاركات وتوحيدها.');
+      }
+    } finally {
+      setIsConvertingParticipations(false);
+    }
+  };
+
+  const handleCleanOrphanedParticipations = async (silent = false) => {
+    if (isCleaningOrphaned) return;
+    if (DataService.isCloudSyncPaused()) {
+      if (!silent) {
+        toast.error('المزامنة السحابية متوقفة حالياً — يرجى تفعيلها أولاً لتحديث قاعدة البيانات.');
+      }
+      return;
+    }
+    const activeDirId = DataService.getActiveDirectorateId() || 'taourirt';
+    const isAllDirs = !activeDirId || activeDirId === 'all';
+    setIsCleaningOrphaned(true);
+    try {
+      const res = await DataService.pruneOrphanedParticipationsForDeletedSchools({
+        targetDirectorateId: isAllDirs ? 'all' : activeDirId,
+        onlyIfNotCleaned: silent
+      });
+      if (res.alreadyCleaned) return;
+
+      const totalRemoved = res.deletedConfirmationsCount + res.deletedStudentsCount;
+      if (totalRemoved > 0) {
+        await Promise.all([loadData(true), refreshConfirmations()]);
+        toast.success(
+          `تم حذف مشاركات المؤسسات المحذوفة والإبقاء على المؤسسات المسجلة فقط (تأكيدات محذوفة: ${res.deletedConfirmationsCount}، مشاركون محذوفون: ${res.deletedStudentsCount})`,
+          { duration: 5500 }
+        );
+      } else if (!silent) {
+        toast.success('جميع المشاركات المسجلة تنتمي لمؤسسات موجودة حالياً في لائحة المؤسسات التعليمية.');
+      }
+    } catch (err) {
+      console.error(err);
+      if (!silent) {
+        toast.error('حدث خطأ أثناء حذف مشاركات المؤسسات المحذوفة.');
+      }
+    } finally {
+      setIsCleaningOrphaned(false);
+    }
+  };
+
+  useEffect(() => {
+    const canRunAutoMigration =
+      isCentralAdmin ||
+      effectiveRole === 'PROVINCIAL_ADMIN' ||
+      effectiveRole === 'REGIONAL_ADMIN' ||
+      isTechCommitteeHead;
+    if (loading || !canRunAutoMigration) return;
+    const activeDirId = DataService.getActiveDirectorateId() || 'taourirt';
+    if (autoMigratedDirsRef.current.has(activeDirId)) return;
+    autoMigratedDirsRef.current.add(activeDirId);
+    (async () => {
+      await handleCleanOrphanedParticipations(true);
+      await handleConvertParticipationsToNonClub(true);
+    })();
+  }, [loading, isCentralAdmin, effectiveRole, isTechCommitteeHead, activeDirObj?.id]);
+
   const loadData = async (silent = true) => {
     if (!silent) {
       setLoading(true);
@@ -502,6 +602,8 @@ export const Tournaments: React.FC = () => {
         const itemToExistingIdMap = new Map<number, string>();
 
         // Pass 1: Exact match on (ageCategory, gender, affiliationType)
+        // Do NOT arbitrarily reassign unmatched remaining tournament IDs across different categories/affiliations,
+        // because old matches/results tied to that tournamentId would bleed into the wrong category/branch.
         items.forEach((item, idx) => {
           const exact = existingSportTournaments.find(existing => {
             if (matchedExistingIds.has(existing.id)) return false;
@@ -514,16 +616,6 @@ export const Tournaments: React.FC = () => {
           if (exact) {
             matchedExistingIds.add(exact.id);
             itemToExistingIdMap.set(idx, exact.id);
-          }
-        });
-
-        // Pass 2: For items without exact match, assign remaining unmatched existing tournaments
-        items.forEach((item, idx) => {
-          if (itemToExistingIdMap.has(idx)) return;
-          const remaining = existingSportTournaments.find(existing => !matchedExistingIds.has(existing.id));
-          if (remaining) {
-            matchedExistingIds.add(remaining.id);
-            itemToExistingIdMap.set(idx, remaining.id);
           }
         });
 
@@ -568,6 +660,7 @@ export const Tournaments: React.FC = () => {
 
         // Update the sport's configured categories in Firestore and local config
         const newSelectedCats = Array.from(new Set(items.map(i => normalizeCategoryKey(i.ageCategory)).filter(Boolean)));
+        const newSelectedAffs = Array.from(new Set(items.map(i => i.affiliationType || 'non_club'))) as Array<'non_club' | 'club_affiliated' | 'open'>;
 
         const cleanBaseNameEdit = items[0]?.name
           ? items[0].name.split(/\s*-\s*(?:البرعمات|البراعم|الصغيرات|الصغار|الفتيات|الفتيان|الشابات|الشبان|ذكور|إناث|مختلط|U12|U15|U18|U20|جميع الفئات|فئة|صغار|فتيان|شبان|براعم|صغيرات|فتيات|شابات|برعمات|لا منتمين|للمنتمين للأندية|مفتوحة|مواليد|السلك|دوري)/i)[0].trim()
@@ -577,7 +670,7 @@ export const Tournaments: React.FC = () => {
           targetSportId, 
           newSelectedCats, 
           undefined, 
-          undefined, 
+          newSelectedAffs, 
           undefined, // Keep base sport discipline name intact
           undefined, 
           true
@@ -737,7 +830,9 @@ export const Tournaments: React.FC = () => {
       teacherCadre = teacherSchoolObj.type;
     }
 
-    return sportsConfig.map(sport => {
+    return sportsConfig
+      .filter(sport => impersonationScopedSportIds.length === 0 || impersonationScopedSportIds.includes(sport.id))
+      .map(sport => {
       let sportTournaments = tournaments.filter(t => t.sportId === sport.id && t.status !== 'Draft' && (t as any).isActive !== false);
       const isManagerOfSport = canManageSport(sport.id);
 
@@ -1046,6 +1141,32 @@ export const Tournaments: React.FC = () => {
                   <Shuffle className="w-3.5 h-3.5 shrink-0" />
                   <span>القرعة الإلكترونية والمباريات</span>
                 </button>
+              )}
+
+              {/* Convert & Deduplicate Participations Button (Central Admin) */}
+              {activeBranch === 'provincial' && isCentralAdmin && (
+                <>
+                  <button
+                    type="button"
+                    disabled={isCleaningOrphaned}
+                    onClick={() => handleCleanOrphanedParticipations(false)}
+                    className="px-2.5 sm:px-3 py-2 sm:py-1.5 rounded-xl text-[11px] sm:text-xs font-bold transition-all cursor-pointer bg-amber-600 hover:bg-amber-700 text-white shadow-xs flex items-center justify-center gap-1.5 text-center disabled:opacity-60"
+                    title="حذف مشاركات المؤسسات المحذوفة والإبقاء فقط على مشاركات المؤسسات المسجلة حالياً في المؤسسات التعليمية"
+                  >
+                    <Trash2 className={`w-3.5 h-3.5 shrink-0 ${isCleaningOrphaned ? 'animate-pulse' : ''}`} />
+                    <span>{isCleaningOrphaned ? 'جاري التنظيف...' : 'حذف مشاركات المحذوفة'}</span>
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isConvertingParticipations}
+                    onClick={() => handleConvertParticipationsToNonClub(false)}
+                    className="px-2.5 sm:px-3 py-2 sm:py-1.5 rounded-xl text-[11px] sm:text-xs font-bold transition-all cursor-pointer bg-indigo-600 hover:bg-indigo-700 text-white shadow-xs flex items-center justify-center gap-1.5 text-center disabled:opacity-60"
+                    title="تحويل جميع مشاركات البطولات إلى غير المنتمين للأندية مع حذف مشاركات المؤسسات المكررة في نفس الصنف والفئة والجنس"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 shrink-0 ${isConvertingParticipations ? 'animate-spin' : ''}`} />
+                    <span>{isConvertingParticipations ? 'جاري التحويل...' : 'توحيد المشاركات (غير منتمين)'}</span>
+                  </button>
+                </>
               )}
 
               {/* Reset Button (Central Admin & Technical Committee Head scoped to own sport) */}

@@ -892,7 +892,8 @@ export const CrossCountryBulkRegisterModal: React.FC<CrossCountryBulkRegisterMod
         const relevantTournament = tournaments.find(t => 
           t.sportId === 'cross_country' && 
           normalizeCategoryKey(t.ageCategory) === normCategory &&
-          (t.gender === activeRaceDef.gender || t.gender === 'Mixed')
+          (t.gender === activeRaceDef.gender || t.gender === 'Mixed') &&
+          ((t.affiliationType || 'non_club') === selectedAffiliation || t.affiliationType === 'open')
         );
         if (relevantTournament) {
           if (relevantTournament.level) {

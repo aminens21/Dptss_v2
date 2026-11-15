@@ -50,7 +50,7 @@ import { cn } from '../../lib/utils';
 import toast from 'react-hot-toast';
 import { TeacherProfileModal } from '../TeacherProfileModal';
 import { CommunicationWidget } from '../CommunicationWidget';
-import { DataService } from '../../lib/dataService';
+import { DataService, SPORTS_MAP } from '../../lib/dataService';
 import {
   syncPendingLocalImportsToCloud,
   getPendingCloudSyncCount
@@ -63,7 +63,18 @@ import { doc, updateDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../../firebase/config';
 
 export const AppLayout: React.FC = () => {
-  const { currentUser, userProfile, logout, isDemo, openProfileModal, updateProfileState } = useAuth();
+  const {
+    currentUser,
+    userProfile,
+    originalUserProfile,
+    isImpersonatingTeacher,
+    impersonationScopedSportIds,
+    stopTeacherImpersonation,
+    logout,
+    isDemo,
+    openProfileModal,
+    updateProfileState
+  } = useAuth();
   const { isDarkMode, toggleDarkMode } = useTheme();
   const navigate = useNavigate();
   const location = useLocation();
@@ -599,7 +610,7 @@ export const AppLayout: React.FC = () => {
 
   const activeDirObj = directoratesList.find(d => d.id === activeDirectorateId) || directoratesList[0];
 
-  const isTeacherBlocked = userProfile && userProfile.role === 'TEACHER' && !userProfile.schoolAccessVerified && !isDemo;
+  const isTeacherBlocked = userProfile && userProfile.role === 'TEACHER' && !userProfile.schoolAccessVerified && !isDemo && !isImpersonatingTeacher;
 
   if (isTeacherBlocked) {
     return (
@@ -1655,6 +1666,49 @@ export const AppLayout: React.FC = () => {
 
         {/* Content Viewport */}
         <main className="flex-1 overflow-y-auto overflow-x-hidden bg-slate-50 dark:bg-[#0b0f1a] p-3 sm:p-4 md:p-6 transition-colors">
+          {isImpersonatingTeacher && userProfile && (
+            <div className="mb-4 rounded-2xl border-2 border-amber-400 bg-gradient-to-r from-amber-50 via-yellow-50 to-indigo-50 p-3 sm:p-4 shadow-md flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-in fade-in duration-150" dir="rtl">
+              <div className="flex items-start sm:items-center gap-3 min-w-0">
+                <div className="w-10 h-10 rounded-xl bg-amber-500 text-white flex items-center justify-center shrink-0 shadow-xs font-black">
+                  <UserCheck className="w-5 h-5" />
+                </div>
+                <div className="min-w-0 space-y-0.5">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="text-[10px] font-black bg-amber-200 text-amber-950 px-2 py-0.5 rounded-full border border-amber-300">
+                      وضع الدخول بالنيابة ({originalUserProfile?.fullName || 'رئيس اللجنة التقنية'})
+                    </span>
+                    {impersonationScopedSportIds.length > 0 && (
+                      <span className="text-[10px] font-black bg-indigo-100 text-indigo-900 px-2 py-0.5 rounded-full border border-indigo-200">
+                        الرياضة المسموحة: {impersonationScopedSportIds.map(id => SPORTS_MAP[id]?.name || id).join('، ')}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs sm:text-sm font-black text-slate-900 leading-snug">
+                    أنت تعمل الآن بصفة الأستاذ: <span className="text-indigo-800">{userProfile.fullName}</span>
+                    {userProfile.workLocation ? (
+                      <span className="text-slate-600 font-bold text-xs"> — المؤسسة: ({userProfile.workLocation})</span>
+                    ) : null}
+                  </p>
+                  <p className="text-[11px] text-amber-900 font-medium">
+                    جميع التعديلات أو الإضافات التي تجريها الآن ستُسجل رسمياً باسم هذا الأستاذ ومؤسسته ضمن رياضتك المسندة فقط.
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => {
+                  stopTeacherImpersonation();
+                  toast.success('تمت العودة بنجاح إلى حسابك الأصلي');
+                  navigate('/teachers');
+                }}
+                className="shrink-0 px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-black text-xs rounded-xl shadow-xs flex items-center justify-center gap-2 transition-all cursor-pointer active:scale-98"
+              >
+                <RotateCw className="w-3.5 h-3.5 text-amber-300" />
+                <span>العودة لحساب رئيس اللجنة التقنية</span>
+              </button>
+            </div>
+          )}
           <Outlet />
         </main>
       </div>

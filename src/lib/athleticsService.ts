@@ -370,7 +370,9 @@ export class AthleticsService {
             }
           }
           if (hasDuplicates) {
-            localStorage.setItem(STORAGE_KEYS.PARTICIPANTS, JSON.stringify(sanitized));
+            try {
+              localStorage.setItem(STORAGE_KEYS.PARTICIPANTS, JSON.stringify(sanitized));
+            } catch {}
           }
           return sanitized;
         }
@@ -465,7 +467,22 @@ export class AthleticsService {
         sanitized.push(p);
       }
     }
-    localStorage.setItem(STORAGE_KEYS.PARTICIPANTS, JSON.stringify(sanitized));
+    try {
+      localStorage.setItem(STORAGE_KEYS.PARTICIPANTS, JSON.stringify(sanitized));
+    } catch {
+      try {
+        const compacted = sanitized.map((p) => {
+          if (p && typeof (p as any).photoUrl === 'string' && (p as any).photoUrl.startsWith('data:image/')) {
+            const { photoUrl, ...rest } = p as any;
+            return rest as AthleticsParticipantRecord;
+          }
+          return p;
+        });
+        localStorage.setItem(STORAGE_KEYS.PARTICIPANTS, JSON.stringify(compacted));
+      } catch (err) {
+        console.warn('Athletics participants storage quota fallback:', err);
+      }
+    }
     window.dispatchEvent(new CustomEvent('athleticsParticipantsUpdated', { detail: sanitized }));
   }
 

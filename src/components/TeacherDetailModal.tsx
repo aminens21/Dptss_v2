@@ -17,7 +17,8 @@ import {
   Users,
   Copy,
   Check,
-  Pencil
+  Pencil,
+  LogIn
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -27,6 +28,7 @@ interface TeacherDetailModalProps {
   teacher: User | null;
   teacherStudents?: Student[];
   onEditRole?: (teacher: User) => void;
+  onImpersonateTeacher?: (teacher: User) => void;
 }
 
 export const TeacherDetailModal: React.FC<TeacherDetailModalProps> = ({
@@ -34,7 +36,8 @@ export const TeacherDetailModal: React.FC<TeacherDetailModalProps> = ({
   onClose,
   teacher,
   teacherStudents = [],
-  onEditRole
+  onEditRole,
+  onImpersonateTeacher
 }) => {
   const [copiedField, setCopiedField] = React.useState<string | null>(null);
 
@@ -322,17 +325,29 @@ export const TeacherDetailModal: React.FC<TeacherDetailModalProps> = ({
         </div>
 
         {/* Modal Footer */}
-        <div className="p-4 bg-slate-50 border-t border-slate-100 flex items-center justify-between gap-3">
-          {onEditRole && (
-            <button
-              type="button"
-              onClick={() => onEditRole(teacher)}
-              className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer"
-            >
-              <Pencil className="h-3.5 w-3.5" />
-              <span>تعديل صفة الأستاذ والإطار</span>
-            </button>
-          )}
+        <div className="p-4 bg-slate-50 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2.5">
+          <div className="flex flex-wrap items-center gap-2">
+            {onImpersonateTeacher && teacher.role !== 'CENTRAL_ADMIN' && !teacher.isSuperAdmin && (
+              <button
+                type="button"
+                onClick={() => onImpersonateTeacher(teacher)}
+                className="flex items-center gap-1.5 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-black transition-all shadow-xs cursor-pointer"
+              >
+                <LogIn className="h-3.5 w-3.5" />
+                <span>الدخول بصفة الأستاذ</span>
+              </button>
+            )}
+            {onEditRole && (
+              <button
+                type="button"
+                onClick={() => onEditRole(teacher)}
+                className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer"
+              >
+                <Pencil className="h-3.5 w-3.5" />
+                <span>تعديل صفة الأستاذ والإطار</span>
+              </button>
+            )}
+          </div>
 
           <button
             type="button"

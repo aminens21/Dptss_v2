@@ -349,6 +349,8 @@ export interface Student {
   schoolName: string; // cache school name
   commune?: string; // commune for bib generation
   sportId: string; // chosen sport
+  tournamentId?: string;
+  tournamentName?: string;
   photoUrl?: string; // photo data url or URL
   affiliationType?: 'non_club' | 'club_affiliated' | 'open'; // غير منتمي لنادي / منتمي لنادي
   participationType?: 'individual' | 'school_team'; // نوع المشاركة في العدو الريفي: فردي أو فريق المؤسسة

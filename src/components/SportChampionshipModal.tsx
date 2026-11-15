@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { Tournament, Student, School, User, Sport, Match } from '../types';
-import { SPORTS_MAP, getAgeCategoriesForSeason, normalizeCategoryKey, DataService, getCategoryYearsLabel, isTeacherLevelAllowedForTournament, getTournamentLevelAr, doesConfirmationMatchBranch, getEffectiveConfirmedBranches, formatBranchLabelAr, isSchoolSectorAllowedForTournament, getTournamentEducationSectorsAr, getSchoolEducationSector, resolveSchoolCoach, schoolNamesMatch } from '../lib/dataService';
+import { SPORTS_MAP, getAgeCategoriesForSeason, normalizeCategoryKey, DataService, getCategoryYearsLabel, isTeacherLevelAllowedForTournament, getTournamentLevelAr, doesConfirmationMatchBranch, getEffectiveConfirmedBranches, formatBranchLabelAr, isSchoolSectorAllowedForTournament, getTournamentEducationSectorsAr, getSchoolEducationSector, resolveSchoolCoach, schoolNamesMatch, normalizeArabicSearch, normalizeArabicMatchText } from '../lib/dataService';
 import { useAuth, isSuperAdminEmail } from '../contexts/AuthContext';
 import { AppLogo } from './AppLogo';
 import { CountdownTimer } from './CountdownTimer';
@@ -126,7 +126,10 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
   isTeacherRole,
   teacherSchoolName
 }) => {
-  const { userProfile } = useAuth();
+  const { userProfile, impersonationScopedSportIds } = useAuth();
+  const isBlockedByImpersonationScope = Boolean(
+    impersonationScopedSportIds.length > 0 && sport && !impersonationScopedSportIds.includes(sport.id)
+  );
 
   // Local copy of students for instant optimistic UI updates
   const [localStudents, setLocalStudents] = useState<Student[]>(allStudents);
@@ -178,9 +181,11 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
   const [coachCategoryTarget, setCoachCategoryTarget] = useState<string>('ALL');
   const [isSubmittingCoach, setIsSubmittingCoach] = useState(false);
 
-  // Category deletion state
+  // Category & branch tournament deletion state
   const [categoryToDelete, setCategoryToDelete] = useState<{ category: string; gender: 'Male' | 'Female'; label: string; count: number } | null>(null);
   const [isDeletingCategory, setIsDeletingCategory] = useState(false);
+  const [branchTournamentToDelete, setBranchTournamentToDelete] = useState<Tournament | null>(null);
+  const [isDeletingBranchTournament, setIsDeletingBranchTournament] = useState(false);
 
   // Individual student deletion state
   const [studentToDelete, setStudentToDelete] = useState<Student | null>(null);
@@ -568,40 +573,20 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
       : seasonalCategories.map(c => c.id);
   }, [sport, seasonalCategories]);
 
-  // Tournaments belonging to the active classification branch (or fallback virtual tournaments)
+  // Tournaments strictly belonging to the active classification branch (no phantom virtual tournaments)
   const displayBranchTournaments = useMemo(() => {
     if (!activeBranchModal || !sport) return [];
-    const programmed = sportTournaments.filter(t => (t.affiliationType || 'non_club') === activeBranchModal);
-    if (programmed.length > 0) return programmed;
+    return sportTournaments.filter(t => (t.affiliationType || 'non_club') === activeBranchModal);
+  }, [sportTournaments, activeBranchModal, sport]);
 
-    // Fallback virtual tournaments for configured categories & genders if no specific records exist yet
-    const virtuals: Tournament[] = [];
-    const cats = sportCategories.length > 0 ? sportCategories : ['U15', 'U18'];
-    const genders: Array<'Male' | 'Female'> = ['Male', 'Female'];
-
-    cats.forEach(cat => {
-      genders.forEach(g => {
-        const affPrefix = activeBranchModal === 'club_affiliated' ? 'بطولة المنتمين للأندية' : 'بطولة غير المنتمين للأندية';
-        const gLabel = g === 'Female' ? 'إناث' : 'ذكور';
-        const tName = `${affPrefix} ${cat} ${gLabel}`;
-        virtuals.push({
-          id: `virtual-${sport.id}-${cat}-${g}-${activeBranchModal}`,
-          sportId: sport.id,
-          name: tName,
-          gender: g,
-          ageCategory: cat,
-          affiliationType: activeBranchModal,
-          seasonId: activeSeason || '2026-2027',
-          scope: 'provincial',
-          startDate: new Date().toISOString().split('T')[0],
-          endDate: new Date().toISOString().split('T')[0],
-          status: 'Scheduled',
-          level: 'ALL'
-        });
-      });
-    });
-    return virtuals;
-  }, [sportTournaments, activeBranchModal, sport, sportCategories]);
+  // If all tournaments inside the open branch were deleted, exit the branch view cleanly
+  useEffect(() => {
+    if (activeBranchModal && displayBranchTournaments.length === 0) {
+      setSelectedBranchTournament(null);
+      setSelectedSchoolNameForView(null);
+      setActiveBranchModal(null);
+    }
+  }, [activeBranchModal, displayBranchTournaments.length]);
 
   // Main modal title for the sport
   const customTitle = useMemo(() => {
@@ -871,6 +856,20 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
       return matchAff && matchCat && matchGen;
     });
 
+    const resolveCanonicalSchoolBucket = (rawSchoolId?: string, rawSchoolName?: string) => {
+      const matched = schools.find(
+        sch => (rawSchoolId && sch.id === rawSchoolId) || (rawSchoolName && schoolNamesMatch(sch.name, rawSchoolName))
+      );
+      if (matched) {
+        return { key: `id:${matched.id}`, displayName: matched.name };
+      }
+      const norm = normalizeArabicMatchText(rawSchoolName);
+      return {
+        key: norm ? `name:${norm}` : `id:${(rawSchoolId || '').trim().toLowerCase()}`,
+        displayName: (rawSchoolName || '').trim()
+      };
+    };
+
     const schoolsMap: Record<string, {
       name: string;
       totalCount: number;
@@ -887,16 +886,18 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
 
     affiliationStudents.forEach(s => {
       if (!s.schoolName) return;
-      if (!schoolsMap[s.schoolName]) {
-        schoolsMap[s.schoolName] = {
-          name: s.schoolName,
+      const bucket = resolveCanonicalSchoolBucket(s.schoolId, s.schoolName);
+      if (!bucket.key) return;
+      if (!schoolsMap[bucket.key]) {
+        schoolsMap[bucket.key] = {
+          name: bucket.displayName || s.schoolName,
           totalCount: 0,
           maleCount: 0,
           femaleCount: 0,
           genderCategories: []
         };
       }
-      const schoolItem = schoolsMap[s.schoolName];
+      const schoolItem = schoolsMap[bucket.key];
       schoolItem.totalCount += 1;
       const gen: 'Male' | 'Female' = s.gender === 'Female' ? 'Female' : 'Male';
       if (gen === 'Male') {
@@ -945,9 +946,12 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
         }, conf.schoolId, conf.schoolName);
         if (isConfWithdrawn) return;
 
-        if (!schoolsMap[conf.schoolName]) {
-          schoolsMap[conf.schoolName] = {
-            name: conf.schoolName,
+        const bucket = resolveCanonicalSchoolBucket(conf.schoolId, conf.schoolName);
+        if (!bucket.key) return;
+
+        if (!schoolsMap[bucket.key]) {
+          schoolsMap[bucket.key] = {
+            name: bucket.displayName || conf.schoolName,
             totalCount: 0,
             maleCount: 0,
             femaleCount: 0,
@@ -955,7 +959,7 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
           };
         }
 
-        const schoolItem = schoolsMap[conf.schoolName];
+        const schoolItem = schoolsMap[bucket.key];
         matchingBranches.forEach(b => {
           const cat = normalizeCategoryKey(b.category);
           const gen = b.gender;
@@ -998,14 +1002,14 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
 
     return allSchools.filter(sch => {
       if (!search.trim()) return true;
-      const term = search.toLowerCase();
-      const matchSchoolName = sch.name.toLowerCase().includes(term);
+      const term = normalizeArabicSearch(search);
+      const matchSchoolName = normalizeArabicSearch(sch.name).includes(term);
       const matchCategories = sch.genderCategories.some(gCat => 
-        gCat.label.toLowerCase().includes(term) || gCat.category.toLowerCase().includes(term)
+        normalizeArabicSearch(gCat.label).includes(term) || normalizeArabicSearch(gCat.category).includes(term)
       );
       return matchSchoolName || matchCategories;
     });
-  }, [sportStudents, selectedAffiliation, selectedBranchTournament, selectedCatId, selectedGender, search, isTeacherRole, userProfile, teacherSchoolName, canManage, activeBranchModal, sport, getConfirmedSchoolsForSport]);
+  }, [sportStudents, schools, selectedAffiliation, selectedBranchTournament, selectedCatId, selectedGender, search, isTeacherRole, userProfile, teacherSchoolName, canManage, activeBranchModal, sport, getConfirmedSchoolsForSport]);
 
   // Students belonging to the currently selected school in this sport & affiliation
   const schoolStudents = useMemo(() => {
@@ -1017,7 +1021,7 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
     const targetGen = selectedBranchTournament ? selectedBranchTournament.gender : selectedGender;
 
     return sportStudents.filter(s => {
-      if (!s || s.schoolName !== selectedSchoolNameForView) return false;
+      if (!s || !schoolNamesMatch(s.schoolName, selectedSchoolNameForView)) return false;
       const sAff = s.affiliationType || 'non_club';
       const sNormCat = normalizeCategoryKey(s.category);
       const sGen = s.gender || 'Male';
@@ -1245,6 +1249,10 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
               <button
                 type="button"
                 onClick={() => {
+                  if (isBlockedByImpersonationScope) {
+                    toast.error('عذراً، في وضع الدخول بصفة أستاذ آخر، صلاحيتك محصورة في رياضتك التقنية فقط.');
+                    return;
+                  }
                   if (!isTeacherAllowedForSport) {
                     toast.error(`عذراً، أنت مسجل كأستاذ سلك (${teacherCadreAr})، وهذه البطولة مخصصة لأسلاك (${allowedSportLevelsAr}) فقط.`);
                     return;
@@ -1598,7 +1606,13 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
                             schoolName={effectiveSchoolName}
                             variant="light"
                             label="مؤكدة ✓ (اضغط مطولاً 3ث للإلغاء)"
-                            onClick={() => setIsConfirmModalOpen(true)}
+                            onClick={() => {
+                              if (isBlockedByImpersonationScope) {
+                                toast.error('عذراً، في وضع الدخول بصفة أستاذ آخر، صلاحيتك محصورة في رياضتك التقنية فقط.');
+                                return;
+                              }
+                              setIsConfirmModalOpen(true);
+                            }}
                             onCancelSuccess={() => {
                               refreshConfirmations();
                             }}
@@ -1606,6 +1620,10 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
                            <button
                             type="button"
                             onClick={() => {
+                              if (isBlockedByImpersonationScope) {
+                                toast.error('عذراً، في وضع الدخول بصفة أستاذ آخر، صلاحيتك محصورة في رياضتك التقنية فقط.');
+                                return;
+                              }
                               const allCompleted = tournaments.length > 0 && tournaments.every(t => t.status === 'Completed' || t.status === 'Archived');
                               if (allCompleted) {
                                 toast.error('عذراً، هذه البطولة منتهية ومؤرشفة نهائياً 🔒');
@@ -1624,6 +1642,10 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
                         <button
                           type="button"
                           onClick={() => {
+                            if (isBlockedByImpersonationScope) {
+                              toast.error('عذراً، في وضع الدخول بصفة أستاذ آخر، صلاحيتك محصورة في رياضتك التقنية فقط.');
+                              return;
+                            }
                             if (isDeadlineExpired) {
                               toast.error('عذراً، لقد انتهى أجل التسجيل وتأكيد مشاركة المؤسسات في هذه البطولة 🔒');
                               return;
@@ -1913,6 +1935,10 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
                       <button
                         type="button"
                         onClick={() => {
+                          if (isBlockedByImpersonationScope) {
+                            toast.error('عذراً، في وضع الدخول بصفة أستاذ آخر، صلاحيتك محصورة في رياضتك التقنية فقط.');
+                            return;
+                          }
                           if (!isTeacherAllowedForSport) {
                             toast.error(`عذراً، بصفتك أستاذ سلك (${teacherCadreAr})، لا يمكنك التسجيل في هذه البطولة المخصصة لـ (${allowedSportLevelsAr})`);
                             return;
@@ -1933,6 +1959,10 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
                       <button
                         type="button"
                         onClick={() => {
+                          if (isBlockedByImpersonationScope) {
+                            toast.error('عذراً، في وضع الدخول بصفة أستاذ آخر، صلاحيتك محصورة في رياضتك التقنية فقط.');
+                            return;
+                          }
                           if (!isTeacherAllowedForSport) {
                             toast.error(`عذراً، بصفتك أستاذ سلك (${teacherCadreAr})، لا يمكنك التسجيل في هذه البطولة المخصصة لـ (${allowedSportLevelsAr})`);
                             return;
@@ -2109,7 +2139,7 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
                             </div>
                           </div>
 
-                          <div className="mt-4 pt-3 border-t border-slate-100">
+                          <div className="mt-4 pt-3 border-t border-slate-100 flex items-center gap-2">
                             <button
                               type="button"
                               onClick={(e) => {
@@ -2117,9 +2147,10 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
                                 setSelectedBranchTournament(t);
                                 setSelectedCatId(normalizeCategoryKey(t.ageCategory));
                                 setSelectedGender(t.gender as any);
+                                setSelectedAffiliation((t.affiliationType || activeBranchModal || 'non_club') as 'non_club' | 'club_affiliated');
                                 setSelectedSchoolNameForView(null);
                               }}
-                              className={`w-full py-2.5 px-4 text-white rounded-xl text-xs font-black shadow-xs transition-all cursor-pointer flex items-center justify-center gap-2 group-hover:scale-102 ${
+                              className={`flex-1 py-2.5 px-4 text-white rounded-xl text-xs font-black shadow-xs transition-all cursor-pointer flex items-center justify-center gap-2 group-hover:scale-102 ${
                                 tAff === 'club_affiliated'
                                   ? 'bg-amber-500 hover:bg-amber-600'
                                   : 'bg-blue-600 hover:bg-blue-700'
@@ -2128,11 +2159,63 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
                               <span>دخول واستعراض المؤسسات المشاركة 🔓</span>
                               <ChevronLeft className="w-4 h-4" />
                             </button>
+                            {canManage && !String(t.id).startsWith('virtual-') && (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setBranchTournamentToDelete(t);
+                                }}
+                                title="حذف هذا الصنف/الفئة نهائياً"
+                                className="p-2.5 bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 rounded-xl transition-colors cursor-pointer shrink-0"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            )}
                           </div>
                         </div>
                       );
                     })}
                   </div>
+
+                  {branchTournamentToDelete && (
+                    <div className="p-4 rounded-2xl bg-rose-50 border-2 border-rose-300 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                      <div className="text-xs text-rose-950">
+                        <p className="font-black">تأكيد حذف فرع البطولة: «{getBranchTournamentTitle(branchTournamentToDelete, activeBranchModal)}»؟</p>
+                        <p className="text-[11px] text-rose-700 mt-0.5">سيتم حذف هذه الفئة ومبارياتها وتحييدها من البطولات المبرمجة نهائياً.</p>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <button
+                          type="button"
+                          disabled={isDeletingBranchTournament}
+                          onClick={() => setBranchTournamentToDelete(null)}
+                          className="px-3 py-1.5 rounded-xl bg-white border border-slate-300 text-xs font-bold text-slate-700 cursor-pointer"
+                        >
+                          إلغاء
+                        </button>
+                        <button
+                          type="button"
+                          disabled={isDeletingBranchTournament}
+                          onClick={async () => {
+                            setIsDeletingBranchTournament(true);
+                            try {
+                              await DataService.deleteTournament(branchTournamentToDelete.id);
+                              toast.success('تم حذف فرع البطولة بنجاح');
+                              setBranchTournamentToDelete(null);
+                              if (onRefreshData) onRefreshData();
+                            } catch {
+                              toast.error('تعذر حذف فرع البطولة');
+                            } finally {
+                              setIsDeletingBranchTournament(false);
+                            }
+                          }}
+                          className="px-4 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-black cursor-pointer disabled:opacity-50"
+                        >
+                          {isDeletingBranchTournament ? 'جاري الحذف...' : 'نعم، حذف نهائياً'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               ) : (selectedSchoolNameForView === null || !canManageSchool(selectedSchoolNameForView)) ? (
                 /* LEVEL 3A: Participating Schools View for Selected Tournament */
@@ -2340,6 +2423,10 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
                                       type="button"
                                       onClick={(e) => {
                                         e.stopPropagation();
+                                        if (isBlockedByImpersonationScope) {
+                                          toast.error('عذراً، في وضع الدخول بصفة أستاذ آخر، صلاحيتك محصورة في رياضتك التقنية فقط.');
+                                          return;
+                                        }
                                         if (!isTeacherAllowedForSport) {
                                           toast.error(`عذراً، أنت مسجل كأستاذ سلك (${teacherCadreAr})، ولا يمكنك التسجيل في هذه البطولة المخصصة لـ (${allowedSportLevelsAr})`);
                                           return;
@@ -2441,6 +2528,10 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
                           <button
                             type="button"
                             onClick={() => {
+                              if (isBlockedByImpersonationScope) {
+                                toast.error('عذراً، في وضع الدخول بصفة أستاذ آخر، صلاحيتك محصورة في رياضتك التقنية فقط.');
+                                return;
+                              }
                               if (!isTeacherAllowedForSport) {
                                 toast.error(`عذراً، أنت مسجل كأستاذ سلك (${teacherCadreAr})، ولا يمكنك التسجيل في هذه البطولة المخصصة لـ (${allowedSportLevelsAr})`);
                                 return;
@@ -2934,7 +3025,7 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
 
       {/* Register Student Modal */}
       <RegisterStudentModal
-        isOpen={isRegisterModalOpen}
+        isOpen={isRegisterModalOpen && !isBlockedByImpersonationScope}
         onClose={() => {
           setIsRegisterModalOpen(false);
           setPreselectedSchoolForRegister(undefined);
@@ -2953,9 +3044,9 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
       />
 
       {/* Sport Bulk Register Modal */}
-      {isBulkRegisterOpen && (
+      {isBulkRegisterOpen && !isBlockedByImpersonationScope && (
         <SportBulkRegisterModal
-          isOpen={isBulkRegisterOpen}
+          isOpen={isBulkRegisterOpen && !isBlockedByImpersonationScope}
           onClose={() => {
             setIsBulkRegisterOpen(false);
             setPreselectedSchoolForRegister(undefined);
@@ -2965,6 +3056,7 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
           preselectedSchoolName={preselectedSchoolForRegister}
           preselectedCategory={effectivePreselectedCategory}
           preselectedGender={effectivePreselectedGender}
+          preselectedAffiliation={effectivePreselectedAffiliation}
           allExistingStudents={localStudents}
           tournaments={allowedTournamentsForTeacher}
           onRegistered={() => {
@@ -3173,15 +3265,19 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
                 <div>
                   <div className="flex items-center justify-between mb-1">
                     <label className="block text-slate-700 font-bold">الجنس *</label>
-                    <span className="text-[10px] font-black px-2 py-0.5 rounded border bg-blue-50 text-blue-700 border-blue-200 flex items-center gap-1">
+                    <span className={`text-[10px] font-black px-2 py-0.5 rounded border flex items-center gap-1 ${
+                      editGender === 'Female'
+                        ? 'bg-pink-50 text-pink-700 border-pink-200'
+                        : 'bg-blue-50 text-blue-700 border-blue-200'
+                    }`}>
                       <Lock className="w-3 h-3" />
-                      <span>مقفل (ذكور فقط)</span>
+                      <span>مقفل ({editGender === 'Female' ? 'إناث فقط' : 'ذكور فقط'})</span>
                     </span>
                   </div>
                   <div className="w-full px-3.5 py-2.5 bg-slate-100 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 flex items-center justify-between cursor-not-allowed">
                     <span className="flex items-center gap-1.5">
-                      <span>👦</span>
-                      <span>ذكر (Male)</span>
+                      <span>{editGender === 'Female' ? '👧' : '👦'}</span>
+                      <span>{editGender === 'Female' ? 'أنثى (Female)' : 'ذكر (Male)'}</span>
                     </span>
                     <span className="text-[10px] text-slate-400 font-bold flex items-center gap-1">
                       <Lock className="w-3 h-3" /> مقفل
@@ -3207,11 +3303,13 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
                     <label className="block text-slate-700 font-bold">الفئة العمرية *</label>
                     <span className="text-[10px] font-black px-2 py-0.5 rounded border bg-blue-50 text-blue-700 border-blue-200 flex items-center gap-1">
                       <Lock className="w-3 h-3" />
-                      <span>مقفل (البراعم فقط)</span>
+                      <span>مقفل ({editCategory || 'U15'})</span>
                     </span>
                   </div>
                   <div className="w-full px-3.5 py-2.5 bg-slate-100 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 flex items-center justify-between cursor-not-allowed">
-                    <span className="font-extrabold text-blue-900">{editCategory || 'U12'} - البراعم</span>
+                    <span className="font-extrabold text-blue-900">
+                      {getDistinctCategoryLabel(editCategory || 'U15', editGender)} ({editCategory || 'U15'})
+                    </span>
                     <span className="text-[10px] text-slate-400 font-bold flex items-center gap-1">
                       <Lock className="w-3 h-3" /> مقفل
                     </span>
@@ -3222,15 +3320,23 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
               <div>
                 <div className="flex items-center justify-between mb-1">
                   <label className="block text-slate-700 font-bold">صنف المشاركة والانتماء الرياضي *</label>
-                  <span className="text-[10px] font-black px-2 py-0.5 rounded border bg-slate-100 text-slate-700 border-slate-300 flex items-center gap-1">
+                  <span className={`text-[10px] font-black px-2 py-0.5 rounded border flex items-center gap-1 ${
+                    editAffiliationType === 'club_affiliated'
+                      ? 'bg-amber-50 text-amber-800 border-amber-300'
+                      : 'bg-slate-100 text-slate-700 border-slate-300'
+                  }`}>
                     <Lock className="w-3 h-3" />
-                    <span>مقفل (لا منتمي فقط)</span>
+                    <span>مقفل ({editAffiliationType === 'club_affiliated' ? 'منتمي للأندية فقط' : 'لا منتمي فقط'})</span>
                   </span>
                 </div>
                 <div className="w-full px-3.5 py-2.5 bg-slate-100 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 flex items-center justify-between cursor-not-allowed">
                   <span className="flex items-center gap-1.5">
-                    <span>⚪</span>
-                    <span>غير منخرطين بالجامعات (لا منتمي - مشاركة مدرسية فقط)</span>
+                    <span>{editAffiliationType === 'club_affiliated' ? '🟡' : '⚪'}</span>
+                    <span>
+                      {editAffiliationType === 'club_affiliated'
+                        ? 'منتمي للأندية والعصب الرياضية (البطولة الصفراء)'
+                        : 'غير منخرطين بالجامعات (لا منتمي - مشاركة مدرسية فقط)'}
+                    </span>
                   </span>
                   <span className="text-[10px] text-slate-400 font-bold flex items-center gap-1">
                     <Lock className="w-3 h-3" /> مقفل
@@ -3451,9 +3557,9 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
       )}
 
       {/* School Participation Confirmation Modal */}
-      {isConfirmModalOpen && sport && (
+      {isConfirmModalOpen && !isBlockedByImpersonationScope && sport && (
         <ConfirmParticipationModal
-          isOpen={isConfirmModalOpen}
+          isOpen={isConfirmModalOpen && !isBlockedByImpersonationScope}
           onClose={() => setIsConfirmModalOpen(false)}
           sport={sport}
           tournaments={sportTournaments}
@@ -3474,7 +3580,7 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
             if (onRefreshData) onRefreshData();
           }}
           onProceedToRegister={() => {
-            if (isProgrammed) {
+            if (isProgrammed && !isBlockedByImpersonationScope) {
               setIsBulkRegisterOpen(true);
             }
           }}

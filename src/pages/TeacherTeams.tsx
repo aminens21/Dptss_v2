@@ -38,7 +38,7 @@ import {
 import toast from 'react-hot-toast';
 
 export const TeacherTeams: React.FC = () => {
-  const { userProfile, openProfileModal } = useAuth();
+  const { userProfile, openProfileModal, impersonationScopedSportIds } = useAuth();
   const [searchParams] = useSearchParams();
   const urlSport = searchParams.get('sport');
   const urlSchool = searchParams.get('school');
@@ -52,7 +52,11 @@ export const TeacherTeams: React.FC = () => {
   const [currentSeason, setCurrentSeason] = useState('2026/2027');
 
   // Selected Context & Categorization Filter
-  const [selectedSportId, setSelectedSportId] = useState<string | null>(urlSport || null);
+  const [selectedSportId, setSelectedSportId] = useState<string | null>(() => {
+    if (!urlSport) return null;
+    if (impersonationScopedSportIds.length > 0 && !impersonationScopedSportIds.includes(urlSport)) return null;
+    return urlSport;
+  });
   const [sportTabFilter, setSportTabFilter] = useState<'PROGRAMMED' | 'NON_PROGRAMMED' | 'ALL'>('PROGRAMMED');
 
   const isTeacherRole = userProfile?.role === 'TEACHER';
@@ -96,14 +100,20 @@ export const TeacherTeams: React.FC = () => {
     return false;
   };
 
-  // Classified Sports
+  // Classified Sports (strictly scoped to Tech Head assigned sports when impersonating a teacher)
   const programmedSports = useMemo(() => {
-    return sportsConfig.filter(s => isSportProgrammed(s));
-  }, [sportsConfig, teacherAllowedTournaments]);
+    return sportsConfig.filter(s =>
+      isSportProgrammed(s) &&
+      (impersonationScopedSportIds.length === 0 || impersonationScopedSportIds.includes(s.id))
+    );
+  }, [sportsConfig, teacherAllowedTournaments, impersonationScopedSportIds]);
 
   const nonProgrammedSports = useMemo(() => {
-    return sportsConfig.filter(s => !isSportProgrammed(s));
-  }, [sportsConfig, teacherAllowedTournaments]);
+    return sportsConfig.filter(s =>
+      !isSportProgrammed(s) &&
+      (impersonationScopedSportIds.length === 0 || impersonationScopedSportIds.includes(s.id))
+    );
+  }, [sportsConfig, teacherAllowedTournaments, impersonationScopedSportIds]);
 
   // New Student Form State
   const [isFormOpen, setIsFormOpen] = useState(false);
@@ -296,7 +306,11 @@ export const TeacherTeams: React.FC = () => {
       }
 
       if (urlSport) {
-        setSelectedSportId(urlSport);
+        if (impersonationScopedSportIds.length === 0 || impersonationScopedSportIds.includes(urlSport)) {
+          setSelectedSportId(urlSport);
+        }
+      } else if (impersonationScopedSportIds.length === 1) {
+        setSelectedSportId(impersonationScopedSportIds[0]);
       }
     } catch (error) {
       console.error('Error loading teacher team data:', error);
@@ -307,6 +321,10 @@ export const TeacherTeams: React.FC = () => {
   };
 
   const handleSelectSport = (sportId: string) => {
+    if (impersonationScopedSportIds.length > 0 && !impersonationScopedSportIds.includes(sportId)) {
+      toast.error('أثناء الدخول بصفة أستاذ آخر، التعديل متاح حصراً في رياضتك المسندة.');
+      return;
+    }
     setSelectedSportId(sportId);
     setSelectedCategoryKey(null);
     
@@ -644,10 +662,12 @@ export const TeacherTeams: React.FC = () => {
     setBirthDate(student.birthDate);
     setCategory(normalizeCategoryKey(student.category));
     
-    // Unlock any temporary locks so teacher can correct data freely
+    // Keep branch affiliation & category locked cleanly on edit unless opened outside a branch
+    const studentAff: 'non_club' | 'club_affiliated' =
+      student.affiliationType === 'club_affiliated' ? 'club_affiliated' : 'non_club';
     setLockedGender(null);
     setLockedCategory(null);
-    setLockedAffiliation(null);
+    setLockedAffiliation(selectedCategoryKey ? studentAff : null);
 
     if (student.schoolId) {
       setSelectedSchoolId(student.schoolId);
@@ -868,8 +888,10 @@ export const TeacherTeams: React.FC = () => {
       }
 
       const normalizedCat = normalizeCategoryKey(category);
-      const coachKey = `${normalizedCat}_${gender}`;
-      const coachInfo = effectiveCoaches[coachKey] || {
+      const normAff = affiliationType === 'club_affiliated' ? 'club_affiliated' : 'non_club';
+      const coachAffKey = `${normalizedCat}_${gender}_${normAff}`;
+      const coachBaseKey = `${normalizedCat}_${gender}`;
+      const coachInfo = effectiveCoaches[coachAffKey] || effectiveCoaches[coachBaseKey] || {
         coachName: userProfile?.fullName || '',
         coachLeaseNumber: userProfile?.leaseNumber || '',
         coachPhone: userProfile?.phone || ''
@@ -1507,7 +1529,7 @@ export const TeacherTeams: React.FC = () => {
                         {selectedSportId === 'cross_country' ? (
                           <button
                             type="button"
-                            onClick={() => handleOpenCrossCountryBulk(selectedCategoryKey)}
+                            onClick={() => handleOpenCrossCountryBulk(selectedCategoryKey, parsed.affiliationType)}
                             disabled={!activeSportCategories || activeSportCategories.length === 0 || !activeSportConfig || !isSportProgrammed(activeSportConfig)}
                             title="تسجيل 8 مشاركين في آن واحد (3 فردي + 5 فريق المؤسسة)"
                             className="bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 text-slate-950 font-black text-xs px-4 py-2 rounded-xl shadow-xs flex items-center gap-1.5 transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer hover:scale-102 active:scale-98"
@@ -2616,12 +2638,12 @@ export const TeacherTeams: React.FC = () => {
                                   }
                                 }));
 
-                                // Propagate updates to all existing students in this category/gender combo
-                                const studentsToUpdate = activeSportStudents.filter(s => 
-                                  s.category === catId && 
-                                  s.gender === g &&
-                                  (!aff || s.affiliationType === aff)
-                                );
+                                // Propagate updates to all existing students strictly matching this category, gender AND affiliation
+                                const targetAff = aff || (isCategoryClub ? 'club_affiliated' : 'non_club');
+                                const studentsToUpdate = activeSportStudents.filter(s => {
+                                  const sAff = s.affiliationType === 'club_affiliated' ? 'club_affiliated' : 'non_club';
+                                  return normalizeCategoryKey(s.category) === catId && s.gender === g && sAff === targetAff;
+                                });
                                 if (studentsToUpdate.length > 0) {
                                   try {
                                     const updates = {
@@ -2632,10 +2654,10 @@ export const TeacherTeams: React.FC = () => {
                                     await Promise.all(studentsToUpdate.map(s => 
                                       DataService.updateStudent(s.id, updates)
                                     ));
-                                setStudents(prev => prev.map(s => {
+                                    setStudents(prev => prev.map(s => {
                                       const match = s.sportId === selectedSportId && normalizeCategoryKey(s.category) === catId && s.gender === g;
-                                      const affMatch = !aff || s.affiliationType === aff;
-                                      if (match && affMatch) {
+                                      const sAff = s.affiliationType === 'club_affiliated' ? 'club_affiliated' : 'non_club';
+                                      if (match && sAff === targetAff) {
                                         return { ...s, ...updates };
                                       }
                                       return s;
@@ -2721,17 +2743,20 @@ export const TeacherTeams: React.FC = () => {
                       <FileText className="w-3.5 h-3.5" />
                       <span>مطبوع المشاركة</span>
                     </button>
-                    {selectedSportId === 'cross_country' && (
-                      <button
-                        type="button"
-                        onClick={() => handleOpenCrossCountryBulk(selectedCategoryKey)}
-                        className="text-[10px] font-black bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 text-slate-950 px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-all cursor-pointer shadow-xs hover:scale-102"
-                        title="تسجيل 8 مشاركين في آن واحد (3 فردي + 5 فريق المؤسسة)"
-                      >
-                        <Sparkles className="w-3.5 h-3.5 text-slate-950" />
-                        <span>تسجيل 8 مشاركين ⚡</span>
-                      </button>
-                    )}
+                    {selectedSportId === 'cross_country' && (() => {
+                      const parsedCC = parseBranchKey(selectedCategoryKey);
+                      return (
+                        <button
+                          type="button"
+                          onClick={() => handleOpenCrossCountryBulk(selectedCategoryKey, parsedCC.affiliationType)}
+                          className="text-[10px] font-black bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 text-slate-950 px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-all cursor-pointer shadow-xs hover:scale-102"
+                          title="تسجيل 8 مشاركين في آن واحد (3 فردي + 5 فريق المؤسسة)"
+                        >
+                          <Sparkles className="w-3.5 h-3.5 text-slate-950" />
+                          <span>تسجيل 8 مشاركين ⚡</span>
+                        </button>
+                      );
+                    })()}
                   </div>
                 </div>
 
@@ -3280,6 +3305,7 @@ export const TeacherTeams: React.FC = () => {
             schools={schools}
             preselectedCategory={selectedCategoryKey ? parsed.catId : undefined}
             preselectedGender={selectedCategoryKey ? parsed.gender : 'Male'}
+            preselectedAffiliation={selectedCategoryKey ? parsed.affiliationType : undefined}
             preselectedSchoolName={schoolName}
             tournaments={
               parsed.affiliationType

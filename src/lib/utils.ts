@@ -287,3 +287,15 @@ export function normalizeArabicName(name: string): string {
     .replace(/[\s\-_]+/g, '');
 }
 
+export function normalizeArabicSearch(text: string): string {
+  if (!text) return '';
+  return String(text)
+    .trim()
+    .toLowerCase()
+    .replace(/[\u064B-\u065F\u0670\u0640]/g, '') // strip Arabic diacritics & tatweel
+    .replace(/[أإآ]/g, 'ا')
+    .replace(/ة/g, 'ه')
+    .replace(/ى/g, 'ي')
+    .replace(/\s+/g, ' ');
+}
+

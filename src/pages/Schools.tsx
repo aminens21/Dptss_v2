@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { DataService, SPORTS_MAP, AGE_CATEGORIES, deduplicateById, generateSecureAccessCode, getEffectiveConfirmedBranches, formatBranchLabelAr, normalizeCategoryKey, ConfirmedBranchTuple, normalizeSchoolCycleType, getSchoolEducationSector, normalizeSchoolPureCycleLabel } from '../lib/dataService';
+import { DataService, SPORTS_MAP, AGE_CATEGORIES, deduplicateById, generateSecureAccessCode, getEffectiveConfirmedBranches, formatBranchLabelAr, normalizeCategoryKey, ConfirmedBranchTuple, normalizeSchoolCycleType, getSchoolEducationSector, normalizeSchoolPureCycleLabel, normalizeArabicSearch } from '../lib/dataService';
 import { School, Match, Directorate } from '../types';
 import { useSchoolConfirmations } from '../hooks/useSchoolConfirmations';
 import * as XLSX from 'xlsx';
@@ -34,7 +34,8 @@ import {
   Lock,
   Eye,
   EyeOff,
-  X
+  X,
+  RefreshCw
 } from 'lucide-react';
 import { CreateSchoolModal } from '../components/CreateSchoolModal';
 import { ConfirmDeleteModal } from '../components/ConfirmDeleteModal';
@@ -99,13 +100,17 @@ export const Schools: React.FC = () => {
   const [isDeletingAll, setIsDeletingAll] = useState(false);
   const [selectedSchoolForParticipants, setSelectedSchoolForParticipants] = useState<School | null>(null);
   const [selectedSchoolForDetails, setSelectedSchoolForDetails] = useState<School | null>(null);
+  const [isPruningExtra, setIsPruningExtra] = useState(false);
+  const autoPrunedDirsRef = useRef<Set<string>>(new Set());
 
   // CENTRAL_ADMIN, SPORT_MANAGER, and Technical Committee Head can manage schools
   const isTechCommitteeHead = !!userProfile?.isTechCommitteeHead;
   const isTeacher = userProfile?.role === 'TEACHER';
   const isPrivilegedAdmin = userProfile?.role === 'CENTRAL_ADMIN' || 
                             userProfile?.role === 'REGIONAL_ADMIN' || 
-                            userProfile?.role === 'PROVINCIAL_ADMIN';
+                            userProfile?.role === 'PROVINCIAL_ADMIN' ||
+                            userProfile?.role === 'SUPER_ADMIN' ||
+                            userProfile?.isSuperAdmin === true;
   const canManage = isPrivilegedAdmin || 
                     userProfile?.role === 'SPORT_MANAGER' || 
                     isTechCommitteeHead;
@@ -169,6 +174,7 @@ export const Schools: React.FC = () => {
     };
     window.addEventListener('directorateChanged', handleRefresh);
     window.addEventListener('schoolsUpdated', handleRefresh);
+    window.addEventListener('userDataChanged', handleRefresh);
     
     // Subscribe to live schools updates from Firestore
     const unsubscribe = DataService.subscribeToSchools((updatedSchools) => {
@@ -186,6 +192,7 @@ export const Schools: React.FC = () => {
     return () => {
       window.removeEventListener('directorateChanged', handleRefresh);
       window.removeEventListener('schoolsUpdated', handleRefresh);
+      window.removeEventListener('userDataChanged', handleRefresh);
       unsubscribe();
     };
   }, []);
@@ -298,6 +305,53 @@ export const Schools: React.FC = () => {
       setIsDeletingAll(false);
     }
   };
+
+  const handlePruneExtraHighMiddleSchools = async (silent = false) => {
+    const activeDirId = DataService.getActiveDirectorateId() || 'taourirt';
+    const isAllDirs = !activeDirId || activeDirId === 'all';
+    setIsPruningExtra(true);
+    try {
+      const result = await DataService.pruneExtraHighAndMiddleSchools(isAllDirs ? 'all' : activeDirId);
+      const orphanRes = await DataService.pruneOrphanedParticipationsForDeletedSchools({
+        targetDirectorateId: isAllDirs ? 'all' : activeDirId,
+        onlyIfNotCleaned: silent
+      });
+      const orphanCleanedCount =
+        !orphanRes.alreadyCleaned
+          ? orphanRes.deletedConfirmationsCount + orphanRes.deletedStudentsCount
+          : 0;
+
+      if (result.deletedCount > 0 || orphanCleanedCount > 0) {
+        await loadSchools();
+        if (result.deletedCount > 0 && orphanCleanedCount > 0) {
+          toast.success(
+            `تم حذف ${result.deletedCount} مؤسسة إضافية (تأهيلي/إعدادي) وتنظيف ${orphanCleanedCount} مشاركة لمؤسسات محذوفة`
+          );
+        } else if (result.deletedCount > 0) {
+          toast.success(`تم حذف ${result.deletedCount} مؤسسة إضافية (تأهيلي/إعدادي) غير مسجلة ضمن الأطر التربوية`);
+        } else {
+          toast.success(`تم حذف ${orphanCleanedCount} مشاركة لمؤسسات محذوفة والإبقاء على المؤسسات المسجلة فقط`);
+        }
+      } else if (!silent) {
+        toast.success('جميع مؤسسات الثانوي التأهيلي والإعدادي متطابقة مع لائحة الأطر التربوية');
+      }
+    } catch (e) {
+      console.error(e);
+      if (!silent) {
+        toast.error('تعذر تصفية المؤسسات الإضافية');
+      }
+    } finally {
+      setIsPruningExtra(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!isPrivilegedAdmin || loading) return;
+    const activeDirId = DataService.getActiveDirectorateId() || 'taourirt';
+    if (autoPrunedDirsRef.current.has(activeDirId)) return;
+    autoPrunedDirsRef.current.add(activeDirId);
+    handlePruneExtraHighMiddleSchools(true);
+  }, [isPrivilegedAdmin, loading, activeDirObj?.id]);
 
   const handleDownloadExcelTemplate = () => {
     try {
@@ -719,15 +773,28 @@ export const Schools: React.FC = () => {
   }, [isTeacher, teacherMatchedSchool, schools]);
 
   const filtered = useMemo(() => {
+    const normalizedQuery = normalizeArabicSearch(search);
     const list = effectiveSchools.filter(s => {
-      const coordinatorStr = (s.coordinatorName || s.teacherName || '').toLowerCase();
-      const principalStr = (s.principalName || '').toLowerCase();
-      const matchSearch = s.name.toLowerCase().includes(search.toLowerCase()) ||
-                          s.commune.toLowerCase().includes(search.toLowerCase()) ||
-                          coordinatorStr.includes(search.toLowerCase()) ||
-                          principalStr.includes(search.toLowerCase()) ||
-                          (s.phone || '').includes(search) ||
-                          (s.principalPhone || '').includes(search);
+      const sectorLabel = getSchoolEducationSector(s) === 'private' ? 'خصوصي تعليم خاص' : 'عمومي';
+      const searchableText = normalizeArabicSearch(
+        [
+          s.name,
+          s.commune,
+          (s as any).code,
+          s.accessCode,
+          s.coordinatorName,
+          s.teacherName,
+          s.principalName,
+          s.phone,
+          s.principalPhone,
+          s.type,
+          normalizeSchoolPureCycleLabel(s),
+          sectorLabel
+        ]
+          .filter(Boolean)
+          .join(' ')
+      );
+      const matchSearch = !normalizedQuery || searchableText.includes(normalizedQuery);
       const sCycle = normalizeSchoolCycleType(s);
       const matchType = typeFilter === 'ALL' || sCycle === typeFilter;
       const matchCommune = communeFilter === 'ALL' || s.commune.includes(communeFilter);
@@ -849,6 +916,21 @@ export const Schools: React.FC = () => {
             </button>
           )}
 
+          {/* Prune extra High/Middle schools not represented in Teachers */}
+          {isPrivilegedAdmin && schools.length > 0 && (
+            <button
+              onClick={() => handlePruneExtraHighMiddleSchools(false)}
+              disabled={isPruningExtra || isLoading}
+              className="inline-flex items-center justify-center gap-1.5 sm:gap-2 rounded-xl bg-rose-50 border border-rose-300 px-2.5 sm:px-3.5 py-2 sm:py-2.5 text-[11px] sm:text-xs font-black text-rose-800 shadow-2xs hover:bg-rose-100 transition-all hover:shadow-xs active:scale-97 cursor-pointer text-center disabled:opacity-50"
+              title="حذف مؤسسات الثانوي التأهيلي والإعدادي الإضافية غير المسجلة في الأطر التربوية"
+            >
+              <div className="w-5 h-5 sm:w-6 sm:h-6 rounded-lg bg-rose-600 text-white flex items-center justify-center shadow-2xs shrink-0">
+                <RefreshCw className={`h-3.5 w-3.5 ${isPruningExtra ? 'animate-spin' : ''}`} />
+              </div>
+              <span>{isPruningExtra ? 'جاري التصفية...' : 'تصفية الإضافي (تأهيلي/إعدادي)'}</span>
+            </button>
+          )}
+
           {/* Central Admin Only Actions */}
           {userProfile?.role === 'CENTRAL_ADMIN' && schools.length > 0 && (
             <>
@@ -902,6 +984,18 @@ export const Schools: React.FC = () => {
             <span>{isTeacher ? 'مؤسستي حصرياً' : 'مؤسستي أولاً'}</span>
             <span>⭐</span>
           </span>
+        </div>
+      )}
+
+      {/* Regulatory notice for High & Middle schools restriction */}
+      {!isTeacher && (
+        <div className="p-3 bg-blue-50/70 border border-blue-200/80 rounded-2xl flex items-center gap-2.5 text-xs text-blue-900 shadow-2xs">
+          <div className="w-7 h-7 rounded-xl bg-blue-600 text-white flex items-center justify-center shrink-0 shadow-2xs">
+            <Filter className="w-3.5 h-3.5" />
+          </div>
+          <p className="font-bold leading-relaxed">
+            تنبيه تنظيمي: مؤسسات <span className="font-black text-blue-950">الثانوي التأهيلي</span> و<span className="font-black text-blue-950">الثانوي الإعدادي</span> مقتصرة حصرياً على المؤسسات المسجلة ضمن زر <span className="underline font-black">الأطر التربوية</span> (مع الإبقاء على مؤسسات الابتدائي والخصوصي كما هي).
+          </p>
         </div>
       )}
 
@@ -985,15 +1079,30 @@ export const Schools: React.FC = () => {
 
       {/* Filter and search */}
       <div className="flex flex-col lg:flex-row items-center gap-3 bg-white p-3 rounded-xl border border-slate-200 shadow-xs">
-        <div className="flex flex-1 items-center px-2 w-full">
-          <Search className="h-4 w-4 text-slate-400 ml-2 shrink-0" />
+        <div className="flex flex-1 items-center gap-1.5 px-2 w-full bg-slate-50/80 border border-slate-200/80 rounded-lg focus-within:bg-white focus-within:border-blue-400 focus-within:ring-2 focus-within:ring-blue-500/20 transition-all">
+          <Search className="h-4 w-4 text-slate-400 ml-1 shrink-0" />
           <input
             type="text"
-            placeholder={isTeacher ? "ابحث في معطيات مؤسستك..." : "ابحث باسم المؤسسة، الجماعة، المنسق، أو المدير..."}
-            className="w-full border-0 focus:ring-0 text-xs py-1 text-slate-800 placeholder-slate-400 focus:outline-none"
+            placeholder={isTeacher ? "ابحث في معطيات مؤسستك..." : "ابحث باسم المؤسسة، الجماعة، الرمز، المنسق، المدير، أو الهاتف..."}
+            className="w-full border-0 bg-transparent focus:ring-0 text-xs py-2 text-slate-800 placeholder-slate-400 focus:outline-none font-medium"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
+          {search && (
+            <button
+              type="button"
+              onClick={() => setSearch('')}
+              className="p-1 text-slate-400 hover:text-slate-700 hover:bg-slate-200/60 rounded-md transition-colors cursor-pointer shrink-0"
+              title="مسح البحث"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          )}
+          {!isTeacher && (
+            <span className="shrink-0 text-[10px] font-black text-blue-700 bg-blue-50 border border-blue-200 px-2 py-0.5 rounded-md whitespace-nowrap">
+              {filtered.length} / {effectiveSchools.length}
+            </span>
+          )}
         </div>
 
         {/* School Search Filter Dropdown (Hidden for teachers since only their school is visible) */}
@@ -1047,10 +1156,15 @@ export const Schools: React.FC = () => {
                     </button>
                     {[...schools]
                       .sort((a, b) => a.name.localeCompare(b.name, 'ar'))
-                      .filter(sch => 
-                        !schoolSelectQuery || 
-                        sch.name.toLowerCase().includes(schoolSelectQuery.toLowerCase())
-                      )
+                      .filter(sch => {
+                        const q = normalizeArabicSearch(schoolSelectQuery);
+                        if (!q) return true;
+                        return (
+                          normalizeArabicSearch(sch.name).includes(q) ||
+                          normalizeArabicSearch(sch.commune).includes(q) ||
+                          normalizeArabicSearch(sch.type).includes(q)
+                        );
+                      })
                       .map(sch => (
                         <button
                           key={sch.id}

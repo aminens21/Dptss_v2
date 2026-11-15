@@ -278,7 +278,7 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
     return sportTournaments.filter(t => !isClubTournament(t) && (t.affiliationType === 'open' || (t.name && (t.name.includes('مفتوحة') || t.name.includes('المفتوحة')))));
   }, [sportTournaments]);
 
-  // Matches for this sport (strictly limited to active programmed tournaments)
+  // Matches for this sport (strictly limited to active programmed tournaments & matching affiliation)
   const sportMatches = useMemo(() => {
     if (!sport || sportTournaments.length === 0) return [];
     return matches.filter(m => {
@@ -286,10 +286,18 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
         return sportTournaments.some(t => t.id === m.tournamentId);
       }
       if (m.sportId === sport.id) {
-        return sportTournaments.some(t => 
-          normalizeCategoryKey(t.ageCategory) === normalizeCategoryKey(m.ageCategory) &&
-          t.gender === m.gender
-        );
+        const mAff = (m as any).affiliationType === 'club_affiliated'
+          ? 'club_affiliated'
+          : (m as any).affiliationType === 'open'
+          ? 'open'
+          : 'non_club';
+        return sportTournaments.some(t => {
+          const tAff = t.affiliationType === 'open' ? 'open' : isClubTournament(t) ? 'club_affiliated' : 'non_club';
+          const catMatch = normalizeCategoryKey(t.ageCategory) === normalizeCategoryKey(m.ageCategory);
+          const genderMatch = t.gender === 'Mixed' || m.gender === 'Mixed' || t.gender === m.gender;
+          const affMatch = tAff === 'open' || mAff === tAff;
+          return catMatch && genderMatch && affMatch;
+        });
       }
       return false;
     });
@@ -751,8 +759,8 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
 
                     {/* Inner Modal Content */}
                     <div className="p-4 sm:p-6 overflow-y-auto flex-1 bg-slate-50 space-y-5">
-                      {/* Central Admin Tournaments Management Box for this Sport & Branch */}
-                      {isCentralAdmin && (
+                      {/* Branch Tournaments Management Box for Central Admin & Tech Head */}
+                      {canManage && (
                         <div className="p-4 bg-gradient-to-r from-blue-900/10 via-indigo-900/10 to-slate-900/10 rounded-2xl border border-blue-200/80 flex flex-wrap items-center justify-between gap-3">
                           <div className="flex items-center gap-2">
                             <ShieldCheck className="w-5 h-5 text-blue-700" />

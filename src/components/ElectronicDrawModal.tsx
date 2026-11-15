@@ -33,7 +33,7 @@ import {
   Share2
 } from 'lucide-react';
 import { Tournament, School, Team, Match, User, Venue, Sport, Referee, SchoolTournamentConfirmation, BlockedSchedulePeriod } from '../types';
-import { DataService, SPORTS_MAP, GENDER_MAP, deduplicateById, normalizeCategoryKey, getCustomCategoryName, doesConfirmationMatchBranch, EDUCATIONAL_CYCLE_LABELS, getMatchEducationalCycles, findBlockedPeriodForDate } from '../lib/dataService';
+import { DataService, SPORTS_MAP, GENDER_MAP, deduplicateById, normalizeCategoryKey, getCustomCategoryName, doesConfirmationMatchBranch, EDUCATIONAL_CYCLE_LABELS, getMatchEducationalCycles, findBlockedPeriodForDate, normalizeArabicSearch, normalizeDateToYmd, schoolNamesMatch } from '../lib/dataService';
 import { isSuperAdminEmail } from '../contexts/AuthContext';
 import {
   resolveHostSchoolForMatch,
@@ -171,6 +171,7 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
   const [referees, setReferees] = useState<Referee[]>([]);
   const [teachers, setTeachers] = useState<User[]>([]);
   const [confirmations, setConfirmations] = useState<SchoolTournamentConfirmation[]>([]);
+  const [allExistingMatches, setAllExistingMatches] = useState<Match[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
 
   // Workflow State: 1 = Choose Tournament & Filter, 2 = Review Teams & Draw Config, 3 = Draw & Schedule Matches with Referees, 4 = Post-Save WhatsApp Notifications
@@ -244,7 +245,8 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
           loadedVenues,
           loadedReferees,
           loadedTeachers,
-          loadedConfirmations
+          loadedConfirmations,
+          loadedMatches
         ] = await Promise.all([
           DataService.getTournaments(),
           DataService.getSportsConfig(),
@@ -253,8 +255,14 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
           DataService.getVenues(),
           DataService.getReferees(),
           DataService.getTeachers(),
-          DataService.getSchoolConfirmations()
+          DataService.getSchoolConfirmations(),
+          DataService.getMatches()
         ]);
+
+        const activeDirId = currentUser?.directorateId || DataService.getActiveDirectorateId() || 'taourirt';
+        const dirMatches = activeDirId === 'all'
+          ? loadedMatches
+          : loadedMatches.filter(m => !m.directorateId || m.directorateId === activeDirId);
 
         setTournaments(loadedTournaments);
         setSportsConfig(loadedSports);
@@ -263,6 +271,7 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
         setReferees(loadedReferees);
         setTeachers(loadedTeachers);
         setConfirmations(loadedConfirmations);
+        setAllExistingMatches(dirMatches);
 
         // Derive team records from students
         const derivedTeams: Team[] = [];
@@ -544,9 +553,9 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
 
       // 6. Search Query
       if (tournamentSearchQuery.trim()) {
-        const q = tournamentSearchQuery.toLowerCase();
-        const matchName = (t.name || '').toLowerCase().includes(q);
-        const matchSport = (SPORTS_MAP[t.sportId]?.name || '').toLowerCase().includes(q);
+        const q = normalizeArabicSearch(tournamentSearchQuery);
+        const matchName = normalizeArabicSearch(t.name || '').includes(q);
+        const matchSport = normalizeArabicSearch(SPORTS_MAP[t.sportId]?.name || '').includes(q);
         if (!matchName && !matchSport) return false;
       }
 
@@ -711,11 +720,11 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
     }
 
     if (!schoolSearchQuery.trim()) return baseList;
-    const q = schoolSearchQuery.toLowerCase();
+    const q = normalizeArabicSearch(schoolSearchQuery);
     return baseList.filter(s => 
-      (s.name || '').toLowerCase().includes(q) || 
-      (s.commune || '').toLowerCase().includes(q) ||
-      (s.type || '').toLowerCase().includes(q)
+      normalizeArabicSearch(s.name || '').includes(q) || 
+      normalizeArabicSearch(s.commune || '').includes(q) ||
+      normalizeArabicSearch(s.type || '').includes(q)
     );
   }, [schools, schoolFilterMode, confirmedSchoolsMap, schoolSearchQuery, selectedTournament]);
 
@@ -1144,6 +1153,131 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
   }, [generatedMatches, blockedPeriods, selectedTournament, schools]);
 
   const hasBlockedMatchesRestriction = blockedGeneratedMatches.length > 0 && !isRegionalOrCentralAdmin;
+
+  const parseDrawTimeToMinutes = (timeStr?: string): number => {
+    if (!timeStr) return 0;
+    const parts = timeStr.split(':');
+    const hours = parseInt(parts[0], 10) || 0;
+    const minutes = parseInt(parts[1], 10) || 0;
+    return hours * 60 + minutes;
+  };
+
+  const findVenueOccupancyConflicts = (params: {
+    date?: string;
+    time?: string;
+    venueMode?: 'school' | 'custom';
+    hostSchoolId?: string;
+    venueId?: string;
+    venueName?: string;
+    excludeGeneratedMatchId?: string;
+  }) => {
+    const targetDate = normalizeDateToYmd(params.date || '') || (params.date || '').trim();
+    const targetTime = (params.time || '10:00').trim();
+    const mode = params.venueMode || (params.hostSchoolId ? 'school' : 'custom');
+    const selectedHostSch = mode === 'school' && params.hostSchoolId
+      ? schools.find(s => s.id === params.hostSchoolId)
+      : undefined;
+    const normalizedCustomName = normalizeArabicSearch(params.venueName || '');
+
+    const hasVenueSelection =
+      mode === 'school'
+        ? Boolean(params.hostSchoolId)
+        : Boolean(normalizedCustomName || (params.venueId && params.venueId !== 'custom'));
+
+    if (!targetDate || !hasVenueSelection) {
+      return {
+        hasVenueSelection: false,
+        conflictingExisting: [] as Match[],
+        conflictingSibling: [] as GeneratedDrawMatch[],
+        sameDayOtherExisting: [] as Match[]
+      };
+    }
+
+    const matchesSameVenue = (
+      otherHostSchoolId?: string,
+      otherVenueId?: string,
+      otherVenueName?: string
+    ) => {
+      if (mode === 'school' && params.hostSchoolId) {
+        if (otherHostSchoolId === params.hostSchoolId || otherVenueId === params.hostSchoolId) {
+          return true;
+        }
+        if (selectedHostSch?.name) {
+          if (schoolNamesMatch(otherVenueName, selectedHostSch.name)) return true;
+          const otherSch = schools.find(s => s.id === (otherHostSchoolId || otherVenueId));
+          if (otherSch && schoolNamesMatch(otherSch.name, selectedHostSch.name)) return true;
+        }
+        return false;
+      }
+
+      if (params.venueId && params.venueId !== 'custom' && otherVenueId === params.venueId) return true;
+      if (normalizedCustomName) {
+        if (
+          schoolNamesMatch(otherVenueName, params.venueName) ||
+          normalizeArabicSearch(otherVenueName || '') === normalizedCustomName
+        ) {
+          return true;
+        }
+      }
+      return false;
+    };
+
+    const conflictingExisting: Match[] = [];
+    const sameDayOtherExisting: Match[] = [];
+    const targetMins = parseDrawTimeToMinutes(targetTime);
+
+    allExistingMatches.forEach(m => {
+      if (m.status === 'Cancelled' || m.status === 'Postponed') return;
+      const mDate = normalizeDateToYmd(m.date || '') || (m.date || '').trim();
+      if (mDate !== targetDate) return;
+      if (!matchesSameVenue(m.hostSchoolId, m.venueId, m.venueName)) return;
+
+      if (m.startTime && targetTime) {
+        const diff = Math.abs(parseDrawTimeToMinutes(m.startTime) - targetMins);
+        if (diff < 60) {
+          conflictingExisting.push(m);
+        } else {
+          sameDayOtherExisting.push(m);
+        }
+      } else {
+        conflictingExisting.push(m);
+      }
+    });
+
+    const conflictingSibling: GeneratedDrawMatch[] = [];
+    generatedMatches.forEach(gm => {
+      if (params.excludeGeneratedMatchId && gm.id === params.excludeGeneratedMatchId) return;
+      const gmDate = normalizeDateToYmd(gm.date || '') || (gm.date || '').trim();
+      if (gmDate !== targetDate) return;
+      if (!matchesSameVenue(gm.hostSchoolId, gm.venueId, gm.venueName)) return;
+
+      if (gm.time && targetTime) {
+        const diff = Math.abs(parseDrawTimeToMinutes(gm.time) - targetMins);
+        if (diff < 60) {
+          conflictingSibling.push(gm);
+        }
+      } else {
+        conflictingSibling.push(gm);
+      }
+    });
+
+    return {
+      hasVenueSelection: true,
+      conflictingExisting,
+      conflictingSibling,
+      sameDayOtherExisting
+    };
+  };
+
+  const bulkOccupancy = useMemo(() => {
+    return findVenueOccupancyConflicts({
+      date: bulkDate,
+      time: bulkTime,
+      venueMode: bulkVenueMode,
+      hostSchoolId: bulkHostSchoolId,
+      venueName: bulkVenueName
+    });
+  }, [bulkDate, bulkTime, bulkVenueMode, bulkHostSchoolId, bulkVenueName, allExistingMatches, schools, generatedMatches]);
 
   // Save all matches to database
   const handleSaveMatchesToDatabase = async () => {
@@ -2199,6 +2333,49 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
                   </div>
                 )}
 
+                {/* Live Cross-Sport Bulk Venue Availability Banner */}
+                {bulkOccupancy.hasVenueSelection && (
+                  (bulkOccupancy.conflictingExisting.length > 0) ? (
+                    <div className="p-3 rounded-2xl bg-red-50 border border-red-300 text-red-900 space-y-1.5 text-[11px]">
+                      <div className="flex items-center gap-1.5 font-black text-red-900">
+                        <ShieldAlert className="w-4 h-4 text-red-600 shrink-0" />
+                        <span>
+                          ⚠️ تنبيه: مركز التباري المختار غير شاغر في {bulkDate} على الساعة {bulkTime || '10:00'}! ({bulkOccupancy.conflictingExisting.length} مقابلة مبرمجة)
+                        </span>
+                      </div>
+                      <div className="space-y-1 pr-5">
+                        {bulkOccupancy.conflictingExisting.map(cm => {
+                          const s1 = schools.find(s => s.id === cm.team1Id)?.name || cm.team1Id;
+                          const s2 = schools.find(s => s.id === cm.team2Id)?.name || cm.team2Id;
+                          const sp = SPORTS_MAP[cm.sportId];
+                          return (
+                            <div key={cm.id} className="flex flex-wrap items-center justify-between gap-2 bg-white/80 px-2 py-1 rounded-lg border border-red-200">
+                              <span className="font-bold">
+                                {sp?.icon || '🏆'} {sp?.name || cm.sportId}: {s1} ضد {s2}
+                              </span>
+                              <span className="font-mono font-bold text-red-700">⏰ {cm.startTime || '10:00'}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="p-2.5 rounded-2xl bg-emerald-100/80 border border-emerald-300 text-emerald-950 flex flex-wrap items-center justify-between gap-2 text-[11px] font-bold">
+                      <span className="flex items-center gap-1.5">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                        <span>
+                          ✓ مركز التباري شاغر في {bulkDate} على الساعة {bulkTime || '10:00'} على مستوى جميع الرياضات
+                        </span>
+                      </span>
+                      {bulkOccupancy.sameDayOtherExisting.length > 0 && (
+                        <span className="text-[10px] text-emerald-800 bg-white/80 px-2 py-0.5 rounded-full border border-emerald-200">
+                          توجد {bulkOccupancy.sameDayOtherExisting.length} مقابلة بأوقات أخرى في نفس اليوم
+                        </span>
+                      )}
+                    </div>
+                  )
+                )}
+
                 <div className="flex justify-end pt-1">
                   <button
                     type="button"
@@ -2236,6 +2413,18 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
                       ? match.refereeIds
                       : (match.refereeId ? [match.refereeId] : []);
                     const matchBlockedPeriod = getBlockedConflictForMatch(match);
+                    const matchOccupancy = findVenueOccupancyConflicts({
+                      date: match.date,
+                      time: match.time,
+                      venueMode: match.venueMode || (match.hostSchoolId ? 'school' : 'custom'),
+                      hostSchoolId: match.hostSchoolId,
+                      venueId: match.venueId,
+                      venueName: match.venueName,
+                      excludeGeneratedMatchId: match.id
+                    });
+                    const hasVenueConflict =
+                      matchOccupancy.conflictingExisting.length > 0 ||
+                      matchOccupancy.conflictingSibling.length > 0;
 
                     return (
                       <div
@@ -2243,6 +2432,8 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
                         className={`p-4 rounded-2xl flex flex-col gap-3 text-xs shadow-2xs transition-colors border ${
                           matchBlockedPeriod
                             ? 'bg-rose-50/70 border-rose-300'
+                            : hasVenueConflict
+                            ? 'bg-amber-50/60 border-amber-300'
                             : 'bg-slate-50 border-slate-200 hover:border-slate-300'
                         }`}
                       >
@@ -2255,6 +2446,37 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
                                 {matchBlockedPeriod.type === 'exams' ? 'فروض / امتحانات' : 'عطلة مدرسية'} ({matchBlockedPeriod.title})
                               </strong>
                             </span>
+                          </div>
+                        )}
+                        {hasVenueConflict && (
+                          <div className="p-2.5 rounded-xl bg-red-50 border border-red-300 text-red-950 text-[11px] space-y-1">
+                            <div className="flex items-center gap-1.5 font-black text-red-900">
+                              <ShieldAlert className="w-4 h-4 text-red-600 shrink-0" />
+                              <span>
+                                ⚠️ تنبيه تنسيقي: مركز التباري ({match.venueName || 'المحدد'}) غير شاغر في {match.date} حوالي {match.time || '10:00'}!
+                              </span>
+                            </div>
+                            {matchOccupancy.conflictingExisting.map(cm => {
+                              const s1 = schools.find(s => s.id === cm.team1Id)?.name || cm.team1Id;
+                              const s2 = schools.find(s => s.id === cm.team2Id)?.name || cm.team2Id;
+                              const sp = SPORTS_MAP[cm.sportId];
+                              return (
+                                <div key={cm.id} className="flex flex-wrap items-center justify-between gap-1.5 bg-white/90 px-2 py-1 rounded-lg border border-red-200 text-[10.5px]">
+                                  <span className="font-bold">
+                                    {sp?.icon || '🏆'} {sp?.name || cm.sportId}: {s1} ضد {s2}
+                                  </span>
+                                  <span className="font-mono font-bold text-red-700">⏰ {cm.startTime || '10:00'}</span>
+                                </div>
+                              );
+                            })}
+                            {matchOccupancy.conflictingSibling.map(gm => (
+                              <div key={gm.id} className="flex flex-wrap items-center justify-between gap-1.5 bg-amber-100/80 px-2 py-1 rounded-lg border border-amber-300 text-[10.5px] text-amber-950">
+                                <span className="font-bold">
+                                  ⚠️ تداخل داخل هذه القرعة: {gm.team1Name} ضد {gm.team2Name}
+                                </span>
+                                <span className="font-mono font-bold">⏰ {gm.time || '10:00'}</span>
+                              </div>
+                            ))}
                           </div>
                         )}
                         {/* Match Header: Teams & Stage */}
@@ -2270,7 +2492,16 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
                             </div>
                           </div>
 
-                          <div className="flex items-center gap-1.5 text-[10px] font-bold">
+                          <div className="flex items-center flex-wrap gap-1.5 text-[10px] font-bold">
+                            {matchOccupancy.hasVenueSelection && (
+                              <span className={`px-2 py-0.5 rounded-full border ${
+                                hasVenueConflict
+                                  ? 'bg-red-100 text-red-900 border-red-300'
+                                  : 'bg-emerald-100 text-emerald-900 border-emerald-300'
+                              }`}>
+                                {hasVenueConflict ? '⚠️ المركز غير شاغر' : '✓ المركز شاغر'}
+                              </span>
+                            )}
                             <span className={`px-2 py-0.5 rounded-full ${
                               assignedRefIds.length > 0 
                                 ? 'bg-amber-100 text-amber-900 border border-amber-300' 

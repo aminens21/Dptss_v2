@@ -9,6 +9,9 @@ import { isFlexibleEmailMatch } from '../lib/utils';
 interface AuthContextType {
   currentUser: FirebaseUser | null;
   userProfile: User | null;
+  originalUserProfile: User | null;
+  isImpersonatingTeacher: boolean;
+  impersonationScopedSportIds: string[];
   loading: boolean;
   isDemo: boolean;
   isProfileModalOpen: boolean;
@@ -18,6 +21,8 @@ interface AuthContextType {
   openProfileModal: () => void;
   closeProfileModal: () => void;
   loginAsDemo: (role: Role, name?: string, email?: string, sportId?: string, assignedTournamentId?: string, extraFields?: Partial<User>) => void;
+  startTeacherImpersonation: (teacher: User) => void;
+  stopTeacherImpersonation: () => void;
   logout: () => Promise<void>;
   updateProfileState: (updatedFields: Partial<User>) => void;
   assignUserDirectorate: (directorateId: string, directorateName: string) => Promise<void>;
@@ -84,9 +89,14 @@ const DEMO_PROFILES: Partial<Record<Role, { name: string; email: string; sportId
   },
 };
 
+const IMPERSONATION_STORAGE_KEY = 'taourirt_impersonation_teacher_v1';
+
 const AuthContext = createContext<AuthContextType>({
   currentUser: null,
   userProfile: null,
+  originalUserProfile: null,
+  isImpersonatingTeacher: false,
+  impersonationScopedSportIds: [],
   loading: true,
   isDemo: false,
   isProfileModalOpen: false,
@@ -96,6 +106,8 @@ const AuthContext = createContext<AuthContextType>({
   openProfileModal: () => {},
   closeProfileModal: () => {},
   loginAsDemo: () => {},
+  startTeacherImpersonation: () => {},
+  stopTeacherImpersonation: () => {},
   logout: async () => {},
   updateProfileState: () => {},
   assignUserDirectorate: async () => {},
@@ -106,6 +118,14 @@ export const useAuth = () => useContext(AuthContext);
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [currentUser, setCurrentUser] = useState<FirebaseUser | null>(null);
   const [userProfile, setUserProfile] = useState<User | null>(null);
+  const [impersonatedTeacher, setImpersonatedTeacher] = useState<User | null>(() => {
+    try {
+      const saved = sessionStorage.getItem(IMPERSONATION_STORAGE_KEY);
+      return saved ? (JSON.parse(saved) as User) : null;
+    } catch {
+      return null;
+    }
+  });
   const [isDemo, setIsDemo] = useState(false);
   const [loading, setLoading] = useState(true);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
@@ -449,8 +469,40 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     } as any);
   };
 
+  const startTeacherImpersonation = (teacher: User) => {
+    if (!userProfile) return;
+    if (!userProfile.isTechCommitteeHead && userProfile.role !== 'CENTRAL_ADMIN' && !userProfile.isSuperAdmin) {
+      return;
+    }
+    const impersonatedProfile: User = {
+      ...teacher,
+      role: 'TEACHER',
+      isTechCommitteeHead: false,
+      isTechCommitteeMember: false,
+      isSuperAdmin: false,
+      schoolAccessVerified: true,
+      directorateId: teacher.directorateId || userProfile.directorateId || 'taourirt',
+      directorateName: teacher.directorateName || userProfile.directorateName || 'المديرية الإقليمية بتاوريرت',
+    };
+    try {
+      sessionStorage.setItem(IMPERSONATION_STORAGE_KEY, JSON.stringify(impersonatedProfile));
+    } catch {}
+    setImpersonatedTeacher(impersonatedProfile);
+  };
+
+  const stopTeacherImpersonation = () => {
+    try {
+      sessionStorage.removeItem(IMPERSONATION_STORAGE_KEY);
+    } catch {}
+    setImpersonatedTeacher(null);
+  };
+
   const logout = async () => {
     localStorage.removeItem('demo_user_profile');
+    try {
+      sessionStorage.removeItem(IMPERSONATION_STORAGE_KEY);
+    } catch {}
+    setImpersonatedTeacher(null);
     setUserProfile(null);
     setIsDemo(false);
     setCurrentUser(null);
@@ -497,10 +549,32 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     DataService.setActiveDirectorateId(directorateId);
   };
 
+  const canImpersonate = Boolean(
+    userProfile && (userProfile.isTechCommitteeHead || userProfile.role === 'CENTRAL_ADMIN' || userProfile.isSuperAdmin)
+  );
+  const isImpersonatingTeacher = Boolean(canImpersonate && impersonatedTeacher);
+  const effectiveUserProfile = isImpersonatingTeacher && impersonatedTeacher ? impersonatedTeacher : userProfile;
+  const impersonationScopedSportIds = React.useMemo(() => {
+    if (!isImpersonatingTeacher || !userProfile) return [];
+    // If real user is Tech Head (and not full central admin), strictly scope edits to their assigned tech committee sports
+    if (userProfile.isTechCommitteeHead && userProfile.role !== 'CENTRAL_ADMIN' && !userProfile.isSuperAdmin) {
+      const assigned = userProfile.techCommitteeSports && userProfile.techCommitteeSports.length > 0
+        ? userProfile.techCommitteeSports
+        : userProfile.sportId
+        ? [userProfile.sportId]
+        : [];
+      return Array.from(new Set(assigned.filter(Boolean)));
+    }
+    return [];
+  }, [isImpersonatingTeacher, userProfile]);
+
   return (
     <AuthContext.Provider value={{ 
       currentUser: isDemo ? ({ uid: userProfile?.id, email: userProfile?.email } as any) : currentUser, 
-      userProfile, 
+      userProfile: effectiveUserProfile,
+      originalUserProfile: isImpersonatingTeacher ? userProfile : null,
+      isImpersonatingTeacher,
+      impersonationScopedSportIds,
       loading, 
       isDemo, 
       isProfileModalOpen,
@@ -509,7 +583,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setIsDirectoratePromptOpen,
       openProfileModal,
       closeProfileModal,
-      loginAsDemo, 
+      loginAsDemo,
+      startTeacherImpersonation,
+      stopTeacherImpersonation,
       logout, 
       updateProfileState,
       assignUserDirectorate

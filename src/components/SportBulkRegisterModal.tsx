@@ -41,6 +41,7 @@ interface SportBulkRegisterModalProps {
   schools: School[];
   preselectedCategory?: string;
   preselectedGender?: 'Male' | 'Female';
+  preselectedAffiliation?: 'non_club' | 'club_affiliated' | 'open';
   preselectedSchoolName?: string;
   allExistingStudents?: Student[];
   onRegistered: () => void;
@@ -55,6 +56,7 @@ export const SportBulkRegisterModal: React.FC<SportBulkRegisterModalProps> = ({
   schools,
   preselectedCategory,
   preselectedGender = 'Male',
+  preselectedAffiliation,
   preselectedSchoolName,
   allExistingStudents = [],
   onRegistered,
@@ -87,8 +89,13 @@ export const SportBulkRegisterModal: React.FC<SportBulkRegisterModalProps> = ({
   const [selectedCategory, setSelectedCategory] = useState<string>('U15');
   // Selected gender
   const [selectedGender, setSelectedGender] = useState<'Male' | 'Female'>(preselectedGender);
-  
-  // Sync category & gender from props on open
+  // Selected affiliation branch (strictly isolated: non_club vs club_affiliated)
+  const [selectedAffiliation, setSelectedAffiliation] = useState<'non_club' | 'club_affiliated'>(
+    preselectedAffiliation === 'club_affiliated' ? 'club_affiliated' : 'non_club'
+  );
+  const isAffiliationLocked = preselectedAffiliation === 'non_club' || preselectedAffiliation === 'club_affiliated';
+
+  // Sync category, gender & affiliation from props on open
   useEffect(() => {
     if (isOpen) {
       if (preselectedCategory) {
@@ -104,8 +111,9 @@ export const SportBulkRegisterModal: React.FC<SportBulkRegisterModalProps> = ({
         setSelectedCategory('U15');
       }
       setSelectedGender(preselectedGender);
+      setSelectedAffiliation(preselectedAffiliation === 'club_affiliated' ? 'club_affiliated' : 'non_club');
     }
-  }, [isOpen, preselectedCategory, preselectedGender, availableCategories]);
+  }, [isOpen, preselectedCategory, preselectedGender, preselectedAffiliation, availableCategories]);
 
   // Selected school
   const [selectedSchoolId, setSelectedSchoolId] = useState<string>('');
@@ -225,11 +233,14 @@ export const SportBulkRegisterModal: React.FC<SportBulkRegisterModalProps> = ({
   useEffect(() => {
     if (!isOpen || !sport) return;
 
-    // Filter existing students of this school in this category/gender for this sport
+    // Filter existing students of this school in this category/gender AND affiliation for this sport
     const matchingStudents = allExistingStudents.filter(s => {
       if (s.sportId !== sport.id) return false;
       const sCat = normalizeCategoryKey(s.category);
       if (sCat !== normalizeCategoryKey(selectedCategory) || s.gender !== selectedGender) return false;
+
+      const sAff = s.affiliationType === 'club_affiliated' ? 'club_affiliated' : 'non_club';
+      if (sAff !== selectedAffiliation) return false;
 
       // School match
       if (selectedSchoolId && s.schoolId && s.schoolId === selectedSchoolId) return true;
@@ -274,7 +285,7 @@ export const SportBulkRegisterModal: React.FC<SportBulkRegisterModalProps> = ({
       if (firstWithCoach.coachLeaseNumber) setCoachLeaseNumber(firstWithCoach.coachLeaseNumber);
       if (firstWithCoach.coachPhone) setCoachPhone(firstWithCoach.coachPhone);
     }
-  }, [isOpen, selectedCategory, selectedGender, selectedSchoolId, resolvedSchoolName, allExistingStudents, sport]);
+  }, [isOpen, selectedCategory, selectedGender, selectedAffiliation, selectedSchoolId, resolvedSchoolName, allExistingStudents, sport]);
 
   // Update a single slot
   const handleUpdateSlot = (slotIndex: number, field: keyof SportParticipantSlot, value: any) => {
@@ -643,7 +654,8 @@ export const SportBulkRegisterModal: React.FC<SportBulkRegisterModalProps> = ({
         const relevantTournament = tournaments.find(t => 
           t.sportId === sport.id && 
           (normalizeCategoryKey(t.ageCategory) === normCategory || normalizeCategoryKey(t.ageCategory) === 'جميع الفئات') &&
-          (t.gender === selectedGender || t.gender === 'Mixed')
+          (t.gender === selectedGender || t.gender === 'Mixed') &&
+          ((t.affiliationType || 'non_club') === selectedAffiliation || t.affiliationType === 'open')
         );
         if (relevantTournament) {
           if (relevantTournament.level) {
@@ -699,7 +711,7 @@ export const SportBulkRegisterModal: React.FC<SportBulkRegisterModalProps> = ({
           gender: selectedGender,
           birthDate: slot.birthDate.trim(),
           category: normalizeCategoryKey(selectedCategory),
-          affiliationType: 'non_club',
+          affiliationType: selectedAffiliation,
           schoolId: schoolIdToUse,
           schoolName: schoolNameToUse,
           sportId: sport.id,
@@ -718,10 +730,11 @@ export const SportBulkRegisterModal: React.FC<SportBulkRegisterModalProps> = ({
           continue;
         }
 
-        // 2. Otherwise check if Massar matches an existing student in this sport
+        // 2. Otherwise check if Massar matches an existing student in this exact sport AND affiliation branch
         const existingByMassar = allExistingStudents.find(
           s =>
             s.sportId === sport.id &&
+            (s.affiliationType === 'club_affiliated' ? 'club_affiliated' : 'non_club') === selectedAffiliation &&
             s.massarNumber.toUpperCase() === slot.massarNumber.trim().toUpperCase() &&
             !usedExistingIds.has(s.id)
         );
@@ -837,7 +850,7 @@ export const SportBulkRegisterModal: React.FC<SportBulkRegisterModalProps> = ({
             {/* Scrollable Container */}
             <div className="p-6 overflow-y-auto space-y-6 flex-1">
             {/* Quick Paste Modal State */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-3xs transition-colors">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-3xs transition-colors">
               {/* Age Category */}
               <div>
                 <label className="block text-xs font-black text-slate-800 dark:text-slate-200 mb-1.5">الفئة العمرية المقررة *</label>
@@ -879,6 +892,48 @@ export const SportBulkRegisterModal: React.FC<SportBulkRegisterModalProps> = ({
                     }`}
                   >
                     👧 إناث
+                  </button>
+                </div>
+              </div>
+
+              {/* Affiliation Branch */}
+              <div>
+                <label className="block text-xs font-black text-slate-800 dark:text-slate-200 mb-1.5 flex items-center justify-between">
+                  <span>صنف الانتماء الرياضي *</span>
+                  {isAffiliationLocked && (
+                    <span className="text-[10px] font-bold text-slate-600 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-300 flex items-center gap-0.5">
+                      <Lock className="w-2.5 h-2.5" /> مقفل
+                    </span>
+                  )}
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    disabled={isAffiliationLocked && selectedAffiliation !== 'non_club'}
+                    onClick={() => setSelectedAffiliation('non_club')}
+                    className={`py-2 px-2 text-[11px] font-bold rounded-xl border transition-all ${
+                      selectedAffiliation === 'non_club'
+                        ? 'bg-slate-900 text-white border-slate-900 shadow-xs'
+                        : isAffiliationLocked
+                        ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed opacity-50'
+                        : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50 cursor-pointer'
+                    }`}
+                  >
+                    ⚪ لا منتمين
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isAffiliationLocked && selectedAffiliation !== 'club_affiliated'}
+                    onClick={() => setSelectedAffiliation('club_affiliated')}
+                    className={`py-2 px-2 text-[11px] font-bold rounded-xl border transition-all ${
+                      selectedAffiliation === 'club_affiliated'
+                        ? 'bg-amber-500 text-slate-950 border-amber-600 shadow-xs font-black'
+                        : isAffiliationLocked
+                        ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed opacity-50'
+                        : 'bg-white text-slate-600 border-slate-200 hover:bg-amber-50 cursor-pointer'
+                    }`}
+                  >
+                    🟡 منتمين للأندية
                   </button>
                 </div>
               </div>

@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import { DataService, SPORTS_MAP } from '../lib/dataService';
 import { User, Student, School } from '../types';
 import { fixTeacherFieldJumble, formatMoroccanPhone } from '../lib/utils';
@@ -34,7 +34,8 @@ import {
   UserPlus,
   Download,
   Upload,
-  FileSpreadsheet
+  FileSpreadsheet,
+  LogIn
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -98,9 +99,34 @@ const CollapsibleSpecialties: React.FC<{ specialties: string[]; SPORTS_MAP: Reco
 };
 
 export const Teachers: React.FC = () => {
-  const { userProfile } = useAuth();
+  const { userProfile, originalUserProfile, isImpersonatingTeacher, startTeacherImpersonation } = useAuth();
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const cadreQuery = searchParams.get('cadre');
+
+  const effectiveAdminProfile = originalUserProfile || userProfile;
+  const canTechHeadImpersonate = Boolean(
+    effectiveAdminProfile?.isTechCommitteeHead && !isImpersonatingTeacher
+  );
+
+  const handleStartImpersonation = (targetTeacher: User, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    if (!canTechHeadImpersonate) return;
+    if (targetTeacher.role === 'CENTRAL_ADMIN' || targetTeacher.isSuperAdmin) {
+      toast.error('لا يمكن الدخول بصفة حساب مسير مركزي أو مسؤول عام');
+      return;
+    }
+    const scopedSports =
+      effectiveAdminProfile?.techCommitteeSports && effectiveAdminProfile.techCommitteeSports.length > 0
+        ? effectiveAdminProfile.techCommitteeSports
+        : effectiveAdminProfile?.sportId
+        ? [effectiveAdminProfile.sportId]
+        : [];
+    startTeacherImpersonation(targetTeacher);
+    setIsDetailModalOpen(false);
+    toast.success(`تم الدخول بصفة الأستاذ ${targetTeacher.fullName} (محصور في رياضتك)`);
+    navigate(scopedSports.length === 1 ? `/teacher-teams?sport=${scopedSports[0]}` : '/teacher-teams');
+  };
 
   const [teachers, setTeachers] = useState<User[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
@@ -927,6 +953,17 @@ export const Teachers: React.FC = () => {
                       {/* Actions */}
                       <td className="px-6 py-4 text-center">
                         <div className="flex items-center justify-center gap-1.5">
+                          {canTechHeadImpersonate && teacher.role !== 'CENTRAL_ADMIN' && !teacher.isSuperAdmin && (
+                            <button
+                              type="button"
+                              onClick={(e) => handleStartImpersonation(teacher, e)}
+                              className="px-2.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl border border-indigo-700 transition-all cursor-pointer shadow-3xs flex items-center gap-1 text-[11px] font-black"
+                              title="الدخول بصفة هذا الأستاذ لتعديل مشاركاته في رياضتك"
+                            >
+                              <LogIn className="h-3.5 w-3.5" />
+                              <span className="hidden xl:inline">دخول بصفته</span>
+                            </button>
+                          )}
                           {(userProfile?.role === 'CENTRAL_ADMIN' || userProfile?.role === 'SPORT_MANAGER') ? (
                             <>
                               <button
@@ -995,7 +1032,18 @@ export const Teachers: React.FC = () => {
                   className="p-4 space-y-3 hover:bg-blue-50/30 transition-colors cursor-pointer"
                 >
                   {/* Mobile Action Buttons: Icons only, centered above name */}
-                  <div className="flex items-center justify-center gap-3 w-full pb-2.5 border-b border-slate-100">
+                  <div className="flex items-center justify-center flex-wrap gap-2 w-full pb-2.5 border-b border-slate-100">
+                    {canTechHeadImpersonate && teacher.role !== 'CENTRAL_ADMIN' && !teacher.isSuperAdmin && (
+                      <button
+                        type="button"
+                        onClick={(e) => handleStartImpersonation(teacher, e)}
+                        className="px-2.5 py-2 bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white rounded-xl border border-indigo-700 transition-all cursor-pointer shadow-3xs flex items-center justify-center gap-1 text-[11px] font-black"
+                        title="الدخول بصفة هذا الأستاذ لتعديل مشاركاته في رياضتك"
+                      >
+                        <LogIn className="h-3.5 w-3.5" />
+                        <span>الدخول بصفة الأستاذ</span>
+                      </button>
+                    )}
                     {(userProfile?.role === 'CENTRAL_ADMIN' || userProfile?.role === 'SPORT_MANAGER') && (
                       <>
                         <button
@@ -1113,6 +1161,7 @@ export const Teachers: React.FC = () => {
           teacher={selectedTeacherModal}
           teacherStudents={teacherStudents}
           onEditRole={handleOpenEditRole}
+          onImpersonateTeacher={canTechHeadImpersonate ? (t) => handleStartImpersonation(t) : undefined}
         />
       )}
 

@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { Match, School, Venue, Tournament, Referee, Student, User, BlockedSchedulePeriod } from '../types';
 import { X, CalendarDays, Clock, MapPin, Trophy, AlertTriangle, AlertCircle, Calendar, ArrowRight, ShieldCheck, Lock, Users, Tag, UserCheck, Plus, Building, Info, Search, CheckCircle2, MessageCircle } from 'lucide-react';
-import { SPORTS_MAP, AGE_CATEGORIES, GENDER_MAP, DataService, getAgeCategoriesForSeason, normalizeCategoryKey, normalizeDateToYmd, EDUCATIONAL_CYCLE_LABELS, getMatchEducationalCycles, findBlockedPeriodForDate } from '../lib/dataService';
+import { SPORTS_MAP, AGE_CATEGORIES, GENDER_MAP, DataService, getAgeCategoriesForSeason, normalizeCategoryKey, normalizeDateToYmd, EDUCATIONAL_CYCLE_LABELS, getMatchEducationalCycles, findBlockedPeriodForDate, normalizeArabicSearch, schoolNamesMatch } from '../lib/dataService';
 import { useAuth, isSuperAdminEmail } from '../contexts/AuthContext';
 import { resolveHostSchoolForMatch, findRefereeContact, generateRefereeMatchNotificationMessage, getWhatsAppUrl } from '../lib/whatsappService';
 import { MatchBroadcastDiffusionModal, MatchBroadcastDiffusionTarget } from './MatchBroadcastDiffusionModal';
@@ -297,13 +297,13 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
   }, [venueMode, selectedHostSchool, customVenueName, selectedVenue]);
 
   const filteredHostSchools = useMemo(() => {
-    const q = hostSchoolSearch.trim().toLowerCase();
+    const q = normalizeArabicSearch(hostSchoolSearch);
     if (!q) return schools;
     return schools.filter(
       s =>
-        s.name.toLowerCase().includes(q) ||
-        (s.commune || '').toLowerCase().includes(q) ||
-        (s.principalName || '').toLowerCase().includes(q)
+        normalizeArabicSearch(s.name).includes(q) ||
+        normalizeArabicSearch(s.commune || '').includes(q) ||
+        normalizeArabicSearch(s.principalName || '').includes(q)
     );
   }, [schools, hostSchoolSearch]);
 
@@ -315,29 +315,67 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
     return hours * 60 + minutes;
   };
 
-  const conflictingMatches = useMemo(() => {
-    if (!effectiveVenueKey || !date) return [];
-    return matches.filter(m => {
-      const sameVenue =
-        (venueMode === 'school' && (m.hostSchoolId === hostSchoolId || m.venueId === hostSchoolId || m.venueName === selectedHostSchool?.name)) ||
-        (venueMode === 'custom' && (m.venueId === effectiveVenueKey || (customVenueName.trim() && m.venueName === customVenueName.trim())));
-      if (!sameVenue) return false;
-      if (m.status === 'Cancelled' || m.status === 'Postponed') return false;
-      if (editingMatch && m.id === editingMatch.id) return false;
+  const { conflictingMatches, sameVenueOtherTimesMatches } = useMemo(() => {
+    if (!effectiveVenueKey || !date) {
+      return { conflictingMatches: [] as Match[], sameVenueOtherTimesMatches: [] as Match[] };
+    }
+    const targetDateYmd = normalizeDateToYmd(date) || date;
+    const normalizedCustomVenue = normalizeArabicSearch(customVenueName);
 
-      // Check date equality (YYYY-MM-DD)
+    const isSameVenue = (m: Match) => {
+      if (venueMode === 'school') {
+        if (hostSchoolId && (m.hostSchoolId === hostSchoolId || m.venueId === hostSchoolId)) {
+          return true;
+        }
+        if (selectedHostSchool?.name) {
+          if (schoolNamesMatch(m.venueName, selectedHostSchool.name)) return true;
+          const matchHostSch = schools.find(s => s.id === (m.hostSchoolId || m.venueId));
+          if (matchHostSch && schoolNamesMatch(matchHostSch.name, selectedHostSchool.name)) return true;
+        }
+        return false;
+      }
+
+      if (effectiveVenueKey && m.venueId === effectiveVenueKey) return true;
+      if (normalizedCustomVenue) {
+        if (
+          schoolNamesMatch(m.venueName, customVenueName) ||
+          normalizeArabicSearch(m.venueName || '') === normalizedCustomVenue
+        ) {
+          return true;
+        }
+      }
+      return false;
+    };
+
+    const conflicts: Match[] = [];
+    const sameDayOtherTimes: Match[] = [];
+
+    matches.forEach(m => {
+      if (!isSameVenue(m)) return;
+      if (m.status === 'Cancelled' || m.status === 'Postponed') return;
+      if (editingMatch && m.id === editingMatch.id) return;
+
       const matchDateStr = normalizeDateToYmd(m.date);
-      if (matchDateStr !== date) return false;
+      if (matchDateStr !== targetDateYmd) return;
 
-      // Same day, check if time difference is less than 60 minutes
       if (m.startTime && startTime) {
         const t1 = parseTimeToMinutes(m.startTime);
         const t2 = parseTimeToMinutes(startTime);
-        return Math.abs(t1 - t2) < 60;
+        if (Math.abs(t1 - t2) < 60) {
+          conflicts.push(m);
+        } else {
+          sameDayOtherTimes.push(m);
+        }
+      } else {
+        conflicts.push(m);
       }
-      return true; // fallback if no times defined
     });
-  }, [matches, effectiveVenueKey, venueMode, hostSchoolId, selectedHostSchool, customVenueName, date, startTime, editingMatch]);
+
+    return {
+      conflictingMatches: conflicts,
+      sameVenueOtherTimesMatches: sameDayOtherTimes
+    };
+  }, [matches, schools, effectiveVenueKey, venueMode, hostSchoolId, selectedHostSchool, customVenueName, date, startTime, editingMatch]);
 
   const hasConflict = conflictingMatches.length > 0;
   const [forceScheduleDespiteConflict, setForceScheduleDespiteConflict] = useState(false);
@@ -1347,51 +1385,100 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
             />
           </div>
 
-          {/* CRITICAL OCCUPANCY CONFLICT WARNING ALERT */}
-          {hasConflict && (
-            <div className="rounded-xl border border-red-200 bg-gradient-to-br from-red-50 to-amber-50/80 p-3.5 space-y-2.5 animate-in fade-in slide-in-from-top-2 duration-200">
-              <div className="flex items-start gap-2.5">
-                <div className="p-1 bg-red-100 text-red-600 rounded-lg shrink-0 mt-0.5">
-                  <AlertTriangle className="h-5 w-5 animate-bounce" />
-                </div>
-                <div className="flex-1">
-                  <h4 className="text-xs font-bold text-red-900 flex items-center gap-1">
-                    <span>تنبيه: مركز التباري غير شاغر في هذا التاريخ!</span>
-                  </h4>
-                  <p className="text-[11px] text-red-700 mt-0.5 leading-relaxed">
-                    تم برمجة نشاط/مقابلة أخرى بـ <strong className="font-bold underline">{effectiveVenueDisplayName}</strong> في تاريخ <span className="font-mono font-bold" dir="ltr">{date}</span>.
-                  </p>
-                </div>
-              </div>
-
-              {/* Conflicting matches list */}
-              <div className="bg-white/80 border border-red-100 rounded-lg p-2.5 space-y-1.5 text-xs">
-                <p className="text-[10px] font-bold text-slate-600">المباريات المبرمجة مسبقاً بنفس المركز:</p>
-                {conflictingMatches.map(cm => (
-                  <div key={cm.id} className="flex items-center justify-between text-[11px] text-slate-700 bg-red-50/50 px-2 py-1 rounded border border-red-100/60">
-                    <span className="font-bold">
-                      {getSchoolName(cm.team1Id)} ضد {getSchoolName(cm.team2Id)}
-                    </span>
-                    <span className="text-[10px] text-red-600 font-bold bg-white px-1.5 py-0.5 rounded border border-red-200">
-                      ⏰ {cm.startTime || '10:00'} ({cm.stage || 'مباراة'})
-                    </span>
+          {/* LIVE CROSS-SPORT VENUE AVAILABILITY NOTIFICATION */}
+          {effectiveVenueKey && date && (
+            hasConflict ? (
+              <div className="rounded-xl border-2 border-red-300 bg-gradient-to-br from-red-50 to-amber-50/80 p-3.5 space-y-2.5 animate-in fade-in slide-in-from-top-2 duration-200">
+                <div className="flex items-start gap-2.5">
+                  <div className="p-1 bg-red-100 text-red-600 rounded-lg shrink-0 mt-0.5">
+                    <AlertTriangle className="h-5 w-5 animate-bounce" />
                   </div>
-                ))}
-              </div>
+                  <div className="flex-1">
+                    <h4 className="text-xs font-black text-red-900 flex items-center gap-1.5 flex-wrap">
+                      <span>⚠️ مركز التباري غير شاغر في هذا التاريخ والتوقيت!</span>
+                      <span className="text-[10px] bg-red-600 text-white px-2 py-0.5 rounded-full font-black">
+                        {conflictingMatches.length} تضارب
+                      </span>
+                    </h4>
+                    <p className="text-[11px] text-red-800 mt-0.5 leading-relaxed">
+                      تمت برمجة مقابلة/نشاط رياضي آخر بـ <strong className="font-bold underline">{effectiveVenueDisplayName}</strong> في تاريخ <span className="font-mono font-bold" dir="ltr">{date}</span> حوالي الساعة <span className="font-mono font-bold" dir="ltr">{startTime}</span>.
+                    </p>
+                  </div>
+                </div>
 
-              {/* Quick helper button to change date */}
-              <div className="flex items-center justify-between pt-1">
-                <span className="text-[10px] text-amber-800 font-medium">المرجو تغيير التاريخ لتفادي تضارب المواعيد:</span>
-                <button
-                  type="button"
-                  onClick={handleNextDay}
-                  className="inline-flex items-center gap-1 px-2.5 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-[10px] font-bold transition-colors cursor-pointer shadow-xs"
-                >
-                  <Calendar className="h-3 w-3" />
-                  <span>تأجيل لليوم الموالي (+1)</span>
-                </button>
+                {/* Conflicting matches list across ALL sports */}
+                <div className="bg-white/90 border border-red-100 rounded-lg p-2.5 space-y-1.5 text-xs">
+                  <p className="text-[10px] font-bold text-slate-600">المقابلات المتزامنة بنفس مركز التباري (عبر كافة الرياضات):</p>
+                  {conflictingMatches.map(cm => {
+                    const cmSport = SPORTS_MAP[cm.sportId];
+                    return (
+                      <div key={cm.id} className="flex flex-wrap items-center justify-between gap-1.5 text-[11px] text-slate-800 bg-red-50/60 px-2.5 py-1.5 rounded-lg border border-red-100">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="text-[10px] font-black px-1.5 py-0.5 rounded bg-red-100 text-red-900 border border-red-200">
+                            {cmSport?.icon || '🏆'} {cmSport?.name || cm.sportId}
+                          </span>
+                          <span className="font-bold">
+                            {getSchoolName(cm.team1Id)} ضد {getSchoolName(cm.team2Id)}
+                          </span>
+                        </div>
+                        <span className="text-[10px] text-red-700 font-bold bg-white px-1.5 py-0.5 rounded border border-red-200">
+                          ⏰ {cm.startTime || '10:00'} ({cm.stage || 'مباراة'})
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {sameVenueOtherTimesMatches.length > 0 && (
+                  <div className="bg-amber-50/90 border border-amber-200 rounded-lg p-2 space-y-1 text-[10.5px] text-amber-900">
+                    <p className="font-bold">مقابلات أخرى مبرمجة بنفس المركز في أوقات مختلفة من نفس اليوم:</p>
+                    {sameVenueOtherTimesMatches.map(om => (
+                      <div key={om.id} className="flex items-center justify-between gap-2">
+                        <span>{SPORTS_MAP[om.sportId]?.icon || '🏆'} {SPORTS_MAP[om.sportId]?.name || om.sportId}: {getSchoolName(om.team1Id)} × {getSchoolName(om.team2Id)}</span>
+                        <span className="font-mono font-bold">⏰ {om.startTime}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Quick helper button to change date */}
+                <div className="flex items-center justify-between pt-1">
+                  <span className="text-[10px] text-amber-900 font-bold">لتفادي الاكتظاظ بين اللجن التقنية، يُنصح بتغيير التوقيت أو التاريخ:</span>
+                  <button
+                    type="button"
+                    onClick={handleNextDay}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-[10px] font-bold transition-colors cursor-pointer shadow-xs"
+                  >
+                    <Calendar className="h-3 w-3" />
+                    <span>تأجيل لليوم الموالي (+1)</span>
+                  </button>
+                </div>
               </div>
-            </div>
+            ) : (
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50/90 p-3 space-y-1.5 animate-in fade-in duration-150">
+                <div className="flex items-center gap-2 text-xs font-black text-emerald-900">
+                  <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
+                  <span>
+                    ✓ مركز التباري شاغر في هذا التاريخ والتوقيت ({effectiveVenueDisplayName} — {date} على الساعة {startTime || '10:00'})
+                  </span>
+                </div>
+                {sameVenueOtherTimesMatches.length > 0 ? (
+                  <div className="bg-white/80 border border-emerald-200 rounded-lg p-2 space-y-1 text-[10.5px] text-slate-700">
+                    <p className="font-bold text-emerald-900">ملاحظة تنسيقية: توجد مقابلات أخرى في نفس اليوم بأوقات متباعدة (أكثر من ساعة):</p>
+                    {sameVenueOtherTimesMatches.map(om => (
+                      <div key={om.id} className="flex items-center justify-between gap-2">
+                        <span>{SPORTS_MAP[om.sportId]?.icon || '🏆'} {SPORTS_MAP[om.sportId]?.name || om.sportId}: {getSchoolName(om.team1Id)} ضد {getSchoolName(om.team2Id)}</span>
+                        <span className="font-mono font-bold text-emerald-800">⏰ {om.startTime}</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-[11px] text-emerald-700 font-medium pr-6">
+                    لا توجد أي مقابلة مبرمجة بهذا المركز في هذا اليوم على مستوى جميع الرياضات.
+                  </p>
+                )}
+              </div>
+            )
           )}
 
           {/* Footer Buttons */}

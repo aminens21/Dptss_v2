@@ -21,8 +21,8 @@ import {
   enableNetwork,
   arrayUnion
 } from 'firebase/firestore';
-import { isFlexibleEmailMatch, fixTeacherFieldJumble, normalizeArabicName, normalizeDateToYmd, formatMatchDate } from './utils';
-export { normalizeDateToYmd };
+import { isFlexibleEmailMatch, fixTeacherFieldJumble, normalizeArabicName, normalizeArabicSearch, normalizeDateToYmd, formatMatchDate } from './utils';
+export { normalizeDateToYmd, normalizeArabicSearch };
 
 /**
  * Determines whether a school record belongs to Private Education (التعليم الخصوصي)
@@ -564,21 +564,75 @@ function isRecentlyDeleted(col: string, id?: string): boolean {
   return true;
 }
 
-// Local storage helpers with automatic deduplication and self-healing
+const inMemoryCollectionCache: Record<string, any[]> = {};
+let hasSyncedUsersForSchoolFilter = false;
+
+function purgeStaleFirestoreStorageKeys(): void {
+  try {
+    if (typeof window === 'undefined' || !window.localStorage) return;
+    const toDelete: string[] = [];
+    for (let i = 0; i < window.localStorage.length; i++) {
+      const k = window.localStorage.key(i);
+      if (k && k.startsWith('firestore_')) {
+        toDelete.push(k);
+      }
+    }
+    toDelete.forEach((k) => {
+      try {
+        window.localStorage.removeItem(k);
+      } catch {}
+    });
+  } catch {}
+}
+
+function stripLargeInlineImagesForStorage<T>(items: T[]): T[] {
+  return items.map((item) => {
+    if (!item || typeof item !== 'object') return item;
+    const copy: any = { ...item };
+    if (typeof copy.photoUrl === 'string' && copy.photoUrl.startsWith('data:image/') && copy.photoUrl.length > 2048) {
+      delete copy.photoUrl;
+    }
+    return copy;
+  });
+}
+
+function safeSetLocalJson(key: string, items: any[]): void {
+  try {
+    localStorage.setItem(key, JSON.stringify(items));
+  } catch {
+    purgeStaleFirestoreStorageKeys();
+    try {
+      localStorage.setItem(key, JSON.stringify(items));
+    } catch {
+      try {
+        const compacted = stripLargeInlineImagesForStorage(items);
+        localStorage.setItem(key, JSON.stringify(compacted));
+      } catch (err) {
+        console.warn(`Local storage quota fallback active for "${key}":`, err);
+      }
+    }
+  }
+}
+
+// Local storage helpers with automatic deduplication, self-healing, and quota protection
 function getLocal<T extends { id?: string }>(key: string, fallback: T[]): T[] {
+  if (Array.isArray(inMemoryCollectionCache[key])) {
+    return deduplicateById<T>(inMemoryCollectionCache[key]);
+  }
   try {
     const data = localStorage.getItem(key);
     if (!data) {
       const cleanFallback = deduplicateById(fallback);
-      localStorage.setItem(key, JSON.stringify(cleanFallback));
+      inMemoryCollectionCache[key] = cleanFallback;
+      safeSetLocalJson(key, cleanFallback);
       return cleanFallback;
     }
     const parsed = JSON.parse(data);
     if (Array.isArray(parsed)) {
       const clean = deduplicateById<T>(parsed);
-      // Auto-heal local storage if duplicates existed
+      inMemoryCollectionCache[key] = clean;
       if (clean.length !== parsed.length) {
-        localStorage.setItem(key, JSON.stringify(clean));
+        safeSetLocalJson(key, clean);
       }
       return clean;
     }
@@ -591,9 +645,10 @@ function getLocal<T extends { id?: string }>(key: string, fallback: T[]): T[] {
 function setLocal<T extends { id?: string }>(key: string, data: T[]) {
   try {
     const clean = deduplicateById(data);
-    localStorage.setItem(key, JSON.stringify(clean));
+    inMemoryCollectionCache[key] = clean;
+    safeSetLocalJson(key, clean);
   } catch (e) {
-    console.error("Local storage error:", e);
+    console.warn("Local storage error:", e);
   }
 }
 
@@ -1107,7 +1162,7 @@ export function isSchoolEligibleForTournament(params: {
   return true;
 }
 
-function normalizeArabicMatchText(value?: string | null): string {
+export function normalizeArabicMatchText(value?: string | null): string {
   return String(value || '')
     .trim()
     .toLowerCase()
@@ -1124,6 +1179,103 @@ export function schoolNamesMatch(a?: string | null, b?: string | null): boolean 
   const cleanB = normalizeArabicMatchText(b);
   if (!cleanA || !cleanB) return false;
   return cleanA === cleanB || cleanA.includes(cleanB) || cleanB.includes(cleanA);
+}
+
+const SCHOOL_PREFIX_STOPWORDS = new Set([
+  'الثانويه', 'ثانويه', 'التاهيليه', 'تاهيليه', 'التاهيلي', 'تاهيلي',
+  'الاعداديه', 'اعداديه', 'الاعدادي', 'اعدادي',
+  'الابتدائيه', 'ابتدائيه', 'الابتدائي', 'ابتدائي',
+  'مؤسسه', 'المؤسسه', 'التعليميه', 'المدرسه', 'مدرسه',
+  'مجموعه', 'مدارس'
+]);
+
+export function normalizeCoreSchoolName(name?: string | null): string {
+  const clean = normalizeArabicMatchText(name)
+    .replace(/[.\-_/()،,]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!clean) return '';
+  const tokens = clean.split(' ').filter(tok => tok && !SCHOOL_PREFIX_STOPWORDS.has(tok));
+  return tokens.join(' ').trim();
+}
+
+export function isSchoolRepresentedInTeachers(school: School, teachersList: User[]): boolean {
+  if (!school) return false;
+  const schoolCycle = normalizeSchoolCycleType(school);
+  // Only restrict public Secondary Qualifying (تأهيلي) and Middle (إعدادي) schools
+  if (schoolCycle !== 'تأهيلي' && schoolCycle !== 'إعدادي') {
+    return true;
+  }
+
+  const schoolDirId = school.directorateId || 'taourirt';
+  const dirTeachers = (teachersList || []).filter(t => {
+    if (!t) return false;
+    if (t.role && t.role !== 'TEACHER') return false;
+    return (t.directorateId || 'taourirt') === schoolDirId;
+  });
+
+  const assignedTeachers = dirTeachers.filter(t =>
+    Boolean(
+      (t.workLocation && t.workLocation.trim()) ||
+      (t.schoolId && t.schoolId.trim()) ||
+      ((t as any).schoolName && String((t as any).schoolName).trim())
+    )
+  );
+
+  // Safety guard: never drop schools if teachers with assigned schools have not been loaded yet
+  if (assignedTeachers.length === 0) {
+    return true;
+  }
+
+  const fullSchoolClean = normalizeArabicMatchText(school.name);
+  const coreSchool = normalizeCoreSchoolName(school.name);
+
+  return assignedTeachers.some(t => {
+    if (t.schoolId && school.id && t.schoolId.trim() === school.id.trim()) {
+      return true;
+    }
+
+    const tLocRaw = (t.workLocation || (t as any).schoolName || '').trim();
+    if (!tLocRaw) return false;
+
+    const tLocNorm = normalizeArabicMatchText(tLocRaw);
+    const tExplicitMiddle = tLocNorm.includes('اعداد');
+    const tExplicitHigh = tLocNorm.includes('تاهيل') || (tLocNorm.includes('ثانويه') && !tExplicitMiddle);
+
+    if (schoolCycle === 'تأهيلي' && tExplicitMiddle) return false;
+    if (schoolCycle === 'إعدادي' && tExplicitHigh) return false;
+
+    if (!tExplicitMiddle && !tExplicitHigh && t.teachingCadre) {
+      if (schoolCycle === 'تأهيلي' && t.teachingCadre !== 'HIGH') return false;
+      if (schoolCycle === 'إعدادي' && t.teachingCadre !== 'MIDDLE') return false;
+    }
+
+    if (fullSchoolClean && tLocNorm && fullSchoolClean === tLocNorm) {
+      return true;
+    }
+
+    const coreTeacher = normalizeCoreSchoolName(tLocRaw);
+    if (coreSchool.length >= 2 && coreTeacher.length >= 2 && coreSchool === coreTeacher) {
+      return true;
+    }
+
+    if (
+      coreSchool.length >= 4 &&
+      coreTeacher.length >= 4 &&
+      (coreSchool.includes(coreTeacher) || coreTeacher.includes(coreSchool))
+    ) {
+      return true;
+    }
+
+    return false;
+  });
+}
+
+export function filterSchoolsRestrictedByTeachers(schoolsList: School[], usersList: User[]): School[] {
+  if (!Array.isArray(schoolsList) || schoolsList.length === 0) return [];
+  const teachersOnly = (usersList || []).filter(u => !u.role || u.role === 'TEACHER');
+  if (teachersOnly.length === 0) return schoolsList;
+  return schoolsList.filter(s => isSchoolRepresentedInTeachers(s, teachersOnly));
 }
 
 function stripCoachHonorifics(name?: string | null): string {
@@ -1733,39 +1885,82 @@ export const DataService = {
       const tournament = tournaments.find(t => t.id === id);
 
       if (tournament) {
-        // 2. Delete Matches associated with this tournament or specific category/gender/affiliation
-        const matches = await this.getMatches();
-        const matchesToDelete = matches.filter(m => 
-          m.tournamentId === id ||
-          (m.sportId === tournament.sportId && 
-           normalizeCategoryKey(m.ageCategory) === normalizeCategoryKey(tournament.ageCategory) && 
-           m.gender === tournament.gender &&
-           (tournament.affiliationType ? (m as any).affiliationType === tournament.affiliationType : true))
+        const normTourAff = tournament.affiliationType === 'club_affiliated'
+          ? 'club_affiliated'
+          : tournament.affiliationType === 'open'
+          ? 'open'
+          : 'non_club';
+        const normTourCat = normalizeCategoryKey(tournament.ageCategory);
+        const remainingSameSportTournaments = tournaments.filter(
+          t => t.id !== id && t.sportId === tournament.sportId
         );
+
+        const isCoveredByRemainingTournament = (
+          cat?: string,
+          genderVal?: string,
+          affVal?: string
+        ): boolean => {
+          const normCat = normalizeCategoryKey(cat);
+          const normAff = affVal === 'club_affiliated' ? 'club_affiliated' : affVal === 'open' ? 'open' : 'non_club';
+          return remainingSameSportTournaments.some(rt => {
+            const rtAff = rt.affiliationType === 'club_affiliated' ? 'club_affiliated' : rt.affiliationType === 'open' ? 'open' : 'non_club';
+            const rtCat = normalizeCategoryKey(rt.ageCategory);
+            const catMatch = !normCat || !rtCat || rtCat === normCat || rtCat === 'جميع الفئات';
+            const genderMatch = !genderVal || rt.gender === 'Mixed' || genderVal === 'Mixed' || rt.gender === genderVal;
+            return catMatch && genderMatch && rtAff === normAff;
+          });
+        };
+
+        // 2. Delete Matches strictly associated with this tournament (or untagged matches matching its exact branch when no sibling tournament covers it)
+        const matches = await this.getMatches();
+        const matchesToDelete = matches.filter(m => {
+          if (m.tournamentId) {
+            return m.tournamentId === id;
+          }
+          if (m.sportId !== tournament.sportId) return false;
+          const mCat = normalizeCategoryKey(m.ageCategory);
+          const mAff = (m as any).affiliationType === 'club_affiliated'
+            ? 'club_affiliated'
+            : (m as any).affiliationType === 'open'
+            ? 'open'
+            : 'non_club';
+          const catMatch = !normTourCat || !mCat || mCat === normTourCat;
+          const genderMatch = tournament.gender === 'Mixed' || m.gender === 'Mixed' || m.gender === tournament.gender;
+          if (!catMatch || !genderMatch || mAff !== normTourAff) return false;
+          return !isCoveredByRemainingTournament(m.ageCategory, m.gender, mAff);
+        });
         for (const m of matchesToDelete) {
           await this.deleteMatch(m.id);
         }
 
-        // 3. Delete Students (Participants)
+        // 3. Delete Students (Participants) strictly matching this deleted branch if no other active tournament covers them
         const allStudents = await this.getStudents();
-        const studentsToDelete = allStudents.filter(s => 
-          s.sportId === tournament.sportId &&
-          normalizeCategoryKey(s.category) === normalizeCategoryKey(tournament.ageCategory) &&
-          s.gender === tournament.gender &&
-          (tournament.affiliationType ? s.affiliationType === tournament.affiliationType : true)
-        );
+        const studentsToDelete = allStudents.filter(s => {
+          if (s.sportId !== tournament.sportId) return false;
+          const sCat = normalizeCategoryKey(s.category);
+          const sAff = s.affiliationType === 'club_affiliated' ? 'club_affiliated' : 'non_club';
+          const catMatch = !normTourCat || !sCat || sCat === normTourCat;
+          const genderMatch = tournament.gender === 'Mixed' || s.gender === 'Mixed' || s.gender === tournament.gender;
+          if (!catMatch || !genderMatch || sAff !== normTourAff) return false;
+          return !isCoveredByRemainingTournament(s.category, s.gender, sAff);
+        });
         for (const s of studentsToDelete) {
           await this.deleteStudent(s.id);
         }
 
-        // 4. Delete Cross Country Results if applicable
+        // 4. Delete Cross Country Results matching this affiliation branch
         if (tournament.sportId === 'cross_country') {
           const activeDirId = this.getActiveDirectorateId();
           const resultsMap = await this.getCrossCountryResults();
-          const resultsToDelete = (Object.values(resultsMap) as CrossCountryCategoryResult[]).filter(r => 
-            normalizeCategoryKey(r.category) === normalizeCategoryKey(tournament.ageCategory) &&
-            r.gender === tournament.gender
-          );
+          const resultsToDelete = (Object.values(resultsMap) as CrossCountryCategoryResult[]).filter(r => {
+            const catMatch = normalizeCategoryKey(r.category) === normTourCat;
+            const genderMatch = tournament.gender === 'Mixed' || r.gender === tournament.gender;
+            if (!catMatch || !genderMatch) return false;
+            const isClubResult = String(r.categoryId || '').endsWith('_club');
+            if (normTourAff === 'club_affiliated') return isClubResult;
+            if (normTourAff === 'non_club') return !isClubResult;
+            return true;
+          });
           
           for (const r of resultsToDelete) {
             const docId = `${activeDirId}_${r.categoryId}`;
@@ -1792,7 +1987,7 @@ export const DataService = {
       // 6. Delete from Firestore
       await deleteDoc(doc(db, 'tournaments', id));
 
-      // 7. Update parent sport configuration (isProgrammed and ageCategories)
+      // 7. Update parent sport configuration (isProgrammed, ageCategories, targetAffiliations)
       if (tournament) {
         const remainingSportTournaments = updated.filter(t => t.sportId === tournament.sportId);
         const currentSports = getLocal<Sport>('taourirt_sports_config', []);
@@ -1800,24 +1995,27 @@ export const DataService = {
         if (remainingSportTournaments.length === 0) {
           // If no tournaments remain for this sport, turn it to unprogrammed / neutralized
           const updatedSports = currentSports.map(s => 
-            s.id === tournament.sportId ? { ...s, isProgrammed: false, ageCategories: [] } : s
+            s.id === tournament.sportId ? { ...s, isProgrammed: false, ageCategories: [], targetAffiliations: [] } : s
           );
           setLocal('taourirt_sports_config', updatedSports);
           await setDoc(doc(db, 'sports', tournament.sportId), {
             isProgrammed: false,
             ageCategories: [],
+            targetAffiliations: [],
             updatedAt: serverTimestamp()
           }, { merge: true }).catch(() => {});
         } else {
-          // Update ageCategories to only remaining active tournament categories
+          // Update ageCategories & targetAffiliations to only remaining active tournament branches
           const remainingCats = Array.from(new Set(remainingSportTournaments.map(t => normalizeCategoryKey(t.ageCategory)).filter(Boolean)));
+          const remainingAffs = Array.from(new Set(remainingSportTournaments.map(t => t.affiliationType || 'non_club'))) as Array<'non_club' | 'club_affiliated' | 'open'>;
           const updatedSports = currentSports.map(s => 
-            s.id === tournament.sportId ? { ...s, isProgrammed: true, ageCategories: remainingCats } : s
+            s.id === tournament.sportId ? { ...s, isProgrammed: true, ageCategories: remainingCats, targetAffiliations: remainingAffs } : s
           );
           setLocal('taourirt_sports_config', updatedSports);
           await setDoc(doc(db, 'sports', tournament.sportId), {
             isProgrammed: true,
             ageCategories: remainingCats,
+            targetAffiliations: remainingAffs,
             updatedAt: serverTimestamp()
           }, { merge: true }).catch(() => {});
         }
@@ -1934,18 +2132,16 @@ export const DataService = {
     targetSeasonId?: string,
     forceCheck: boolean = false
   ): Promise<number> {
+    // Do NOT silently auto-recreate deleted club_affiliated branches on page load;
+    // only execute when explicitly requested with forceCheck = true.
+    if (!forceCheck) {
+      return 0;
+    }
+
     const activeDirId = targetDirectorateId || this.getActiveDirectorateId();
     const effectiveDirId = (!activeDirId || activeDirId === 'all') ? 'taourirt' : activeDirId;
     const activeSeason = targetSeasonId || (await this.getActiveSeason());
     const flagKey = `taourirt_restored_club_affiliated_v2_${effectiveDirId}_${activeSeason}`;
-
-    if (!forceCheck) {
-      try {
-        if (localStorage.getItem(flagKey) === 'true') {
-          return 0;
-        }
-      } catch {}
-    }
 
     const allTournaments = await this.getTournaments(undefined, true);
     const dirTournaments = allTournaments.filter(
@@ -2564,6 +2760,17 @@ export const DataService = {
   // SCHOOLS
   async getSchools(targetDirectorateId?: string, all?: boolean): Promise<School[]> {
     const activeDirId = targetDirectorateId || this.getActiveDirectorateId();
+    let usersForFilter: User[] =
+      (inMemoryCollectionCache['local_registered_users'] as User[]) ||
+      getLocal<User>('local_registered_users', []);
+    if (!hasSyncedUsersForSchoolFilter || usersForFilter.length === 0) {
+      try {
+        usersForFilter = await this.getUsers();
+      } catch {
+        // Fallback to cached users
+      }
+    }
+
     try {
       const snap = await getDocs(collection(db, 'schools'));
       if (!snap.empty) {
@@ -2617,10 +2824,11 @@ export const DataService = {
 
         const combinedList = deduplicateById<School>([...localPending, ...listWithCodes]);
         setLocal(STORAGE_KEYS.SCHOOLS, combinedList);
+        const restrictedList = filterSchoolsRestrictedByTeachers(combinedList, usersForFilter);
         if (all === true || !activeDirId || activeDirId === 'all') {
-          return combinedList;
+          return restrictedList;
         }
-        return combinedList.filter(s => (s.directorateId || 'taourirt') === activeDirId);
+        return restrictedList.filter(s => (s.directorateId || 'taourirt') === activeDirId);
       } else {
         // Firestore collection is empty: preserve only genuinely pending local creations
         const localList = getLocal<School>(STORAGE_KEYS.SCHOOLS, []);
@@ -2647,14 +2855,18 @@ export const DataService = {
           });
         }
         setLocal(STORAGE_KEYS.SCHOOLS, pendingOnly);
+        const restrictedPending = filterSchoolsRestrictedByTeachers(pendingOnly, usersForFilter);
         return (all === true || !activeDirId || activeDirId === 'all')
-          ? pendingOnly
-          : pendingOnly.filter(s => (s.directorateId || 'taourirt') === activeDirId);
+          ? restrictedPending
+          : restrictedPending.filter(s => (s.directorateId || 'taourirt') === activeDirId);
       }
     } catch (e) {
       console.warn("Firestore schools fetch error:", e);
       const localList = getLocal<School>(STORAGE_KEYS.SCHOOLS, []);
-      const filtered = localList.filter(s => s && s.name && !s.name.includes('غير محدد') && !isRecentlyDeleted('schools', s.id));
+      const filtered = filterSchoolsRestrictedByTeachers(
+        localList.filter(s => s && s.name && !s.name.includes('غير محدد') && !isRecentlyDeleted('schools', s.id)),
+        usersForFilter
+      );
       if (all === true || !activeDirId || activeDirId === 'all') {
         return filtered;
       }
@@ -2663,16 +2875,30 @@ export const DataService = {
   },
 
   subscribeToSchools(callback: (schools: School[]) => void): () => void {
+    let latestRawSchools: School[] = [];
+    let isUnsubscribed = false;
+
+    const getCachedUsers = (): User[] =>
+      (inMemoryCollectionCache['local_registered_users'] as User[]) ||
+      getLocal<User>('local_registered_users', []);
+
     const emitLocal = () => {
       const localList = getLocal<School>(STORAGE_KEYS.SCHOOLS, []).filter(
         s => s && s.name && !s.name.includes('غير محدد') && !isRecentlyDeleted('schools', s.id)
       );
-      callback(localList);
+      latestRawSchools = localList;
+      callback(filterSchoolsRestrictedByTeachers(localList, getCachedUsers()));
     };
     const handleLocalUpdate = () => {
       if (isCloudSyncPaused()) emitLocal();
     };
+    const handleUsersUpdated = () => {
+      if (!isUnsubscribed && latestRawSchools.length > 0) {
+        callback(filterSchoolsRestrictedByTeachers(latestRawSchools, getCachedUsers()));
+      }
+    };
     window.addEventListener('schoolsUpdated', handleLocalUpdate);
+    window.addEventListener('userDataChanged', handleUsersUpdated);
 
     try {
       if (isCloudSyncPaused()) emitLocal();
@@ -2707,19 +2933,114 @@ export const DataService = {
 
         const combined = deduplicateById<School>([...localPending, ...listWithCodes]);
         setLocal(STORAGE_KEYS.SCHOOLS, combined);
-        callback(combined);
+        latestRawSchools = combined;
+
+        const cachedUsers = getCachedUsers();
+        if (!hasSyncedUsersForSchoolFilter) {
+          this.getUsers()
+            .then(freshUsers => {
+              if (!isUnsubscribed && latestRawSchools.length > 0) {
+                callback(filterSchoolsRestrictedByTeachers(latestRawSchools, freshUsers));
+              }
+            })
+            .catch(() => {});
+        }
+
+        callback(filterSchoolsRestrictedByTeachers(combined, cachedUsers));
       }, (err) => {
         console.warn("Real-time schools listener error:", err);
       });
       return () => {
+        isUnsubscribed = true;
         window.removeEventListener('schoolsUpdated', handleLocalUpdate);
+        window.removeEventListener('userDataChanged', handleUsersUpdated);
         unsubscribe();
       };
     } catch (err) {
       console.warn("Failed to subscribe to schools:", err);
       return () => {
+        isUnsubscribed = true;
         window.removeEventListener('schoolsUpdated', handleLocalUpdate);
+        window.removeEventListener('userDataChanged', handleUsersUpdated);
       };
+    }
+  },
+
+  async pruneExtraHighAndMiddleSchools(targetDirectorateId?: string): Promise<{ deletedCount: number; deletedSchools: School[] }> {
+    if (isCloudSyncPaused()) {
+      return { deletedCount: 0, deletedSchools: [] };
+    }
+    const activeDirId = targetDirectorateId || this.getActiveDirectorateId() || 'taourirt';
+    const isAllDirs = !activeDirId || activeDirId === 'all';
+
+    try {
+      const [teachersList, snap] = await Promise.all([
+        this.getTeachers(),
+        getDocs(collection(db, 'schools'))
+      ]);
+
+      const rawCloudSchools: School[] = snap.docs
+        .filter(d => !isRecentlyDeleted('schools', d.id))
+        .map(d => ({ id: d.id, ...d.data(), directorateId: d.data().directorateId || 'taourirt' } as School))
+        .filter(s => s && s.name && !s.name.includes('غير محدد'));
+
+      const localList = getLocal<School>(STORAGE_KEYS.SCHOOLS, []);
+      const combinedSchools = deduplicateById<School>([...rawCloudSchools, ...localList]);
+
+      const dirSchools = isAllDirs
+        ? combinedSchools
+        : combinedSchools.filter(s => (s.directorateId || 'taourirt') === activeDirId);
+
+      const extraSchools = dirSchools.filter(s => {
+        const cycle = normalizeSchoolCycleType(s);
+        if (cycle !== 'تأهيلي' && cycle !== 'إعدادي') return false;
+        return !isSchoolRepresentedInTeachers(s, teachersList);
+      });
+
+      if (extraSchools.length === 0) {
+        return { deletedCount: 0, deletedSchools: [] };
+      }
+
+      const deletedIdSet = new Set(extraSchools.map(s => s.id));
+      extraSchools.forEach(s => {
+        if (s.id) markRecentlyDeleted('schools', s.id);
+      });
+
+      const cloudIdSet = new Set(rawCloudSchools.map(s => s.id));
+      const cloudToDelete = extraSchools.filter(s => s.id && cloudIdSet.has(s.id));
+
+      if (cloudToDelete.length > 0) {
+        let batch = writeBatch(db);
+        let batchCount = 0;
+        for (const sch of cloudToDelete) {
+          batch.delete(doc(db, 'schools', sch.id));
+          batchCount++;
+          if (batchCount >= 450) {
+            await batch.commit();
+            batch = writeBatch(db);
+            batchCount = 0;
+          }
+        }
+        if (batchCount > 0) {
+          await batch.commit();
+        }
+      }
+
+      const remainingLocal = combinedSchools.filter(s => !deletedIdSet.has(s.id));
+      setLocal(STORAGE_KEYS.SCHOOLS, remainingLocal);
+      window.dispatchEvent(new CustomEvent('schoolsUpdated'));
+
+      // Cascade-delete championship participations belonging to the pruned extra schools
+      await this.pruneOrphanedParticipationsForDeletedSchools({
+        targetDirectorateId: isAllDirs ? 'all' : activeDirId,
+        deletedSchoolIds: extraSchools.map(s => s.id).filter(Boolean),
+        deletedSchoolNames: extraSchools.map(s => s.name).filter(Boolean)
+      });
+
+      return { deletedCount: extraSchools.length, deletedSchools: extraSchools };
+    } catch (e) {
+      console.error('Error pruning extra High/Middle schools:', e);
+      return { deletedCount: 0, deletedSchools: [] };
     }
   },
 
@@ -3041,6 +3362,7 @@ export const DataService = {
   async deleteSchool(id: string): Promise<void> {
     markRecentlyDeleted('schools', id);
     const localList = getLocal<School>(STORAGE_KEYS.SCHOOLS, []);
+    const targetSchool = localList.find(s => s.id === id);
     const updated = localList.filter(s => s.id !== id);
     setLocal(STORAGE_KEYS.SCHOOLS, updated);
 
@@ -3050,15 +3372,21 @@ export const DataService = {
       console.error("Error deleting school from Firestore:", e);
     }
 
+    // Cascade-delete participations of this deleted school
+    await this.pruneOrphanedParticipationsForDeletedSchools({
+      targetDirectorateId: targetSchool?.directorateId || this.getActiveDirectorateId() || 'taourirt',
+      deletedSchoolIds: [id],
+      deletedSchoolNames: targetSchool?.name ? [targetSchool.name] : []
+    }).catch(() => {});
+
     window.dispatchEvent(new CustomEvent('schoolsUpdated'));
   },
 
   async deleteAllSchools(): Promise<void> {
     const activeDirId = this.getActiveDirectorateId() || 'taourirt';
     const localList = getLocal<School>(STORAGE_KEYS.SCHOOLS, []);
-    localList
-      .filter(s => activeDirId === 'all' || (s.directorateId || 'taourirt') === activeDirId)
-      .forEach(s => markRecentlyDeleted('schools', s.id));
+    const dirSchools = localList.filter(s => activeDirId === 'all' || (s.directorateId || 'taourirt') === activeDirId);
+    dirSchools.forEach(s => markRecentlyDeleted('schools', s.id));
     
     // 1. Delete from Firestore
     try {
@@ -3092,6 +3420,14 @@ export const DataService = {
       ? []
       : localList.filter(s => (s.directorateId || 'taourirt') !== activeDirId);
     setLocal(STORAGE_KEYS.SCHOOLS, updated);
+
+    // 3. Cascade-delete all participations for deleted directorate schools
+    await this.pruneOrphanedParticipationsForDeletedSchools({
+      targetDirectorateId: activeDirId,
+      deletedSchoolIds: dirSchools.map(s => s.id).filter(Boolean),
+      deletedSchoolNames: dirSchools.map(s => s.name).filter(Boolean),
+      allowEmptySchools: true
+    }).catch(() => {});
     
     // Trigger global UI refresh
     window.dispatchEvent(new CustomEvent('schoolsUpdated'));
@@ -3740,9 +4076,9 @@ export const DataService = {
     } catch {}
 
     const mergedUsers = Array.from(usersMap.values()).map(u => fixTeacherFieldJumble(u));
-    try {
-      localStorage.setItem('local_registered_users', JSON.stringify(mergedUsers));
-    } catch {}
+    inMemoryCollectionCache['local_registered_users'] = mergedUsers;
+    hasSyncedUsersForSchoolFilter = true;
+    safeSetLocalJson('local_registered_users', mergedUsers);
 
     return deduplicateById(mergedUsers);
   },
@@ -3878,7 +4214,8 @@ export const DataService = {
       };
       users.push(fullUserRecord);
     }
-    localStorage.setItem('local_registered_users', JSON.stringify(users));
+    inMemoryCollectionCache['local_registered_users'] = users;
+    safeSetLocalJson('local_registered_users', users);
 
     // 2. Also sync demo user profile if matching
     try {
@@ -4030,6 +4367,7 @@ export const DataService = {
       if (localUsersRaw) {
         const users = JSON.parse(localUsersRaw) as User[];
         const updated = users.filter(u => u.id !== userId);
+        inMemoryCollectionCache['local_registered_users'] = updated;
         localStorage.setItem('local_registered_users', JSON.stringify(updated));
       }
     } catch (e) {
@@ -4075,6 +4413,7 @@ export const DataService = {
         const updated = users.filter(u => 
           !(u.role === 'TEACHER' && (u.directorateId || 'taourirt') === activeDirId)
         );
+        inMemoryCollectionCache['local_registered_users'] = updated;
         localStorage.setItem('local_registered_users', JSON.stringify(updated));
       }
     } catch (e) {
@@ -6889,7 +7228,27 @@ export const DataService = {
     };
 
     const current = getLocal<SchoolTournamentConfirmation>(STORAGE_KEYS.CONFIRMATIONS, []);
-    const updated = deduplicateById([payload, ...current.filter(c => c.id !== confirmationId)]);
+    const duplicateDocIds = new Set<string>();
+    current.forEach(c => {
+      if (
+        c &&
+        c.id !== confirmationId &&
+        c.sportId === data.sportId &&
+        (c.directorateId || 'taourirt') === payload.directorateId &&
+        (
+          (data.schoolId && c.schoolId === data.schoolId) ||
+          (data.schoolName && c.schoolName && schoolNamesMatch(c.schoolName, data.schoolName))
+        )
+      ) {
+        duplicateDocIds.add(c.id);
+      }
+    });
+
+    duplicateDocIds.forEach(dupId => markRecentlyDeleted('school_confirmations', dupId));
+    const updated = deduplicateById([
+      payload,
+      ...current.filter(c => c.id !== confirmationId && !duplicateDocIds.has(c.id))
+    ]);
     setLocal(STORAGE_KEYS.CONFIRMATIONS, updated);
     markPendingWrite('school_confirmations', confirmationId);
 
@@ -6897,6 +7256,11 @@ export const DataService = {
       const cleanPayload = stripUndefinedDeep(payload);
       await setDoc(doc(db, 'school_confirmations', confirmationId), cleanPayload, { merge: true });
       clearPendingWrite('school_confirmations', confirmationId);
+      if (duplicateDocIds.size > 0) {
+        await Promise.all(
+          Array.from(duplicateDocIds).map(dupId => deleteDoc(doc(db, 'school_confirmations', dupId)).catch(() => {}))
+        );
+      }
     } catch (err) {
       console.error('Error writing school confirmation to Firestore:', err);
     }
@@ -6936,6 +7300,783 @@ export const DataService = {
     }
 
     window.dispatchEvent(new CustomEvent('schoolConfirmationsUpdated'));
+  },
+
+  async convertAllParticipationsToNonClubAndDeduplicate(options?: {
+    targetDirectorateId?: string;
+    onlyIfNotMigrated?: boolean;
+  }): Promise<{
+    alreadyMigrated?: boolean;
+    convertedConfirmationsCount: number;
+    deletedDuplicateConfirmationsCount: number;
+    convertedStudentsCount: number;
+    deletedDuplicateStudentsCount: number;
+  }> {
+    const emptyResult = {
+      alreadyMigrated: false,
+      convertedConfirmationsCount: 0,
+      deletedDuplicateConfirmationsCount: 0,
+      convertedStudentsCount: 0,
+      deletedDuplicateStudentsCount: 0
+    };
+
+    const activeDirId = options?.targetDirectorateId || this.getActiveDirectorateId() || 'taourirt';
+    const isAllDirs = !activeDirId || activeDirId === 'all';
+    const dirKey = isAllDirs ? 'all' : activeDirId;
+    const migrationKey = `migration_participations_non_club_v1_${dirKey}`;
+
+    if (options?.onlyIfNotMigrated) {
+      try {
+        if (typeof window !== 'undefined' && window.localStorage.getItem(migrationKey) === '1') {
+          return { ...emptyResult, alreadyMigrated: true };
+        }
+      } catch {
+        // ignore storage errors
+      }
+      if (!isCloudSyncPaused()) {
+        try {
+          const flagSnap = await getDoc(doc(db, 'settings', migrationKey));
+          if (flagSnap.exists() && flagSnap.data()?.completed === true) {
+            try {
+              window.localStorage.setItem(migrationKey, '1');
+            } catch {
+              // ignore
+            }
+            return { ...emptyResult, alreadyMigrated: true };
+          }
+        } catch {
+          // Proceed carefully or abort if offline
+        }
+      }
+    }
+
+    if (isCloudSyncPaused()) {
+      return emptyResult;
+    }
+
+    try {
+      const [schoolsList, confSnap, studSnap, allTournaments] = await Promise.all([
+        this.getSchools(isAllDirs ? 'all' : activeDirId, isAllDirs),
+        getDocs(collection(db, 'school_confirmations')),
+        getDocs(collection(db, 'students')),
+        this.getTournaments()
+      ]);
+
+      const resolveCanonicalSchool = (schoolId?: string, schoolName?: string, dirId?: string) => {
+        const cleanId = (schoolId || '').trim();
+        const cleanName = (schoolName || '').trim();
+        const dirScoped = schoolsList.filter(s => !dirId || (s.directorateId || 'taourirt') === dirId);
+        const searchPool = dirScoped.length > 0 ? dirScoped : schoolsList;
+
+        let matched = cleanId ? searchPool.find(s => s.id === cleanId) : undefined;
+        if (!matched && cleanName) {
+          matched = searchPool.find(s => schoolNamesMatch(s.name, cleanName));
+        }
+        if (!matched && cleanName) {
+          matched = schoolsList.find(s => schoolNamesMatch(s.name, cleanName));
+        }
+
+        if (matched) {
+          return {
+            canonicalKey: `id:${matched.id}`,
+            canonicalId: matched.id,
+            canonicalName: matched.name
+          };
+        }
+
+        const normName = normalizeArabicMatchText(cleanName);
+        if (normName) {
+          return {
+            canonicalKey: `name:${normName}`,
+            canonicalId: cleanId || cleanName,
+            canonicalName: cleanName
+          };
+        }
+
+        return {
+          canonicalKey: `raw:${cleanId.toLowerCase()}`,
+          canonicalId: cleanId,
+          canonicalName: cleanName
+        };
+      };
+
+      // ------------------------------------------------------------------
+      // 1. CONVERT & DEDUPLICATE SCHOOL CONFIRMATIONS (Phase 1)
+      // ------------------------------------------------------------------
+      const cloudConfs: SchoolTournamentConfirmation[] = [];
+      confSnap.forEach((docSnap: any) => {
+        if (!isRecentlyDeleted('school_confirmations', docSnap.id)) {
+          cloudConfs.push({ id: docSnap.id, ...docSnap.data() } as SchoolTournamentConfirmation);
+        }
+      });
+
+      const localConfs = getLocal<SchoolTournamentConfirmation>(STORAGE_KEYS.CONFIRMATIONS, []).filter(
+        c => c && !isRecentlyDeleted('school_confirmations', c.id)
+      );
+      const allConfs = deduplicateById([...cloudConfs, ...localConfs]);
+      const cloudConfIdSet = new Set(cloudConfs.map(c => c.id));
+
+      const confsInScope: SchoolTournamentConfirmation[] = [];
+      const confsOutOfScope: SchoolTournamentConfirmation[] = [];
+      allConfs.forEach(c => {
+        const cDir = c.directorateId || 'taourirt';
+        if (isAllDirs || cDir === activeDirId) {
+          confsInScope.push(c);
+        } else {
+          confsOutOfScope.push(c);
+        }
+      });
+
+      const confGroups = new Map<string, SchoolTournamentConfirmation[]>();
+      const nonConfirmedInScope: SchoolTournamentConfirmation[] = [];
+
+      confsInScope.forEach(conf => {
+        if (conf.status !== 'confirmed') {
+          nonConfirmedInScope.push(conf);
+          return;
+        }
+        const cDir = conf.directorateId || 'taourirt';
+        const resolved = resolveCanonicalSchool(conf.schoolId, conf.schoolName, cDir);
+        const gKey = `${cDir}__${conf.sportId}__${resolved.canonicalKey}`;
+        if (!confGroups.has(gKey)) {
+          confGroups.set(gKey, []);
+        }
+        confGroups.get(gKey)!.push(conf);
+      });
+
+      const finalConfirmedConfs: SchoolTournamentConfirmation[] = [];
+      const confsToSave: SchoolTournamentConfirmation[] = [];
+      const confIdsToDelete = new Set<string>();
+      let convertedConfirmationsCount = 0;
+
+      for (const groupDocs of confGroups.values()) {
+        const cDir = groupDocs[0].directorateId || 'taourirt';
+        const sportId = groupDocs[0].sportId;
+        const resolved = resolveCanonicalSchool(groupDocs[0].schoolId, groupDocs[0].schoolName, cDir);
+        const preferredId = `${sportId}_${resolved.canonicalId}`;
+
+        // Pick primary confirmation doc deterministically
+        const sorted = [...groupDocs].sort((a, b) => {
+          if (a.id === preferredId && b.id !== preferredId) return -1;
+          if (b.id === preferredId && a.id !== preferredId) return 1;
+          const aLen = getEffectiveConfirmedBranches(a, false).length;
+          const bLen = getEffectiveConfirmedBranches(b, false).length;
+          if (aLen !== bLen) return bLen - aLen;
+          return (a.confirmedAt || '').localeCompare(b.confirmedAt || '');
+        });
+
+        const primary = sorted[0];
+        const duplicates = sorted.slice(1);
+        duplicates.forEach(d => {
+          if (d.id) confIdsToDelete.add(d.id);
+        });
+
+        // Merge all branches across duplicates and convert ALL to 'non_club', keeping strictly 1 per (category, gender)
+        const branchMap = new Map<string, ConfirmedBranchTuple>();
+        let hadNonNonClubOrDuplicateBranch = duplicates.length > 0;
+
+        sorted.forEach(docItem => {
+          const rawBranches = getEffectiveConfirmedBranches(docItem, false);
+          rawBranches.forEach(b => {
+            const normCat = normalizeCategoryKey(b.category);
+            const normGen: 'Male' | 'Female' = b.gender === 'Female' ? 'Female' : 'Male';
+            if ((b.affiliationType || 'non_club') !== 'non_club') {
+              hadNonNonClubOrDuplicateBranch = true;
+            }
+            const bKey = `non_club__${normCat}__${normGen}`;
+            if (branchMap.has(bKey)) {
+              hadNonNonClubOrDuplicateBranch = true;
+            } else {
+              branchMap.set(bKey, {
+                category: normCat,
+                gender: normGen,
+                affiliationType: 'non_club'
+              });
+            }
+          });
+        });
+
+        // Also check legacy fields on primary
+        if (
+          (Array.isArray(primary.affiliationTypes) && primary.affiliationTypes.some(a => a !== 'non_club')) ||
+          ((primary as any).affiliationType && (primary as any).affiliationType !== 'non_club')
+        ) {
+          hadNonNonClubOrDuplicateBranch = true;
+        }
+
+        const dedupedBranches = Array.from(branchMap.values());
+        if (dedupedBranches.length === 0) {
+          // Empty confirmation after merge -> remove cleanly
+          if (primary.id) confIdsToDelete.add(primary.id);
+          continue;
+        }
+
+        const mergedTeacherId = primary.teacherId || sorted.find(x => x.teacherId)?.teacherId || '';
+        const mergedTeacherName = primary.teacherName || sorted.find(x => x.teacherName)?.teacherName || '';
+        const mergedTeacherPhone = primary.teacherPhone || sorted.find(x => x.teacherPhone)?.teacherPhone;
+        const mergedTeacherLease = primary.teacherLeaseNumber || sorted.find(x => x.teacherLeaseNumber)?.teacherLeaseNumber;
+        const mergedNotes = sorted
+          .map(x => (x.notes || '').trim())
+          .filter(Boolean)
+          .filter((v, i, arr) => arr.indexOf(v) === i)
+          .join(' | ');
+
+        const updatedConf: SchoolTournamentConfirmation = {
+          ...primary,
+          schoolId: resolved.canonicalId || primary.schoolId,
+          schoolName: resolved.canonicalName || primary.schoolName,
+          teacherId: mergedTeacherId,
+          teacherName: mergedTeacherName,
+          ...(mergedTeacherPhone ? { teacherPhone: mergedTeacherPhone } : {}),
+          ...(mergedTeacherLease ? { teacherLeaseNumber: mergedTeacherLease } : {}),
+          ...(mergedNotes ? { notes: mergedNotes } : {}),
+          directorateId: cDir,
+          categories: Array.from(new Set(dedupedBranches.map(b => b.category))),
+          genders: Array.from(new Set(dedupedBranches.map(b => b.gender))),
+          affiliationTypes: ['non_club'],
+          selectedBranches: dedupedBranches,
+          status: 'confirmed'
+        };
+        if ('affiliationType' in updatedConf) {
+          delete (updatedConf as any).affiliationType;
+        }
+
+        finalConfirmedConfs.push(updatedConf);
+        if (
+          hadNonNonClubOrDuplicateBranch ||
+          primary.schoolName !== updatedConf.schoolName ||
+          primary.schoolId !== updatedConf.schoolId
+        ) {
+          confsToSave.push(updatedConf);
+          convertedConfirmationsCount++;
+        }
+      }
+
+      // ------------------------------------------------------------------
+      // 2. CONVERT & DEDUPLICATE REGISTERED STUDENTS (Phase 2)
+      // ------------------------------------------------------------------
+      const cloudStudents: Student[] = [];
+      studSnap.forEach((docSnap: any) => {
+        if (!isRecentlyDeleted('students', docSnap.id)) {
+          cloudStudents.push({ id: docSnap.id, ...docSnap.data(), directorateId: docSnap.data().directorateId || 'taourirt' } as Student);
+        }
+      });
+
+      const localStudents = getLocal<Student>('taourirt_students_data', []).filter(
+        s => s && !isRecentlyDeleted('students', s.id)
+      );
+      const allStudents = deduplicateById([...cloudStudents, ...localStudents]);
+      const cloudStudentIdSet = new Set(cloudStudents.map(s => s.id));
+
+      const clubTournamentIds = new Set(
+        allTournaments
+          .filter(t => t.affiliationType && t.affiliationType !== 'non_club')
+          .map(t => t.id)
+      );
+
+      const nonClubTournByKey = new Map<string, Tournament>();
+      allTournaments.forEach(t => {
+        if ((t.affiliationType || 'non_club') !== 'non_club') return;
+        const tDir = t.directorateId || 'taourirt';
+        const tCat = normalizeCategoryKey(t.ageCategory);
+        const key = `${tDir}__${t.sportId}__${tCat}__${t.gender}`;
+        if (!nonClubTournByKey.has(key)) {
+          nonClubTournByKey.set(key, t);
+        }
+      });
+
+      const studentsInScope: Student[] = [];
+      const studentsOutOfScope: Student[] = [];
+      allStudents.forEach(st => {
+        const stDir = st.directorateId || 'taourirt';
+        if (isAllDirs || stDir === activeDirId) {
+          studentsInScope.push(st);
+        } else {
+          studentsOutOfScope.push(st);
+        }
+      });
+
+      const studentDedupGroups = new Map<string, Student[]>();
+      studentsInScope.forEach(st => {
+        const stDir = st.directorateId || 'taourirt';
+        const normCat = normalizeCategoryKey(st.category || 'U15');
+        const normGen: 'Male' | 'Female' = st.gender === 'Female' ? 'Female' : 'Male';
+        const resolved = resolveCanonicalSchool(st.schoolId, st.schoolName, stDir);
+        const cleanMassar = (st.massarNumber || '').trim().toUpperCase();
+        const studentIdentity = cleanMassar.length >= 4
+          ? `massar:${cleanMassar}`
+          : `name:${normalizeArabicMatchText(st.fullName)}|${(st.birthDate || '').trim()}`;
+        const key = `${stDir}__${st.sportId}__${resolved.canonicalKey}__${normCat}__${normGen}__${studentIdentity}`;
+        if (!studentDedupGroups.has(key)) {
+          studentDedupGroups.set(key, []);
+        }
+        studentDedupGroups.get(key)!.push(st);
+      });
+
+      const finalStudentsInScope: Student[] = [];
+      const studentsToSave: Student[] = [];
+      const studentIdsToDelete = new Set<string>();
+      let convertedStudentsCount = 0;
+
+      for (const group of studentDedupGroups.values()) {
+        // Prefer existing non_club record with photo/massar/bib, else richest record
+        const sorted = [...group].sort((a, b) => {
+          const aScore =
+            ((a.affiliationType || 'non_club') === 'non_club' ? 10 : 0) +
+            (a.photoUrl ? 4 : 0) +
+            (a.massarNumber ? 2 : 0) +
+            (a.bibNumber ? 1 : 0);
+          const bScore =
+            ((b.affiliationType || 'non_club') === 'non_club' ? 10 : 0) +
+            (b.photoUrl ? 4 : 0) +
+            (b.massarNumber ? 2 : 0) +
+            (b.bibNumber ? 1 : 0);
+          return bScore - aScore;
+        });
+
+        const keeper = sorted[0];
+        sorted.slice(1).forEach(dup => {
+          if (dup.id) studentIdsToDelete.add(dup.id);
+        });
+
+        const stDir = keeper.directorateId || 'taourirt';
+        const normCat = normalizeCategoryKey(keeper.category || 'U15');
+        const normGen: 'Male' | 'Female' = keeper.gender === 'Female' ? 'Female' : 'Male';
+        const resolved = resolveCanonicalSchool(keeper.schoolId, keeper.schoolName, stDir);
+
+        let nextTournamentId = keeper.tournamentId;
+        let nextTournamentName = keeper.tournamentName;
+        const needsAffiliationFix = (keeper.affiliationType || 'non_club') !== 'non_club';
+        const hasClubTournRef = !!(keeper.tournamentId && clubTournamentIds.has(keeper.tournamentId));
+
+        if (needsAffiliationFix || hasClubTournRef) {
+          const matchingNonClubTourn =
+            nonClubTournByKey.get(`${stDir}__${keeper.sportId}__${normCat}__${normGen}`) ||
+            nonClubTournByKey.get(`${stDir}__${keeper.sportId}__${normCat}__Mixed`) ||
+            nonClubTournByKey.get(`${stDir}__${keeper.sportId}__${normCat}__Both`);
+          if (matchingNonClubTourn) {
+            nextTournamentId = matchingNonClubTourn.id;
+            nextTournamentName = matchingNonClubTourn.name;
+          } else if (hasClubTournRef) {
+            nextTournamentId = '';
+            nextTournamentName = '';
+          }
+        }
+
+        const updatedStudent: Student = {
+          ...keeper,
+          schoolId: resolved.canonicalId || keeper.schoolId,
+          schoolName: resolved.canonicalName || keeper.schoolName,
+          category: normCat,
+          gender: normGen,
+          affiliationType: 'non_club',
+          ...(nextTournamentId !== undefined ? { tournamentId: nextTournamentId } : {}),
+          ...(nextTournamentName !== undefined ? { tournamentName: nextTournamentName } : {})
+        };
+
+        finalStudentsInScope.push(updatedStudent);
+
+        if (
+          needsAffiliationFix ||
+          hasClubTournRef ||
+          sorted.length > 1 ||
+          keeper.schoolName !== updatedStudent.schoolName
+        ) {
+          studentsToSave.push(updatedStudent);
+          if (needsAffiliationFix || hasClubTournRef) {
+            convertedStudentsCount++;
+          }
+        }
+      }
+
+      // ------------------------------------------------------------------
+      // 3. CLEAR CONFLICTING WITHDRAWALS FOR CONVERTED NON_CLUB BRANCHES
+      // ------------------------------------------------------------------
+      const currentWithdrawals = getLocal<SchoolWithdrawalRecord>(STORAGE_KEYS.WITHDRAWALS, []);
+      const withdrawalIdsToDelete = new Set<string>();
+      const remainingWithdrawals = currentWithdrawals.filter(w => {
+        if (!w || (w.affiliationType && w.affiliationType !== 'non_club')) return true;
+        const wDir = w.directorateId || 'taourirt';
+        if (!isAllDirs && wDir !== activeDirId) return true;
+        const conflictsWithConfirmed = finalConfirmedConfs.some(conf => {
+          if (conf.sportId !== w.sportId) return false;
+          const schoolMatch =
+            (w.schoolId && conf.schoolId && w.schoolId === conf.schoolId) ||
+            (w.schoolName && conf.schoolName && schoolNamesMatch(w.schoolName, conf.schoolName));
+          if (!schoolMatch) return false;
+          return getEffectiveConfirmedBranches(conf, false).some(b => {
+            const catMatch = !w.ageCategory || normalizeCategoryKey(w.ageCategory) === normalizeCategoryKey(b.category);
+            const genMatch = !w.gender || w.gender === 'ALL' || w.gender === 'Both' || w.gender.toLowerCase() === b.gender.toLowerCase();
+            return catMatch && genMatch;
+          });
+        });
+        if (conflictsWithConfirmed && w.id) {
+          withdrawalIdsToDelete.add(w.id);
+          return false;
+        }
+        return true;
+      });
+      if (withdrawalIdsToDelete.size > 0) {
+        setLocal(STORAGE_KEYS.WITHDRAWALS, remainingWithdrawals);
+      }
+
+      // ------------------------------------------------------------------
+      // 4. COMMIT ALL UPDATES & DELETIONS IN FIRESTORE BATCHES
+      // ------------------------------------------------------------------
+      confIdsToDelete.forEach(id => markRecentlyDeleted('school_confirmations', id));
+      studentIdsToDelete.forEach(id => markRecentlyDeleted('students', id));
+
+      const batchOps: Array<() => { apply: (b: ReturnType<typeof writeBatch>) => void }> = [];
+
+      confsToSave.forEach(conf => {
+        const payload = stripUndefinedDeep({
+          ...conf,
+          updatedAt: serverTimestamp()
+        });
+        batchOps.push(() => ({
+          apply: b => b.set(doc(db, 'school_confirmations', conf.id), payload, { merge: false })
+        }));
+      });
+
+      confIdsToDelete.forEach(id => {
+        if (cloudConfIdSet.has(id)) {
+          batchOps.push(() => ({
+            apply: b => b.delete(doc(db, 'school_confirmations', id))
+          }));
+        }
+      });
+
+      studentsToSave.forEach(stud => {
+        const payload = stripUndefinedDeep({
+          ...stud,
+          updatedAt: serverTimestamp()
+        });
+        batchOps.push(() => ({
+          apply: b => b.set(doc(db, 'students', stud.id), payload, { merge: true })
+        }));
+      });
+
+      studentIdsToDelete.forEach(id => {
+        if (cloudStudentIdSet.has(id)) {
+          batchOps.push(() => ({
+            apply: b => b.delete(doc(db, 'students', id))
+          }));
+        }
+      });
+
+      withdrawalIdsToDelete.forEach(id => {
+        batchOps.push(() => ({
+          apply: b => b.delete(doc(db, 'school_withdrawals', id))
+        }));
+      });
+
+      for (let i = 0; i < batchOps.length; i += 400) {
+        const chunk = batchOps.slice(i, i + 400);
+        const batch = writeBatch(db);
+        chunk.forEach(op => op().apply(batch));
+        await batch.commit();
+      }
+
+      // Persist cleaned caches locally
+      const mergedFinalConfs = deduplicateById([
+        ...finalConfirmedConfs,
+        ...nonConfirmedInScope.filter(c => !confIdsToDelete.has(c.id)),
+        ...confsOutOfScope
+      ]);
+      setLocal(STORAGE_KEYS.CONFIRMATIONS, mergedFinalConfs);
+
+      const mergedFinalStudents = deduplicateById([
+        ...finalStudentsInScope,
+        ...studentsOutOfScope
+      ]);
+      setLocal('taourirt_students_data', mergedFinalStudents);
+
+      // Mark migration flag in Firestore & localStorage
+      const statsPayload = {
+        completed: true,
+        directorateId: dirKey,
+        convertedConfirmationsCount,
+        deletedDuplicateConfirmationsCount: confIdsToDelete.size,
+        convertedStudentsCount,
+        deletedDuplicateStudentsCount: studentIdsToDelete.size,
+        completedAt: serverTimestamp()
+      };
+      await setDoc(doc(db, 'settings', migrationKey), statsPayload, { merge: true }).catch(() => {});
+      try {
+        window.localStorage.setItem(migrationKey, '1');
+      } catch {
+        // ignore
+      }
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('schoolConfirmationsUpdated'));
+        window.dispatchEvent(new CustomEvent('studentsUpdated'));
+        if (withdrawalIdsToDelete.size > 0) {
+          window.dispatchEvent(new CustomEvent('schoolWithdrawalsUpdated'));
+        }
+      }
+
+      return {
+        alreadyMigrated: false,
+        convertedConfirmationsCount,
+        deletedDuplicateConfirmationsCount: confIdsToDelete.size,
+        convertedStudentsCount,
+        deletedDuplicateStudentsCount: studentIdsToDelete.size
+      };
+    } catch (err) {
+      console.error('Error converting participations to non_club:', err);
+      return emptyResult;
+    }
+  },
+
+  async pruneOrphanedParticipationsForDeletedSchools(options?: {
+    targetDirectorateId?: string;
+    deletedSchoolIds?: string[];
+    deletedSchoolNames?: string[];
+    allowEmptySchools?: boolean;
+    onlyIfNotCleaned?: boolean;
+  }): Promise<{
+    alreadyCleaned?: boolean;
+    deletedConfirmationsCount: number;
+    deletedStudentsCount: number;
+    deletedWithdrawalsCount: number;
+  }> {
+    const emptyResult = {
+      alreadyCleaned: false,
+      deletedConfirmationsCount: 0,
+      deletedStudentsCount: 0,
+      deletedWithdrawalsCount: 0
+    };
+
+    const activeDirId = options?.targetDirectorateId || this.getActiveDirectorateId() || 'taourirt';
+    const isAllDirs = !activeDirId || activeDirId === 'all';
+    const dirKey = isAllDirs ? 'all' : activeDirId;
+    const cleanupKey = `cleanup_orphaned_participations_v1_${dirKey}`;
+
+    if (options?.onlyIfNotCleaned) {
+      try {
+        if (typeof window !== 'undefined' && window.localStorage.getItem(cleanupKey) === '1') {
+          return { ...emptyResult, alreadyCleaned: true };
+        }
+      } catch {
+        // ignore storage error
+      }
+      if (!isCloudSyncPaused()) {
+        try {
+          const flagSnap = await getDoc(doc(db, 'settings', cleanupKey));
+          if (flagSnap.exists() && flagSnap.data()?.completed === true) {
+            try {
+              window.localStorage.setItem(cleanupKey, '1');
+            } catch {
+              // ignore
+            }
+            return { ...emptyResult, alreadyCleaned: true };
+          }
+        } catch {
+          // continue cleanly
+        }
+      }
+    }
+
+    if (isCloudSyncPaused()) {
+      return emptyResult;
+    }
+
+    try {
+      const [registeredSchools, confSnap, studSnap] = await Promise.all([
+        this.getSchools(isAllDirs ? 'all' : activeDirId, isAllDirs),
+        getDocs(collection(db, 'school_confirmations')),
+        getDocs(collection(db, 'students'))
+      ]);
+
+      // Safety guard: never wipe participations if no registered schools were returned unless explicitly allowed
+      if (registeredSchools.length === 0 && !options?.allowEmptySchools) {
+        return emptyResult;
+      }
+
+      const explicitDeletedIdSet = new Set((options?.deletedSchoolIds || []).map(x => x.trim()).filter(Boolean));
+      const explicitDeletedNames = (options?.deletedSchoolNames || [])
+        .map(n => normalizeArabicMatchText(n))
+        .filter(Boolean);
+
+      const doesRecordMatchSchool = (rawSchoolId: string | undefined, rawSchoolName: string | undefined, school: School): boolean => {
+        const cleanId = (rawSchoolId || '').trim();
+        if (cleanId && school.id === cleanId) return true;
+        const cleanA = normalizeArabicMatchText(rawSchoolName);
+        const cleanB = normalizeArabicMatchText(school.name);
+        if (!cleanA || !cleanB) return false;
+        if (cleanA === cleanB) return true;
+
+        const aMiddle = cleanA.includes('اعداد');
+        const aHigh = cleanA.includes('تاهيل') || (cleanA.includes('ثانويه') && !aMiddle);
+        const aPrimary = cleanA.includes('ابتدائ') || cleanA.includes('مدرسه') || cleanA.includes('مجموعه') || cleanA.startsWith('م.م');
+        const sCycle = normalizeSchoolCycleType(school);
+        if (aMiddle && sCycle !== 'إعدادي' && sCycle !== 'خصوصي') return false;
+        if (aHigh && sCycle !== 'تأهيلي' && sCycle !== 'خصوصي') return false;
+        if (aPrimary && sCycle !== 'ابتدائي' && sCycle !== 'خصوصي') return false;
+
+        return cleanA.length >= 4 && cleanB.length >= 4 && (cleanA.includes(cleanB) || cleanB.includes(cleanA));
+      };
+
+      const isSchoolActiveInDirectory = (rawSchoolId?: string, rawSchoolName?: string, recDirId?: string): boolean => {
+        const cleanId = (rawSchoolId || '').trim();
+        const cleanNormName = normalizeArabicMatchText(rawSchoolName);
+        if (cleanId && explicitDeletedIdSet.has(cleanId)) return false;
+        if (cleanNormName && explicitDeletedNames.some(dn => dn === cleanNormName)) return false;
+
+        const targetDir = recDirId || 'taourirt';
+        const dirSchools = isAllDirs
+          ? registeredSchools
+          : registeredSchools.filter(s => (s.directorateId || 'taourirt') === targetDir);
+
+        return dirSchools.some(s => doesRecordMatchSchool(rawSchoolId, rawSchoolName, s));
+      };
+
+      // 1. Identify orphaned school_confirmations
+      const cloudConfs: SchoolTournamentConfirmation[] = [];
+      confSnap.forEach((docSnap: any) => {
+        if (!isRecentlyDeleted('school_confirmations', docSnap.id)) {
+          cloudConfs.push({ id: docSnap.id, ...docSnap.data() } as SchoolTournamentConfirmation);
+        }
+      });
+      const localConfs = getLocal<SchoolTournamentConfirmation>(STORAGE_KEYS.CONFIRMATIONS, []).filter(
+        c => c && !isRecentlyDeleted('school_confirmations', c.id)
+      );
+      const allConfs = deduplicateById([...cloudConfs, ...localConfs]);
+      const cloudConfIdSet = new Set(cloudConfs.map(c => c.id));
+
+      const confIdsToDelete = new Set<string>();
+      const survivingConfs: SchoolTournamentConfirmation[] = [];
+      allConfs.forEach(c => {
+        const cDir = c.directorateId || 'taourirt';
+        if (!isAllDirs && cDir !== activeDirId) {
+          survivingConfs.push(c);
+          return;
+        }
+        if (isSchoolActiveInDirectory(c.schoolId, c.schoolName, cDir)) {
+          survivingConfs.push(c);
+        } else if (c.id) {
+          confIdsToDelete.add(c.id);
+        }
+      });
+
+      // 2. Identify orphaned students
+      const cloudStudents: Student[] = [];
+      studSnap.forEach((docSnap: any) => {
+        if (!isRecentlyDeleted('students', docSnap.id)) {
+          cloudStudents.push({ id: docSnap.id, ...docSnap.data(), directorateId: docSnap.data().directorateId || 'taourirt' } as Student);
+        }
+      });
+      const localStudents = getLocal<Student>('taourirt_students_data', []).filter(
+        s => s && !isRecentlyDeleted('students', s.id)
+      );
+      const allStudents = deduplicateById([...cloudStudents, ...localStudents]);
+      const cloudStudentIdSet = new Set(cloudStudents.map(s => s.id));
+
+      const studentIdsToDelete = new Set<string>();
+      const survivingStudents: Student[] = [];
+      allStudents.forEach(st => {
+        const stDir = st.directorateId || 'taourirt';
+        if (!isAllDirs && stDir !== activeDirId) {
+          survivingStudents.push(st);
+          return;
+        }
+        if (isSchoolActiveInDirectory(st.schoolId, st.schoolName, stDir)) {
+          survivingStudents.push(st);
+        } else if (st.id) {
+          studentIdsToDelete.add(st.id);
+        }
+      });
+
+      // 3. Identify orphaned withdrawals
+      const localWithdrawals = getLocal<SchoolWithdrawalRecord>(STORAGE_KEYS.WITHDRAWALS, []);
+      const withdrawalIdsToDelete = new Set<string>();
+      const survivingWithdrawals: SchoolWithdrawalRecord[] = [];
+      localWithdrawals.forEach(w => {
+        if (!w) return;
+        const wDir = w.directorateId || 'taourirt';
+        if (!isAllDirs && wDir !== activeDirId) {
+          survivingWithdrawals.push(w);
+          return;
+        }
+        if (isSchoolActiveInDirectory(w.schoolId, w.schoolName, wDir)) {
+          survivingWithdrawals.push(w);
+        } else if (w.id) {
+          withdrawalIdsToDelete.add(w.id);
+        }
+      });
+
+      // Mark recently deleted locally so snapshots don't resurrect orphaned docs
+      confIdsToDelete.forEach(id => markRecentlyDeleted('school_confirmations', id));
+      studentIdsToDelete.forEach(id => markRecentlyDeleted('students', id));
+
+      // Commit Firestore deletions in batches of 400
+      const deleteRefs: any[] = [];
+      confIdsToDelete.forEach(id => {
+        if (cloudConfIdSet.has(id)) deleteRefs.push(doc(db, 'school_confirmations', id));
+      });
+      studentIdsToDelete.forEach(id => {
+        if (cloudStudentIdSet.has(id)) deleteRefs.push(doc(db, 'students', id));
+      });
+      withdrawalIdsToDelete.forEach(id => {
+        deleteRefs.push(doc(db, 'school_withdrawals', id));
+      });
+
+      for (let i = 0; i < deleteRefs.length; i += 400) {
+        const chunk = deleteRefs.slice(i, i + 400);
+        const batch = writeBatch(db);
+        chunk.forEach(ref => batch.delete(ref));
+        await batch.commit();
+      }
+
+      // Persist surviving caches locally
+      if (confIdsToDelete.size > 0) {
+        setLocal(STORAGE_KEYS.CONFIRMATIONS, survivingConfs);
+      }
+      if (studentIdsToDelete.size > 0) {
+        setLocal('taourirt_students_data', survivingStudents);
+      }
+      if (withdrawalIdsToDelete.size > 0) {
+        setLocal(STORAGE_KEYS.WITHDRAWALS, survivingWithdrawals);
+      }
+
+      // Record cleanup flag if running auto-cleanup
+      if (options?.onlyIfNotCleaned) {
+        await setDoc(
+          doc(db, 'settings', cleanupKey),
+          {
+            completed: true,
+            directorateId: dirKey,
+            deletedConfirmationsCount: confIdsToDelete.size,
+            deletedStudentsCount: studentIdsToDelete.size,
+            deletedWithdrawalsCount: withdrawalIdsToDelete.size,
+            completedAt: serverTimestamp()
+          },
+          { merge: true }
+        ).catch(() => {});
+        try {
+          window.localStorage.setItem(cleanupKey, '1');
+        } catch {
+          // ignore
+        }
+      }
+
+      if (typeof window !== 'undefined') {
+        if (confIdsToDelete.size > 0) window.dispatchEvent(new CustomEvent('schoolConfirmationsUpdated'));
+        if (studentIdsToDelete.size > 0) window.dispatchEvent(new CustomEvent('studentsUpdated'));
+        if (withdrawalIdsToDelete.size > 0) window.dispatchEvent(new CustomEvent('schoolWithdrawalsUpdated'));
+      }
+
+      return {
+        alreadyCleaned: false,
+        deletedConfirmationsCount: confIdsToDelete.size,
+        deletedStudentsCount: studentIdsToDelete.size,
+        deletedWithdrawalsCount: withdrawalIdsToDelete.size
+      };
+    } catch (err) {
+      console.error('Error pruning orphaned participations for deleted schools:', err);
+      return emptyResult;
+    }
   },
 
   subscribeToSchoolConfirmations(callback: (confirmations: SchoolTournamentConfirmation[]) => void): () => void {

@@ -619,12 +619,23 @@ export const Matches: React.FC = () => {
           if (matchDir !== activeDirId) return false;
         }
 
-        // Must belong to one of active sport tournaments
+        // Must belong to one of active sport tournaments (strictly matching affiliation when tournamentId is absent)
         if (m.tournamentId) {
           if (!sportTournaments.some(t => t.id === m.tournamentId)) return false;
         } else {
           if (m.sportId !== sport.id) return false;
-          if (!sportTournaments.some(t => normalizeCategoryKey(t.ageCategory) === normalizeCategoryKey(m.ageCategory) && t.gender === m.gender)) {
+          const mAff = (m as any).affiliationType === 'club_affiliated'
+            ? 'club_affiliated'
+            : (m as any).affiliationType === 'open'
+            ? 'open'
+            : 'non_club';
+          if (!sportTournaments.some(t => {
+            const tAff = t.affiliationType === 'open' ? 'open' : isClubTournament(t) ? 'club_affiliated' : 'non_club';
+            const catMatch = normalizeCategoryKey(t.ageCategory) === normalizeCategoryKey(m.ageCategory);
+            const genderMatch = t.gender === 'Mixed' || m.gender === 'Mixed' || t.gender === m.gender;
+            const affMatch = tAff === 'open' || mAff === tAff;
+            return catMatch && genderMatch && affMatch;
+          })) {
             return false;
           }
         }
@@ -710,6 +721,8 @@ export const Matches: React.FC = () => {
       }
 
       const nonClubCount = sportMatches.filter(m => {
+        if ((m as any).affiliationType === 'club_affiliated') return false;
+        if ((m as any).affiliationType === 'non_club' || (m as any).affiliationType === 'open') return true;
         if (m.tournamentId) {
           const pt = tournaments.find(t => t.id === m.tournamentId);
           if (pt) return !isClubTournament(pt);
@@ -717,7 +730,14 @@ export const Matches: React.FC = () => {
         return true;
       }).length;
 
-      const clubCount = Math.max(0, totalMatches - nonClubCount);
+      const clubCount = sportMatches.filter(m => {
+        if ((m as any).affiliationType === 'club_affiliated') return true;
+        if (m.tournamentId) {
+          const pt = tournaments.find(t => t.id === m.tournamentId);
+          if (pt) return isClubTournament(pt);
+        }
+        return false;
+      }).length;
 
       // Technical head
       const techHead = teachers.find(tch =>
