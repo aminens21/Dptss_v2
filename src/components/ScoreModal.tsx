@@ -3,7 +3,9 @@ import { createPortal } from 'react-dom';
 import { Match, School, Venue } from '../types';
 import { X, CheckCircle2, ShieldAlert, Plus, Minus, Database, Megaphone, CalendarClock, ShieldCheck } from 'lucide-react';
 import { SPORTS_MAP, GENDER_MAP, canUserApproveSportResult } from '../lib/dataService';
+import { formatTeamDisplayName, doesMatchRequirePenaltyOnDraw } from '../lib/drawTournamentUtils';
 import { useAuth } from '../contexts/AuthContext';
+import toast from 'react-hot-toast';
 
 interface ScoreModalProps {
   isOpen: boolean;
@@ -84,6 +86,15 @@ export const ScoreModal: React.FC<ScoreModalProps> = ({
     }
   }, [isOpen, match]);
 
+  const isKnockoutDrawMatch = Boolean(match && (match.drawSystem === 'knockout_groups' || match.drawSystem === 'knockout'));
+  const requiresPenaltyOnDraw = match ? doesMatchRequirePenaltyOnDraw(match) : false;
+
+  React.useEffect(() => {
+    if (isOpen && match && status === 'Completed' && requiresPenaltyOnDraw && Number(score1) === Number(score2)) {
+      setShowPenalties(true);
+    }
+  }, [isOpen, match, status, requiresPenaltyOnDraw, score1, score2]);
+
   if (!isOpen || !match) return null;
 
   const effectiveCanApprove =
@@ -97,8 +108,8 @@ export const ScoreModal: React.FC<ScoreModalProps> = ({
     userProfile?.email ||
     (effectiveCanApprove ? 'رئيس اللجنة التقنية' : 'حكم المقابلة');
 
-  const team1 = schools.find(s => s.id === match.team1Id)?.name || match.team1Name || 'المؤسسة 1';
-  const team2 = schools.find(s => s.id === match.team2Id)?.name || match.team2Name || 'المؤسسة 2';
+  const team1 = formatTeamDisplayName(match.team1Id, match.team1Name, schools);
+  const team2 = formatTeamDisplayName(match.team2Id, match.team2Name, schools);
   const sportInfo = SPORTS_MAP[match.sportId] || { name: 'الرياضة', icon: '🏆' };
   const genderInfo = match.gender ? GENDER_MAP[match.gender] : undefined;
 
@@ -148,8 +159,26 @@ export const ScoreModal: React.FC<ScoreModalProps> = ({
     };
   };
 
+  const validatePenaltyResolution = (finalStatus: Match['status']): boolean => {
+    if (finalStatus !== 'Completed') return true;
+    if (!requiresPenaltyOnDraw) return true;
+    if (Number(score1) !== Number(score2)) return true;
+
+    setShowPenalties(true);
+    if (penalty1 === undefined || penalty2 === undefined) {
+      toast.error('في حالة التعادل يجب إدخال نتيجة ضربات الجزاء لتحديد الفريق المتأهل!');
+      return false;
+    }
+    if (Number(penalty1) === Number(penalty2)) {
+      toast.error('لا يمكن أن تتعادل ضربات الجزاء في هذا الدور — يرجى تحديد الفائز بركلات الترجيح.');
+      return false;
+    }
+    return true;
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!validatePenaltyResolution(status)) return;
     setIsSubmitting(true);
     const extras = buildWinnerAndExtras(status);
     try {
@@ -162,8 +191,9 @@ export const ScoreModal: React.FC<ScoreModalProps> = ({
 
   const handleApproveAndNotify = async () => {
     if (!effectiveCanApprove) return;
-    setIsSubmitting(true);
     const finalStatus: Match['status'] = 'Completed';
+    if (!validatePenaltyResolution(finalStatus)) return;
+    setIsSubmitting(true);
     const extras = buildWinnerAndExtras(finalStatus);
     try {
       await onSave(match.id, Number(score1), Number(score2), finalStatus, extras);
@@ -368,21 +398,34 @@ export const ScoreModal: React.FC<ScoreModalProps> = ({
 
             {/* Penalties / Tie-breaker Toggle */}
             <div className="pt-2 border-t border-slate-200/70">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between gap-2 flex-wrap">
                 <button
                   type="button"
                   onClick={() => setShowPenalties(!showPenalties)}
                   className="text-xs font-bold text-blue-600 hover:text-blue-800 flex items-center gap-1 cursor-pointer"
                 >
-                  <span>{showPenalties ? '− إخفاء ركلات الترجيح / الأشواط الإضافية' : '+ إضافة ركلات الترجيح (في حالة التعادل)'}</span>
+                  <span>{showPenalties ? '− إخفاء ضربات الجزاء / الترجيح' : '+ إضافة ضربات الجزاء (في حالة التعادل)'}</span>
                 </button>
+                {requiresPenaltyOnDraw && Number(score1) === Number(score2) && status === 'Completed' && (
+                  <span className="text-[10px] font-black text-rose-700 bg-rose-50 border border-rose-200 px-2 py-0.5 rounded-full">
+                    إلزامي عند التعادل
+                  </span>
+                )}
               </div>
+
+              {requiresPenaltyOnDraw && Number(score1) === Number(score2) && status === 'Completed' && (
+                <div className="mt-2 p-2.5 rounded-xl bg-amber-50 border border-amber-300 text-[11px] font-bold text-amber-950">
+                  {isKnockoutDrawMatch
+                    ? '⚖️ نظام المجموعات إقصاء مباشر: يتم الاحتكام مباشرة لضربات الجزاء في كل مقابلة عند التعادل لتحديد الفائز.'
+                    : '⚖️ الأدوار النهائية: في حالة التعادل يتم الاحتكام إلى ضربات الجزاء لتحديد المتأهل.'}
+                </div>
+              )}
 
               {showPenalties && (
                 <div className="grid grid-cols-2 gap-3 mt-2.5 p-3 bg-white rounded-xl border border-blue-100">
                   <div>
                     <label className="block text-[11px] font-bold text-slate-600 mb-1">
-                      ركلات {team1}
+                      ضربات جزاء {team1}
                     </label>
                     <input
                       type="number"
@@ -392,10 +435,15 @@ export const ScoreModal: React.FC<ScoreModalProps> = ({
                       placeholder="0"
                       className="w-full text-xs rounded-lg border border-slate-200 p-2 text-center font-bold"
                     />
+                    {Number(score1) === Number(score2) && penalty1 !== undefined && penalty2 !== undefined && Number(penalty1) > Number(penalty2) && (
+                      <span className="inline-block mt-1 text-[10px] font-black text-emerald-700">
+                        👑 المتأهل بضربات الجزاء
+                      </span>
+                    )}
                   </div>
                   <div>
                     <label className="block text-[11px] font-bold text-slate-600 mb-1">
-                      ركلات {team2}
+                      ضربات جزاء {team2}
                     </label>
                     <input
                       type="number"
@@ -405,6 +453,11 @@ export const ScoreModal: React.FC<ScoreModalProps> = ({
                       placeholder="0"
                       className="w-full text-xs rounded-lg border border-slate-200 p-2 text-center font-bold"
                     />
+                    {Number(score1) === Number(score2) && penalty1 !== undefined && penalty2 !== undefined && Number(penalty2) > Number(penalty1) && (
+                      <span className="inline-block mt-1 text-[10px] font-black text-emerald-700">
+                        👑 المتأهل بضربات الجزاء
+                      </span>
+                    )}
                   </div>
                 </div>
               )}

@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { DataService, SPORTS_MAP, getAgeCategoriesForSeason, deduplicateById, getCategoryGenderLabel, isClubTournament, normalizeCategoryKey, getTournamentLevelAr, isTeacherLevelAllowedForTournament, getCustomCategoryName, getCustomCategoryDetails, isSchoolSectorAllowedForTournament, getTournamentEducationSectorsAr, normalizeTournamentEducationSectors, getSchoolEducationSector, schoolNamesMatch } from '../lib/dataService';
+import { DataService, SPORTS_MAP, getAgeCategoriesForSeason, deduplicateById, getCategoryGenderLabel, isClubTournament, normalizeCategoryKey, getTournamentLevelAr, isTeacherLevelAllowedForTournament, getCustomCategoryName, getCustomCategoryDetails, isSchoolSectorAllowedForTournament, getTournamentEducationSectorsAr, normalizeTournamentEducationSectors, getSchoolEducationSector, schoolNamesMatch, normalizeCanonicalSportId, areSportIdsEquivalent } from '../lib/dataService';
 import { Tournament, User, Student, School, Sport, Match, Directorate } from '../types';
 import { CountdownTimer } from '../components/CountdownTimer';
 import * as XLSX from 'xlsx';
@@ -150,8 +150,12 @@ export const Tournaments: React.FC = () => {
   const effectiveRole = currentTeacherProfile?.role || userProfile?.role;
   const isCentralAdmin = effectiveRole === 'CENTRAL_ADMIN' || isSuperAdmin;
   const isSportManager = effectiveRole === 'SPORT_MANAGER';
-  const isTechCommitteeHead = userProfile?.isTechCommitteeHead === true || currentTeacherProfile?.isTechCommitteeHead === true;
-  const isTeacherRole = effectiveRole === 'TEACHER';
+  const isTechCommitteeHead =
+    userProfile?.isTechCommitteeHead === true ||
+    currentTeacherProfile?.isTechCommitteeHead === true ||
+    effectiveRole === 'TECH_HEAD' ||
+    (effectiveRole as string) === 'TECH_COMMITTEE_HEAD';
+  const isTeacherRole = effectiveRole === 'TEACHER' && !isTechCommitteeHead && !isCentralAdmin && !isSportManager;
 
   const canManageAllLevels = isCentralAdmin || userProfile?.isSuperAdmin || isSportManager || isTechCommitteeHead;
   const userSchoolId = userProfile?.schoolId || currentTeacherProfile?.schoolId;
@@ -258,18 +262,31 @@ export const Tournaments: React.FC = () => {
     if (isCentralAdmin) return null; // null means unrestricted
     if (isTechCommitteeHead) {
       const set = new Set<string>();
+      const addSport = (raw?: string) => {
+        if (!raw) return;
+        set.add(raw);
+        const canonical = normalizeCanonicalSportId(raw, sportsConfig);
+        if (canonical) set.add(canonical);
+      };
       if (userProfile?.techCommitteeSports) {
-        userProfile.techCommitteeSports.forEach(s => set.add(s));
+        userProfile.techCommitteeSports.forEach(addSport);
       }
       if (currentTeacherProfile?.techCommitteeSports) {
-        currentTeacherProfile.techCommitteeSports.forEach(s => set.add(s));
+        currentTeacherProfile.techCommitteeSports.forEach(addSport);
       }
-      if (userProfile?.sportId) set.add(userProfile.sportId);
-      if (currentTeacherProfile?.sportId) set.add(currentTeacherProfile.sportId);
+      addSport(userProfile?.sportId);
+      addSport(currentTeacherProfile?.sportId);
+      tournaments.forEach(t => {
+        const emailMatch = t.managerEmail && userProfile?.email && t.managerEmail.toLowerCase() === userProfile.email.toLowerCase();
+        const nameMatch = t.managerName && userProfile?.fullName && t.managerName.trim() === userProfile.fullName.trim();
+        if ((emailMatch || nameMatch) && t.sportId) {
+          addSport(t.sportId);
+        }
+      });
       return Array.from(set);
     }
     return [];
-  }, [isCentralAdmin, isTechCommitteeHead, userProfile, currentTeacherProfile]);
+  }, [isCentralAdmin, isTechCommitteeHead, userProfile, currentTeacherProfile, sportsConfig, tournaments]);
 
   const canCreate = isCentralAdmin || (isTechCommitteeHead && (allowedSportIds === null || allowedSportIds.length > 0));
 
@@ -287,8 +304,8 @@ export const Tournaments: React.FC = () => {
 
   const canManageSport = (sportId: string) => {
     if (isCentralAdmin) return true;
-    if (isTechCommitteeHead && allowedSportIds && allowedSportIds.includes(sportId)) return true;
-    if (isSportManager && managerSportId === sportId) return true;
+    if (isTechCommitteeHead && allowedSportIds && allowedSportIds.some(id => areSportIdsEquivalent(id, sportId, sportsConfig))) return true;
+    if (isSportManager && managerSportId && areSportIdsEquivalent(managerSportId, sportId, sportsConfig)) return true;
     return false;
   };
 
@@ -478,6 +495,12 @@ export const Tournaments: React.FC = () => {
     (async () => {
       await handleCleanOrphanedParticipations(true);
       await handleConvertParticipationsToNonClub(true);
+      if (!DataService.isCloudSyncPaused()) {
+        const removed = await DataService.deduplicateTournamentBranches(activeDirId).catch(() => 0);
+        if (removed > 0) {
+          await loadData(true);
+        }
+      }
     })();
   }, [loading, isCentralAdmin, effectiveRole, isTechCommitteeHead, activeDirObj?.id]);
 
@@ -514,11 +537,12 @@ export const Tournaments: React.FC = () => {
         ]);
       }
 
-      const dirTeachers = allTeachers.filter(t => (t.directorateId || 'taourirt') === activeDirId);
-      const dirStudents = studentsList.filter(st => (st.directorateId || 'taourirt') === activeDirId);
-      const dirSchools = schoolsList.filter(s => (s.directorateId || 'taourirt') === activeDirId);
-      const dirMatches = matchList.filter(m => (m.directorateId || 'taourirt') === activeDirId);
-      const dirTournaments = resolvedTournaments.filter(t => (t.directorateId || 'taourirt') === activeDirId);
+      const isAllDirs = !activeDirId || activeDirId === 'all';
+      const dirTeachers = isAllDirs ? allTeachers : allTeachers.filter(t => (t.directorateId || 'taourirt') === activeDirId);
+      const dirStudents = isAllDirs ? studentsList : studentsList.filter(st => (st.directorateId || 'taourirt') === activeDirId);
+      const dirSchools = isAllDirs ? schoolsList : schoolsList.filter(s => (s.directorateId || 'taourirt') === activeDirId);
+      const dirMatches = isAllDirs ? matchList : matchList.filter(m => (m.directorateId || 'taourirt') === activeDirId);
+      const dirTournaments = isAllDirs ? resolvedTournaments : resolvedTournaments.filter(t => (t.directorateId || 'taourirt') === activeDirId);
 
       setActiveDirObj(activeDir);
       setTournaments(deduplicateById(dirTournaments));

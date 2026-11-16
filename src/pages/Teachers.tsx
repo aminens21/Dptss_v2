@@ -105,6 +105,15 @@ export const Teachers: React.FC = () => {
   const cadreQuery = searchParams.get('cadre');
 
   const effectiveAdminProfile = originalUserProfile || userProfile;
+  const isCentralOrSportManager = Boolean(
+    userProfile?.role === 'CENTRAL_ADMIN' ||
+    userProfile?.role === 'SPORT_MANAGER' ||
+    userProfile?.isSuperAdmin
+  );
+  const canEditTeachers = Boolean(
+    isCentralOrSportManager ||
+    (effectiveAdminProfile?.isTechCommitteeHead && !isImpersonatingTeacher)
+  );
   const canTechHeadImpersonate = Boolean(
     effectiveAdminProfile?.isTechCommitteeHead && !isImpersonatingTeacher
   );
@@ -964,29 +973,29 @@ export const Teachers: React.FC = () => {
                               <span className="hidden xl:inline">دخول بصفته</span>
                             </button>
                           )}
-                          {(userProfile?.role === 'CENTRAL_ADMIN' || userProfile?.role === 'SPORT_MANAGER') ? (
-                            <>
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleOpenEditRole(teacher);
-                                }}
-                                className="p-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-xl border border-emerald-200 transition-all cursor-pointer shadow-3xs"
-                                title="تعديل بيانات الأستاذ ومهامه"
-                              >
-                                <Pencil className="h-4 w-4" />
-                              </button>
-                              <button
-                                type="button"
-                                onClick={(e) => handleDeleteClick(e, teacher)}
-                                className="p-2 bg-red-50 hover:bg-red-100 text-red-600 rounded-xl border border-red-200 transition-all cursor-pointer shadow-3xs"
-                                title="حذف حساب الأستاذ نهائياً"
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </button>
-                            </>
-                          ) : null}
+                          {canEditTeachers && (isCentralOrSportManager || (teacher.role !== 'CENTRAL_ADMIN' && !teacher.isSuperAdmin)) && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleOpenEditRole(teacher);
+                              }}
+                              className="p-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-xl border border-emerald-200 transition-all cursor-pointer shadow-3xs"
+                              title="تعديل بيانات الأستاذ ومهامه"
+                            >
+                              <Pencil className="h-4 w-4" />
+                            </button>
+                          )}
+                          {(userProfile?.role === 'CENTRAL_ADMIN' || userProfile?.role === 'SPORT_MANAGER') && (
+                            <button
+                              type="button"
+                              onClick={(e) => handleDeleteClick(e, teacher)}
+                              className="p-2 bg-red-50 hover:bg-red-100 text-red-600 rounded-xl border border-red-200 transition-all cursor-pointer shadow-3xs"
+                              title="حذف حساب الأستاذ نهائياً"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          )}
                           <button
                             type="button"
                             onClick={(e) => {
@@ -1044,28 +1053,28 @@ export const Teachers: React.FC = () => {
                         <span>الدخول بصفة الأستاذ</span>
                       </button>
                     )}
+                    {canEditTeachers && (isCentralOrSportManager || (teacher.role !== 'CENTRAL_ADMIN' && !teacher.isSuperAdmin)) && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleOpenEditRole(teacher);
+                        }}
+                        className="p-2 bg-emerald-50 hover:bg-emerald-100 active:scale-95 text-emerald-700 rounded-xl border border-emerald-200 transition-all cursor-pointer shadow-3xs flex items-center justify-center"
+                        title="تعديل بيانات الأستاذ ومهامه"
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </button>
+                    )}
                     {(userProfile?.role === 'CENTRAL_ADMIN' || userProfile?.role === 'SPORT_MANAGER') && (
-                      <>
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleOpenEditRole(teacher);
-                          }}
-                          className="p-2 bg-emerald-50 hover:bg-emerald-100 active:scale-95 text-emerald-700 rounded-xl border border-emerald-200 transition-all cursor-pointer shadow-3xs flex items-center justify-center"
-                          title="تعديل بيانات الأستاذ ومهامه"
-                        >
-                          <Pencil className="h-4 w-4" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={(e) => handleDeleteClick(e, teacher)}
-                          className="p-2 bg-red-50 hover:bg-red-100 active:scale-95 text-red-600 rounded-xl border border-red-200 transition-all cursor-pointer shadow-3xs flex items-center justify-center"
-                          title="حذف حساب الأستاذ نهائياً"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
-                      </>
+                      <button
+                        type="button"
+                        onClick={(e) => handleDeleteClick(e, teacher)}
+                        className="p-2 bg-red-50 hover:bg-red-100 active:scale-95 text-red-600 rounded-xl border border-red-200 transition-all cursor-pointer shadow-3xs flex items-center justify-center"
+                        title="حذف حساب الأستاذ نهائياً"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
                     )}
                     <button
                       type="button"
@@ -1160,7 +1169,13 @@ export const Teachers: React.FC = () => {
           onClose={() => setIsDetailModalOpen(false)}
           teacher={selectedTeacherModal}
           teacherStudents={teacherStudents}
-          onEditRole={handleOpenEditRole}
+          onEditRole={
+            canEditTeachers &&
+            selectedTeacherModal &&
+            (isCentralOrSportManager || (selectedTeacherModal.role !== 'CENTRAL_ADMIN' && !selectedTeacherModal.isSuperAdmin))
+              ? handleOpenEditRole
+              : undefined
+          }
           onImpersonateTeacher={canTechHeadImpersonate ? (t) => handleStartImpersonation(t) : undefined}
         />
       )}

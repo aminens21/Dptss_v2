@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { Match, School, Venue, Tournament, User } from '../types';
 import { SPORTS_MAP } from '../lib/dataService';
+import { formatTeamDisplayName } from '../lib/drawTournamentUtils';
 import { AthleticsService } from '../lib/athleticsService';
 import {
   Trophy,
@@ -99,8 +100,8 @@ export const RefereeMatchesView: React.FC<RefereeMatchesViewProps> = ({
       // Search query
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
-        const t1 = schools.find((s) => s.id === m.team1Id)?.name || m.team1Id || '';
-        const t2 = schools.find((s) => s.id === m.team2Id)?.name || m.team2Id || '';
+        const t1 = formatTeamDisplayName(m.team1Id, m.team1Name, schools);
+        const t2 = formatTeamDisplayName(m.team2Id, m.team2Name, schools);
         const venueName = venues.find((v) => v.id === m.venueId)?.name || '';
         const sportName = SPORTS_MAP[m.sportId]?.name || '';
         const stage = m.stage || '';
@@ -117,9 +118,8 @@ export const RefereeMatchesView: React.FC<RefereeMatchesViewProps> = ({
   const ongoingCount = refereeMatches.filter((m) => m.status === 'Ongoing').length;
   const completedCount = refereeMatches.filter((m) => m.status === 'Completed').length;
 
-  const getSchoolName = (id: string) => {
-    const s = schools.find((sch) => sch.id === id);
-    return s ? s.name : id || 'غير محدد';
+  const getSchoolName = (id: string, fallbackName?: string) => {
+    return formatTeamDisplayName(id, fallbackName, schools);
   };
 
   const getVenueName = (id: string) => {
@@ -324,8 +324,8 @@ export const RefereeMatchesView: React.FC<RefereeMatchesViewProps> = ({
         <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
           {filteredMatches.map((m) => {
             const sport = getSportDetails(m.sportId);
-            const t1Name = getSchoolName(m.team1Id);
-            const t2Name = getSchoolName(m.team2Id);
+            const t1Name = getSchoolName(m.team1Id, m.team1Name);
+            const t2Name = getSchoolName(m.team2Id, m.team2Name);
             const venueName = getVenueName(m.venueId);
 
             const isCompleted = m.status === 'Completed';

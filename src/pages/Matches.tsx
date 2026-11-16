@@ -2,7 +2,8 @@ import React, { useEffect, useState, useMemo } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import clsx from 'clsx';
 import { useAuth } from '../contexts/AuthContext';
-import { DataService, SPORTS_MAP, GENDER_MAP, deduplicateById, AGE_CATEGORIES, isClubTournament, getAgeCategoriesForSeason, normalizeCategoryKey, getCustomCategoryName, getCustomCategoryDetails, canUserApproveSportResult } from '../lib/dataService';
+import { DataService, SPORTS_MAP, GENDER_MAP, deduplicateById, AGE_CATEGORIES, isClubTournament, getAgeCategoriesForSeason, normalizeCategoryKey, getCustomCategoryName, getCustomCategoryDetails, canUserApproveSportResult, normalizeCanonicalSportId, areSportIdsEquivalent } from '../lib/dataService';
+import { formatTeamDisplayName } from '../lib/drawTournamentUtils';
 import { Match, School, Venue, Tournament, Sport, Student, User, Referee } from '../types';
 import { CountdownTimer } from '../components/CountdownTimer';
 import {
@@ -164,26 +165,32 @@ export const Matches: React.FC = () => {
   const techCommitteeAllowedSports = useMemo<string[] | null>(() => {
     if (isCentralAdmin) return null;
     const set = new Set<string>();
-    userProfile?.techCommitteeSports?.forEach(id => id && set.add(id));
-    currentTeacherProfile?.techCommitteeSports?.forEach(id => id && set.add(id));
-    if (userProfile?.sportId) set.add(userProfile.sportId);
-    if (currentTeacherProfile?.sportId) set.add(currentTeacherProfile.sportId);
-    if (managerSportId) set.add(managerSportId);
+    const addSport = (raw?: string) => {
+      if (!raw) return;
+      set.add(raw);
+      const canonical = normalizeCanonicalSportId(raw, sportsConfig);
+      if (canonical) set.add(canonical);
+    };
+    userProfile?.techCommitteeSports?.forEach(addSport);
+    currentTeacherProfile?.techCommitteeSports?.forEach(addSport);
+    addSport(userProfile?.sportId);
+    addSport(currentTeacherProfile?.sportId);
+    addSport(managerSportId);
     tournaments.forEach(t => {
       const emailMatch = t.managerEmail && userProfile?.email && t.managerEmail.toLowerCase() === userProfile.email.toLowerCase();
       const nameMatch = t.managerName && userProfile?.fullName && t.managerName.trim() === userProfile.fullName.trim();
       if ((emailMatch || nameMatch) && t.sportId) {
-        set.add(t.sportId);
+        addSport(t.sportId);
       }
     });
     return Array.from(set);
-  }, [isCentralAdmin, userProfile, currentTeacherProfile, managerSportId, tournaments]);
+  }, [isCentralAdmin, userProfile, currentTeacherProfile, managerSportId, tournaments, sportsConfig]);
 
   const canManageSport = (sportId?: string) => {
     if (isCentralAdmin) return true;
     if (!sportId) return false;
     if (isTechCommitteeHead || isSportManager) {
-      return techCommitteeAllowedSports !== null && techCommitteeAllowedSports.includes(sportId);
+      return techCommitteeAllowedSports !== null && techCommitteeAllowedSports.some(id => areSportIdsEquivalent(id, sportId, sportsConfig));
     }
     return false;
   };
@@ -390,8 +397,8 @@ export const Matches: React.FC = () => {
   };
 
   const openMatchDiffusionModal = (m: Match, mode: 'schedule' | 'result') => {
-    const t1Name = schools.find(s => s.id === m.team1Id)?.name || m.team1Name || m.team1Id || 'المؤسسة 1';
-    const t2Name = schools.find(s => s.id === m.team2Id)?.name || m.team2Name || m.team2Id || 'المؤسسة 2';
+    const t1Name = formatTeamDisplayName(m.team1Id, m.team1Name, schools);
+    const t2Name = formatTeamDisplayName(m.team2Id, m.team2Name, schools);
     const vName = venues.find(v => v.id === m.venueId)?.name || m.venueName || m.venueId || 'ملعب غير محدد';
     const hostSchoolObj = resolveHostSchoolForMatch(m, schools);
     const rawRefs = [

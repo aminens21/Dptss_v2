@@ -14,7 +14,7 @@ import {
   BellOff
 } from 'lucide-react';
 import { Match, Sport, Tournament } from '../types';
-import { DataService, SPORTS_MAP, normalizeCategoryKey } from '../lib/dataService';
+import { DataService, SPORTS_MAP, normalizeCategoryKey, areSportIdsEquivalent, normalizeCanonicalSportId } from '../lib/dataService';
 import { useNotifications } from '../contexts/NotificationContext';
 import toast from 'react-hot-toast';
 
@@ -32,6 +32,7 @@ interface TournamentResetModalProps {
 type ResetActionKind =
   | 'ALL_MATCH_RESULTS'
   | 'SPECIFIC_TOURNAMENT_RESULTS'
+  | 'SPECIFIC_TOURNAMENT_MATCHES'
   | 'ALL_SCHEDULED_MATCHES'
   | 'ALL_BELLS_FOR_SUPERVISORS';
 
@@ -48,22 +49,45 @@ export const TournamentResetModal: React.FC<TournamentResetModalProps> = ({
   const { resetAllBellsForAllUsers } = useNotifications();
   const isScopedToTechHead = !isCentralAdmin && Array.isArray(allowedSportIds);
 
+  const tournamentSportMap = useMemo(() => {
+    const map = new Map<string, string>();
+    tournaments.forEach(t => {
+      if (t && t.id && t.sportId) map.set(t.id, t.sportId);
+    });
+    return map;
+  }, [tournaments]);
+
+  const isSportAllowedForUser = (sportId?: string) => {
+    if (!isScopedToTechHead) return true;
+    if (!sportId || !allowedSportIds) return false;
+    return allowedSportIds.some(allowedId => areSportIdsEquivalent(allowedId, sportId, sportsConfig));
+  };
+
+  const doesMatchBelongToSport = (m: Match, targetSportId: string) => {
+    if (areSportIdsEquivalent(m.sportId, targetSportId, sportsConfig)) return true;
+    if (m.tournamentId) {
+      const parentSport = tournamentSportMap.get(m.tournamentId);
+      if (parentSport && areSportIdsEquivalent(parentSport, targetSportId, sportsConfig)) return true;
+    }
+    return false;
+  };
+
   // Allowed sports list for dropdown & display
   const availableSports = useMemo(() => {
     const base = isScopedToTechHead
-      ? sportsConfig.filter(s => allowedSportIds!.includes(s.id))
+      ? sportsConfig.filter(s => isSportAllowedForUser(s.id))
       : sportsConfig;
 
     // Sort programmed / sports-with-matches to the top
     return [...base].sort((a, b) => {
-      const aCount = matches.filter(m => m.sportId === a.id).length;
-      const bCount = matches.filter(m => m.sportId === b.id).length;
+      const aCount = matches.filter(m => doesMatchBelongToSport(m, a.id)).length;
+      const bCount = matches.filter(m => doesMatchBelongToSport(m, b.id)).length;
       if (aCount !== bCount) return bCount - aCount;
-      const aProg = tournaments.some(t => t.sportId === a.id) ? 1 : 0;
-      const bProg = tournaments.some(t => t.sportId === b.id) ? 1 : 0;
+      const aProg = tournaments.some(t => areSportIdsEquivalent(t.sportId, a.id, sportsConfig)) ? 1 : 0;
+      const bProg = tournaments.some(t => areSportIdsEquivalent(t.sportId, b.id, sportsConfig)) ? 1 : 0;
       return bProg - aProg;
     });
-  }, [sportsConfig, matches, tournaments, isScopedToTechHead, allowedSportIds]);
+  }, [sportsConfig, matches, tournaments, isScopedToTechHead, allowedSportIds, tournamentSportMap]);
 
   const [selectedSportId, setSelectedSportId] = useState<string>('');
   const [selectedTournamentId, setSelectedTournamentId] = useState<string>('ALL');
@@ -88,11 +112,18 @@ export const TournamentResetModal: React.FC<TournamentResetModalProps> = ({
     }
   }, [isOpen, availableSports]);
 
-  // Scoped matches according to user permissions
+  // Scoped matches according to user permissions (checks direct sportId & parent tournament sportId)
   const scopedMatches = useMemo(() => {
     if (!isScopedToTechHead) return matches;
-    return matches.filter(m => allowedSportIds!.includes(m.sportId));
-  }, [matches, isScopedToTechHead, allowedSportIds]);
+    return matches.filter(m => {
+      if (isSportAllowedForUser(m.sportId)) return true;
+      if (m.tournamentId) {
+        const parentSport = tournamentSportMap.get(m.tournamentId);
+        if (parentSport && isSportAllowedForUser(parentSport)) return true;
+      }
+      return false;
+    });
+  }, [matches, isScopedToTechHead, allowedSportIds, tournamentSportMap, sportsConfig]);
 
   const scopedScoredMatchesCount = useMemo(() => {
     return scopedMatches.filter(
@@ -108,33 +139,33 @@ export const TournamentResetModal: React.FC<TournamentResetModalProps> = ({
   const sportBranchTournaments = useMemo(() => {
     if (!selectedSportId) return [];
     return tournaments
-      .filter(t => t.sportId === selectedSportId && t.status !== 'Archived')
+      .filter(t => areSportIdsEquivalent(t.sportId, selectedSportId, sportsConfig) && t.status !== 'Archived')
       .sort((a, b) => {
         const affA = a.affiliationType === 'club_affiliated' ? 1 : 0;
         const affB = b.affiliationType === 'club_affiliated' ? 1 : 0;
         if (affA !== affB) return affA - affB;
         return (a.name || '').localeCompare(b.name || '', 'ar');
       });
-  }, [tournaments, selectedSportId]);
+  }, [tournaments, selectedSportId, sportsConfig]);
 
   // Matches matching the selected sport & optional branch in Section 2
   const specificTargetMatches = useMemo(() => {
     if (!selectedSportId) return [];
     if (selectedTournamentId === 'ALL') {
-      return scopedMatches.filter(m => m.sportId === selectedSportId);
+      return scopedMatches.filter(m => doesMatchBelongToSport(m, selectedSportId));
     }
     const targetTourn = sportBranchTournaments.find(t => t.id === selectedTournamentId);
     return scopedMatches.filter(m => {
       if (m.tournamentId === selectedTournamentId) return true;
       if (!targetTourn) return false;
       return (
-        m.sportId === targetTourn.sportId &&
+        doesMatchBelongToSport(m, targetTourn.sportId) &&
         normalizeCategoryKey(m.ageCategory) === normalizeCategoryKey(targetTourn.ageCategory) &&
         (m.gender === targetTourn.gender || targetTourn.gender === 'Mixed') &&
         ((m as any).affiliationType || 'non_club') === (targetTourn.affiliationType || 'non_club')
       );
     });
-  }, [scopedMatches, selectedSportId, selectedTournamentId, sportBranchTournaments]);
+  }, [scopedMatches, selectedSportId, selectedTournamentId, sportBranchTournaments, tournamentSportMap, sportsConfig]);
 
   const specificScoredCount = useMemo(() => {
     return specificTargetMatches.filter(
@@ -148,8 +179,18 @@ export const TournamentResetModal: React.FC<TournamentResetModalProps> = ({
 
   const assignedSportNames = useMemo(() => {
     if (!isScopedToTechHead || !allowedSportIds) return [];
-    return allowedSportIds.map(
-      id => sportsConfig.find(s => s.id === id)?.name || SPORTS_MAP[id]?.name || id
+    return Array.from(
+      new Set(
+        allowedSportIds.map(id => {
+          const norm = normalizeCanonicalSportId(id, sportsConfig);
+          return (
+            sportsConfig.find(s => s.id === id || s.id === norm)?.name ||
+            SPORTS_MAP[id]?.name ||
+            SPORTS_MAP[norm]?.name ||
+            id
+          );
+        })
+      )
     );
   }, [isScopedToTechHead, allowedSportIds, sportsConfig]);
 
@@ -197,14 +238,41 @@ export const TournamentResetModal: React.FC<TournamentResetModalProps> = ({
         toast.success(
           `تم تصفير نتائج بطولة «${sportLabel}» بنجاح (${res.resetMatchesCount} مباراة).`
         );
+      } else if (action === 'SPECIFIC_TOURNAMENT_MATCHES') {
+        if (!selectedSportId) {
+          toast.error('يرجى اختيار البطولة / الرياضة المراد حذف مبارياتها');
+          setIsExecuting(false);
+          return;
+        }
+        const res = await DataService.clearScheduledMatchesByScope({
+          allowedSportIds: scopeIds,
+          sportId: selectedSportId,
+          tournamentId: selectedTournamentId !== 'ALL' ? selectedTournamentId : undefined
+        });
+        await onResetComplete();
+        const sportLabel =
+          availableSports.find(s => s.id === selectedSportId)?.name ||
+          SPORTS_MAP[selectedSportId]?.name ||
+          selectedSportId;
+        if (res.deletedMatchesCount > 0) {
+          toast.success(
+            `تم تصفير وحذف مباريات بطولة «${sportLabel}» بنجاح (${res.deletedMatchesCount} مباراة).`
+          );
+        } else {
+          toast('لا توجد مباريات مبرمجة مطابقة للحذف في هذا الاختيار.', { icon: 'ℹ️' });
+        }
       } else if (action === 'ALL_SCHEDULED_MATCHES') {
         const res = await DataService.clearScheduledMatchesByScope({
           allowedSportIds: scopeIds
         });
         await onResetComplete();
-        toast.success(
-          `تم تصفير ومسح جميع المباريات المبرمجة بنجاح (${res.deletedMatchesCount} مباراة).`
-        );
+        if (res.deletedMatchesCount > 0) {
+          toast.success(
+            `تم تصفير ومسح جميع المباريات المبرمجة بنجاح (${res.deletedMatchesCount} مباراة).`
+          );
+        } else {
+          toast('لا توجد مباريات مبرمجة مطابقة للحذف ضمن رياضتك حالياً.', { icon: 'ℹ️' });
+        }
       } else if (action === 'ALL_BELLS_FOR_SUPERVISORS') {
         if (!isCentralAdmin) {
           toast.error('هذه الصلاحية مقتصرة على المسير المركزي فقط.');
@@ -455,21 +523,35 @@ export const TournamentResetModal: React.FC<TournamentResetModalProps> = ({
                     </strong>
                   </span>
 
-                  <button
-                    type="button"
-                    disabled={
-                      isExecuting ||
-                      !selectedSportId ||
-                      (specificTargetMatches.length === 0 &&
-                        selectedSportId !== 'cross_country' &&
-                        selectedSportId !== 'athletics')
-                    }
-                    onClick={() => setPendingConfirm('SPECIFIC_TOURNAMENT_RESULTS')}
-                    className="px-4 py-2 rounded-xl text-xs font-black bg-blue-600 hover:bg-blue-700 text-white shadow-xs transition-all cursor-pointer shrink-0 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
-                  >
-                    <RotateCcw className="w-3.5 h-3.5" />
-                    <span>تصفير نتائج هذه البطولة</span>
-                  </button>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      disabled={
+                        isExecuting ||
+                        !selectedSportId ||
+                        (specificTargetMatches.length === 0 &&
+                          selectedSportId !== 'cross_country' &&
+                          selectedSportId !== 'athletics')
+                      }
+                      onClick={() => setPendingConfirm('SPECIFIC_TOURNAMENT_RESULTS')}
+                      className="px-3.5 py-2 rounded-xl text-xs font-black bg-blue-600 hover:bg-blue-700 text-white shadow-xs transition-all cursor-pointer shrink-0 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5" />
+                      <span>تصفير نتائج هذه البطولة</span>
+                    </button>
+
+                    {selectedSportId !== 'cross_country' && selectedSportId !== 'athletics' && (
+                      <button
+                        type="button"
+                        disabled={isExecuting || !selectedSportId || specificTargetMatches.length === 0}
+                        onClick={() => setPendingConfirm('SPECIFIC_TOURNAMENT_MATCHES')}
+                        className="px-3.5 py-2 rounded-xl text-xs font-black bg-rose-600 hover:bg-rose-700 text-white shadow-xs transition-all cursor-pointer shrink-0 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
+                      >
+                        <CalendarX2 className="w-3.5 h-3.5" />
+                        <span>حذف مباريات هذا الفرع</span>
+                      </button>
+                    )}
+                  </div>
                 </div>
 
                 {renderConfirmBar(
@@ -483,6 +565,19 @@ export const TournamentResetModal: React.FC<TournamentResetModalProps> = ({
                         })`
                       : ''
                   }؟`
+                )}
+
+                {renderConfirmBar(
+                  'SPECIFIC_TOURNAMENT_MATCHES',
+                  `تحذير: سيتم حذف جميع المباريات المبرمجة (${specificTargetMatches.length} مباراة) الخاصة بـ «${
+                    availableSports.find(s => s.id === selectedSportId)?.name || selectedSportId
+                  }»${
+                    selectedTournamentId !== 'ALL'
+                      ? ` (${
+                          sportBranchTournaments.find(t => t.id === selectedTournamentId)?.name || ''
+                        })`
+                      : ''
+                  } نهائياً. هل تريد المتابعة؟`
                 )}
               </div>
 

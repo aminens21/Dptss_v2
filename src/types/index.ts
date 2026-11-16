@@ -261,6 +261,8 @@ export interface Referee {
   directorateId?: string;
 }
 
+export type DrawSystemType = 'groups_home_away' | 'groups_single' | 'knockout_groups';
+
 export interface Match {
   id: string;
   tournamentId: string;
@@ -268,6 +270,16 @@ export interface Match {
   sportName?: string;
   stage: string;
   groupName?: string;
+  drawSystem?: DrawSystemType | 'groups' | 'knockout' | string;
+  drawMatchNumber?: number;
+  roundIndex?: number;
+  leg?: 'first' | 'second';
+  team1SourceMatchId?: string;
+  team2SourceMatchId?: string;
+  team1SourceMatchNumber?: number;
+  team2SourceMatchNumber?: number;
+  team1Placeholder?: string;
+  team2Placeholder?: string;
   team1Id: string;
   team2Id: string;
   team1Name?: string;

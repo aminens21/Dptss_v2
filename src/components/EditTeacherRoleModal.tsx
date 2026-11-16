@@ -183,12 +183,18 @@ export const EditTeacherRoleModal: React.FC<EditTeacherRoleModalProps> = ({
     });
     const summaryDiploma = Object.values(cleanedDiplomas).filter(Boolean).join(' • ');
 
+    const isCentralOrSuperAdmin = Boolean(userProfile?.role === 'CENTRAL_ADMIN' || userProfile?.isSuperAdmin);
+    const safeRole: 'TEACHER' | 'SPORT_MANAGER' | 'CENTRAL_ADMIN' =
+      role === 'CENTRAL_ADMIN' && !isCentralOrSuperAdmin
+        ? (teacher?.role === 'CENTRAL_ADMIN' ? 'CENTRAL_ADMIN' : 'TEACHER')
+        : role;
+
     const updateData: Partial<User> = {
       fullName: cleanName,
       email: cleanEmail,
       phone: phone.trim(),
       teachingCadre: cadre,
-      role: role,
+      role: safeRole,
       isTechCommitteeHead: isTechCommitteeHead,
       techCommitteeSports: isTechCommitteeHead ? techCommitteeSports : [],
       sportId: primarySport,
@@ -470,7 +476,9 @@ export const EditTeacherRoleModal: React.FC<EditTeacherRoleModalProps> = ({
               >
                 <option value="TEACHER">أستاذ مؤطر (TEACHER)</option>
                 <option value="SPORT_MANAGER">منسق مادة التربية البدنية بالمؤسسة (SPORT_MANAGER)</option>
-                <option value="CENTRAL_ADMIN">مسير إقليمي (CENTRAL_ADMIN)</option>
+                {(userProfile?.role === 'CENTRAL_ADMIN' || userProfile?.isSuperAdmin || role === 'CENTRAL_ADMIN') && (
+                  <option value="CENTRAL_ADMIN">مسير إقليمي (CENTRAL_ADMIN)</option>
+                )}
               </select>
             </div>
 

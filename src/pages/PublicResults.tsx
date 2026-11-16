@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { DataService, SPORTS_MAP } from '../lib/dataService';
+import { computeGroupStandings, formatTeamDisplayName } from '../lib/drawTournamentUtils';
 import { Match, School, Venue, CrossCountryCategoryResult, AthleticsCategoryResult, Student, Directorate, Sport, Tournament } from '../types';
 import { CROSS_COUNTRY_CATEGORIES } from '../lib/crossCountryConfig';
 import { AthleticsService } from '../lib/athleticsService';
@@ -85,7 +86,7 @@ export const PublicResults: React.FC = () => {
     toast.success(`تم التبديل لعرض نتائج: ${dirObj?.name || newDirId}`);
   };
 
-  const getSchoolName = (id: string) => schools.find(sch => sch.id === id)?.name || id;
+  const getSchoolName = (id: string, fallbackName?: string) => formatTeamDisplayName(id, fallbackName, schools);
   const getVenueName = (id: string, fallbackName?: string) => venues.find(ven => ven.id === id)?.name || fallbackName || id;
 
   const getMatchSport = (m: Match): { id: string; name: string; icon: string } => {
@@ -147,8 +148,8 @@ export const PublicResults: React.FC = () => {
         // Search query filter
         if (searchQuery.trim()) {
           const q = searchQuery.toLowerCase();
-          const team1 = getSchoolName(m.team1Id).toLowerCase();
-          const team2 = getSchoolName(m.team2Id).toLowerCase();
+          const team1 = getSchoolName(m.team1Id, m.team1Name).toLowerCase();
+          const team2 = getSchoolName(m.team2Id, m.team2Name).toLowerCase();
           const venue = getVenueName(m.venueId).toLowerCase();
           const stage = (m.stage || '').toLowerCase();
           const sp = getMatchSport(m).name.toLowerCase();
@@ -159,6 +160,31 @@ export const PublicResults: React.FC = () => {
       })
       .sort((a, b) => parseDateToTimestampMs(b.date) - parseDateToTimestampMs(a.date));
   }, [matches, selectedSportId, statusFilter, searchQuery, sportsConfig, tournaments, schools, venues]);
+
+  const publicSportGroupStandings = useMemo(() => {
+    if (selectedSportId === 'ALL' || selectedSportId === 'cross_country' || selectedSportId === 'athletics') {
+      return [];
+    }
+    const sportScoped = matches.filter(m => getMatchSport(m).id === selectedSportId);
+    const byBranch = new Map<string, { label: string; matches: Match[] }>();
+    sportScoped.forEach(m => {
+      const cat = m.ageCategory || 'عام';
+      const gen = m.gender === 'Female' ? 'إناث' : m.gender === 'Male' ? 'ذكور' : '';
+      const aff = m.affiliationType === 'club_affiliated' ? 'المنتمين للأندية' : m.affiliationType === 'open' ? 'مفتوحة' : 'غير المنتمين';
+      const key = `${cat}__${gen}__${aff}`;
+      const label = [cat, gen, aff].filter(Boolean).join(' • ');
+      const existing = byBranch.get(key) || { label, matches: [] };
+      existing.matches.push(m);
+      byBranch.set(key, existing);
+    });
+    return Array.from(byBranch.entries())
+      .map(([key, b]) => ({
+        key,
+        label: b.label,
+        standings: computeGroupStandings(b.matches, schools)
+      }))
+      .filter(b => b.standings.length > 0);
+  }, [matches, selectedSportId, sportsConfig, tournaments, schools]);
 
   // Match statistics
   const stats = useMemo(() => {
@@ -664,6 +690,61 @@ export const PublicResults: React.FC = () => {
               </span>
             </div>
 
+            {publicSportGroupStandings.length > 0 && (
+              <div className="space-y-4">
+                {publicSportGroupStandings.map(bucket => (
+                  <div key={bucket.key} className="bg-white rounded-3xl border border-slate-200 shadow-xs overflow-hidden">
+                    <div className="px-4 py-3 bg-slate-900 text-white flex flex-wrap items-center justify-between gap-2">
+                      <span className="text-xs font-black">🏆 جدول الترتيب والنقط — {bucket.label}</span>
+                      <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-400/30 text-emerald-200">
+                        فوز: 3ن • تعادل: 1ن • هزيمة: 0ن
+                      </span>
+                    </div>
+                    <div className="p-4 grid grid-cols-1 lg:grid-cols-2 gap-4">
+                      {bucket.standings.map(grp => (
+                        <div key={grp.groupName} className="rounded-2xl border border-slate-200 overflow-hidden">
+                          <div className="px-3 py-2 bg-slate-50 border-b border-slate-200 flex items-center justify-between text-xs">
+                            <span className="font-black text-slate-800">{grp.groupName}</span>
+                            <span className="text-[10px] font-bold text-slate-500">{grp.systemLabel}</span>
+                          </div>
+                          <div className="overflow-x-auto">
+                            <table className="w-full text-[11px] text-right">
+                              <thead className="bg-white border-b border-slate-200 text-slate-500 font-black">
+                                <tr>
+                                  <th className="py-2 px-2 text-center w-8">#</th>
+                                  <th className="py-2 px-2">المؤسسة</th>
+                                  <th className="py-2 px-1.5 text-center">ل</th>
+                                  <th className="py-2 px-1.5 text-center">ف</th>
+                                  <th className="py-2 px-1.5 text-center">ت</th>
+                                  <th className="py-2 px-1.5 text-center">هـ</th>
+                                  <th className="py-2 px-1.5 text-center">+/-</th>
+                                  <th className="py-2 px-2 text-center text-blue-800">النقط</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-100 bg-white">
+                                {grp.rows.map(row => (
+                                  <tr key={row.teamId} className={row.rank === 1 && grp.completedMatches > 0 ? 'bg-emerald-50/50' : ''}>
+                                    <td className="py-2 px-2 text-center font-black">{row.rank}</td>
+                                    <td className="py-2 px-2 font-bold text-slate-800">{row.teamName}</td>
+                                    <td className="py-2 px-1.5 text-center font-mono">{row.played}</td>
+                                    <td className="py-2 px-1.5 text-center font-mono text-emerald-700 font-bold">{row.won}</td>
+                                    <td className="py-2 px-1.5 text-center font-mono text-amber-700">{row.drawn}</td>
+                                    <td className="py-2 px-1.5 text-center font-mono text-rose-600">{row.lost}</td>
+                                    <td className="py-2 px-1.5 text-center font-mono font-bold" dir="ltr">{row.gd > 0 ? `+${row.gd}` : row.gd}</td>
+                                    <td className="py-2 px-2 text-center font-mono font-black text-blue-800">{row.points}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
             {filteredMatches.length === 0 ? (
               <div className="bg-white rounded-3xl p-12 text-center border border-slate-200 shadow-xs space-y-2">
                 <Calendar className="w-12 h-12 text-slate-300 mx-auto" />
@@ -701,8 +782,8 @@ export const PublicResults: React.FC = () => {
 
                       <div className="flex items-center justify-between py-3 px-3 bg-slate-50/90 rounded-2xl border border-slate-100">
                         <div className="flex-1 text-right min-w-0">
-                          <span className="text-xs font-black text-slate-900 truncate block" title={getSchoolName(m.team1Id)}>
-                            {getSchoolName(m.team1Id)}
+                          <span className="text-xs font-black text-slate-900 truncate block" title={getSchoolName(m.team1Id, m.team1Name)}>
+                            {getSchoolName(m.team1Id, m.team1Name)}
                           </span>
                         </div>
                         <div className="px-3 py-1 bg-white rounded-xl border border-slate-200 shadow-2xs font-mono font-black text-sm text-blue-700 shrink-0 mx-2">
@@ -713,8 +794,8 @@ export const PublicResults: React.FC = () => {
                           )}
                         </div>
                         <div className="flex-1 text-left min-w-0">
-                          <span className="text-xs font-black text-slate-900 truncate block" title={getSchoolName(m.team2Id)}>
-                            {getSchoolName(m.team2Id)}
+                          <span className="text-xs font-black text-slate-900 truncate block" title={getSchoolName(m.team2Id, m.team2Name)}>
+                            {getSchoolName(m.team2Id, m.team2Name)}
                           </span>
                         </div>
                       </div>

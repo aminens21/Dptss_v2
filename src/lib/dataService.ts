@@ -22,6 +22,7 @@ import {
   arrayUnion
 } from 'firebase/firestore';
 import { isFlexibleEmailMatch, fixTeacherFieldJumble, normalizeArabicName, normalizeArabicSearch, normalizeDateToYmd, formatMatchDate } from './utils';
+import { isPlaceholderTeamId, makePlaceholderTeamId } from './drawTournamentUtils';
 export { normalizeDateToYmd, normalizeArabicSearch };
 
 /**
@@ -735,6 +736,97 @@ try {
   }
 } catch {
   // Ignore in SSR/test environment
+}
+
+export function normalizeCanonicalSportId(sportIdOrName?: string, sportsList?: Sport[]): string {
+  const raw = String(sportIdOrName || '').trim();
+  if (!raw) return '';
+  const lower = raw.toLowerCase();
+  if (lower === 'track_field') return 'athletics';
+  if (SPORTS_MAP[raw]) return raw === 'track_field' ? 'athletics' : raw;
+  if (SPORTS_MAP[lower]) return lower === 'track_field' ? 'athletics' : lower;
+
+  const normInput = normalizeArabicSearch(raw);
+  if (normInput === 'track_field' || normInput === 'العاب القوي' || normInput === 'العاب القوى') {
+    return 'athletics';
+  }
+  for (const [id, info] of Object.entries(SPORTS_MAP)) {
+    if (normalizeArabicSearch(info.name) === normInput) {
+      return id === 'track_field' ? 'athletics' : id;
+    }
+  }
+  if (Array.isArray(sportsList)) {
+    for (const sp of sportsList) {
+      if (!sp) continue;
+      if (String(sp.id || '').trim().toLowerCase() === lower) {
+        return sp.id === 'track_field' ? 'athletics' : sp.id;
+      }
+      if (sp.name && normalizeArabicSearch(sp.name) === normInput) {
+        return sp.id === 'track_field' ? 'athletics' : sp.id;
+      }
+    }
+  }
+  return lower;
+}
+
+export function areSportIdsEquivalent(a?: string, b?: string, sportsList?: Sport[]): boolean {
+  if (!a || !b) return false;
+  const rawA = String(a).trim().toLowerCase();
+  const rawB = String(b).trim().toLowerCase();
+  if (rawA === rawB) return true;
+  const normA = normalizeCanonicalSportId(a, sportsList);
+  const normB = normalizeCanonicalSportId(b, sportsList);
+  return Boolean(normA && normB && normA === normB);
+}
+
+function buildAllowedSportSet(allowedSportIds?: string[] | null, sportsList?: Sport[]): Set<string> | null {
+  if (!Array.isArray(allowedSportIds)) return null;
+  const set = new Set<string>();
+  allowedSportIds.forEach(raw => {
+    const clean = String(raw || '').trim();
+    if (!clean) return;
+    set.add(clean.toLowerCase());
+    const canonical = normalizeCanonicalSportId(clean, sportsList);
+    if (canonical) {
+      set.add(canonical.toLowerCase());
+      if (canonical === 'athletics') set.add('track_field');
+    }
+  });
+  return set;
+}
+
+function isSportInAllowedSet(
+  sportIdOrName: string | undefined,
+  allowedSet: Set<string>,
+  sportsList?: Sport[]
+): boolean {
+  const clean = String(sportIdOrName || '').trim();
+  if (!clean) return false;
+  if (allowedSet.has(clean.toLowerCase())) return true;
+  const canonical = normalizeCanonicalSportId(clean, sportsList);
+  if (canonical && allowedSet.has(canonical.toLowerCase())) return true;
+  return false;
+}
+
+function doesMatchMatchSportScope(
+  m: Match,
+  allowedSet: Set<string> | null,
+  targetSportId: string | undefined,
+  tournamentSportMap: Map<string, string>,
+  sportsList?: Sport[]
+): boolean {
+  const parentSportId = m.tournamentId ? tournamentSportMap.get(m.tournamentId) : undefined;
+  if (allowedSet !== null) {
+    const matchDirect = isSportInAllowedSet(m.sportId, allowedSet, sportsList);
+    const matchViaParent = parentSportId ? isSportInAllowedSet(parentSportId, allowedSet, sportsList) : false;
+    if (!matchDirect && !matchViaParent) return false;
+  }
+  if (targetSportId) {
+    const targetDirect = areSportIdsEquivalent(m.sportId, targetSportId, sportsList);
+    const targetViaParent = parentSportId ? areSportIdsEquivalent(parentSportId, targetSportId, sportsList) : false;
+    if (!targetDirect && !targetViaParent) return false;
+  }
+  return true;
 }
 
 export interface OfficialLogos {
@@ -1653,6 +1745,18 @@ export const isOpenTournament = (t?: { affiliationType?: string; name?: string }
   return false;
 };
 
+export const normalizeTournamentAffiliation = (raw?: string, name?: string): 'non_club' | 'club_affiliated' | 'open' => {
+  const val = String(raw || '').trim().toLowerCase();
+  if (val === 'club_affiliated' || val === 'espoir_club') return 'club_affiliated';
+  if (val === 'open') return 'open';
+  if (val === 'non_club' || val === 'espoir_non_club' || val === 'sports_tracks') return 'non_club';
+  if (name) {
+    if (name.includes('للمنتمين للأندية') || name.includes('المنتمين للأندية') || name.includes('عصب وأندية')) return 'club_affiliated';
+    if (name.includes('مفتوحة') || name.includes('المفتوحة') || name.includes('دوري مفتوح')) return 'open';
+  }
+  return 'non_club';
+};
+
 export const GENDER_MAP: Record<string, { name: string; icon: string; badgeClass: string }> = {
   Male: { name: 'ذكور', icon: '👦', badgeClass: 'bg-blue-50 text-blue-700 border-blue-200' },
   Female: { name: 'إناث', icon: '👧', badgeClass: 'bg-pink-50 text-pink-700 border-pink-200' },
@@ -1702,6 +1806,7 @@ export const DataService = {
   async getTournaments(targetDirectorateId?: string, all?: boolean): Promise<Tournament[]> {
     const activeDirId = targetDirectorateId || this.getActiveDirectorateId();
     const tournsMap = new Map<string, Tournament>();
+    const firestoreIds = new Set<string>();
 
     // 1. Fetch from Firestore first (source of truth)
     try {
@@ -1721,12 +1826,12 @@ export const DataService = {
             scope: data.scope || 'Provincial',
             status: data.status || 'Scheduled',
             description: data.description || '',
-            affiliationType: data.affiliationType || 'non_club',
             managerName: data.managerName || '',
             managerPhone: data.managerPhone || '',
             managerEmail: data.managerEmail || '',
             accessCode: data.accessCode || '',
             ...data,
+            affiliationType: normalizeTournamentAffiliation(data.affiliationType, data.name),
             startDate: data.startDate?.toDate ? data.startDate.toDate() : (data.startDate ? new Date(data.startDate) : undefined),
             endDate: data.endDate?.toDate ? data.endDate.toDate() : (data.endDate ? new Date(data.endDate) : undefined),
             registrationDeadline: data.registrationDeadline?.toDate ? data.registrationDeadline.toDate() : (data.registrationDeadline ? new Date(data.registrationDeadline) : undefined),
@@ -1735,6 +1840,7 @@ export const DataService = {
           } as Tournament;
 
           tournsMap.set(d.id, firestoreTourn);
+          firestoreIds.add(d.id);
         });
       }
     } catch (e) {
@@ -1742,17 +1848,19 @@ export const DataService = {
     }
 
     // 2. Merge local cache for any items not yet in Firestore or newer local edits
-    // Only use INITIAL_TOURNAMENTS fallback if we are on taourirt or requesting all
-    const initialFallback = (all === true || activeDirId === 'taourirt') ? INITIAL_TOURNAMENTS : [];
+    // Only use INITIAL_TOURNAMENTS fallback if Firestore is empty and we are on taourirt or requesting all
+    const initialFallback = (tournsMap.size === 0 && (all === true || activeDirId === 'taourirt')) ? INITIAL_TOURNAMENTS : [];
     const localList = getLocal<Tournament>(STORAGE_KEYS.TOURNAMENTS, tournsMap.size > 0 ? [] : initialFallback);
     localList.forEach(t => {
       if (t && t.id && !isRecentlyDeleted('tournaments', t.id)) {
         const existing = tournsMap.get(t.id);
+        const normAff = normalizeTournamentAffiliation(t.affiliationType, t.name);
         if (!existing) {
-          // If Firestore is loaded, only merge local items that are unsynced pending creations
-          if (tournsMap.size === 0 || isPendingWrite('tournaments', t.id) || t.id.startsWith('tourn-')) {
+          // If Firestore is loaded, only merge local items that are unsynced pending creations (do NOT inject stale tourn-* mocks when Firestore has data)
+          if (tournsMap.size === 0 || isPendingWrite('tournaments', t.id)) {
             tournsMap.set(t.id, {
               ...t,
+              affiliationType: normAff,
               directorateId: t.directorateId || 'taourirt',
               startDate: t.startDate ? (typeof t.startDate === 'object' && 'toDate' in t.startDate ? (t.startDate as any).toDate() : (t.startDate instanceof Date ? t.startDate : new Date(t.startDate))) : undefined,
               endDate: t.endDate ? (typeof t.endDate === 'object' && 'toDate' in t.endDate ? (t.endDate as any).toDate() : (t.endDate instanceof Date ? t.endDate : new Date(t.endDate))) : undefined,
@@ -1763,6 +1871,7 @@ export const DataService = {
           tournsMap.set(t.id, {
             ...existing,
             ...t,
+            affiliationType: normAff,
             directorateId: t.directorateId || existing.directorateId || 'taourirt',
             startDate: t.startDate ? (typeof t.startDate === 'object' && 'toDate' in t.startDate ? (t.startDate as any).toDate() : (t.startDate instanceof Date ? t.startDate : new Date(t.startDate))) : existing.startDate,
             endDate: t.endDate ? (typeof t.endDate === 'object' && 'toDate' in t.endDate ? (t.endDate as any).toDate() : (t.endDate instanceof Date ? t.endDate : new Date(t.endDate))) : existing.endDate,
@@ -1788,32 +1897,186 @@ export const DataService = {
           .replace(/\s+-\s+-\s+/g, ' - ')
           .trim();
       }
+      const normAff = normalizeTournamentAffiliation(t.affiliationType, cleanName);
       return {
         ...t,
         ageCategory: cleanCat,
+        gender: t.gender || 'Mixed',
+        affiliationType: normAff,
         name: cleanName
       };
     });
 
-    setLocal(STORAGE_KEYS.TOURNAMENTS, sanitizedList);
-    const deduped = deduplicateById(sanitizedList);
+    // Semantic deduplication: guarantee at most ONE branch per (directorateId, sportId, seasonId, ageCategory, gender, affiliationType)
+    const getTimestampMs = (v: any): number => {
+      if (!v) return 0;
+      if (v instanceof Date) return isNaN(v.getTime()) ? 0 : v.getTime();
+      if (typeof v === 'object' && typeof v.toDate === 'function') return v.toDate().getTime();
+      const d = new Date(v);
+      return isNaN(d.getTime()) ? 0 : d.getTime();
+    };
+    const branchWinnerMap = new Map<string, Tournament>();
+    deduplicateById(sanitizedList).forEach(t => {
+      const dirKey = t.directorateId || 'taourirt';
+      const seasonKey = (t.seasonId || '2026/2027').trim();
+      const branchKey = `${dirKey}__${t.sportId}__${seasonKey}__${t.ageCategory}__${t.gender}__${t.affiliationType}`;
+      const existing = branchWinnerMap.get(branchKey);
+      if (!existing) {
+        branchWinnerMap.set(branchKey, t);
+        return;
+      }
+      const existingIsMock = existing.id.startsWith('tourn-');
+      const currentIsMock = t.id.startsWith('tourn-');
+      if (existingIsMock && !currentIsMock) {
+        branchWinnerMap.set(branchKey, t);
+        return;
+      }
+      if (!existingIsMock && currentIsMock) {
+        return;
+      }
+      const existingInFs = firestoreIds.has(existing.id);
+      const currentInFs = firestoreIds.has(t.id);
+      if (!existingInFs && currentInFs) {
+        branchWinnerMap.set(branchKey, t);
+        return;
+      }
+      if (existingInFs && !currentInFs) {
+        return;
+      }
+      const existingTs = Math.max(getTimestampMs(existing.updatedAt), getTimestampMs(existing.createdAt));
+      const currentTs = Math.max(getTimestampMs(t.updatedAt), getTimestampMs(t.createdAt));
+      if (currentTs > existingTs) {
+        branchWinnerMap.set(branchKey, t);
+      }
+    });
+
+    const semanticDeduped = Array.from(branchWinnerMap.values());
+    setLocal(STORAGE_KEYS.TOURNAMENTS, semanticDeduped);
 
     if (all === true || !activeDirId || activeDirId === 'all') {
-      return deduped;
+      return semanticDeduped;
     }
 
     // Isolate by active directorate
-    return deduped.filter(t => (t.directorateId || 'taourirt') === activeDirId);
+    return semanticDeduped.filter(t => (t.directorateId || 'taourirt') === activeDirId);
+  },
+
+  async deduplicateTournamentBranches(targetDirectorateId?: string): Promise<number> {
+    const activeDirId = targetDirectorateId || this.getActiveDirectorateId() || 'taourirt';
+    const isAllDirs = !activeDirId || activeDirId === 'all';
+    try {
+      const rawDocs: Tournament[] = [];
+      if (!isCloudSyncPaused()) {
+        const snap = await getDocs(collection(db, 'tournaments'));
+        snap.docs.forEach(d => {
+          const data = d.data();
+          if (isRecentlyDeleted('tournaments', d.id)) return;
+          const dir = data.directorateId || 'taourirt';
+          if (!isAllDirs && dir !== activeDirId) return;
+          rawDocs.push({
+            id: d.id,
+            ...data,
+            ageCategory: normalizeCategoryKey(data.ageCategory),
+            gender: data.gender || 'Mixed',
+            affiliationType: normalizeTournamentAffiliation(data.affiliationType, data.name),
+            directorateId: dir
+          } as Tournament);
+        });
+      }
+
+      if (rawDocs.length === 0) return 0;
+
+      const allMatches = await this.getMatches(isAllDirs ? 'all' : activeDirId, isAllDirs);
+      const matchCountByTournId = new Map<string, number>();
+      allMatches.forEach(m => {
+        if (m.tournamentId) {
+          matchCountByTournId.set(m.tournamentId, (matchCountByTournId.get(m.tournamentId) || 0) + 1);
+        }
+      });
+
+      const groups = new Map<string, Tournament[]>();
+      rawDocs.forEach(t => {
+        const key = `${t.directorateId || 'taourirt'}__${t.sportId}__${(t.seasonId || '2026/2027').trim()}__${normalizeCategoryKey(t.ageCategory)}__${t.gender || 'Mixed'}__${normalizeTournamentAffiliation(t.affiliationType, t.name)}`;
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key)!.push(t);
+      });
+
+      let removedCount = 0;
+      for (const [, list] of groups.entries()) {
+        if (list.length <= 1) continue;
+        const sorted = [...list].sort((a, b) => {
+          const aMock = a.id.startsWith('tourn-') ? 1 : 0;
+          const bMock = b.id.startsWith('tourn-') ? 1 : 0;
+          if (aMock !== bMock) return aMock - bMock;
+          const aMatches = matchCountByTournId.get(a.id) || 0;
+          const bMatches = matchCountByTournId.get(b.id) || 0;
+          if (aMatches !== bMatches) return bMatches - aMatches;
+          const aTime = (a.updatedAt as any)?.toDate ? (a.updatedAt as any).toDate().getTime() : new Date(a.updatedAt || a.createdAt || 0).getTime();
+          const bTime = (b.updatedAt as any)?.toDate ? (b.updatedAt as any).toDate().getTime() : new Date(b.updatedAt || b.createdAt || 0).getTime();
+          return bTime - aTime;
+        });
+
+        const winner = sorted[0];
+        const duplicates = sorted.slice(1);
+        for (const dup of duplicates) {
+          const linkedMatches = allMatches.filter(m => m.tournamentId === dup.id);
+          for (const lm of linkedMatches) {
+            await this.updateMatch(lm.id, { tournamentId: winner.id });
+          }
+          await this.deleteTournament(dup.id);
+          removedCount++;
+        }
+      }
+      return removedCount;
+    } catch (e) {
+      console.warn('deduplicateTournamentBranches warning:', e);
+      return 0;
+    }
   },
 
   async addTournament(tournament: Omit<Tournament, 'id'>): Promise<Tournament> {
     const activeDirId = this.getActiveDirectorateId() || 'taourirt';
+    const effectiveDirId = tournament.directorateId || (activeDirId === 'all' ? 'taourirt' : activeDirId);
+    const normCat = normalizeCategoryKey(tournament.ageCategory);
+    const normAff = normalizeTournamentAffiliation(tournament.affiliationType, tournament.name);
+    const normGender = tournament.gender || 'Mixed';
+    const normSeason = (tournament.seasonId || '2026/2027').trim();
+
+    // Prevent duplicate branches for the exact same (directorate, sport, season, category, gender, affiliation)
+    try {
+      const existingList = await this.getTournaments(effectiveDirId);
+      const duplicateMatch = existingList.find(t =>
+        t.sportId === tournament.sportId &&
+        (t.directorateId || 'taourirt') === effectiveDirId &&
+        (t.seasonId || '2026/2027').trim() === normSeason &&
+        normalizeCategoryKey(t.ageCategory) === normCat &&
+        (t.gender || 'Mixed') === normGender &&
+        normalizeTournamentAffiliation(t.affiliationType, t.name) === normAff
+      );
+      if (duplicateMatch) {
+        const mergedUpdate: Partial<Tournament> = {
+          ...tournament,
+          ageCategory: normCat,
+          gender: normGender,
+          affiliationType: normAff,
+          directorateId: effectiveDirId
+        };
+        await this.updateTournament(duplicateMatch.id, mergedUpdate);
+        return { ...duplicateMatch, ...mergedUpdate, id: duplicateMatch.id };
+      }
+    } catch {
+      // Proceed to create if lookup fails
+    }
+
     const docRef = doc(collection(db, 'tournaments'));
     const realId = docRef.id;
 
     const tournamentWithDir = {
       ...tournament,
-      directorateId: tournament.directorateId || (activeDirId === 'all' ? 'taourirt' : activeDirId),
+      ageCategory: normCat,
+      gender: normGender,
+      affiliationType: normAff,
+      directorateId: effectiveDirId,
       createdAt: new Date(),
       updatedAt: new Date()
     };
@@ -1850,7 +2113,6 @@ export const DataService = {
       const sportId = tournament.sportId;
       const currentSports = getLocal<Sport>('taourirt_sports_config', []);
       const targetSport = currentSports.find(s => s.id === sportId);
-      const normCat = normalizeCategoryKey(tournament.ageCategory);
       let newCats = (targetSport?.ageCategories && targetSport.ageCategories.length > 0)
         ? targetSport.ageCategories.map(normalizeCategoryKey)
         : [normCat];
@@ -2521,7 +2783,7 @@ export const DataService = {
       if (!snap.empty) {
         const firestoreList = snap.docs
           .filter(d => !isRecentlyDeleted('matches', d.id))
-          .map(d => normalizeMatchRecord({ id: d.id, ...d.data() } as Match));
+          .map(d => normalizeMatchRecord({ ...d.data(), id: d.id } as Match));
         const filtered = firestoreList.filter(m => m.id !== 'mat-1' && m.id !== 'mat-2' && m.id !== 'mat-3');
         const localPending = getLocal<Match>(STORAGE_KEYS.MATCHES, [])
           .filter(lm => lm && lm.id && isPendingWrite('matches', lm.id) && !isRecentlyDeleted('matches', lm.id))
@@ -2688,8 +2950,88 @@ export const DataService = {
     }
 
     const fullMatch = updated.find(m => m.id === matchId);
+    if (status === 'Completed' && extras?.approvalStatus !== 'provisional') {
+      await this.advanceKnockoutBracketWinner(matchId, fullMatch);
+    }
     if (fullMatch && extras?.approvalStatus !== 'provisional') {
       this.triggerMatchNotification('result', fullMatch);
+    }
+  },
+
+  async advanceKnockoutBracketWinner(matchId: string, matchHint?: Match): Promise<void> {
+    try {
+      const allMatches = await this.getMatches();
+      let sourceMatch = allMatches.find(m => m.id === matchId) || matchHint;
+      if (!sourceMatch) return;
+      if (sourceMatch.status !== 'Completed' || sourceMatch.approvalStatus === 'provisional') return;
+
+      const s1 = Number(sourceMatch.score1 ?? sourceMatch.team1Score ?? 0);
+      const s2 = Number(sourceMatch.score2 ?? sourceMatch.team2Score ?? 0);
+      const p1 = sourceMatch.penalty1;
+      const p2 = sourceMatch.penalty2;
+
+      let winnerId = sourceMatch.winnerId;
+      if (!winnerId || isPlaceholderTeamId(winnerId)) {
+        if (s1 > s2) winnerId = sourceMatch.team1Id;
+        else if (s2 > s1) winnerId = sourceMatch.team2Id;
+        else if (p1 !== undefined && p2 !== undefined) {
+          if (p1 > p2) winnerId = sourceMatch.team1Id;
+          else if (p2 > p1) winnerId = sourceMatch.team2Id;
+        }
+      }
+
+      if (!winnerId || isPlaceholderTeamId(winnerId)) return;
+
+      let winnerName =
+        winnerId === sourceMatch.team1Id
+          ? (sourceMatch.team1Name || sourceMatch.team1SchoolName)
+          : winnerId === sourceMatch.team2Id
+          ? (sourceMatch.team2Name || sourceMatch.team2SchoolName)
+          : sourceMatch.winnerTeamName;
+
+      if (!winnerName || isPlaceholderTeamId(winnerName)) {
+        const schools = await this.getSchools().catch(() => []);
+        const foundSch = schools.find(s => s.id === winnerId);
+        if (foundSch?.name) winnerName = foundSch.name;
+      }
+
+      const dependents = allMatches.filter(m => {
+        if (m.id === sourceMatch!.id) return false;
+        const matchById = m.team1SourceMatchId === sourceMatch!.id || m.team2SourceMatchId === sourceMatch!.id;
+        const matchByNum =
+          Boolean(sourceMatch!.drawMatchNumber) &&
+          m.tournamentId === sourceMatch!.tournamentId &&
+          (m.team1SourceMatchNumber === sourceMatch!.drawMatchNumber ||
+            m.team2SourceMatchNumber === sourceMatch!.drawMatchNumber);
+        return matchById || matchByNum;
+      });
+
+      for (const dep of dependents) {
+        const patch: Partial<Match> = {};
+        if (
+          dep.team1SourceMatchId === sourceMatch.id ||
+          (sourceMatch.drawMatchNumber &&
+            dep.tournamentId === sourceMatch.tournamentId &&
+            dep.team1SourceMatchNumber === sourceMatch.drawMatchNumber)
+        ) {
+          patch.team1Id = winnerId;
+          if (winnerName) patch.team1Name = winnerName;
+        }
+        if (
+          dep.team2SourceMatchId === sourceMatch.id ||
+          (sourceMatch.drawMatchNumber &&
+            dep.tournamentId === sourceMatch.tournamentId &&
+            dep.team2SourceMatchNumber === sourceMatch.drawMatchNumber)
+        ) {
+          patch.team2Id = winnerId;
+          if (winnerName) patch.team2Name = winnerName;
+        }
+        if (Object.keys(patch).length > 0) {
+          await this.updateMatch(dep.id, patch);
+        }
+      }
+    } catch (err) {
+      console.warn('advanceKnockoutBracketWinner warning:', err);
     }
   },
 
@@ -2726,6 +3068,8 @@ export const DataService = {
     } catch (e) {
       console.warn("Match approval saved locally; Firestore sync pending:", e);
     }
+
+    await this.advanceKnockoutBracketWinner(matchId, approvedMatch || undefined);
 
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('matchesDataChanged'));
@@ -3128,7 +3472,7 @@ export const DataService = {
       const unsubscribe = onSnapshot(collection(db, 'matches'), (snap) => {
         const firestoreList = snap.docs
           .filter((d: any) => !isRecentlyDeleted('matches', d.id))
-          .map((d: any) => normalizeMatchRecord({ id: d.id, ...d.data() } as Match));
+          .map((d: any) => normalizeMatchRecord({ ...d.data(), id: d.id } as Match));
         const filtered = firestoreList.filter((m: Match) => m.id !== 'mat-1' && m.id !== 'mat-2' && m.id !== 'mat-3');
         const localPending = getLocal<Match>(STORAGE_KEYS.MATCHES, [])
           .filter(lm => lm && lm.id && isPendingWrite('matches', lm.id) && !isRecentlyDeleted('matches', lm.id))
@@ -6144,19 +6488,29 @@ export const DataService = {
     const effectiveDirId = (!activeDirId || activeDirId === 'all') ? 'taourirt' : activeDirId;
     const { allowedSportIds, sportId, tournamentId } = options;
 
+    const cachedSports = getLocal<Sport>('taourirt_sports_config', []);
+    const allowedSet = buildAllowedSportSet(allowedSportIds, cachedSports);
+
     // Enforce allowedSportIds guard when role is scoped (e.g. Technical Committee Head)
-    if (sportId && Array.isArray(allowedSportIds) && !allowedSportIds.includes(sportId)) {
+    if (sportId && allowedSet !== null && !isSportInAllowedSet(sportId, allowedSet, cachedSports)) {
       throw new Error('UNAUTHORIZED_SPORT_RESET');
     }
 
+    const allTourns = await this.getTournaments();
+    const tournamentSportMap = new Map<string, string>();
+    allTourns.forEach(t => {
+      if (t && t.id && t.sportId) {
+        tournamentSportMap.set(t.id, t.sportId);
+      }
+    });
+
     let targetTournamentObj: Tournament | undefined;
     if (tournamentId) {
-      const allTourns = await this.getTournaments();
       targetTournamentObj = allTourns.find(t => t.id === tournamentId);
       if (
         targetTournamentObj &&
-        Array.isArray(allowedSportIds) &&
-        !allowedSportIds.includes(targetTournamentObj.sportId)
+        allowedSet !== null &&
+        !isSportInAllowedSet(targetTournamentObj.sportId, allowedSet, cachedSports)
       ) {
         throw new Error('UNAUTHORIZED_SPORT_RESET');
       }
@@ -6166,17 +6520,14 @@ export const DataService = {
     const targetMatchIds = new Set<string>();
 
     matchesToInspect.forEach(m => {
-      if (Array.isArray(allowedSportIds) && !allowedSportIds.includes(m.sportId)) {
-        return;
-      }
-      if (sportId && m.sportId !== sportId) {
+      if (!doesMatchMatchSportScope(m, allowedSet, sportId, tournamentSportMap, cachedSports)) {
         return;
       }
       if (tournamentId) {
         const directMatch = m.tournamentId === tournamentId;
         const metaMatch =
           targetTournamentObj &&
-          m.sportId === targetTournamentObj.sportId &&
+          areSportIdsEquivalent(m.sportId, targetTournamentObj.sportId, cachedSports) &&
           normalizeCategoryKey(m.ageCategory) === normalizeCategoryKey(targetTournamentObj.ageCategory) &&
           (m.gender === targetTournamentObj.gender || targetTournamentObj.gender === 'Mixed') &&
           ((m as any).affiliationType || 'non_club') === (targetTournamentObj.affiliationType || 'non_club');
@@ -6188,6 +6539,10 @@ export const DataService = {
     });
 
     if (targetMatchIds.size > 0) {
+      const targetMatchMap = new Map<string, Match>();
+      matchesToInspect.forEach(m => {
+        if (targetMatchIds.has(m.id)) targetMatchMap.set(m.id, m);
+      });
       const allCached = getLocal<Match>(STORAGE_KEYS.MATCHES, []).map(normalizeMatchRecord);
       const updatedAll = allCached.map(m => {
         if (!targetMatchIds.has(m.id)) return m;
@@ -6197,6 +6552,16 @@ export const DataService = {
         cleaned.team1Score = 0;
         cleaned.team2Score = 0;
         cleaned.status = 'Scheduled';
+        if (cleaned.team1Placeholder || cleaned.team1SourceMatchNumber) {
+          const ph1 = cleaned.team1Placeholder || `الفائز من المباراة ${cleaned.team1SourceMatchNumber}`;
+          cleaned.team1Id = makePlaceholderTeamId(ph1);
+          cleaned.team1Name = ph1;
+        }
+        if (cleaned.team2Placeholder || cleaned.team2SourceMatchNumber) {
+          const ph2 = cleaned.team2Placeholder || `الفائز من المباراة ${cleaned.team2SourceMatchNumber}`;
+          cleaned.team2Id = makePlaceholderTeamId(ph2);
+          cleaned.team2Name = ph2;
+        }
         delete cleaned.penalty1;
         delete cleaned.penalty2;
         delete cleaned.team1Penalties;
@@ -6204,6 +6569,11 @@ export const DataService = {
         delete cleaned.winnerId;
         delete cleaned.scorers;
         delete cleaned.matchSheet;
+        delete cleaned.approvalStatus;
+        delete cleaned.approvedByName;
+        delete cleaned.approvedAt;
+        delete cleaned.recordedByName;
+        delete cleaned.recordedByRole;
         return cleaned as Match;
       });
       setLocal(STORAGE_KEYS.MATCHES, updatedAll);
@@ -6215,26 +6585,39 @@ export const DataService = {
           const chunk = idsArray.slice(i, i + 400);
           const batch = writeBatch(db);
           chunk.forEach(id => {
-            batch.set(
-              doc(db, 'matches', id),
-              {
-                id,
-                score1: 0,
-                score2: 0,
-                team1Score: 0,
-                team2Score: 0,
-                status: 'Scheduled',
-                penalty1: null,
-                penalty2: null,
-                team1Penalties: null,
-                team2Penalties: null,
-                winnerId: '',
-                scorers: '',
-                matchSheet: null,
-                updatedAt: serverTimestamp()
-              },
-              { merge: true }
-            );
+            const orig = targetMatchMap.get(id);
+            const resetPayload: any = {
+              id,
+              score1: 0,
+              score2: 0,
+              team1Score: 0,
+              team2Score: 0,
+              status: 'Scheduled',
+              penalty1: null,
+              penalty2: null,
+              team1Penalties: null,
+              team2Penalties: null,
+              winnerId: '',
+              scorers: '',
+              matchSheet: null,
+              approvalStatus: null,
+              approvedByName: '',
+              approvedAt: '',
+              recordedByName: '',
+              recordedByRole: '',
+              updatedAt: serverTimestamp()
+            };
+            if (orig && (orig.team1Placeholder || orig.team1SourceMatchNumber)) {
+              const ph1 = orig.team1Placeholder || `الفائز من المباراة ${orig.team1SourceMatchNumber}`;
+              resetPayload.team1Id = makePlaceholderTeamId(ph1);
+              resetPayload.team1Name = ph1;
+            }
+            if (orig && (orig.team2Placeholder || orig.team2SourceMatchNumber)) {
+              const ph2 = orig.team2Placeholder || `الفائز من المباراة ${orig.team2SourceMatchNumber}`;
+              resetPayload.team2Id = makePlaceholderTeamId(ph2);
+              resetPayload.team2Name = ph2;
+            }
+            batch.set(doc(db, 'matches', id), resetPayload, { merge: true });
           });
           try {
             await batch.commit();
@@ -6249,8 +6632,8 @@ export const DataService = {
     // Check if Cross Country results are within scope
     const effectiveSportIdForSpecial = targetTournamentObj?.sportId || sportId;
     const isCrossCountryInScope = effectiveSportIdForSpecial
-      ? effectiveSportIdForSpecial === 'cross_country'
-      : !Array.isArray(allowedSportIds) || allowedSportIds.includes('cross_country');
+      ? areSportIdsEquivalent(effectiveSportIdForSpecial, 'cross_country', cachedSports)
+      : allowedSet === null || isSportInAllowedSet('cross_country', allowedSet, cachedSports);
 
     let resetCrossCountry = false;
     if (isCrossCountryInScope) {
@@ -6308,8 +6691,8 @@ export const DataService = {
 
     // Check if Athletics results are within scope
     const isAthleticsInScope = effectiveSportIdForSpecial
-      ? effectiveSportIdForSpecial === 'athletics'
-      : !Array.isArray(allowedSportIds) || allowedSportIds.includes('athletics');
+      ? areSportIdsEquivalent(effectiveSportIdForSpecial, 'athletics', cachedSports)
+      : allowedSet === null || isSportInAllowedSet('athletics', allowedSet, cachedSports);
 
     let resetAthletics = false;
     if (isAthleticsInScope && !tournamentId) {
@@ -6367,40 +6750,54 @@ export const DataService = {
     sportId?: string;
     tournamentId?: string;
   } = {}): Promise<{ deletedMatchesCount: number }> {
+    const activeDirId = this.getActiveDirectorateId();
     const { allowedSportIds, sportId, tournamentId } = options;
 
-    if (sportId && Array.isArray(allowedSportIds) && !allowedSportIds.includes(sportId)) {
+    const cachedSports = getLocal<Sport>('taourirt_sports_config', []);
+    const allowedSet = buildAllowedSportSet(allowedSportIds, cachedSports);
+
+    if (sportId && allowedSet !== null && !isSportInAllowedSet(sportId, allowedSet, cachedSports)) {
       throw new Error('UNAUTHORIZED_SPORT_RESET');
     }
 
+    const allTourns = await this.getTournaments();
+    const tournamentSportMap = new Map<string, string>();
+    allTourns.forEach(t => {
+      if (t && t.id && t.sportId) {
+        tournamentSportMap.set(t.id, t.sportId);
+      }
+    });
+
     let targetTournamentObj: Tournament | undefined;
     if (tournamentId) {
-      const allTourns = await this.getTournaments();
       targetTournamentObj = allTourns.find(t => t.id === tournamentId);
       if (
         targetTournamentObj &&
-        Array.isArray(allowedSportIds) &&
-        !allowedSportIds.includes(targetTournamentObj.sportId)
+        allowedSet !== null &&
+        !isSportInAllowedSet(targetTournamentObj.sportId, allowedSet, cachedSports)
       ) {
         throw new Error('UNAUTHORIZED_SPORT_RESET');
       }
     }
 
-    const matchesToInspect = await this.getMatches();
+    const cloudMatches = await this.getMatches();
+    const localCachedInDir = getLocal<Match>(STORAGE_KEYS.MATCHES, [])
+      .map(normalizeMatchRecord)
+      .filter(m => !activeDirId || activeDirId === 'all' || (m.directorateId || 'taourirt') === activeDirId);
+    const matchesToInspect = deduplicateById([...cloudMatches, ...localCachedInDir]);
+
     const deleteIds = new Set<string>();
 
     matchesToInspect.forEach(m => {
-      if (Array.isArray(allowedSportIds) && !allowedSportIds.includes(m.sportId)) {
-        return;
-      }
-      if (sportId && m.sportId !== sportId) {
+      if (!m || !m.id) return;
+      if (!doesMatchMatchSportScope(m, allowedSet, sportId, tournamentSportMap, cachedSports)) {
         return;
       }
       if (tournamentId) {
         const directMatch = m.tournamentId === tournamentId;
         const metaMatch =
           targetTournamentObj &&
-          m.sportId === targetTournamentObj.sportId &&
+          areSportIdsEquivalent(m.sportId, targetTournamentObj.sportId, cachedSports) &&
           normalizeCategoryKey(m.ageCategory) === normalizeCategoryKey(targetTournamentObj.ageCategory) &&
           (m.gender === targetTournamentObj.gender || targetTournamentObj.gender === 'Mixed') &&
           ((m as any).affiliationType || 'non_club') === (targetTournamentObj.affiliationType || 'non_club');
@@ -6428,7 +6825,12 @@ export const DataService = {
           try {
             await batch.commit();
           } catch (e) {
-            console.warn('Matches cleared locally; Firestore batch delete pending:', e);
+            console.warn('Firestore batch delete failed, falling back to per-document delete:', e);
+            await Promise.allSettled(
+              chunk.map(id => deleteDoc(doc(db, 'matches', id)).catch(err => {
+                console.warn(`Failed to delete match ${id}:`, err);
+              }))
+            );
           }
         }
       }

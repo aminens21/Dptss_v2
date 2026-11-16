@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { Sport, Tournament, Match, School, Venue, Student, User, Referee } from '../types';
-import { DataService, isClubTournament, GENDER_MAP, SPORTS_MAP, getAgeCategoriesForSeason, normalizeCategoryKey, canUserApproveSportResult } from '../lib/dataService';
+import { DataService, isClubTournament, GENDER_MAP, SPORTS_MAP, getAgeCategoriesForSeason, normalizeCategoryKey, canUserApproveSportResult, areSportIdsEquivalent, normalizeCanonicalSportId } from '../lib/dataService';
+import { computeGroupStandings, formatTeamDisplayName, isPlaceholderTeamId, isKnockoutBracketMatch, ComputedGroupStandings } from '../lib/drawTournamentUtils';
 import { CrossCountryPodiumView } from './CrossCountryPodiumView';
 import { AthleticsResultsView } from './AthleticsResultsView';
 import { CrossCountryCategoryResult } from '../types';
@@ -154,15 +155,21 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
 
   const allowedSportsForUser = useMemo(() => {
     const set = new Set<string>();
-    userProfile?.techCommitteeSports?.forEach(id => id && set.add(id));
-    matchedTeacher?.techCommitteeSports?.forEach(id => id && set.add(id));
-    if (userProfile?.sportId) set.add(userProfile.sportId);
-    if (matchedTeacher?.sportId) set.add(matchedTeacher.sportId);
+    const addId = (raw?: string) => {
+      if (!raw) return;
+      set.add(raw);
+      const norm = normalizeCanonicalSportId(raw);
+      if (norm) set.add(norm);
+    };
+    userProfile?.techCommitteeSports?.forEach(addId);
+    matchedTeacher?.techCommitteeSports?.forEach(addId);
+    addId(userProfile?.sportId);
+    addId(matchedTeacher?.sportId);
     tournaments.forEach(t => {
       const emailMatch = t.managerEmail && userProfile?.email && t.managerEmail.toLowerCase() === userProfile.email.toLowerCase();
       const nameMatch = t.managerName && userProfile?.fullName && t.managerName.trim() === userProfile.fullName.trim();
       if ((emailMatch || nameMatch) && t.sportId) {
-        set.add(t.sportId);
+        addId(t.sportId);
       }
     });
     return Array.from(set);
@@ -176,7 +183,7 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
   const canManage = isCentralAdmin
     ? true
     : (isTechHead || isSportManager)
-      ? (sport ? allowedSportsForUser.includes(sport.id) : false)
+      ? (sport ? allowedSportsForUser.some(id => areSportIdsEquivalent(id, sport.id)) : false)
       : canDo('action:edit_results') && userProfile?.role !== 'REFEREE';
 
   const isUserAssignedReferee = (m: Match): boolean => {
@@ -355,8 +362,8 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
       // Search query
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
-        const t1 = schools.find(s => s.id === m.team1Id)?.name || m.team1Id || '';
-        const t2 = schools.find(s => s.id === m.team2Id)?.name || m.team2Id || '';
+        const t1 = formatTeamDisplayName(m.team1Id, m.team1Name, schools);
+        const t2 = formatTeamDisplayName(m.team2Id, m.team2Name, schools);
         const v = venues.find(v => v.id === m.venueId)?.name || '';
         const stage = m.stage || '';
         const matchStr = `${t1} ${t2} ${v} ${stage}`.toLowerCase();
@@ -366,6 +373,46 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
       return true;
     });
   }, [sportMatches, selectedAffiliation, selectedCategory, selectedGender, statusFilter, searchQuery, schools, venues, tournaments]);
+
+  // Matches for standings & knockout bracket in current branch + category + gender (ignores statusFilter)
+  const branchStandingsBuckets = useMemo(() => {
+    const scoped = sportMatches.filter(m => {
+      if (getMatchAffiliation(m) !== selectedAffiliation) return false;
+      if (selectedCategory !== 'ALL') {
+        const mCat = (m.ageCategory || '').toLowerCase();
+        const selCat = selectedCategory.toLowerCase();
+        if (mCat !== selCat && !mCat.includes(selCat) && !selCat.includes(mCat)) return false;
+      }
+      if (selectedGender !== 'ALL' && m.gender !== selectedGender) return false;
+      return true;
+    });
+
+    const buckets = new Map<string, { label: string; matches: Match[] }>();
+    scoped.forEach(m => {
+      const catKey = normalizeCategoryKey(m.ageCategory || '') || 'عام';
+      const genKey = m.gender || 'Mixed';
+      const key = `${catKey}__${genKey}`;
+      const catLabel = seasonalCategories.find(c => c.id === catKey)?.name || m.ageCategory || '';
+      const genLabel = genKey && GENDER_MAP[genKey] ? GENDER_MAP[genKey].name : '';
+      const label = [catLabel, genLabel].filter(Boolean).join(' — ');
+      const existing = buckets.get(key) || { label, matches: [] };
+      existing.matches.push(m);
+      buckets.set(key, existing);
+    });
+
+    return Array.from(buckets.entries()).map(([key, bucket]) => {
+      const standings: ComputedGroupStandings[] = computeGroupStandings(bucket.matches, schools);
+      const knockoutMatches = bucket.matches
+        .filter(isKnockoutBracketMatch)
+        .sort((a, b) => (a.drawMatchNumber || 999) - (b.drawMatchNumber || 999));
+      return {
+        key,
+        label: bucket.label,
+        standings,
+        knockoutMatches
+      };
+    }).filter(b => b.standings.length > 0 || b.knockoutMatches.length > 0);
+  }, [sportMatches, selectedAffiliation, selectedCategory, selectedGender, schools, seasonalCategories, tournaments]);
 
   // Determine branch card visibility based on existing matches or tournaments
   const hasNonClub = useMemo(() => {
@@ -404,9 +451,8 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
 
   if (!isOpen || !sport) return null;
 
-  const getSchoolName = (id: string) => {
-    const s = schools.find(sch => sch.id === id);
-    return s ? s.name : id || 'غير محدد';
+  const getSchoolName = (id: string, fallbackName?: string) => {
+    return formatTeamDisplayName(id, fallbackName, schools);
   };
 
   const getVenueName = (id: string, fallbackName?: string, hostSchoolId?: string) => {
@@ -917,6 +963,179 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
                         </div>
                       </div>
 
+                      {/* GROUP STANDINGS (3/1/0) & KNOCKOUT BRACKET TREE */}
+                      {branchStandingsBuckets.length > 0 && (
+                        <div className="space-y-4">
+                          {branchStandingsBuckets.map(bucket => (
+                            <div key={bucket.key} className="space-y-4">
+                              {/* 1. Group Standings Tables (ذهاب فقط / ذهاب وإياب) */}
+                              {bucket.standings.length > 0 && (
+                                <div className="bg-white rounded-2xl border border-slate-200 shadow-2xs overflow-hidden">
+                                  <div className="px-4 py-3 bg-gradient-to-l from-slate-900 via-blue-950 to-slate-900 text-white flex flex-wrap items-center justify-between gap-2">
+                                    <div className="flex items-center gap-2">
+                                      <Trophy className="w-4 h-4 text-amber-400" />
+                                      <span className="text-xs font-black">
+                                        الترتيب والنقط {bucket.label ? `— ${bucket.label}` : ''}
+                                      </span>
+                                    </div>
+                                    <div className="flex flex-wrap items-center gap-1.5 text-[10px] font-bold">
+                                      <span className="px-2 py-0.5 rounded-full bg-white/15 border border-white/20">
+                                        {bucket.standings[0]?.systemLabel}
+                                      </span>
+                                      <span className="px-2 py-0.5 rounded-full bg-emerald-500/25 border border-emerald-400/30 text-emerald-200">
+                                        فوز: 3ن • تعادل: 1ن • هزيمة: 0ن
+                                      </span>
+                                    </div>
+                                  </div>
+
+                                  <div className="p-3 sm:p-4 grid grid-cols-1 xl:grid-cols-2 gap-4">
+                                    {bucket.standings.map(grp => (
+                                      <div key={grp.groupName} className="rounded-xl border border-slate-200 overflow-hidden bg-slate-50/40">
+                                        <div className="px-3 py-2 bg-slate-100 border-b border-slate-200 flex items-center justify-between text-xs">
+                                          <span className="font-black text-slate-800">{grp.groupName}</span>
+                                          <span className="text-[10px] font-bold text-slate-500">
+                                            {grp.completedMatches}/{grp.totalMatches} مباريات مصادق عليها
+                                          </span>
+                                        </div>
+                                        <div className="overflow-x-auto">
+                                          <table className="w-full text-[11px] text-right">
+                                            <thead className="bg-white border-b border-slate-200 text-slate-500 font-black">
+                                              <tr>
+                                                <th className="py-2 px-2 text-center w-8">#</th>
+                                                <th className="py-2 px-2">المؤسسة</th>
+                                                <th className="py-2 px-1.5 text-center">ل</th>
+                                                <th className="py-2 px-1.5 text-center">ف</th>
+                                                <th className="py-2 px-1.5 text-center">ت</th>
+                                                <th className="py-2 px-1.5 text-center">هـ</th>
+                                                <th className="py-2 px-1.5 text-center">له</th>
+                                                <th className="py-2 px-1.5 text-center">عليه</th>
+                                                <th className="py-2 px-1.5 text-center">+/-</th>
+                                                <th className="py-2 px-2 text-center text-blue-800">النقط</th>
+                                              </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-slate-100 bg-white">
+                                              {grp.rows.map(row => (
+                                                <tr
+                                                  key={row.teamId}
+                                                  className={cn(
+                                                    row.rank === 1 && grp.completedMatches > 0 ? 'bg-emerald-50/60' : ''
+                                                  )}
+                                                >
+                                                  <td className="py-2 px-2 text-center font-black">
+                                                    <span
+                                                      className={cn(
+                                                        'inline-flex items-center justify-center w-5 h-5 rounded-full text-[10px]',
+                                                        row.rank === 1 && grp.completedMatches > 0
+                                                          ? 'bg-emerald-600 text-white'
+                                                          : 'bg-slate-100 text-slate-700'
+                                                      )}
+                                                    >
+                                                      {row.rank}
+                                                    </span>
+                                                  </td>
+                                                  <td className="py-2 px-2 font-bold text-slate-800">
+                                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                                      <span>{row.teamName}</span>
+                                                      {row.rank === 1 && grp.completedMatches > 0 && (
+                                                        <span className="text-[9px] font-black px-1.5 py-0.2 rounded bg-emerald-100 text-emerald-800 border border-emerald-200">
+                                                          متصدر
+                                                        </span>
+                                                      )}
+                                                      {row.hasExactTieWithPrev && (
+                                                        <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-amber-100 text-amber-800">
+                                                          تعادل تام
+                                                        </span>
+                                                      )}
+                                                    </div>
+                                                  </td>
+                                                  <td className="py-2 px-1.5 text-center font-mono">{row.played}</td>
+                                                  <td className="py-2 px-1.5 text-center font-mono text-emerald-700 font-bold">{row.won}</td>
+                                                  <td className="py-2 px-1.5 text-center font-mono text-amber-700">{row.drawn}</td>
+                                                  <td className="py-2 px-1.5 text-center font-mono text-rose-600">{row.lost}</td>
+                                                  <td className="py-2 px-1.5 text-center font-mono">{row.gf}</td>
+                                                  <td className="py-2 px-1.5 text-center font-mono">{row.ga}</td>
+                                                  <td className="py-2 px-1.5 text-center font-mono font-bold" dir="ltr">
+                                                    {row.gd > 0 ? `+${row.gd}` : row.gd}
+                                                  </td>
+                                                  <td className="py-2 px-2 text-center font-mono font-black text-blue-800 bg-blue-50/50">
+                                                    {row.points}
+                                                  </td>
+                                                </tr>
+                                              ))}
+                                            </tbody>
+                                          </table>
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+
+                              {/* 2. Knockout Bracket Tree Overview (نظام المجموعات إقصاء مباشر) */}
+                              {bucket.knockoutMatches.length > 0 && (
+                                <div className="bg-white rounded-2xl border border-indigo-200 shadow-2xs overflow-hidden">
+                                  <div className="px-4 py-3 bg-gradient-to-l from-indigo-900 via-slate-900 to-indigo-950 text-white flex flex-wrap items-center justify-between gap-2">
+                                    <div className="flex items-center gap-2">
+                                      <Award className="w-4 h-4 text-amber-400" />
+                                      <span className="text-xs font-black">
+                                        شجرة ومواجهات الإقصاء المباشر {bucket.label ? `— ${bucket.label}` : ''}
+                                      </span>
+                                    </div>
+                                    <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-white/15 border border-white/20">
+                                      الترقية التلقائية للفائزين نحو النهائي
+                                    </span>
+                                  </div>
+
+                                  <div className="p-3 sm:p-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                                    {bucket.knockoutMatches.map((km, kIdx) => {
+                                      const kt1 = getSchoolName(km.team1Id, km.team1Name);
+                                      const kt2 = getSchoolName(km.team2Id, km.team2Name);
+                                      const kComp = km.status === 'Completed' && km.approvalStatus !== 'provisional';
+                                      const ks1 = km.score1 ?? km.team1Score ?? 0;
+                                      const ks2 = km.score2 ?? km.team2Score ?? 0;
+                                      const kW1 = kComp && (km.winnerId === km.team1Id || ks1 > ks2 || (ks1 === ks2 && (km.penalty1 ?? 0) > (km.penalty2 ?? 0)));
+                                      const kW2 = kComp && (km.winnerId === km.team2Id || ks2 > ks1 || (ks1 === ks2 && (km.penalty2 ?? 0) > (km.penalty1 ?? 0)));
+
+                                      return (
+                                        <div key={km.id} className="rounded-xl border border-slate-200 bg-slate-50/70 p-2.5 space-y-2">
+                                          <div className="flex items-center justify-between gap-1 text-[10px] font-black">
+                                            <span className="px-2 py-0.5 rounded bg-indigo-100 text-indigo-900">
+                                              {km.stage || `المباراة ${km.drawMatchNumber || kIdx + 1}`}
+                                            </span>
+                                            <span className={cn(
+                                              'px-1.5 py-0.5 rounded-full text-[9px]',
+                                              kComp ? 'bg-emerald-100 text-emerald-800' : 'bg-white text-slate-500 border border-slate-200'
+                                            )}>
+                                              {kComp ? '✅ حُسمت' : '⏳ مبرمجة'}
+                                            </span>
+                                          </div>
+                                          <div className="space-y-1 text-[11px] font-bold">
+                                            <div className={cn(
+                                              'flex items-center justify-between px-2 py-1 rounded-lg border',
+                                              kW1 ? 'bg-emerald-50 border-emerald-300 text-emerald-950 font-black' : 'bg-white border-slate-200 text-slate-800'
+                                            )}>
+                                              <span className="truncate">{kt1}</span>
+                                              <span className="font-mono">{km.status === 'Completed' || km.status === 'Ongoing' ? ks1 : '—'}</span>
+                                            </div>
+                                            <div className={cn(
+                                              'flex items-center justify-between px-2 py-1 rounded-lg border',
+                                              kW2 ? 'bg-emerald-50 border-emerald-300 text-emerald-950 font-black' : 'bg-white border-slate-200 text-slate-800'
+                                            )}>
+                                              <span className="truncate">{kt2}</span>
+                                              <span className="font-mono">{km.status === 'Completed' || km.status === 'Ongoing' ? ks2 : '—'}</span>
+                                            </div>
+                                          </div>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
                       {/* MATCHES LIST / GRID */}
                       <div className="space-y-3">
                         <div className="flex items-center justify-between">
@@ -954,8 +1173,9 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
                         ) : (
                           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                             {activeBranchMatches.map((m) => {
-                              const t1Name = getSchoolName(m.team1Id);
-                              const t2Name = getSchoolName(m.team2Id);
+                              const t1Name = getSchoolName(m.team1Id, m.team1Name);
+                              const t2Name = getSchoolName(m.team2Id, m.team2Name);
+                              const hasPendingSlot = isPlaceholderTeamId(m.team1Id) || isPlaceholderTeamId(m.team2Id);
                               const vName = getVenueName(m.venueId, m.venueName, m.hostSchoolId);
                               const hostSchoolObj = resolveHostSchoolForMatch(m, schools);
                               const rawRefs = [
@@ -1411,12 +1631,21 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
                                       <div className="flex items-center gap-1 shrink-0 self-end sm:self-center">
                                         <button
                                           type="button"
+                                          disabled={hasPendingSlot}
                                           onClick={() => onEditScore(m)}
-                                          className="px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-[9px] font-black transition-all cursor-pointer flex items-center gap-1 shadow-3xs"
+                                          title={hasPendingSlot ? 'بانتظار حسم المباراة السابقة لتحديد المتأهل' : 'تسجيل أو تعديل النتيجة'}
+                                          className={cn(
+                                            "px-2.5 py-1 rounded-lg text-[9px] font-black transition-all flex items-center gap-1 shadow-3xs",
+                                            hasPendingSlot
+                                              ? "bg-slate-200 text-slate-500 cursor-not-allowed"
+                                              : "bg-blue-600 hover:bg-blue-700 text-white cursor-pointer"
+                                          )}
                                         >
                                           <Edit3 className="w-2.5 h-2.5" />
                                           <span>
-                                            {isCompleted && m.approvalStatus === 'provisional'
+                                            {hasPendingSlot
+                                              ? 'بانتظار المتأهل'
+                                              : isCompleted && m.approvalStatus === 'provisional'
                                               ? 'مراجعة ومصادقة النتيجة'
                                               : isCompleted
                                               ? 'تعديل النتيجة'
@@ -1433,7 +1662,7 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
                                           <Pencil className="w-3 h-3" />
                                         </button>
 
-                                        {isCentralAdmin && (
+                                        {(isCentralAdmin || canManage || canApproveThisSport) && (
                                           <button
                                             type="button"
                                             onClick={() => onDeleteMatch(m)}

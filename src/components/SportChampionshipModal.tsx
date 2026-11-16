@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { Tournament, Student, School, User, Sport, Match } from '../types';
-import { SPORTS_MAP, getAgeCategoriesForSeason, normalizeCategoryKey, DataService, getCategoryYearsLabel, isTeacherLevelAllowedForTournament, getTournamentLevelAr, doesConfirmationMatchBranch, getEffectiveConfirmedBranches, formatBranchLabelAr, isSchoolSectorAllowedForTournament, getTournamentEducationSectorsAr, getSchoolEducationSector, resolveSchoolCoach, schoolNamesMatch, normalizeArabicSearch, normalizeArabicMatchText } from '../lib/dataService';
+import { SPORTS_MAP, getAgeCategoriesForSeason, normalizeCategoryKey, DataService, getCategoryYearsLabel, isTeacherLevelAllowedForTournament, getTournamentLevelAr, doesConfirmationMatchBranch, getEffectiveConfirmedBranches, formatBranchLabelAr, isSchoolSectorAllowedForTournament, getTournamentEducationSectorsAr, getSchoolEducationSector, resolveSchoolCoach, schoolNamesMatch, normalizeArabicSearch, normalizeArabicMatchText, normalizeTournamentAffiliation } from '../lib/dataService';
 import { useAuth, isSuperAdminEmail } from '../contexts/AuthContext';
 import { AppLogo } from './AppLogo';
 import { CountdownTimer } from './CountdownTimer';
@@ -573,10 +573,25 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
       : seasonalCategories.map(c => c.id);
   }, [sport, seasonalCategories]);
 
-  // Tournaments strictly belonging to the active classification branch (no phantom virtual tournaments)
+  // Tournaments strictly belonging to the active classification branch (semantically deduplicated so no duplicate branch appears for same gender & category)
   const displayBranchTournaments = useMemo(() => {
     if (!activeBranchModal || !sport) return [];
-    return sportTournaments.filter(t => (t.affiliationType || 'non_club') === activeBranchModal);
+    const seenKeys = new Map<string, Tournament>();
+    sportTournaments.forEach(t => {
+      const aff = normalizeTournamentAffiliation(t.affiliationType, t.name);
+      if (aff !== activeBranchModal) return;
+      const key = `${normalizeCategoryKey(t.ageCategory)}__${t.gender || 'Mixed'}__${aff}`;
+      const existing = seenKeys.get(key);
+      if (!existing) {
+        seenKeys.set(key, t);
+        return;
+      }
+      // Prefer non-mock IDs over mock tourn-* IDs
+      if (existing.id.startsWith('tourn-') && !t.id.startsWith('tourn-')) {
+        seenKeys.set(key, t);
+      }
+    });
+    return Array.from(seenKeys.values());
   }, [sportTournaments, activeBranchModal, sport]);
 
   // If all tournaments inside the open branch were deleted, exit the branch view cleanly
@@ -640,15 +655,15 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
   }, [tournaments, isTeacherRole, canManage, userProfile?.teachingCadre, teacherSchoolObj]);
 
   const hasNonClubTournaments = useMemo(() => {
-    return sportTournaments.some(t => (t.affiliationType || 'non_club') === 'non_club');
+    return sportTournaments.some(t => normalizeTournamentAffiliation(t.affiliationType, t.name) === 'non_club');
   }, [sportTournaments]);
 
   const hasClubTournaments = useMemo(() => {
-    return sportTournaments.some(t => t.affiliationType === 'club_affiliated');
+    return sportTournaments.some(t => normalizeTournamentAffiliation(t.affiliationType, t.name) === 'club_affiliated');
   }, [sportTournaments]);
 
   const hasOpenTournaments = useMemo(() => {
-    return sportTournaments.some(t => t.affiliationType === 'open' || (t.name && (t.name.includes('مفتوحة') || t.name.includes('المفتوحة'))));
+    return sportTournaments.some(t => normalizeTournamentAffiliation(t.affiliationType, t.name) === 'open');
   }, [sportTournaments]);
 
   // Set default category on open or when sport changes + auto guard for teacher cadre/sector

@@ -30,10 +30,12 @@ import {
   Volleyball,
   Award,
   MessageCircle,
-  Share2
+  Share2,
+  Undo2
 } from 'lucide-react';
-import { Tournament, School, Team, Match, User, Venue, Sport, Referee, SchoolTournamentConfirmation, BlockedSchedulePeriod } from '../types';
-import { DataService, SPORTS_MAP, GENDER_MAP, deduplicateById, normalizeCategoryKey, getCustomCategoryName, doesConfirmationMatchBranch, EDUCATIONAL_CYCLE_LABELS, getMatchEducationalCycles, findBlockedPeriodForDate, normalizeArabicSearch, normalizeDateToYmd, schoolNamesMatch } from '../lib/dataService';
+import { Tournament, School, Team, Match, User, Venue, Sport, Referee, SchoolTournamentConfirmation, BlockedSchedulePeriod, DrawSystemType } from '../types';
+import { DataService, SPORTS_MAP, GENDER_MAP, deduplicateById, normalizeCategoryKey, getCustomCategoryName, doesConfirmationMatchBranch, EDUCATIONAL_CYCLE_LABELS, getMatchEducationalCycles, findBlockedPeriodForDate, normalizeArabicSearch, normalizeDateToYmd, schoolNamesMatch, normalizeTournamentAffiliation } from '../lib/dataService';
+import { generateRoundRobinDrawMatches, generateKnockoutGroupsDrawMatches, isPlaceholderTeamId } from '../lib/drawTournamentUtils';
 import { isSuperAdminEmail } from '../contexts/AuthContext';
 import {
   resolveHostSchoolForMatch,
@@ -55,10 +57,20 @@ export interface GeneratedDrawMatch {
   id: string;
   stage: string;
   groupName?: string;
+  drawSystem?: DrawSystemType;
+  drawMatchNumber?: number;
+  roundIndex?: number;
+  leg?: 'first' | 'second';
   team1Id: string;
   team1Name: string;
   team2Id: string;
   team2Name: string;
+  team1SourceTempId?: string;
+  team2SourceTempId?: string;
+  team1SourceMatchNumber?: number;
+  team2SourceMatchNumber?: number;
+  team1Placeholder?: string;
+  team2Placeholder?: string;
   date: string;
   time: string;
   venueId: string;
@@ -190,15 +202,36 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
   const [groupAssignments, setGroupAssignments] = useState<Record<string, number | 'AUTO'>>({});
   const [customTeamNames, setCustomTeamNames] = useState<string[]>([]);
   const [newTeamInput, setNewTeamInput] = useState<string>('');
-  const [drawSystem, setDrawSystem] = useState<'groups' | 'knockout'>('groups');
+  const [drawSystem, setDrawSystem] = useState<DrawSystemType>('groups_home_away');
   const [groupsCount, setGroupsCount] = useState<number>(2);
   const [schoolSearchQuery, setSchoolSearchQuery] = useState<string>('');
 
   // Step 3: Draw Result & Scheduled Matches with Referees
   const [isDrawing, setIsDrawing] = useState<boolean>(false);
   const [drawnGroups, setDrawnGroups] = useState<{ groupName: string; teams: { id: string; name: string }[] }[]>([]);
+  const [byeTeams, setByeTeams] = useState<{ groupName: string; teamName: string }[]>([]);
   const [generatedMatches, setGeneratedMatches] = useState<GeneratedDrawMatch[]>([]);
+  const [matchHistory, setMatchHistory] = useState<GeneratedDrawMatch[][]>([]);
+  const [savedMatchIds, setSavedMatchIds] = useState<string[]>([]);
+  const [isRevertingSave, setIsRevertingSave] = useState<boolean>(false);
   const [isSaving, setIsSaving] = useState<boolean>(false);
+
+  // Step 3 Search & Manual Match Builder state
+  const [step3SchoolSearchQuery, setStep3SchoolSearchQuery] = useState<string>('');
+  const [bulkHostSchoolSearch, setBulkHostSchoolSearch] = useState<string>('');
+  const [hostSchoolSearchByMatchId, setHostSchoolSearchByMatchId] = useState<Record<string, string>>({});
+  const [showManualBuilder, setShowManualBuilder] = useState<boolean>(false);
+  const [manualIncludeAllSchools, setManualIncludeAllSchools] = useState<boolean>(false);
+  const [manualTeam1Id, setManualTeam1Id] = useState<string>('');
+  const [manualTeam2Id, setManualTeam2Id] = useState<string>('');
+  const [manualStage, setManualStage] = useState<string>('دور المجموعات');
+  const [manualGroupName, setManualGroupName] = useState<string>('');
+  const [manualDate, setManualDate] = useState<string>(new Date().toISOString().slice(0, 10));
+  const [manualTime, setManualTime] = useState<string>('10:00');
+  const [manualVenueMode, setManualVenueMode] = useState<'school' | 'custom'>('school');
+  const [manualHostSchoolId, setManualHostSchoolId] = useState<string>('');
+  const [manualVenueName, setManualVenueName] = useState<string>('');
+  const [manualHostSchoolSearch, setManualHostSchoolSearch] = useState<string>('');
 
   // Batch edit helpers
   const [bulkDate, setBulkDate] = useState<string>(new Date().toISOString().slice(0, 10));
@@ -489,9 +522,9 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
     }
   }, [availableAgeCategories, selectedAgeCategoryFilter]);
 
-  // Filter Tournaments based on User Role, Team Sports, Sport, Category & Gender
+  // Filter Tournaments based on User Role, Team Sports, Sport, Category & Gender (+ semantic branch deduplication)
   const filteredTournaments = useMemo(() => {
-    return tournaments.filter(t => {
+    const filtered = tournaments.filter(t => {
       // 1. Role-Based Permission Filter
       if (userSportRestriction && userSportRestriction.length > 0) {
         if (!userSportRestriction.includes(t.sportId)) {
@@ -561,6 +594,22 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
 
       return true;
     });
+
+    // Guarantee unique branch per (sportId, ageCategory, gender, affiliationType)
+    const dedupMap = new Map<string, Tournament>();
+    filtered.forEach(t => {
+      const aff = normalizeTournamentAffiliation(t.affiliationType, t.name);
+      const key = `${t.sportId}__${normalizeCategoryKey(t.ageCategory || '')}__${t.gender || 'Mixed'}__${aff}`;
+      const existing = dedupMap.get(key);
+      if (!existing) {
+        dedupMap.set(key, t);
+        return;
+      }
+      if (existing.id.startsWith('tourn-') && !t.id.startsWith('tourn-')) {
+        dedupMap.set(key, t);
+      }
+    });
+    return Array.from(dedupMap.values());
   }, [
     tournaments,
     sportsConfig,
@@ -833,6 +882,131 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
     toast.success('تمت إعادة الضبط: سيتم توزيع الفرق المتبقية وسحب القرعة آلياً');
   };
 
+  // Push current generatedMatches snapshot to undo stack
+  const pushMatchHistorySnapshot = (snapshot: GeneratedDrawMatch[]) => {
+    setMatchHistory(prev => [...prev.slice(-19), snapshot.map(m => ({ ...m }))]);
+  };
+
+  const handleUndoStep3Edit = () => {
+    if (matchHistory.length === 0) return;
+    const previous = matchHistory[matchHistory.length - 1];
+    setGeneratedMatches(previous);
+    setMatchHistory(prev => prev.slice(0, -1));
+    toast.success('تم التراجع عن آخر تعديل في جدول المباريات');
+  };
+
+  // Enter Manual Programming directly from Step 2 (using branch participating teams)
+  const handleEnterManualProgramming = () => {
+    setMatchHistory([]);
+    setSavedMatchIds([]);
+    setByeTeams([]);
+    if (allDrawTeams.length > 0) {
+      setDrawnGroups([
+        {
+          groupName: 'الفرق المشاركة في الفرع (برمجة يدوية)',
+          teams: [...allDrawTeams]
+        }
+      ]);
+      setManualTeam1Id(allDrawTeams[0]?.id || '');
+      setManualTeam2Id(allDrawTeams[1]?.id || '');
+    } else {
+      setDrawnGroups([]);
+      setManualTeam1Id('');
+      setManualTeam2Id('');
+    }
+    setGeneratedMatches([]);
+    setShowManualBuilder(true);
+    setStep3SchoolSearchQuery('');
+    setStep(3);
+    toast.success('تم الانتقال إلى البرمجة اليدوية للمباريات انطلاقاً من الفرق المشاركة في الفرع');
+  };
+
+  // Team pool available for manual programming (participating branch teams by default, or all directorate schools)
+  const manualAvailableTeams = useMemo(() => {
+    const base = [...allDrawTeams];
+    if (!manualIncludeAllSchools) return base;
+    const seenIds = new Set(base.map(t => t.id));
+    schools.forEach(s => {
+      if (!seenIds.has(s.id)) {
+        seenIds.add(s.id);
+        base.push({ id: s.id, name: s.name, schoolName: s.name });
+      }
+    });
+    return base;
+  }, [allDrawTeams, manualIncludeAllSchools, schools]);
+
+  // Add a single manually programmed match in Step 3
+  const handleAddManualMatch = () => {
+    if (!manualTeam1Id || !manualTeam2Id) {
+      toast.error('يرجى اختيار الفريق الأول والفريق الثاني');
+      return;
+    }
+    if (manualTeam1Id === manualTeam2Id) {
+      toast.error('لا يمكن برمجة مباراة بين نفس المؤسسة!');
+      return;
+    }
+    const t1 = manualAvailableTeams.find(t => t.id === manualTeam1Id);
+    const t2 = manualAvailableTeams.find(t => t.id === manualTeam2Id);
+    if (!t1 || !t2) {
+      toast.error('تعذر العثور على بيانات أحد الفريقين المختارين');
+      return;
+    }
+
+    const selectedHost = manualVenueMode === 'school'
+      ? schools.find(s => s.id === manualHostSchoolId) || schools.find(s => s.id === t1.id)
+      : undefined;
+    const defaultRef = sportSpecializedReferees[0] || combinedRefereesList[0] || null;
+    const initialRefIds = defaultRef ? [defaultRef.id] : [];
+    const initialRefNames = defaultRef ? [defaultRef.fullName || defaultRef.name] : [];
+
+    const newMatch: GeneratedDrawMatch = {
+      id: `manual-match-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      stage: manualStage.trim() || 'مباراة مبرمجة يدوياً',
+      groupName: manualGroupName.trim() || undefined,
+      team1Id: t1.id,
+      team1Name: t1.name,
+      team2Id: t2.id,
+      team2Name: t2.name,
+      date: manualDate || new Date().toISOString().slice(0, 10),
+      time: manualTime || '10:00',
+      venueMode: manualVenueMode === 'custom' ? 'custom' : (selectedHost ? 'school' : 'custom'),
+      hostSchoolId: manualVenueMode === 'school' && selectedHost ? selectedHost.id : '',
+      venueId: manualVenueMode === 'school' && selectedHost ? selectedHost.id : (venues[0]?.id || 'custom'),
+      venueName:
+        manualVenueMode === 'custom'
+          ? (manualVenueName.trim() || venues[0]?.name || 'القاعة المغطاة')
+          : (selectedHost?.name || venues[0]?.name || 'القاعة المغطاة'),
+      refereeId: defaultRef?.id,
+      refereeName: defaultRef?.name,
+      refereeIds: initialRefIds,
+      refereeNames: initialRefNames
+    };
+
+    pushMatchHistorySnapshot(generatedMatches);
+    setGeneratedMatches(prev => [...prev, newMatch]);
+    setManualTeam1Id('');
+    setManualTeam2Id('');
+    toast.success(`تمت إضافة المباراة: ${t1.name} ضد ${t2.name}`);
+  };
+
+  const handleDeleteGeneratedMatch = (matchId: string) => {
+    pushMatchHistorySnapshot(generatedMatches);
+    setGeneratedMatches(prev => prev.filter(m => m.id !== matchId));
+    toast.success('تم حذف المباراة من الجدول (يمكنك التراجع من زر التراجع)');
+  };
+
+  // Step 3 school search filtered matches
+  const displayedGeneratedMatches = useMemo(() => {
+    const q = normalizeArabicSearch(step3SchoolSearchQuery.trim());
+    if (!q) return generatedMatches;
+    return generatedMatches.filter(m =>
+      normalizeArabicSearch(m.team1Name || '').includes(q) ||
+      normalizeArabicSearch(m.team2Name || '').includes(q) ||
+      normalizeArabicSearch(m.venueName || '').includes(q) ||
+      normalizeArabicSearch(m.stage || '').includes(q)
+    );
+  }, [generatedMatches, step3SchoolSearchQuery]);
+
   // Execute Electronic Draw (سحب القرعة آلياً)
   const handleExecuteDraw = () => {
     if (allDrawTeams.length < 2) {
@@ -843,26 +1017,36 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
     setIsDrawing(true);
 
     setTimeout(() => {
-      // Shuffle array randomly
-      const shuffled = [...allDrawTeams].sort(() => Math.random() - 0.5);
+      const alphabet = ['المجموعة أ (Groupe A)', 'المجموعة ب (Groupe B)', 'المجموعة ج (Groupe C)', 'المجموعة د (Groupe D)'];
+      const effectiveGroupCount = drawSystem === 'knockout_groups'
+        ? Math.min(Math.max(1, groupsCount), allDrawTeams.length)
+        : Math.min(Math.max(2, groupsCount), allDrawTeams.length);
 
-      if (drawSystem === 'groups') {
-        const alphabet = ['المجموعة أ (Groupe A)', 'المجموعة ب (Groupe B)', 'المجموعة ج (Groupe C)', 'المجموعة د (Groupe D)'];
-        const numGroups = Math.min(groupsCount, allDrawTeams.length);
-        const groups: { groupName: string; teams: { id: string; name: string }[] }[] = [];
+      const defaultVenue = venues[0]?.name || 'القاعة المغطاة';
+      const defaultDate = new Date().toISOString().slice(0, 10);
+      const defaultRef = sportSpecializedReferees[0] || (combinedRefereesList[0] || null);
+      const initialRefIds = defaultRef ? [defaultRef.id] : [];
+      const initialRefNames = defaultRef ? [defaultRef.fullName || defaultRef.name] : [];
 
-        for (let i = 0; i < numGroups; i++) {
-          groups.push({
-            groupName: alphabet[i] || `المجموعة ${i + 1}`,
-            teams: []
-          });
-        }
+      const groups: { groupName: string; teams: { id: string; name: string }[] }[] = [];
+      for (let i = 0; i < effectiveGroupCount; i++) {
+        groups.push({
+          groupName:
+            drawSystem === 'knockout_groups' && effectiveGroupCount === 1
+              ? 'مسار الإقصاء المباشر'
+              : (alphabet[i] || `المجموعة ${i + 1}`),
+          teams: []
+        });
+      }
 
+      if (effectiveGroupCount === 1) {
+        groups[0].teams = [...allDrawTeams].sort(() => Math.random() - 0.5);
+      } else {
         // 1. Place teams explicitly assigned to specific groups
         const unassignedTeams: typeof allDrawTeams = [];
         allDrawTeams.forEach(team => {
           const assignedIdx = groupAssignments[team.id];
-          if (typeof assignedIdx === 'number' && assignedIdx >= 0 && assignedIdx < numGroups) {
+          if (typeof assignedIdx === 'number' && assignedIdx >= 0 && assignedIdx < effectiveGroupCount) {
             groups[assignedIdx].teams.push(team);
           } else {
             unassignedTeams.push(team);
@@ -873,7 +1057,7 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
         const shuffledUnassigned = [...unassignedTeams].sort(() => Math.random() - 0.5);
         shuffledUnassigned.forEach(team => {
           let minGroupIdx = 0;
-          for (let i = 1; i < numGroups; i++) {
+          for (let i = 1; i < effectiveGroupCount; i++) {
             if (groups[i].teams.length < groups[minGroupIdx].teams.length) {
               minGroupIdx = i;
             }
@@ -881,104 +1065,56 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
           groups[minGroupIdx].teams.push(team);
         });
 
-        // 3. 🌟 CRITICAL: "على أن تتم القرعة داخل كل مجموعة"
-        // Perform the electronic draw / random shuffle WITHIN EACH GROUP
+        // 3. Random shuffle WITHIN EACH GROUP
         groups.forEach(grp => {
           grp.teams = [...grp.teams].sort(() => Math.random() - 0.5);
         });
-
-        setDrawnGroups(groups);
-
-        // Generate matches for each group (Round robin in each group)
-        const matchesList: GeneratedDrawMatch[] = [];
-        let matchCounter = 1;
-        const defaultVenue = venues[0]?.name || 'القاعة المغطاة';
-        const defaultDate = new Date().toISOString().slice(0, 10);
-        const defaultRef = sportSpecializedReferees[0] || (combinedRefereesList[0] || null);
-        const initialRefIds = defaultRef ? [defaultRef.id] : [];
-        const initialRefNames = defaultRef ? [defaultRef.fullName || defaultRef.name] : [];
-
-        groups.forEach(grp => {
-          const grpTeams = grp.teams;
-          for (let i = 0; i < grpTeams.length; i++) {
-            for (let j = i + 1; j < grpTeams.length; j++) {
-              const hostSch = schools.find(s => s.id === grpTeams[i].id);
-              matchesList.push({
-                id: `gen-match-${matchCounter++}`,
-                stage: `${grp.groupName} - مواجهة الجولة ${i + 1}`,
-                groupName: grp.groupName,
-                team1Id: grpTeams[i].id,
-                team1Name: grpTeams[i].name,
-                team2Id: grpTeams[j].id,
-                team2Name: grpTeams[j].name,
-                date: defaultDate,
-                time: `${9 + (matchCounter % 6)}:00`,
-                venueMode: hostSch ? 'school' : 'custom',
-                hostSchoolId: hostSch ? hostSch.id : '',
-                venueId: hostSch ? hostSch.id : (venues[0]?.id || 'v1'),
-                venueName: hostSch ? hostSch.name : defaultVenue,
-                refereeId: defaultRef?.id,
-                refereeName: defaultRef?.name,
-                refereeIds: initialRefIds,
-                refereeNames: initialRefNames
-              });
-            }
-          }
-        });
-
-        setGeneratedMatches(matchesList);
-      } else {
-        // Knockout system (Direct elimination)
-        const matchesList: GeneratedDrawMatch[] = [];
-        let matchCounter = 1;
-        const defaultVenue = venues[0]?.name || 'القاعة المغطاة';
-        const defaultDate = new Date().toISOString().slice(0, 10);
-        const defaultRef = sportSpecializedReferees[0] || (combinedRefereesList[0] || null);
-        const initialRefIds = defaultRef ? [defaultRef.id] : [];
-        const initialRefNames = defaultRef ? [defaultRef.fullName || defaultRef.name] : [];
-
-        const totalMatches = Math.floor(shuffled.length / 2);
-        for (let i = 0; i < totalMatches; i++) {
-          const t1 = shuffled[i * 2];
-          const t2 = shuffled[i * 2 + 1];
-          const hostSch = schools.find(s => s.id === t1.id);
-          matchesList.push({
-            id: `gen-match-${matchCounter++}`,
-            stage: totalMatches === 2 ? 'نصف النهائي' : totalMatches === 1 ? 'المباراة النهائية' : `دور خروج المغلوب (المباراة ${i + 1})`,
-            team1Id: t1.id,
-            team1Name: t1.name,
-            team2Id: t2.id,
-            team2Name: t2.name,
-            date: defaultDate,
-            time: `${9 + i * 2}:00`,
-            venueMode: hostSch ? 'school' : 'custom',
-            hostSchoolId: hostSch ? hostSch.id : '',
-            venueId: hostSch ? hostSch.id : (venues[0]?.id || 'v1'),
-            venueName: hostSch ? hostSch.name : defaultVenue,
-            refereeId: defaultRef?.id,
-            refereeName: defaultRef?.name,
-            refereeIds: initialRefIds,
-            refereeNames: initialRefNames
-          });
-        }
-
-        setDrawnGroups([
-          {
-            groupName: 'أدوار خروج المغلوب',
-            teams: shuffled
-          }
-        ]);
-        setGeneratedMatches(matchesList);
       }
 
+      const drawDefaults = {
+        defaultDate,
+        defaultVenueId: venues[0]?.id || 'v1',
+        defaultVenueName: defaultVenue,
+        defaultRefId: defaultRef?.id,
+        defaultRefName: defaultRef?.name,
+        initialRefIds,
+        initialRefNames,
+        schools
+      };
+
+      let matchesList: GeneratedDrawMatch[] = [];
+      let newByeTeams: { groupName: string; teamName: string }[] = [];
+
+      if (drawSystem === 'knockout_groups') {
+        const koResult = generateKnockoutGroupsDrawMatches(groups, drawDefaults);
+        matchesList = koResult.matches;
+        newByeTeams = koResult.byeTeams;
+      } else {
+        matchesList = generateRoundRobinDrawMatches(groups, drawSystem, drawDefaults);
+      }
+
+      setDrawnGroups(groups);
+      setByeTeams(newByeTeams);
+      setMatchHistory([]);
+      setSavedMatchIds([]);
+      setShowManualBuilder(false);
+      setStep3SchoolSearchQuery('');
+      setGeneratedMatches(matchesList);
       setIsDrawing(false);
       setStep(3);
-      toast.success('تمت القرعة وتوليد جدول المباريات بنجاح!');
+      toast.success(
+        drawSystem === 'knockout_groups'
+          ? 'تمت القرعة بنظام المجموعات إقصاء مباشر وتوليد شجرة المباريات كاملة!'
+          : drawSystem === 'groups_home_away'
+          ? 'تمت القرعة بنظام المجموعات ذهاب وإياب وتوليد جدول المباريات بنجاح!'
+          : 'تمت القرعة بنظام المجموعات ذهاب فقط وتوليد جدول المباريات بنجاح!'
+      );
     }, 700);
   };
 
   // Update match details (date, time, venue)
   const handleUpdateMatchField = (matchId: string, field: keyof GeneratedDrawMatch, value: string) => {
+    pushMatchHistorySnapshot(generatedMatches);
     setGeneratedMatches(prev => 
       prev.map(m => {
         if (m.id !== matchId) return m;
@@ -993,6 +1129,7 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
     const ref = combinedRefereesList.find(r => r.id === refereeId);
     if (!ref) return;
 
+    pushMatchHistorySnapshot(generatedMatches);
     setGeneratedMatches(prev =>
       prev.map(m => {
         if (m.id !== matchId) return m;
@@ -1023,6 +1160,7 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
 
   // Remove a referee from a specific match
   const handleRemoveRefereeFromMatch = (matchId: string, refereeIdToRemove: string) => {
+    pushMatchHistorySnapshot(generatedMatches);
     setGeneratedMatches(prev =>
       prev.map(m => {
         if (m.id !== matchId) return m;
@@ -1081,6 +1219,7 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
       })
       .filter(Boolean) as string[];
 
+    pushMatchHistorySnapshot(generatedMatches);
     setGeneratedMatches(prev => 
       prev.map(m => {
         const updatedRefIds = effectiveBulkIds.length > 0 
@@ -1303,6 +1442,8 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
     const toastId = toast.loading(`جاري حفظ ${generatedMatches.length} مباراة مع تعيين الحكام في جدول البطولة...`);
 
     try {
+      const createdIds: string[] = [];
+      const tempIdToFirestoreId: Record<string, string> = {};
       for (const gm of generatedMatches) {
         const allRefs = gm.refereeIds && gm.refereeIds.length > 0
           ? gm.refereeIds
@@ -1312,13 +1453,25 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
           ? resolveHostSchoolForMatch({ hostSchoolId: gm.hostSchoolId, venueId: gm.venueId, venueName: gm.venueName }, schools)
           : undefined;
 
-        await DataService.addMatch({
+        const created = await DataService.addMatch({
           tournamentId: selectedTournament.id,
           sportId: selectedTournament.sportId,
           stage: gm.stage,
           groupName: gm.groupName,
+          drawSystem: gm.drawSystem || drawSystem,
+          drawMatchNumber: gm.drawMatchNumber,
+          roundIndex: gm.roundIndex,
+          leg: gm.leg,
           team1Id: gm.team1Id,
+          team1Name: gm.team1Name,
           team2Id: gm.team2Id,
+          team2Name: gm.team2Name,
+          team1SourceMatchId: gm.team1SourceTempId ? tempIdToFirestoreId[gm.team1SourceTempId] : undefined,
+          team2SourceMatchId: gm.team2SourceTempId ? tempIdToFirestoreId[gm.team2SourceTempId] : undefined,
+          team1SourceMatchNumber: gm.team1SourceMatchNumber,
+          team2SourceMatchNumber: gm.team2SourceMatchNumber,
+          team1Placeholder: gm.team1Placeholder,
+          team2Placeholder: gm.team2Placeholder,
           ageCategory: selectedTournament.ageCategory,
           gender: selectedTournament.gender,
           affiliationType: selectedTournament.affiliationType,
@@ -1334,10 +1487,15 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
           status: 'Scheduled',
           updatedAt: new Date()
         });
+        if (created?.id) {
+          createdIds.push(created.id);
+          tempIdToFirestoreId[gm.id] = created.id;
+        }
       }
 
+      setSavedMatchIds(createdIds);
       toast.dismiss(toastId);
-      toast.success('تم حفظ واعتماد جميع المباريات بنجاح! يمكنك الآن إرسال إشعارات الواتساب للمعنيين.');
+      toast.success('تم حفظ واعتماد جميع المباريات بنجاح! يمكنك الآن إرسال إشعارات الواتساب أو التراجع عن الحفظ للتعديل.');
       if (onMatchesCreated) onMatchesCreated();
       setStep(4);
     } catch (err) {
@@ -1346,6 +1504,34 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
       toast.error('حدث خطأ أثناء حفظ المباريات في قاعدة البيانات');
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  // Undo Step 4: delete newly saved matches from database and return cleanly to Step 3
+  const handleRevertSavedMatchesAndGoBack = async () => {
+    if (savedMatchIds.length === 0) {
+      setStep(3);
+      return;
+    }
+    setIsRevertingSave(true);
+    const toastId = toast.loading(`جاري التراجع وإلغاء ${savedMatchIds.length} مباراة محفوظة للعودة إلى التعديل...`);
+    try {
+      for (const mId of savedMatchIds) {
+        await DataService.deleteMatch(mId);
+      }
+      const savedSet = new Set(savedMatchIds);
+      setAllExistingMatches(prev => prev.filter(m => !savedSet.has(m.id)));
+      setSavedMatchIds([]);
+      if (onMatchesCreated) onMatchesCreated();
+      toast.dismiss(toastId);
+      toast.success('تم التراجع عن الحفظ بنجاح! يمكنك الآن تعديل المباريات أو المواعيد في المرحلة 3.');
+      setStep(3);
+    } catch (err) {
+      console.error('Failed to revert saved matches:', err);
+      toast.dismiss(toastId);
+      toast.error('تعذر إلغاء بعض المباريات المحفوظة تلقائياً');
+    } finally {
+      setIsRevertingSave(false);
     }
   };
 
@@ -1420,30 +1606,48 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
           </div>
         </div>
 
-        {/* Stepper Progress Bar */}
-        <div className="bg-slate-100 px-6 py-2.5 border-b border-slate-200 flex items-center justify-between text-xs font-bold shrink-0">
-          <div className={`flex items-center gap-2 ${step >= 1 ? 'text-emerald-800 font-black' : 'text-slate-400'}`}>
+        {/* Stepper Progress Bar (Clickable to step back/undo any stage) */}
+        <div className="bg-slate-100 px-4 sm:px-6 py-2.5 border-b border-slate-200 flex items-center justify-between text-xs font-bold shrink-0 gap-1 overflow-x-auto">
+          <button
+            type="button"
+            disabled={step <= 1}
+            onClick={() => step > 1 && setStep(1)}
+            title={step > 1 ? 'العودة إلى المرحلة 1: اختيار نوع البطولة' : undefined}
+            className={`flex items-center gap-2 shrink-0 transition-opacity ${step >= 1 ? 'text-emerald-800 font-black' : 'text-slate-400'} ${step > 1 ? 'cursor-pointer hover:opacity-75 underline-offset-4 hover:underline' : 'cursor-default'}`}
+          >
             <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs ${step >= 1 ? 'bg-emerald-600 text-white' : 'bg-slate-300 text-slate-600'}`}>1</span>
             <span>1. اختيار نوع البطولة والفلترة</span>
-          </div>
+          </button>
 
-          <div className="w-12 h-0.5 bg-slate-300" />
+          <div className="w-8 sm:w-12 h-0.5 bg-slate-300 shrink-0" />
 
-          <div className={`flex items-center gap-2 ${step >= 2 ? 'text-emerald-800 font-black' : 'text-slate-400'}`}>
+          <button
+            type="button"
+            disabled={step <= 2}
+            onClick={() => step > 2 && setStep(2)}
+            title={step > 2 ? 'التراجع إلى المرحلة 2: المؤسسات ونظام القرعة' : undefined}
+            className={`flex items-center gap-2 shrink-0 transition-opacity ${step >= 2 ? 'text-emerald-800 font-black' : 'text-slate-400'} ${step > 2 ? 'cursor-pointer hover:opacity-75 underline-offset-4 hover:underline' : 'cursor-default'}`}
+          >
             <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs ${step >= 2 ? 'bg-emerald-600 text-white' : 'bg-slate-300 text-slate-600'}`}>2</span>
             <span>2. المؤسسات ونظام القرعة</span>
-          </div>
+          </button>
 
-          <div className="w-12 h-0.5 bg-slate-300" />
+          <div className="w-8 sm:w-12 h-0.5 bg-slate-300 shrink-0" />
 
-          <div className={`flex items-center gap-2 ${step >= 3 ? 'text-emerald-800 font-black' : 'text-slate-400'}`}>
+          <button
+            type="button"
+            disabled={step <= 3}
+            onClick={() => step > 3 && setStep(3)}
+            title={step > 3 ? 'العودة إلى المرحلة 3: المواعيد والملاعب والحكام' : undefined}
+            className={`flex items-center gap-2 shrink-0 transition-opacity ${step >= 3 ? 'text-emerald-800 font-black' : 'text-slate-400'} ${step > 3 ? 'cursor-pointer hover:opacity-75 underline-offset-4 hover:underline' : 'cursor-default'}`}
+          >
             <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs ${step >= 3 ? 'bg-emerald-600 text-white' : 'bg-slate-300 text-slate-600'}`}>3</span>
             <span>3. المواعيد والملاعب والحكام</span>
-          </div>
+          </button>
 
-          <div className="hidden sm:block w-8 h-0.5 bg-slate-300" />
+          <div className="hidden sm:block w-8 h-0.5 bg-slate-300 shrink-0" />
 
-          <div className={`hidden sm:flex items-center gap-2 ${step >= 4 ? 'text-emerald-800 font-black' : 'text-slate-400'}`}>
+          <div className={`hidden sm:flex items-center gap-2 shrink-0 ${step >= 4 ? 'text-emerald-800 font-black' : 'text-slate-400'}`}>
             <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs ${step >= 4 ? 'bg-emerald-600 text-white' : 'bg-slate-300 text-slate-600'}`}>4</span>
             <span>4. إشعارات الواتساب</span>
           </div>
@@ -1602,13 +1806,37 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
                             </span>
                           </div>
 
-                          <div>
-                            <h5 className="font-black text-sm text-slate-900 leading-snug">{t.name}</h5>
-                            <p className="text-xs text-slate-500 font-bold mt-1">
-                              {sportInfo.name} • {t.ageCategory || 'عامة'} • {t.gender === 'Female' ? 'إناث' : t.gender === 'Male' ? 'ذكور' : 'مختلط'}
-                            </p>
+                            <div>
+                              <h5 className="font-black text-sm text-slate-900 leading-snug">{t.name}</h5>
+                              <p className="text-xs text-slate-500 font-bold mt-1">
+                                {sportInfo.name} • {t.ageCategory || 'عامة'} • {t.gender === 'Female' ? 'إناث' : t.gender === 'Male' ? 'ذكور' : 'مختلط'}
+                              </p>
+                              <div className="mt-1.5">
+                                {(() => {
+                                  const aff = normalizeTournamentAffiliation(t.affiliationType, t.name);
+                                  if (aff === 'club_affiliated') {
+                                    return (
+                                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-black bg-amber-100 text-amber-900 border border-amber-200">
+                                        🟡 منتمين للأندية
+                                      </span>
+                                    );
+                                  }
+                                  if (aff === 'open') {
+                                    return (
+                                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-black bg-indigo-100 text-indigo-900 border border-indigo-200">
+                                        🌐 بطولة مفتوحة
+                                      </span>
+                                    );
+                                  }
+                                  return (
+                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-black bg-slate-100 text-slate-700 border border-slate-200">
+                                      ⚪ غير منتمين للأندية
+                                    </span>
+                                  );
+                                })()}
+                              </div>
+                            </div>
                           </div>
-                        </div>
 
                         <div className="mt-3 pt-3 border-t border-slate-100 flex items-center justify-between text-xs">
                           <span className="text-slate-400 font-medium">{t.seasonId || '2026/2027'}</span>
@@ -1692,11 +1920,36 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
                   <span>نظام القرعة والتوزيع:</span>
                 </h4>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                   <div
-                    onClick={() => setDrawSystem('groups')}
+                    onClick={() => {
+                      setDrawSystem('groups_home_away');
+                      if (groupsCount < 2) setGroupsCount(2);
+                    }}
                     className={`p-4 rounded-2xl border-2 transition-all cursor-pointer flex items-start gap-3 ${
-                      drawSystem === 'groups'
+                      drawSystem === 'groups_home_away'
+                        ? selectedTournament.affiliationType === 'club_affiliated'
+                          ? 'bg-amber-50 border-amber-600 ring-2 ring-amber-400/20'
+                          : 'bg-emerald-50 border-emerald-600 ring-2 ring-emerald-400/20'
+                        : 'bg-slate-50 border-slate-200 hover:bg-slate-100'
+                    }`}
+                  >
+                    <span className="text-2xl">🔁</span>
+                    <div>
+                      <h5 className="font-black text-xs text-slate-900">نظام المجموعات ذهاب وإياب</h5>
+                      <p className="text-[11px] text-slate-500 font-medium mt-0.5 leading-relaxed">
+                        يلعب كل فريق ضد كل فريق آخر في مجموعته مرتين (ذهاب + إياب) لتحديد المتأهل بالنقط (فوز 3 • تعادل 1 • هزيمة 0).
+                      </p>
+                    </div>
+                  </div>
+
+                  <div
+                    onClick={() => {
+                      setDrawSystem('groups_single');
+                      if (groupsCount < 2) setGroupsCount(2);
+                    }}
+                    className={`p-4 rounded-2xl border-2 transition-all cursor-pointer flex items-start gap-3 ${
+                      drawSystem === 'groups_single'
                         ? selectedTournament.affiliationType === 'club_affiliated'
                           ? 'bg-amber-50 border-amber-600 ring-2 ring-amber-400/20'
                           : 'bg-emerald-50 border-emerald-600 ring-2 ring-emerald-400/20'
@@ -1705,17 +1958,17 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
                   >
                     <span className="text-2xl">👥</span>
                     <div>
-                      <h5 className="font-black text-xs text-slate-900">نظام المجموعات (دور المجموعات)</h5>
-                      <p className="text-[11px] text-slate-500 font-medium mt-0.5">
-                        توزيع الفرق عشوائياً على مجموعات (A, B, C...) مع توليد مباريات كل دور.
+                      <h5 className="font-black text-xs text-slate-900">نظام المجموعات ذهاب فقط</h5>
+                      <p className="text-[11px] text-slate-500 font-medium mt-0.5 leading-relaxed">
+                        يلعب كل فريق ضد كل فريق آخر في مجموعته مرة واحدة فقط لتحديد المتأهل بالنقط (فوز 3 • تعادل 1 • هزيمة 0).
                       </p>
                     </div>
                   </div>
 
                   <div
-                    onClick={() => setDrawSystem('knockout')}
+                    onClick={() => setDrawSystem('knockout_groups')}
                     className={`p-4 rounded-2xl border-2 transition-all cursor-pointer flex items-start gap-3 ${
-                      drawSystem === 'knockout'
+                      drawSystem === 'knockout_groups'
                         ? selectedTournament.affiliationType === 'club_affiliated'
                           ? 'bg-amber-50 border-amber-600 ring-2 ring-amber-400/20'
                           : 'bg-emerald-50 border-emerald-600 ring-2 ring-emerald-400/20'
@@ -1724,37 +1977,39 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
                   >
                     <span className="text-2xl">⚔️</span>
                     <div>
-                      <h5 className="font-black text-xs text-slate-900">نظام خروج المغلوب المباشر (Knockout)</h5>
-                      <p className="text-[11px] text-slate-500 font-medium mt-0.5">
-                        مواجهات إقصائية مباشرة (نصف نهائي، نهائي...) مع تأهل الفائز.
+                      <h5 className="font-black text-xs text-slate-900">نظام المجموعات إقصاء مباشر</h5>
+                      <p className="text-[11px] text-slate-500 font-medium mt-0.5 leading-relaxed">
+                        توليد شجرة الإقصاء المباشر كاملة داخل كل مجموعة وصولاً للنهائي (بما في ذلك مباريات «الفائز من المباراة ...»).
                       </p>
                     </div>
                   </div>
                 </div>
 
-                {drawSystem === 'groups' && (
-                  <div className="space-y-3 pt-2 border-t border-slate-100">
-                    <div className="flex items-center gap-3">
-                      <span className="text-xs font-bold text-slate-700">عدد المجموعات المراد تكوينها:</span>
-                      <div className="flex items-center gap-2">
-                        {[2, 3, 4].map(num => (
-                          <button
-                            key={num}
-                            type="button"
-                            onClick={() => setGroupsCount(num)}
-                            className={`w-9 h-9 rounded-xl font-black text-xs transition-all cursor-pointer ${
-                              groupsCount === num
-                                ? 'bg-emerald-600 text-white shadow-xs'
-                                : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-                            }`}
-                          >
-                            {num}
-                          </button>
-                        ))}
-                      </div>
+                <div className="space-y-3 pt-2 border-t border-slate-100">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <span className="text-xs font-bold text-slate-700">
+                      {drawSystem === 'knockout_groups' ? 'عدد المجموعات / المسارات (1 = مسار موحد):' : 'عدد المجموعات المراد تكوينها:'}
+                    </span>
+                    <div className="flex items-center gap-2">
+                      {(drawSystem === 'knockout_groups' ? [1, 2, 3, 4] : [2, 3, 4]).map(num => (
+                        <button
+                          key={num}
+                          type="button"
+                          onClick={() => setGroupsCount(num)}
+                          className={`w-9 h-9 rounded-xl font-black text-xs transition-all cursor-pointer ${
+                            groupsCount === num
+                              ? 'bg-emerald-600 text-white shadow-xs'
+                              : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                          }`}
+                        >
+                          {num}
+                        </button>
+                      ))}
                     </div>
+                  </div>
 
-                    {/* Pre-assignment Controls & Group Summary Badges */}
+                  {/* Pre-assignment Controls & Group Summary Badges */}
+                  {groupsCount > 1 && (
                     <div className="bg-slate-50/90 p-3.5 rounded-2xl border border-slate-200/90 space-y-2.5">
                       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                         <div className="flex items-center gap-1.5">
@@ -1782,7 +2037,7 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
                       </div>
 
                       <p className="text-[10.5px] text-slate-500 font-medium">
-                        يمكنك تحديد المجموعة لكل مؤسسة بالضغط على أزرار [أ، ب، ج، د] في بطاقتها أدناه. الفرق المتبقية ستوزع تلقائياً لتوازن المجموعات، والقرعة وسحب المباريات والمواعيد تجرى إلكترونياً داخل كل مجموعة.
+                        يمكنك تحديد المجموعة لكل مؤسسة بالضغط على أزرار [أ، ب، ج، د] في بطاقتها أدناه. الفرق المتبقية ستوزع تلقائياً لتوازن المجموعات، ثم تجرى قرعة {drawSystem === 'knockout_groups' ? 'الإقصاء المباشر' : drawSystem === 'groups_home_away' ? 'الذهاب والإياب' : 'الذهاب فقط'} داخل كل مجموعة.
                       </p>
 
                       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
@@ -1805,8 +2060,8 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
                         })}
                       </div>
                     </div>
-                  </div>
-                )}
+                  )}
+                </div>
               </div>
 
               {/* Participating Schools Selection Box */}
@@ -1952,8 +2207,8 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
                             )}
                           </div>
 
-                          {/* Group Assignment Buttons for Group Draw System */}
-                          {isSelected && drawSystem === 'groups' && (
+                          {/* Group Assignment Buttons for Both Systems when >1 Group */}
+                          {isSelected && (drawSystem !== 'knockout_groups' || groupsCount > 1) && (
                             <div
                               className="mt-1.5 pt-1.5 border-t border-slate-200/80 flex items-center justify-between text-[10px]"
                               onClick={(e) => e.stopPropagation()}
@@ -2049,7 +2304,7 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
                           className="inline-flex items-center gap-2 px-3 py-1.5 bg-amber-50 border border-amber-200 text-amber-900 rounded-xl text-xs font-bold"
                         >
                           <span>{cName}</span>
-                          {drawSystem === 'groups' && (
+                          {(drawSystem !== 'knockout_groups' || groupsCount > 1) && (
                             <div className="flex items-center gap-1 border-r border-amber-200 pr-1.5 mr-1">
                               {Array.from({ length: groupsCount }).map((_, gIdx) => {
                                 const isCurrent = groupAssignments[cId] === gIdx;
@@ -2085,22 +2340,37 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
               </div>
 
               {/* Bottom Actions */}
-              <div className="flex items-center justify-between pt-4 border-t border-slate-200">
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5 pt-4 border-t border-slate-200">
                 <button
+                  type="button"
                   onClick={() => setStep(1)}
-                  className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-xl text-xs font-bold cursor-pointer"
+                  className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-xl text-xs font-bold cursor-pointer flex items-center justify-center gap-1.5"
                 >
-                  الرجوع للخطوة 1
+                  <Undo2 className="w-3.5 h-3.5" />
+                  <span>التراجع للمرحلة 1</span>
                 </button>
 
-                <button
-                  onClick={handleExecuteDraw}
-                  disabled={allDrawTeams.length < 2 || isDrawing}
-                  className="px-6 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 text-white rounded-xl text-xs font-black flex items-center gap-2 shadow-lg shadow-emerald-600/25 cursor-pointer disabled:opacity-50"
-                >
-                  <Shuffle className={`w-4 h-4 ${isDrawing ? 'animate-spin' : ''}`} />
-                  <span>{isDrawing ? 'جاري السحب العشوائي...' : 'إجراء القرعة الإلكترونية وتوليد المباريات'}</span>
-                </button>
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleEnterManualProgramming}
+                    className="px-4 py-2.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-800 border border-indigo-300 rounded-xl text-xs font-black flex items-center justify-center gap-2 cursor-pointer transition-colors"
+                    title="اختيار الفريقين والبرمجة يدوياً من الفرق المشاركة في هذا الفرع"
+                  >
+                    <Plus className="w-4 h-4" />
+                    <span>البرمجة يدوياً من الفرق المشاركة</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleExecuteDraw}
+                    disabled={allDrawTeams.length < 2 || isDrawing}
+                    className="px-6 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 text-white rounded-xl text-xs font-black flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/25 cursor-pointer disabled:opacity-50"
+                  >
+                    <Shuffle className={`w-4 h-4 ${isDrawing ? 'animate-spin' : ''}`} />
+                    <span>{isDrawing ? 'جاري السحب العشوائي...' : 'إجراء القرعة الإلكترونية وتوليد المباريات'}</span>
+                  </button>
+                </div>
               </div>
 
             </div>
@@ -2112,54 +2382,141 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
           {step === 3 && selectedTournament && (
             <div className="space-y-6">
               
-              {/* Groups Distribution Overview */}
-              <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-xs space-y-3">
-                <div className="flex items-center justify-between">
-                  <h4 className="text-sm font-black text-slate-900 flex items-center gap-2">
-                    <Trophy className="w-4 h-4 text-amber-500" />
-                    <span>نتائج قرعة المجموعات والمسارات:</span>
-                  </h4>
-                  <span className="text-xs font-black text-emerald-700 bg-emerald-50 px-3 py-1 rounded-full border border-emerald-200">
-                    تم التوزيع العشوائي بنجاح
-                  </span>
+              {/* Step 3 Quick Navigation & School Search Bar */}
+              <div className="bg-white p-3.5 rounded-3xl border border-slate-200 shadow-xs flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+                <div className="relative flex-1">
+                  <Search className="w-4 h-4 text-emerald-600 absolute right-3 top-2.5" />
+                  <input
+                    type="text"
+                    value={step3SchoolSearchQuery}
+                    onChange={(e) => setStep3SchoolSearchQuery(e.target.value)}
+                    placeholder="ابحث عن مؤسسة في نتائج القرعة، جدول المباريات، أو الملاعب المحتضنة..."
+                    className="w-full pr-9 pl-16 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:bg-white focus:ring-2 focus:ring-emerald-500"
+                  />
+                  {step3SchoolSearchQuery && (
+                    <button
+                      type="button"
+                      onClick={() => setStep3SchoolSearchQuery('')}
+                      className="absolute left-2 top-1.5 px-2 py-1 text-[10px] font-black text-rose-700 bg-rose-50 hover:bg-rose-100 rounded-lg cursor-pointer"
+                    >
+                      مسح
+                    </button>
+                  )}
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 pt-1">
-                  {drawnGroups.map((grp, idx) => (
-                    <div key={idx} className={`border rounded-2xl p-3.5 space-y-2 ${
-                      selectedTournament.affiliationType === 'club_affiliated'
-                        ? 'bg-amber-50/50 border-amber-200'
-                        : 'bg-slate-50 border-slate-200'
-                    }`}>
-                      <div className={`flex items-center justify-between pb-1.5 border-b ${
-                        selectedTournament.affiliationType === 'club_affiliated' ? 'border-amber-200' : 'border-slate-200'
-                      }`}>
-                        <span className={`text-xs font-black ${
-                          selectedTournament.affiliationType === 'club_affiliated' ? 'text-amber-900' : 'text-slate-900'
-                        }`}>{grp.groupName}</span>
-                        <span className={`text-[10px] font-bold px-1.5 py-0.2 rounded ${
-                          selectedTournament.affiliationType === 'club_affiliated' ? 'bg-amber-100 text-amber-700' : 'bg-slate-200 text-slate-700'
-                        }`}>
-                          {grp.teams.length} فرق
-                        </span>
-                      </div>
-
-                      <div className="space-y-1">
-                        {grp.teams.map((t, tIdx) => (
-                          <div key={t.id} className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
-                            <span className={`w-4 h-4 rounded-full text-white text-[10px] flex items-center justify-center font-bold ${
-                              selectedTournament.affiliationType === 'club_affiliated' ? 'bg-amber-600' : 'bg-emerald-600'
-                            }`}>
-                              {tIdx + 1}
-                            </span>
-                            <span className="truncate">{t.name}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  ))}
+                <div className="flex flex-wrap items-center gap-2 shrink-0">
+                  {matchHistory.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={handleUndoStep3Edit}
+                      className="px-3 py-2 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 rounded-xl text-xs font-black flex items-center gap-1.5 cursor-pointer"
+                      title="التراجع عن آخر تعديل في المواعيد أو الملاعب أو الحكام"
+                    >
+                      <Undo2 className="w-3.5 h-3.5" />
+                      <span>تراجع عن آخر تعديل ({matchHistory.length})</span>
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setStep(2)}
+                    className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-200 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Undo2 className="w-3.5 h-3.5" />
+                    <span>المرحلة 2</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setStep(1)}
+                    className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-200 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Undo2 className="w-3.5 h-3.5" />
+                    <span>المرحلة 1</span>
+                  </button>
                 </div>
               </div>
+
+              {/* Groups Distribution Overview */}
+              {drawnGroups.length > 0 && (
+                <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-xs space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <h4 className="text-sm font-black text-slate-900 flex items-center gap-2">
+                      <Trophy className="w-4 h-4 text-amber-500" />
+                      <span>
+                        {drawSystem === 'knockout_groups'
+                          ? 'نتائج القرعة — نظام المجموعات إقصاء مباشر:'
+                          : drawSystem === 'groups_home_away'
+                          ? 'نتائج القرعة — نظام المجموعات ذهاب وإياب:'
+                          : 'نتائج القرعة — نظام المجموعات ذهاب فقط:'}
+                      </span>
+                    </h4>
+                    <span className="text-xs font-black text-emerald-700 bg-emerald-50 px-3 py-1 rounded-full border border-emerald-200">
+                      {drawnGroups.length} {drawnGroups.length === 1 ? 'مسار' : 'مجموعات'}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 pt-1">
+                    {drawnGroups.map((grp, idx) => {
+                      const q = normalizeArabicSearch(step3SchoolSearchQuery.trim());
+                      return (
+                        <div key={idx} className={`border rounded-2xl p-3.5 space-y-2 ${
+                          selectedTournament.affiliationType === 'club_affiliated'
+                            ? 'bg-amber-50/50 border-amber-200'
+                            : 'bg-slate-50 border-slate-200'
+                        }`}>
+                          <div className={`flex items-center justify-between pb-1.5 border-b ${
+                            selectedTournament.affiliationType === 'club_affiliated' ? 'border-amber-200' : 'border-slate-200'
+                          }`}>
+                            <span className={`text-xs font-black ${
+                              selectedTournament.affiliationType === 'club_affiliated' ? 'text-amber-900' : 'text-slate-900'
+                            }`}>{grp.groupName}</span>
+                            <span className={`text-[10px] font-bold px-1.5 py-0.2 rounded ${
+                              selectedTournament.affiliationType === 'club_affiliated' ? 'bg-amber-100 text-amber-700' : 'bg-slate-200 text-slate-700'
+                            }`}>
+                              {grp.teams.length} فرق
+                            </span>
+                          </div>
+
+                          <div className="space-y-1">
+                            {grp.teams.map((t, tIdx) => {
+                              const isMatch = q ? normalizeArabicSearch(t.name).includes(q) : false;
+                              return (
+                                <div
+                                  key={t.id}
+                                  className={`text-xs font-bold flex items-center gap-1.5 px-1.5 py-0.5 rounded-lg transition-colors ${
+                                    isMatch
+                                      ? 'bg-amber-200/80 text-amber-950 ring-1 ring-amber-400'
+                                      : q
+                                      ? 'text-slate-400 opacity-60'
+                                      : 'text-slate-700'
+                                  }`}
+                                >
+                                  <span className={`w-4 h-4 rounded-full text-white text-[10px] flex items-center justify-center font-bold shrink-0 ${
+                                    selectedTournament.affiliationType === 'club_affiliated' ? 'bg-amber-600' : 'bg-emerald-600'
+                                  }`}>
+                                    {tIdx + 1}
+                                  </span>
+                                  <span className="truncate">{t.name}</span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {byeTeams.length > 0 && (
+                    <div className="p-3 rounded-2xl bg-indigo-50 border border-indigo-200 text-xs text-indigo-950 flex flex-wrap items-center gap-2">
+                      <span className="font-black">🎖️ تأهل تلقائي للدور الموالي (Bye — عدد فردي في المجموعة):</span>
+                      {byeTeams.map((bt, bIdx) => (
+                        <span key={bIdx} className="px-2.5 py-0.5 bg-white border border-indigo-200 rounded-full font-bold text-[11px]">
+                          {bt.teamName} ({bt.groupName})
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* SPORT SPECIALIZATION STATUS BANNER */}
               <div className={`p-4 rounded-3xl border flex flex-col sm:flex-row items-center justify-between gap-3 text-xs shadow-xs ${
@@ -2255,16 +2612,35 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
                       </div>
                     </div>
                     {bulkVenueMode === 'school' ? (
-                      <select
-                        value={bulkHostSchoolId}
-                        onChange={(e) => setBulkHostSchoolId(e.target.value)}
-                        className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-xl font-bold text-slate-800 cursor-pointer"
-                      >
-                        <option value="">-- اختر المؤسسة المحتضنة --</option>
-                        {schools.map(s => (
-                          <option key={s.id} value={s.id}>{s.name}</option>
-                        ))}
-                      </select>
+                      <div className="space-y-1">
+                        <div className="relative">
+                          <Search className="w-3 h-3 text-slate-400 absolute right-2 top-2" />
+                          <input
+                            type="text"
+                            value={bulkHostSchoolSearch}
+                            onChange={(e) => setBulkHostSchoolSearch(e.target.value)}
+                            placeholder="بحث عن مؤسسة محتضنة..."
+                            className="w-full pr-6 pl-2 py-1 bg-white border border-slate-200 rounded-lg text-[10px] font-bold text-slate-700"
+                          />
+                        </div>
+                        <select
+                          value={bulkHostSchoolId}
+                          onChange={(e) => setBulkHostSchoolId(e.target.value)}
+                          className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-xl font-bold text-slate-800 cursor-pointer"
+                        >
+                          <option value="">-- اختر المؤسسة المحتضنة --</option>
+                          {schools
+                            .filter(s => {
+                              if (s.id === bulkHostSchoolId) return true;
+                              if (!bulkHostSchoolSearch.trim()) return true;
+                              const q = normalizeArabicSearch(bulkHostSchoolSearch);
+                              return normalizeArabicSearch(s.name || '').includes(q) || normalizeArabicSearch(s.commune || '').includes(q);
+                            })
+                            .map(s => (
+                              <option key={s.id} value={s.id}>{s.name}</option>
+                            ))}
+                        </select>
+                      </div>
                     ) : (
                       <input
                         type="text"
@@ -2390,13 +2766,34 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
               {/* GENERATED MATCHES LIST WITH DATES, VENUES & REFEREES */}
               <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-xs space-y-4">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                  <h4 className="text-sm font-black text-slate-900 flex items-center gap-2">
-                    <Calendar className="w-4 h-4 text-emerald-600" />
-                    <span>جدول المباريات وتعيين الحكام المتخصصين ({generatedMatches.length} مباراة):</span>
-                  </h4>
+                  <div className="space-y-0.5">
+                    <h4 className="text-sm font-black text-slate-900 flex items-center gap-2">
+                      <Calendar className="w-4 h-4 text-emerald-600" />
+                      <span>جدول المباريات وتعيين الحكام المتخصصين ({generatedMatches.length} مباراة):</span>
+                    </h4>
+                    {step3SchoolSearchQuery.trim() && (
+                      <p className="text-[11px] font-bold text-emerald-700">
+                        تصفية البحث: عرض {displayedGeneratedMatches.length} من أصل {generatedMatches.length} مباراة
+                      </p>
+                    )}
+                  </div>
 
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     <button
+                      type="button"
+                      onClick={() => setShowManualBuilder(prev => !prev)}
+                      className={`px-3 py-1.5 border rounded-xl text-xs font-black flex items-center gap-1.5 cursor-pointer transition-colors ${
+                        showManualBuilder
+                          ? 'bg-indigo-600 text-white border-indigo-700'
+                          : 'bg-indigo-50 hover:bg-indigo-100 text-indigo-800 border-indigo-200'
+                      }`}
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>{showManualBuilder ? 'إخفاء البرمجة اليدوية' : 'برمجة مباراة يدوياً من فرق الفرع'}</span>
+                    </button>
+
+                    <button
+                      type="button"
                       onClick={handleExportExcel}
                       className="px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer"
                     >
@@ -2406,9 +2803,201 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
                   </div>
                 </div>
 
+                {/* MANUAL MATCH BUILDER FROM PARTICIPATING TEAMS IN BRANCH */}
+                {showManualBuilder && (
+                  <div className="p-4 rounded-2xl bg-indigo-50/70 border-2 border-indigo-200 space-y-3 text-xs">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-indigo-200/80">
+                      <div>
+                        <h5 className="font-black text-indigo-950 flex items-center gap-1.5">
+                          <Plus className="w-4 h-4 text-indigo-700" />
+                          <span>إضافة مباراة مبرمجة يدوياً (اختيار الفرق المشاركة في فرع البطولة)</span>
+                        </h5>
+                        <p className="text-[11px] text-indigo-800 mt-0.5">
+                          اختر الفريق الأول والفريق الثاني من الفرق المشاركة في هذا الفرع ({allDrawTeams.length} فريق مشارك) وحدد الدور والتوقيت والملعب.
+                        </p>
+                      </div>
+                      <label className="inline-flex items-center gap-1.5 bg-white px-2.5 py-1.5 rounded-xl border border-indigo-200 text-[11px] font-bold text-indigo-900 cursor-pointer shrink-0">
+                        <input
+                          type="checkbox"
+                          checked={manualIncludeAllSchools}
+                          onChange={(e) => setManualIncludeAllSchools(e.target.checked)}
+                          className="rounded border-indigo-300 text-indigo-600"
+                        />
+                        <span>تضمين كل مؤسسات المديرية ({schools.length})</span>
+                      </label>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-600 mb-1">الفريق الأول (من المشاركين):</label>
+                        <select
+                          value={manualTeam1Id}
+                          onChange={(e) => setManualTeam1Id(e.target.value)}
+                          className="w-full px-2.5 py-1.5 bg-white border border-indigo-200 rounded-xl font-bold text-slate-800 cursor-pointer"
+                        >
+                          <option value="">-- اختر الفريق الأول --</option>
+                          {manualAvailableTeams.map(t => (
+                            <option key={`man-t1-${t.id}`} value={t.id} disabled={t.id === manualTeam2Id}>
+                              {t.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-600 mb-1">الفريق الثاني (من المشاركين):</label>
+                        <select
+                          value={manualTeam2Id}
+                          onChange={(e) => setManualTeam2Id(e.target.value)}
+                          className="w-full px-2.5 py-1.5 bg-white border border-indigo-200 rounded-xl font-bold text-slate-800 cursor-pointer"
+                        >
+                          <option value="">-- اختر الفريق الثاني --</option>
+                          {manualAvailableTeams.map(t => (
+                            <option key={`man-t2-${t.id}`} value={t.id} disabled={t.id === manualTeam1Id}>
+                              {t.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-600 mb-1">الدور / المرحلة:</label>
+                        <div className="flex gap-1.5">
+                          <input
+                            type="text"
+                            value={manualStage}
+                            onChange={(e) => setManualStage(e.target.value)}
+                            placeholder="مثال: دور المجموعات، نصف النهائي..."
+                            className="flex-1 px-2.5 py-1.5 bg-white border border-indigo-200 rounded-xl font-bold text-slate-800"
+                          />
+                          <select
+                            value=""
+                            onChange={(e) => { if (e.target.value) setManualStage(e.target.value); }}
+                            className="px-2 py-1.5 bg-white border border-indigo-200 rounded-xl font-bold text-indigo-800 text-[10px] cursor-pointer"
+                            title="اختيار دور جاهز"
+                          >
+                            <option value="">قالب...</option>
+                            <option value="دور المجموعات">دور المجموعات</option>
+                            <option value="إقصاء مباشر">إقصاء مباشر</option>
+                            <option value="ربع النهائي">ربع النهائي</option>
+                            <option value="نصف النهائي">نصف النهائي</option>
+                            <option value="المباراة النهائية">المباراة النهائية</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-600 mb-1">التاريخ:</label>
+                        <input
+                          type="date"
+                          value={manualDate}
+                          onChange={(e) => setManualDate(e.target.value)}
+                          className="w-full px-2.5 py-1.5 bg-white border border-indigo-200 rounded-xl font-bold text-slate-800"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-600 mb-1">التوقيت:</label>
+                        <input
+                          type="time"
+                          value={manualTime}
+                          onChange={(e) => setManualTime(e.target.value)}
+                          className="w-full px-2.5 py-1.5 bg-white border border-indigo-200 rounded-xl font-bold text-slate-800"
+                        />
+                      </div>
+
+                      <div>
+                        <div className="flex items-center justify-between mb-1">
+                          <label className="text-[10px] font-bold text-slate-600">المكان / المؤسسة المحتضنة:</label>
+                          <div className="inline-flex rounded-md bg-white border border-indigo-200 p-0.5 text-[9px] font-bold">
+                            <button
+                              type="button"
+                              onClick={() => setManualVenueMode('school')}
+                              className={`px-1.5 py-0.5 rounded cursor-pointer ${manualVenueMode === 'school' ? 'bg-indigo-600 text-white' : 'text-slate-600'}`}
+                            >
+                              🏫 مؤسسة
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setManualVenueMode('custom')}
+                              className={`px-1.5 py-0.5 rounded cursor-pointer ${manualVenueMode === 'custom' ? 'bg-indigo-600 text-white' : 'text-slate-600'}`}
+                            >
+                              🏟️ فضاء آخر
+                            </button>
+                          </div>
+                        </div>
+                        {manualVenueMode === 'school' ? (
+                          <div className="space-y-1">
+                            <div className="relative">
+                              <Search className="w-3 h-3 text-slate-400 absolute right-2 top-2" />
+                              <input
+                                type="text"
+                                value={manualHostSchoolSearch}
+                                onChange={(e) => setManualHostSchoolSearch(e.target.value)}
+                                placeholder="بحث عن مؤسسة محتضنة..."
+                                className="w-full pr-6 pl-2 py-1 bg-white border border-indigo-200 rounded-lg text-[10px] font-bold text-slate-700"
+                              />
+                            </div>
+                            <select
+                              value={manualHostSchoolId}
+                              onChange={(e) => setManualHostSchoolId(e.target.value)}
+                              className="w-full px-2 py-1.5 bg-white border border-indigo-200 rounded-xl font-bold text-slate-800 cursor-pointer text-[11px]"
+                            >
+                              <option value="">-- افتراضي (مؤسسة الفريق الأول) --</option>
+                              {schools
+                                .filter(s => {
+                                  if (s.id === manualHostSchoolId) return true;
+                                  if (!manualHostSchoolSearch.trim()) return true;
+                                  const q = normalizeArabicSearch(manualHostSchoolSearch);
+                                  return normalizeArabicSearch(s.name || '').includes(q) || normalizeArabicSearch(s.commune || '').includes(q);
+                                })
+                                .map(s => (
+                                  <option key={s.id} value={s.id}>{s.name}</option>
+                                ))}
+                            </select>
+                          </div>
+                        ) : (
+                          <input
+                            type="text"
+                            value={manualVenueName}
+                            onChange={(e) => setManualVenueName(e.target.value)}
+                            placeholder="مثال: القاعة المغطاة..."
+                            className="w-full px-2.5 py-1.5 bg-white border border-indigo-200 rounded-xl font-bold text-slate-800"
+                          />
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                      <input
+                        type="text"
+                        value={manualGroupName}
+                        onChange={(e) => setManualGroupName(e.target.value)}
+                        placeholder="اسم المجموعة (اختياري، مثال: المجموعة أ)"
+                        className="w-full sm:w-64 px-2.5 py-1.5 bg-white border border-indigo-200 rounded-xl font-bold text-slate-800 text-[11px]"
+                      />
+                      <button
+                        type="button"
+                        onClick={handleAddManualMatch}
+                        disabled={!manualTeam1Id || !manualTeam2Id}
+                        className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-black flex items-center gap-1.5 cursor-pointer disabled:opacity-50 shadow-xs"
+                      >
+                        <Plus className="w-4 h-4" />
+                        <span>إضافة المباراة إلى الجدول</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
+
                 {/* Match Cards */}
                 <div className="space-y-3.5 max-h-[460px] overflow-y-auto pr-1">
-                  {generatedMatches.map((match, mIdx) => {
+                  {displayedGeneratedMatches.length === 0 ? (
+                    <div className="p-8 text-center bg-slate-50 border border-dashed border-slate-300 rounded-2xl text-xs text-slate-500 font-bold">
+                      {generatedMatches.length === 0
+                        ? 'لا توجد مباريات مبرمجة حالياً — استخدم لوحة «البرمجة اليدوية» أعلاه لإضافة المباريات من الفرق المشاركة.'
+                        : 'لا توجد مباريات مطابقة لاسم المؤسسة التي تبحث عنها.'}
+                    </div>
+                  ) : displayedGeneratedMatches.map((match, mIdx) => {
                     const assignedRefIds = match.refereeIds && match.refereeIds.length > 0
                       ? match.refereeIds
                       : (match.refereeId ? [match.refereeId] : []);
@@ -2482,13 +3071,33 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
                         {/* Match Header: Teams & Stage */}
                         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200/70 pb-2.5">
                           <div className="space-y-1">
-                            <span className="px-2 py-0.5 bg-slate-200 text-slate-700 rounded-md font-bold text-[10px]">
-                              {match.stage} • مقابلة #{mIdx + 1}
-                            </span>
-                            <div className="font-black text-sm text-slate-900 flex items-center gap-2">
-                              <span className="text-emerald-700">{match.team1Name}</span>
+                            <div className="flex items-center flex-wrap gap-1.5">
+                              <span className="px-2 py-0.5 bg-slate-200 text-slate-700 rounded-md font-bold text-[10px]">
+                                {match.stage} • مقابلة #{match.drawMatchNumber || mIdx + 1}
+                              </span>
+                              {match.leg && (
+                                <span className={`px-2 py-0.5 rounded-md font-black text-[10px] ${
+                                  match.leg === 'second'
+                                    ? 'bg-amber-100 text-amber-900 border border-amber-300'
+                                    : 'bg-blue-100 text-blue-900 border border-blue-300'
+                                }`}>
+                                  {match.leg === 'second' ? '🔁 إياب' : '➡️ ذهاب'}
+                                </span>
+                              )}
+                              {(isPlaceholderTeamId(match.team1Id) || isPlaceholderTeamId(match.team2Id)) && (
+                                <span className="px-2 py-0.5 rounded-md font-black text-[10px] bg-indigo-100 text-indigo-900 border border-indigo-200">
+                                  ⏳ مباراة إقصائية مستقبلية
+                                </span>
+                              )}
+                            </div>
+                            <div className="font-black text-sm text-slate-900 flex flex-wrap items-center gap-2">
+                              <span className={isPlaceholderTeamId(match.team1Id) ? 'text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-lg border border-indigo-200 text-xs' : 'text-emerald-700'}>
+                                {match.team1Name}
+                              </span>
                               <span className="text-slate-400 font-mono text-xs">ضد</span>
-                              <span className="text-blue-700">{match.team2Name}</span>
+                              <span className={isPlaceholderTeamId(match.team2Id) ? 'text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-lg border border-indigo-200 text-xs' : 'text-blue-700'}>
+                                {match.team2Name}
+                              </span>
                             </div>
                           </div>
 
@@ -2509,6 +3118,14 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
                             }`}>
                               {assignedRefIds.length > 0 ? `${assignedRefIds.length} حكام معيّنون` : 'لم يعيّن حكام بعد'}
                             </span>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteGeneratedMatch(match.id)}
+                              className="p-1 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                              title="حذف هذه المباراة من الجدول"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
                           </div>
                         </div>
 
@@ -2543,6 +3160,7 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
                                 <button
                                   type="button"
                                   onClick={() => {
+                                    pushMatchHistorySnapshot(generatedMatches);
                                     const fallbackSchool = schools.find(s => s.id === match.hostSchoolId) || schools.find(s => s.id === match.team1Id) || schools[0];
                                     setGeneratedMatches(prev =>
                                       prev.map(gm =>
@@ -2565,6 +3183,7 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
                                 <button
                                   type="button"
                                   onClick={() => {
+                                    pushMatchHistorySnapshot(generatedMatches);
                                     setGeneratedMatches(prev =>
                                       prev.map(gm =>
                                         gm.id === match.id
@@ -2586,31 +3205,55 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
                               </div>
                             </div>
                             {(match.venueMode || 'school') === 'school' ? (
-                              <select
-                                value={match.hostSchoolId || ''}
-                                onChange={(e) => {
-                                  const sch = schools.find(s => s.id === e.target.value);
-                                  setGeneratedMatches(prev =>
-                                    prev.map(gm =>
-                                      gm.id === match.id
-                                        ? {
-                                            ...gm,
-                                            venueMode: 'school',
-                                            hostSchoolId: sch?.id || '',
-                                            venueId: sch?.id || '',
-                                            venueName: sch?.name || ''
-                                          }
-                                        : gm
-                                    )
-                                  );
-                                }}
-                                className="w-full px-2 py-1.5 bg-white border border-slate-200 rounded-xl font-bold text-slate-800 cursor-pointer text-[11px]"
-                              >
-                                <option value="">-- اختر المؤسسة المحتضنة --</option>
-                                {schools.map(s => (
-                                  <option key={s.id} value={s.id}>{s.name}</option>
-                                ))}
-                              </select>
+                              <div className="space-y-1">
+                                <div className="relative">
+                                  <Search className="w-3 h-3 text-slate-400 absolute right-2 top-2" />
+                                  <input
+                                    type="text"
+                                    value={hostSchoolSearchByMatchId[match.id] || ''}
+                                    onChange={(e) => {
+                                      const qVal = e.target.value;
+                                      setHostSchoolSearchByMatchId(prev => ({ ...prev, [match.id]: qVal }));
+                                    }}
+                                    placeholder="بحث عن مؤسسة..."
+                                    className="w-full pr-6 pl-2 py-1 bg-white border border-slate-200 rounded-lg text-[10px] font-bold text-slate-700"
+                                  />
+                                </div>
+                                <select
+                                  value={match.hostSchoolId || ''}
+                                  onChange={(e) => {
+                                    pushMatchHistorySnapshot(generatedMatches);
+                                    const sch = schools.find(s => s.id === e.target.value);
+                                    setGeneratedMatches(prev =>
+                                      prev.map(gm =>
+                                        gm.id === match.id
+                                          ? {
+                                              ...gm,
+                                              venueMode: 'school',
+                                              hostSchoolId: sch?.id || '',
+                                              venueId: sch?.id || '',
+                                              venueName: sch?.name || ''
+                                            }
+                                          : gm
+                                      )
+                                    );
+                                  }}
+                                  className="w-full px-2 py-1.5 bg-white border border-slate-200 rounded-xl font-bold text-slate-800 cursor-pointer text-[11px]"
+                                >
+                                  <option value="">-- اختر المؤسسة المحتضنة --</option>
+                                  {schools
+                                    .filter(s => {
+                                      if (s.id === match.hostSchoolId) return true;
+                                      const rawQ = (hostSchoolSearchByMatchId[match.id] || '').trim();
+                                      if (!rawQ) return true;
+                                      const q = normalizeArabicSearch(rawQ);
+                                      return normalizeArabicSearch(s.name || '').includes(q) || normalizeArabicSearch(s.commune || '').includes(q);
+                                    })
+                                    .map(s => (
+                                      <option key={s.id} value={s.id}>{s.name}</option>
+                                    ))}
+                                </select>
+                              </div>
                             ) : (
                               <input
                                 type="text"
@@ -2750,18 +3393,33 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
               )}
 
               {/* Final Submit & Save to Database */}
-              <div className="flex items-center justify-between pt-4 border-t border-slate-200">
-                <button
-                  onClick={() => setStep(2)}
-                  className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-xl text-xs font-bold cursor-pointer"
-                >
-                  إعادة ضبط القرعة
-                </button>
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5 pt-4 border-t border-slate-200">
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setStep(2)}
+                    className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-xl text-xs font-bold cursor-pointer flex items-center gap-1.5"
+                  >
+                    <Undo2 className="w-3.5 h-3.5" />
+                    <span>التراجع للمرحلة 2</span>
+                  </button>
+                  {matchHistory.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={handleUndoStep3Edit}
+                      className="px-4 py-2 bg-amber-100 hover:bg-amber-200 text-amber-900 rounded-xl text-xs font-bold cursor-pointer flex items-center gap-1.5"
+                    >
+                      <Undo2 className="w-3.5 h-3.5" />
+                      <span>تراجع عن آخر تعديل</span>
+                    </button>
+                  )}
+                </div>
 
                 <button
+                  type="button"
                   onClick={handleSaveMatchesToDatabase}
                   disabled={isSaving || generatedMatches.length === 0 || hasBlockedMatchesRestriction}
-                  className="px-7 py-3 bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 text-white rounded-2xl text-xs font-black flex items-center gap-2 shadow-xl shadow-emerald-600/30 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="px-7 py-3 bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 text-white rounded-2xl text-xs font-black flex items-center justify-center gap-2 shadow-xl shadow-emerald-600/30 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <Save className="w-4 h-4" />
                   <span>
@@ -2769,7 +3427,7 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
                       ? 'جاري الحفظ والاعتماد...'
                       : hasBlockedMatchesRestriction
                       ? 'ممنوع الحفظ في تاريخ عطلة أو فروض'
-                      : 'حفظ واعتماد جدول المباريات والحكام في المنظومة'}
+                      : `حفظ واعتماد جدول المباريات والحكام (${generatedMatches.length} مباراة)`}
                   </span>
                 </button>
               </div>
@@ -2889,7 +3547,34 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
                 })}
               </div>
 
-              <div className="flex justify-end pt-3 border-t border-slate-200">
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5 pt-3 border-t border-slate-200">
+                <div className="flex flex-wrap items-center gap-2">
+                  {savedMatchIds.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={handleRevertSavedMatchesAndGoBack}
+                      disabled={isRevertingSave}
+                      className="px-4 py-2.5 bg-amber-100 hover:bg-amber-200 text-amber-950 border border-amber-300 rounded-xl text-xs font-black flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+                      title="إلغاء حفظ هذه المباريات من الجدول والعودة إلى المرحلة 3 لتعديلها"
+                    >
+                      <Undo2 className="w-4 h-4" />
+                      <span>
+                        {isRevertingSave
+                          ? 'جاري التراجع عن الحفظ...'
+                          : `التراجع عن حفظ المباريات (${savedMatchIds.length}) والعودة للمرحلة 3`}
+                      </span>
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setStep(3)}
+                    className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer"
+                  >
+                    <Undo2 className="w-3.5 h-3.5" />
+                    <span>العودة للمرحلة 3 بدون حذف</span>
+                  </button>
+                </div>
+
                 <button
                   type="button"
                   onClick={onClose}
