@@ -145,6 +145,7 @@ export const Teachers: React.FC = () => {
   const [selectedSport, setSelectedSport] = useState('');
   const [selectedLocation, setSelectedLocation] = useState('');
   const [selectedCadre, setSelectedCadre] = useState<string>(cadreQuery || '');
+  const [profileFilter, setProfileFilter] = useState<'ALL' | 'COMPLETE' | 'INCOMPLETE'>('ALL');
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
   // Detail Modal State
@@ -562,8 +563,15 @@ export const Teachers: React.FC = () => {
     const matchesSport = selectedSport === '' || (Array.isArray(teacher.refereeSpecialty) ? teacher.refereeSpecialty.includes(selectedSport) : teacher.refereeSpecialty === selectedSport);
     const matchesLocation = selectedLocation === '' || teacher.workLocation === selectedLocation;
     const matchesCadre = selectedCadre === '' || (teacher.teachingCadre || 'HIGH') === selectedCadre;
+    const isProfileComplete = Boolean(teacher.workLocation && teacher.leaseNumber);
+    const matchesProfile =
+      profileFilter === 'ALL'
+        ? true
+        : profileFilter === 'COMPLETE'
+        ? isProfileComplete
+        : !isProfileComplete;
 
-    return matchesSearch && matchesSport && matchesLocation && matchesCadre;
+    return matchesSearch && matchesSport && matchesLocation && matchesCadre && matchesProfile;
   });
 
   // Calculate statistics
@@ -694,35 +702,93 @@ export const Teachers: React.FC = () => {
 
       {/* Stats Cards Dashboard Section */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-3xs">
-          <p className="text-[10px] text-slate-400 font-bold uppercase mb-1">إجمالي الأساتذة المسجلين</p>
+        <button
+          type="button"
+          onClick={() => setProfileFilter('ALL')}
+          className={`w-full text-right bg-white p-4 rounded-2xl border shadow-3xs transition-all cursor-pointer group ${
+            profileFilter === 'ALL'
+              ? 'border-blue-500 ring-2 ring-blue-500/15 bg-blue-50/20'
+              : 'border-slate-200 hover:border-blue-300 hover:shadow-sm'
+          }`}
+          title="عرض جميع الأساتذة المسجلين"
+        >
+          <div className="flex items-center justify-between mb-1">
+            <p className="text-[10px] text-slate-400 font-bold uppercase">إجمالي الأساتذة المسجلين</p>
+            {profileFilter === 'ALL' && (
+              <span className="text-[10px] font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full">
+                الكل
+              </span>
+            )}
+          </div>
           <div className="flex items-center justify-between">
             <h3 className="text-2xl font-black text-slate-800">{totalTeachers}</h3>
-            <span className="p-2 bg-blue-50 text-blue-600 rounded-xl">
+            <span className="p-2 bg-blue-50 text-blue-600 rounded-xl group-hover:scale-105 transition-transform">
               <GraduationCap className="h-5 w-5" />
             </span>
           </div>
-        </div>
+        </button>
 
-        <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-3xs">
-          <p className="text-[10px] text-slate-400 font-bold uppercase mb-1">ملفات شخصية مكتملة</p>
+        <button
+          type="button"
+          onClick={() => setProfileFilter(prev => (prev === 'COMPLETE' ? 'ALL' : 'COMPLETE'))}
+          aria-pressed={profileFilter === 'COMPLETE'}
+          className={`w-full text-right bg-white p-4 rounded-2xl border shadow-3xs transition-all cursor-pointer group ${
+            profileFilter === 'COMPLETE'
+              ? 'border-emerald-500 ring-2 ring-emerald-500/20 bg-emerald-50/30'
+              : 'border-slate-200 hover:border-emerald-300 hover:shadow-sm'
+          }`}
+          title="تصفية لعرض الملفات الشخصية المكتملة"
+        >
+          <div className="flex items-center justify-between mb-1">
+            <p className="text-[10px] text-slate-400 font-bold uppercase">ملفات شخصية مكتملة</p>
+            <span
+              className={`text-[10px] font-bold px-2 py-0.5 rounded-full transition-colors ${
+                profileFilter === 'COMPLETE'
+                  ? 'bg-emerald-600 text-white'
+                  : 'bg-emerald-50 text-emerald-700 opacity-80 group-hover:opacity-100'
+              }`}
+            >
+              {profileFilter === 'COMPLETE' ? 'مُصفّى ✓' : 'انقر للتصفية'}
+            </span>
+          </div>
           <div className="flex items-center justify-between">
             <h3 className="text-2xl font-black text-emerald-600">{completedProfiles}</h3>
-            <span className="p-2 bg-emerald-50 text-emerald-600 rounded-xl">
+            <span className="p-2 bg-emerald-50 text-emerald-600 rounded-xl group-hover:scale-105 transition-transform">
               <UserCheck className="h-5 w-5" />
             </span>
           </div>
-        </div>
+        </button>
 
-        <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-3xs">
-          <p className="text-[10px] text-slate-400 font-bold uppercase mb-1">ملفات تحتاج استكمال</p>
+        <button
+          type="button"
+          onClick={() => setProfileFilter(prev => (prev === 'INCOMPLETE' ? 'ALL' : 'INCOMPLETE'))}
+          aria-pressed={profileFilter === 'INCOMPLETE'}
+          className={`w-full text-right bg-white p-4 rounded-2xl border shadow-3xs transition-all cursor-pointer group ${
+            profileFilter === 'INCOMPLETE'
+              ? 'border-amber-500 ring-2 ring-amber-500/25 bg-amber-50/40'
+              : 'border-slate-200 hover:border-amber-400 hover:bg-amber-50/20 hover:shadow-sm'
+          }`}
+          title="انقر لعرض الملفات التي تحتاج استكمال البيانات"
+        >
+          <div className="flex items-center justify-between mb-1">
+            <p className="text-[10px] text-slate-500 font-bold uppercase">ملفات تحتاج استكمال</p>
+            <span
+              className={`text-[10px] font-bold px-2 py-0.5 rounded-full transition-colors ${
+                profileFilter === 'INCOMPLETE'
+                  ? 'bg-amber-600 text-white'
+                  : 'bg-amber-50 text-amber-700 opacity-85 group-hover:opacity-100'
+              }`}
+            >
+              {profileFilter === 'INCOMPLETE' ? 'مُصفّى ✓' : 'انقر للعرض'}
+            </span>
+          </div>
           <div className="flex items-center justify-between">
             <h3 className="text-2xl font-black text-amber-600">{incompleteProfiles}</h3>
-            <span className="p-2 bg-amber-50 text-amber-600 rounded-xl">
+            <span className="p-2 bg-amber-50 text-amber-600 rounded-xl group-hover:scale-105 transition-transform">
               <AlertCircle className="h-5 w-5" />
             </span>
           </div>
-        </div>
+        </button>
       </div>
 
       {/* Search and Filters */}
@@ -821,13 +887,14 @@ export const Teachers: React.FC = () => {
             ))}
           </select>
 
-          {(searchTerm || selectedSport || selectedLocation || selectedCadre) && (
+          {(searchTerm || selectedSport || selectedLocation || selectedCadre || profileFilter !== 'ALL') && (
             <button
               onClick={() => {
                 setSearchTerm('');
                 setSelectedSport('');
                 setSelectedLocation('');
                 setSelectedCadre('');
+                setProfileFilter('ALL');
                 setSearchParams({});
               }}
               className="text-xs font-bold text-red-600 hover:text-red-700 bg-red-50 hover:bg-red-100 px-3 py-2.5 rounded-xl transition-colors shrink-0 cursor-pointer"
@@ -837,6 +904,36 @@ export const Teachers: React.FC = () => {
           )}
         </div>
       </div>
+
+      {profileFilter !== 'ALL' && (
+        <div
+          className={`flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 rounded-xl border text-xs font-bold ${
+            profileFilter === 'INCOMPLETE'
+              ? 'bg-amber-50 border-amber-200 text-amber-900'
+              : 'bg-emerald-50 border-emerald-200 text-emerald-900'
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            {profileFilter === 'INCOMPLETE' ? (
+              <AlertCircle className="h-4 w-4 text-amber-600 shrink-0" />
+            ) : (
+              <UserCheck className="h-4 w-4 text-emerald-600 shrink-0" />
+            )}
+            <span>
+              {profileFilter === 'INCOMPLETE'
+                ? `يتم الآن عرض الملفات التي تحتاج استكمال فقط (مقر العمل أو رقم التأجير غير مكتمل) — العدد: ${filteredTeachers.length}`
+                : `يتم الآن عرض الملفات الشخصية المكتملة فقط — العدد: ${filteredTeachers.length}`}
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setProfileFilter('ALL')}
+            className="px-2.5 py-1 rounded-lg bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 transition-colors cursor-pointer text-[11px] font-bold"
+          >
+            عرض جميع الأساتذة
+          </button>
+        </div>
+      )}
 
       {/* Main Table / Grid */}
       {loading ? (
@@ -848,7 +945,14 @@ export const Teachers: React.FC = () => {
         <div className="bg-white rounded-2xl border border-slate-200 p-12 text-center">
           <p className="text-slate-500 text-xs font-semibold">لا توجد نتائج تطابق خيارات البحث الحالية.</p>
           <button
-            onClick={() => { setSearchTerm(''); setSelectedSport(''); setSelectedLocation(''); }}
+            onClick={() => {
+              setSearchTerm('');
+              setSelectedSport('');
+              setSelectedLocation('');
+              setSelectedCadre('');
+              setProfileFilter('ALL');
+              setSearchParams({});
+            }}
             className="mt-3 text-xs font-bold text-blue-600 hover:underline cursor-pointer"
           >
             إعادة تعيين الفلاتر

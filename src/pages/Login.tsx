@@ -56,13 +56,15 @@ import {
 import { doc, setDoc, getDoc, serverTimestamp, query, collection, where, getDocs } from 'firebase/firestore';
 import { auth, db } from '../firebase/config';
 import { User, Role, Directorate, School, Tournament, Match, Student, CrossCountryCategoryResult, AthleticsCategoryResult, AthleticsWinner, Sport } from '../types';
-import { DataService, SPORTS_MAP, getAgeCategoriesForSeason, getCategoryYearsLabel } from '../lib/dataService';
+import { DataService, SPORTS_MAP, getAgeCategoriesForSeason, getCategoryYearsLabel, normalizeCategoryKey, normalizeTournamentAffiliation } from '../lib/dataService';
 import { calculateTeamRankings, resolveRunnerParticipationType } from '../lib/crossCountryConfig';
+import { hasValidMatchTeams, formatTeamDisplayName, extractMatchGroupLabel, isPlaceholderTeamId, computeGroupStandings } from '../lib/drawTournamentUtils';
+import { resolveMatchAffiliation } from '../lib/programExportService';
 import { AppLogo } from '../components/AppLogo';
 import { SportsIntroAnimation } from '../components/SportsIntroAnimation';
 import { CrossCountryPodiumView } from '../components/CrossCountryPodiumView';
 import toast from 'react-hot-toast';
-import { cn, isFlexibleEmailMatch, normalizeDateToYmd } from '../lib/utils';
+import { cn, isFlexibleEmailMatch, normalizeDateToYmd, formatMatchDate } from '../lib/utils';
 
 export const Login: React.FC = () => {
   const { currentUser, userProfile, loading, updateProfileState } = useAuth();
@@ -77,6 +79,7 @@ export const Login: React.FC = () => {
 
   // Data states for Public View
   const [activeDirectorate, setActiveDirectorate] = useState<Directorate | null>(null);
+  const activeDirIdRef = useRef<string>('taourirt');
   const [isAboutModalOpen, setIsAboutModalOpen] = useState(false);
   const [isIntroOpen, setIsIntroOpen] = useState<boolean>(() => {
     try {
@@ -115,6 +118,7 @@ export const Login: React.FC = () => {
   const [selectedAffiliation, setSelectedAffiliation] = useState<'ALL' | 'CLUB' | 'NON_CLUB'>('NON_CLUB');
   const [selectedAthleticsSpecialty, setSelectedAthleticsSpecialty] = useState<'ALL' | 'track' | 'field'>('ALL');
   const [selectedDate, setSelectedDate] = useState<string>(new Date().toISOString().split('T')[0]);
+  const [filterMatchesByDate, setFilterMatchesByDate] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [activePublicTab, setActivePublicTab] = useState<'CC_PODIUM' | 'ATHLETICS' | 'MATCHES' | 'TOURNAMENTS'>('CC_PODIUM');
   
@@ -367,6 +371,7 @@ export const Login: React.FC = () => {
     try {
       const activeDir = await DataService.getActiveDirectorate();
       const effectiveDirId = targetDirId || activeDir.id;
+      activeDirIdRef.current = effectiveDirId;
       if (targetDirId && activeDir.id !== targetDirId) {
         const dirs = await DataService.getDirectorates();
         const found = dirs.find(d => d.id === targetDirId);
@@ -536,9 +541,18 @@ export const Login: React.FC = () => {
   useEffect(() => {
     loadAllData('taourirt');
 
-    const unsubSchools = DataService.subscribeToSchools((s) => setSchools(s));
-    const unsubTournaments = DataService.subscribeToTournaments((t) => setTournaments(t));
-    const unsubMatches = DataService.subscribeToMatches((m) => setMatches(m));
+    const unsubSchools = DataService.subscribeToSchools((s) => {
+      const dir = activeDirIdRef.current;
+      setSchools(!dir || dir === 'all' ? s : s.filter(item => !item.directorateId || item.directorateId === dir));
+    });
+    const unsubTournaments = DataService.subscribeToTournaments((t) => {
+      const dir = activeDirIdRef.current;
+      setTournaments(!dir || dir === 'all' ? t : t.filter(item => !item.directorateId || item.directorateId === dir));
+    });
+    const unsubMatches = DataService.subscribeToMatches((m) => {
+      const dir = activeDirIdRef.current;
+      setMatches(!dir || dir === 'all' ? m : m.filter(item => !item.directorateId || item.directorateId === dir));
+    });
     const unsubCcResults = DataService.subscribeCrossCountryResults((r) => setCrossCountryResults(r as Record<string, CrossCountryCategoryResult>));
     const unsubAthletics = DataService.subscribeAthleticsResults((ar) => setAthleticsResults(ar));
 
@@ -679,10 +693,11 @@ export const Login: React.FC = () => {
       const cleanEmail = (googleUser.email || '').toLowerCase().trim();
 
       if (isSuperAdminEmail(cleanEmail)) {
+        const isEducationalSupervisor = cleanEmail === 'sayhihassan@gmail.com';
         try {
           await setDoc(doc(db, 'users', googleUser.uid), {
             id: googleUser.uid,
-            fullName: googleUser.displayName || 'المسير المركزي الرئيسي',
+            fullName: googleUser.displayName || (isEducationalSupervisor ? 'حسن السايحي' : 'المسير المركزي الرئيسي'),
             email: cleanEmail,
             role: 'CENTRAL_ADMIN',
             isSuperAdmin: true,
@@ -693,7 +708,11 @@ export const Login: React.FC = () => {
         } catch (err) {
           console.warn("Could not persist super admin user doc:", err);
         }
-        toast.success(`مرحباً بك! تم تسجيل الدخول بصلاحيات المشرف العام المركزي (${cleanEmail})`);
+        toast.success(
+          isEducationalSupervisor
+            ? `مرحباً بك ذ. حسن السايحي! تم تسجيل الدخول بصلاحيات المشرف التربوي الشاملة (${cleanEmail})`
+            : `مرحباً بك! تم تسجيل الدخول بصلاحيات المشرف العام المركزي (${cleanEmail})`
+        );
         navigate('/dashboard', { replace: true });
         return;
       }
@@ -1047,30 +1066,102 @@ export const Login: React.FC = () => {
     });
   }, [tournaments, selectedDate, selectedSport, selectedScope, selectedCategory, selectedGender, searchQuery]);
 
-  // Filtered Matches for Public Fixtures
+  // Helper predicate for Public Match filtering (enforces both teams present + sport + affiliation + category + gender + search)
+  const doesMatchPassPublicFilters = (m: Match, enforceSelectedDate: boolean): boolean => {
+    if (!hasValidMatchTeams(m, schools)) return false;
+
+    if (enforceSelectedDate && (!m.date || !safeDateCompare(m.date, selectedDate))) {
+      return false;
+    }
+
+    const tourn = tournaments.find(t => t.id === m.tournamentId);
+    const mSport = m.sportId || tourn?.sportId;
+    if (selectedSport !== 'ALL' && mSport !== selectedSport) return false;
+
+    if (selectedAffiliation !== 'ALL') {
+      const rawAff = m.affiliationType || tourn?.affiliationType;
+      const mAff = rawAff
+        ? normalizeTournamentAffiliation(rawAff, tourn?.name)
+        : resolveMatchAffiliation(m, tournaments);
+      if (selectedAffiliation === 'CLUB' && mAff !== 'club_affiliated' && mAff !== 'open') return false;
+      if (selectedAffiliation === 'NON_CLUB' && mAff !== 'non_club' && mAff !== 'open') return false;
+    }
+
+    if (selectedCategory !== 'ALL') {
+      const rawMCat = m.ageCategory || m.category || tourn?.ageCategory || '';
+      if (!rawMCat) return false;
+      const normMCat = normalizeCategoryKey(rawMCat);
+      const normSelectedCat = normalizeCategoryKey(selectedCategory);
+      if (normMCat !== normSelectedCat) return false;
+    }
+
+    if (selectedGender !== 'ALL') {
+      const rawCategoryText = `${m.ageCategory || ''} ${m.category || ''} ${tourn?.name || ''}`;
+      const explicitGender =
+        m.gender && m.gender !== 'Mixed'
+          ? m.gender
+          : tourn?.gender && tourn.gender !== 'Mixed'
+          ? tourn.gender
+          : '';
+      const inferredGender =
+        explicitGender ||
+        (rawCategoryText.includes('إناث') || rawCategoryText.includes('فتيات') || rawCategoryText.includes('صغيرات') || rawCategoryText.includes('برعمات') || rawCategoryText.includes('شابات')
+          ? 'Female'
+          : rawCategoryText.includes('ذكور') || rawCategoryText.includes('فتيان') || rawCategoryText.includes('صغار') || rawCategoryText.includes('براعم') || rawCategoryText.includes('شبان')
+          ? 'Male'
+          : '');
+      if (!inferredGender || inferredGender !== selectedGender) return false;
+    }
+
+    if (searchQuery.trim()) {
+      const q = searchQuery.trim().toLowerCase();
+      const t1 = formatTeamDisplayName(m.team1Id, m.team1Name || m.team1SchoolName, schools, m.team1Placeholder, m.team1SourceMatchNumber).toLowerCase();
+      const t2 = formatTeamDisplayName(m.team2Id, m.team2Name || m.team2SchoolName, schools, m.team2Placeholder, m.team2SourceMatchNumber).toLowerCase();
+      const venue = (m.venueName || '').toLowerCase();
+      const group = extractMatchGroupLabel(m).toLowerCase();
+      const stage = (m.stage || '').toLowerCase();
+      const matchNumStr = m.drawMatchNumber ? String(m.drawMatchNumber) : '';
+      if (
+        !t1.includes(q) &&
+        !t2.includes(q) &&
+        !venue.includes(q) &&
+        !group.includes(q) &&
+        !stage.includes(q) &&
+        !matchNumStr.includes(q)
+      ) {
+        return false;
+      }
+    }
+
+    return true;
+  };
+
+  // Filtered Matches for Daily Program Calendar Widget (strictly scoped to selectedDate)
   const filteredMatches = useMemo(() => {
-    return matches.filter(m => {
-      // Date Filter: Match must be on the selected day
-      if (m.date && !safeDateCompare(m.date, selectedDate)) return false;
-      
-      if (selectedSport !== 'ALL') {
-        const tourn = tournaments.find(t => t.id === m.tournamentId);
-        const mSport = m.sportId || tourn?.sportId;
-        if (mSport !== selectedSport) return false;
-      }
-      if (selectedCategory !== 'ALL' && m.category && !m.category.toUpperCase().includes(selectedCategory.toUpperCase())) return false;
-      if (selectedGender !== 'ALL' && m.gender !== selectedGender) return false;
-      if (searchQuery.trim()) {
-        const q = searchQuery.trim().toLowerCase();
-        const matchesTeam1 = m.team1Name?.toLowerCase().includes(q);
-        const matchesTeam2 = m.team2Name?.toLowerCase().includes(q);
-        const matchesVenue = m.venueName?.toLowerCase().includes(q);
-        const matchesGroup = m.groupName?.toLowerCase().includes(q);
-        if (!matchesTeam1 && !matchesTeam2 && !matchesVenue && !matchesGroup) return false;
-      }
-      return true;
-    });
-  }, [matches, tournaments, selectedDate, selectedSport, selectedCategory, selectedGender, searchQuery]);
+    return matches
+      .filter(m => doesMatchPassPublicFilters(m, true))
+      .sort((a, b) => (a.drawMatchNumber ?? 9999) - (b.drawMatchNumber ?? 9999));
+  }, [matches, tournaments, schools, selectedDate, selectedSport, selectedAffiliation, selectedCategory, selectedGender, searchQuery]);
+
+  // Filtered Matches for Public Matches Tab (all dates by default, or selectedDate when toggle active)
+  const publicTabMatches = useMemo(() => {
+    return matches
+      .filter(m => doesMatchPassPublicFilters(m, filterMatchesByDate))
+      .sort((a, b) => {
+        const numDiff = (a.drawMatchNumber ?? 9999) - (b.drawMatchNumber ?? 9999);
+        if (numDiff !== 0) return numDiff;
+        const dateA = normalizeDateToYmd(a.date) || '9999-12-31';
+        const dateB = normalizeDateToYmd(b.date) || '9999-12-31';
+        return dateA.localeCompare(dateB);
+      });
+  }, [matches, tournaments, schools, selectedDate, filterMatchesByDate, selectedSport, selectedAffiliation, selectedCategory, selectedGender, searchQuery]);
+
+  const publicTabGroupStandings = useMemo(() => {
+    if (selectedSport === 'ALL' || selectedSport === 'cross_country' || selectedSport === 'athletics') {
+      return [];
+    }
+    return computeGroupStandings(publicTabMatches, schools);
+  }, [publicTabMatches, schools, selectedSport]);
 
   // Cross Country Results Data (Strictly Separated, Deduplicated, & Recalculated by Affiliation)
   const crossCountryList = useMemo(() => {
@@ -1309,10 +1400,23 @@ export const Login: React.FC = () => {
         const isTeamSport = t.sportId !== 'cross_country' && t.sportId !== 'athletics';
         if (!isTeamSport) return false;
         if (selectedSport !== 'ALL' && t.sportId !== selectedSport) return false;
+        if (selectedAffiliation !== 'ALL') {
+          const tAff = normalizeTournamentAffiliation(t.affiliationType, t.name);
+          if (selectedAffiliation === 'CLUB' && tAff !== 'club_affiliated' && tAff !== 'open') return false;
+          if (selectedAffiliation === 'NON_CLUB' && tAff !== 'non_club' && tAff !== 'open') return false;
+        }
         return true;
       });
       
-      const uniqueCats = Array.from(new Set<string>(teamSportsTourns.map(t => `${t.ageCategory}_${t.gender}`)));
+      const uniqueBranchSet = new Set<string>();
+      teamSportsTourns.forEach(t => {
+        const cleanCat = normalizeCategoryKey(t.ageCategory || t.name || 'U15');
+        const cleanGender = t.gender || 'Mixed';
+        if (cleanCat && cleanGender) {
+          uniqueBranchSet.add(`${cleanCat}__${cleanGender}`);
+        }
+      });
+      const uniqueCats = Array.from(uniqueBranchSet);
       
       const list = [
         { id: 'ALL_ALL', cat: 'ALL', gender: 'ALL', label: 'جميع الفئات المبرمجة 🌟' }
@@ -1320,13 +1424,15 @@ export const Login: React.FC = () => {
       
       const catOrder: Record<string, number> = { 'U12': 1, 'U15': 2, 'U18': 3, 'U20': 4 };
       const sortedKeys = uniqueCats.sort((a, b) => {
-        const catA = a.split('_')[0];
-        const catB = b.split('_')[0];
-        return (catOrder[catA] || 99) - (catOrder[catB] || 99);
+        const catA = a.split('__')[0];
+        const catB = b.split('__')[0];
+        const orderDiff = (catOrder[catA] || 99) - (catOrder[catB] || 99);
+        if (orderDiff !== 0) return orderDiff;
+        return a.localeCompare(b);
       });
 
       sortedKeys.forEach(key => {
-        const [cat, gender] = key.split('_');
+        const [cat, gender] = key.split('__');
         if (!cat || !gender) return;
         
         const genderLabel = gender === 'Male' ? 'ذكور' : gender === 'Female' ? 'إناث' : 'مختلط';
@@ -1350,7 +1456,7 @@ export const Login: React.FC = () => {
     return [
       { id: 'ALL_ALL', cat: 'ALL', gender: 'ALL', label: 'جميع الفئات 🌟' }
     ];
-  }, [activePublicTab, tournaments, crossCountryResults, athleticsResults, selectedSport, sportsConfig]);
+  }, [activePublicTab, tournaments, crossCountryResults, athleticsResults, selectedSport, selectedAffiliation, sportsConfig]);
 
   // Filtered sports for sports bar: STRICTLY sports that are programmed AND open for registration
   const programmedSportsEntries = useMemo(() => {
@@ -1407,12 +1513,7 @@ export const Login: React.FC = () => {
     const year = currentCalendarMonth.getFullYear();
     const monthStr = String(currentCalendarMonth.getMonth() + 1).padStart(2, '0');
     
-    const sportRelevantMatches = matches.filter(m => {
-      if (selectedSport === 'ALL') return true;
-      const tourn = tournaments.find(t => t.id === m.tournamentId);
-      const mSport = m.sportId || tourn?.sportId;
-      return mSport === selectedSport;
-    });
+    const sportRelevantMatches = matches.filter(m => doesMatchPassPublicFilters(m, false));
 
     const set = new Set<string>();
     sportRelevantMatches.forEach(m => {
@@ -1573,22 +1674,43 @@ export const Login: React.FC = () => {
                     )}
                   </div>
                 ) : (
-                  filteredMatches.map(m => (
-                    <div key={m.id} className="p-3 bg-slate-50 dark:bg-slate-800 rounded-2xl space-y-1.5 border border-slate-200/80 dark:border-slate-700/60 shadow-xs hover:border-emerald-400 transition-all">
-                      <div className="flex items-center justify-between text-xs font-black text-slate-900 dark:text-slate-100">
-                        <span className="flex items-center gap-1.5 text-emerald-700 dark:text-emerald-400 truncate">
-                          <span>{SPORTS_MAP[m.sportId]?.icon || '⚽'}</span>
-                          <span className="truncate">{m.team1Name} VS {m.team2Name}</span>
-                        </span>
-                        <span className="font-mono text-amber-600 dark:text-amber-400 shrink-0 font-black">{m.startTime || '10:00'}</span>
-                      </div>
+                  filteredMatches.map((m, mIdx) => {
+                    const t1Display = formatTeamDisplayName(m.team1Id, m.team1Name || m.team1SchoolName, schools, m.team1Placeholder, m.team1SourceMatchNumber);
+                    const t2Display = formatTeamDisplayName(m.team2Id, m.team2Name || m.team2SchoolName, schools, m.team2Placeholder, m.team2SourceMatchNumber);
+                    const grpLabel = extractMatchGroupLabel(m);
+                    const matchNum = m.drawMatchNumber ?? (mIdx + 1);
+                    return (
+                      <div key={m.id} className="p-3 bg-slate-50 dark:bg-slate-800 rounded-2xl space-y-1.5 border border-slate-200/80 dark:border-slate-700/60 shadow-xs hover:border-emerald-400 transition-all">
+                        <div className="flex items-center justify-between gap-1 text-[10px] font-black">
+                          <div className="flex items-center gap-1 flex-wrap">
+                            <span className="px-1.5 py-0.5 bg-blue-100 dark:bg-blue-950 text-blue-800 dark:text-blue-200 rounded-md">
+                              المباراة رقم {matchNum}
+                            </span>
+                            <span className="px-1.5 py-0.5 bg-slate-200/80 dark:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-md font-bold">
+                              الدور: {m.stage?.trim() || 'دور المجموعات'}
+                            </span>
+                            {grpLabel && (
+                              <span className="px-1.5 py-0.5 bg-purple-100 dark:bg-purple-950 text-purple-800 dark:text-purple-200 rounded-md truncate max-w-[140px]">
+                                {grpLabel}
+                              </span>
+                            )}
+                          </div>
+                          <span className="font-mono text-amber-600 dark:text-amber-400 shrink-0 font-black">{m.startTime || '10:00'}</span>
+                        </div>
+                        <div className="flex items-center justify-between text-xs font-black text-slate-900 dark:text-slate-100">
+                          <span className="flex items-center gap-1.5 text-emerald-700 dark:text-emerald-400 truncate">
+                            <span>{SPORTS_MAP[m.sportId]?.icon || '⚽'}</span>
+                            <span className="truncate">{t1Display} VS {t2Display}</span>
+                          </span>
+                        </div>
 
-                      <div className="flex items-center justify-between text-[10px] text-slate-500 dark:text-slate-400 font-bold">
-                        <span className="flex items-center gap-1 truncate"><MapPin className="w-2.5 h-2.5" /> {m.venueName || 'الملعب الرياضي'}</span>
-                        <span className="px-1.5 py-0.5 bg-white dark:bg-slate-700 rounded-md font-black">{m.category || 'عامة'}</span>
+                        <div className="flex items-center justify-between text-[10px] text-slate-500 dark:text-slate-400 font-bold">
+                          <span className="flex items-center gap-1 truncate"><MapPin className="w-2.5 h-2.5" /> {m.venueName || 'الملعب الرياضي'}</span>
+                          <span className="px-1.5 py-0.5 bg-white dark:bg-slate-700 rounded-md font-black">{m.ageCategory || m.category || 'عامة'}</span>
+                        </div>
                       </div>
-                    </div>
-                  ))
+                    );
+                  })
                 )}
               </div>
 
@@ -1851,22 +1973,43 @@ export const Login: React.FC = () => {
                 )}
               </div>
             ) : (
-              filteredMatches.map(m => (
-                <div key={m.id} className="p-2.5 bg-slate-50 dark:bg-slate-800 rounded-2xl space-y-1.5 border border-slate-200/80 dark:border-slate-700/60 hover:border-emerald-300 transition-all">
-                  <div className="flex items-center justify-between text-[11px] font-black text-slate-900 dark:text-slate-100">
-                    <span className="flex items-center gap-1.5 text-emerald-700 dark:text-emerald-400 truncate">
-                      <span>{SPORTS_MAP[m.sportId]?.icon || '⚽'}</span>
-                      <span className="truncate">{m.team1Name} VS {m.team2Name}</span>
-                    </span>
-                    <span className="font-mono text-amber-600 dark:text-amber-400 shrink-0 font-black">{m.startTime || '10:00'}</span>
-                  </div>
+              filteredMatches.map((m, mIdx) => {
+                const t1Display = formatTeamDisplayName(m.team1Id, m.team1Name || m.team1SchoolName, schools, m.team1Placeholder, m.team1SourceMatchNumber);
+                const t2Display = formatTeamDisplayName(m.team2Id, m.team2Name || m.team2SchoolName, schools, m.team2Placeholder, m.team2SourceMatchNumber);
+                const grpLabel = extractMatchGroupLabel(m);
+                const matchNum = m.drawMatchNumber ?? (mIdx + 1);
+                return (
+                  <div key={m.id} className="p-2.5 bg-slate-50 dark:bg-slate-800 rounded-2xl space-y-1.5 border border-slate-200/80 dark:border-slate-700/60 hover:border-emerald-300 transition-all">
+                    <div className="flex items-center justify-between gap-1 text-[10px] font-black">
+                      <div className="flex items-center gap-1 flex-wrap">
+                        <span className="px-1.5 py-0.5 bg-blue-100 dark:bg-blue-950 text-blue-800 dark:text-blue-200 rounded-md">
+                          المباراة رقم {matchNum}
+                        </span>
+                        <span className="px-1.5 py-0.5 bg-slate-200/80 dark:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-md font-bold">
+                          الدور: {m.stage?.trim() || 'دور المجموعات'}
+                        </span>
+                        {grpLabel && (
+                          <span className="px-1.5 py-0.5 bg-purple-100 dark:bg-purple-950 text-purple-800 dark:text-purple-200 rounded-md truncate max-w-[140px]">
+                            {grpLabel}
+                          </span>
+                        )}
+                      </div>
+                      <span className="font-mono text-amber-600 dark:text-amber-400 shrink-0 font-black">{m.startTime || '10:00'}</span>
+                    </div>
+                    <div className="flex items-center justify-between text-[11px] font-black text-slate-900 dark:text-slate-100">
+                      <span className="flex items-center gap-1.5 text-emerald-700 dark:text-emerald-400 truncate">
+                        <span>{SPORTS_MAP[m.sportId]?.icon || '⚽'}</span>
+                        <span className="truncate">{t1Display} VS {t2Display}</span>
+                      </span>
+                    </div>
 
-                  <div className="flex items-center justify-between text-[10px] text-slate-500 dark:text-slate-400">
-                    <span className="flex items-center gap-1"><MapPin className="w-2.5 h-2.5" /> {m.venueName || 'الملعب'}</span>
-                    <span className="px-1.5 py-0.5 bg-white dark:bg-slate-700 rounded font-bold">{m.category || 'عامة'}</span>
+                    <div className="flex items-center justify-between text-[10px] text-slate-500 dark:text-slate-400">
+                      <span className="flex items-center gap-1"><MapPin className="w-2.5 h-2.5" /> {m.venueName || 'الملعب'}</span>
+                      <span className="px-1.5 py-0.5 bg-white dark:bg-slate-700 rounded font-bold">{m.ageCategory || m.category || 'عامة'}</span>
+                    </div>
                   </div>
-                </div>
-              ))
+                );
+              })
             )}
           </div>
         </div>
@@ -2241,6 +2384,7 @@ export const Login: React.FC = () => {
                             setActivePublicTab('MATCHES');
                           }
                           setSelectedCategory('ALL');
+                          setSelectedGender('ALL');
                         }}
                         className={`px-3.5 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer flex items-center gap-1.5 shrink-0 ${
                           isSelected
@@ -2983,101 +3127,274 @@ export const Login: React.FC = () => {
             {/* TAB 2: TEAM MATCHES & STANDINGS */}
             {activePublicTab === 'MATCHES' && (
               <div className="space-y-4">
-                {filteredMatches.length === 0 ? (
+                {/* Summary Header + Date Toggle */}
+                <div className="flex flex-wrap items-center justify-between gap-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl px-4 py-3 shadow-xs">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-xs font-black text-slate-900 dark:text-white flex items-center gap-1.5">
+                      <span>{selectedSport !== 'ALL' ? (SPORTS_MAP[selectedSport]?.icon || '⚽') : '🏆'}</span>
+                      <span>
+                        {selectedSport !== 'ALL'
+                          ? `مباريات وبرمجة ${SPORTS_MAP[selectedSport]?.name || ''}`
+                          : 'المباريات المبرمجة والنتائج'}
+                      </span>
+                    </span>
+                    <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-200 border border-emerald-200 dark:border-emerald-800">
+                      {publicTabMatches.length} مباراة جاهزة
+                    </span>
+                  </div>
+
+                  <div className="flex items-center gap-1.5 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl text-[10px] font-black">
+                    <button
+                      type="button"
+                      onClick={() => setFilterMatchesByDate(false)}
+                      className={`px-2.5 py-1 rounded-lg transition-all cursor-pointer ${
+                        !filterMatchesByDate
+                          ? 'bg-emerald-600 text-white shadow-xs'
+                          : 'text-slate-600 dark:text-slate-300 hover:bg-white/60'
+                      }`}
+                    >
+                      جميع التواريخ
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setFilterMatchesByDate(true)}
+                      className={`px-2.5 py-1 rounded-lg transition-all cursor-pointer ${
+                        filterMatchesByDate
+                          ? 'bg-emerald-600 text-white shadow-xs'
+                          : 'text-slate-600 dark:text-slate-300 hover:bg-white/60'
+                      }`}
+                    >
+                      تاريخ {selectedDate}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Group Standings Table (when groups exist for filtered sport) */}
+                {publicTabGroupStandings.length > 0 && (
+                  <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden shadow-xs">
+                    <div className="px-4 py-2.5 bg-slate-900 text-white flex flex-wrap items-center justify-between gap-2 text-xs">
+                      <span className="font-black">🏆 ترتيب المجموعات والنقط</span>
+                      <span className="text-[10px] font-bold text-emerald-300">فوز: 3ن • تعادل: 1ن • هزيمة: 0ن</span>
+                    </div>
+                    <div className="p-3 grid grid-cols-1 md:grid-cols-2 gap-3">
+                      {publicTabGroupStandings.map((grp) => (
+                        <div key={grp.groupName} className="rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden">
+                          <div className="px-3 py-1.5 bg-slate-50 dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between text-[11px]">
+                            <span className="font-black text-slate-900 dark:text-white">{grp.groupName}</span>
+                            <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400">{grp.systemLabel}</span>
+                          </div>
+                          <div className="overflow-x-auto">
+                            <table className="w-full text-[11px] text-right">
+                              <thead className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700 text-slate-500 font-black">
+                                <tr>
+                                  <th className="py-1.5 px-2 text-center w-7">#</th>
+                                  <th className="py-1.5 px-2">المؤسسة</th>
+                                  <th className="py-1.5 px-1 text-center">ل</th>
+                                  <th className="py-1.5 px-1 text-center">ف</th>
+                                  <th className="py-1.5 px-1 text-center">ت</th>
+                                  <th className="py-1.5 px-1 text-center">هـ</th>
+                                  <th className="py-1.5 px-2 text-center text-emerald-700 dark:text-emerald-400">ن</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                                {grp.rows.map((row) => (
+                                  <tr key={row.teamId} className={row.rank === 1 && grp.completedMatches > 0 ? 'bg-emerald-50/50 dark:bg-emerald-950/30' : ''}>
+                                    <td className="py-1.5 px-2 text-center font-black">{row.rank}</td>
+                                    <td className="py-1.5 px-2 font-bold text-slate-800 dark:text-slate-200 truncate max-w-[140px]">{row.teamName}</td>
+                                    <td className="py-1.5 px-1 text-center font-mono">{row.played}</td>
+                                    <td className="py-1.5 px-1 text-center font-mono text-emerald-700 dark:text-emerald-400 font-bold">{row.won}</td>
+                                    <td className="py-1.5 px-1 text-center font-mono text-amber-600">{row.drawn}</td>
+                                    <td className="py-1.5 px-1 text-center font-mono text-rose-600">{row.lost}</td>
+                                    <td className="py-1.5 px-2 text-center font-mono font-black text-emerald-700 dark:text-emerald-400">{row.points}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {publicTabMatches.length === 0 ? (
                   <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-8 text-center space-y-3 shadow-xs transition-colors">
                     <Calendar className="w-12 h-12 text-slate-300 dark:text-slate-700 mx-auto" />
                     <p className="text-sm font-bold text-slate-700 dark:text-slate-300">
-                      لا توجد مباريات مسجلة حالياً تطابق البحث
+                      لا توجد مباريات مسجلة حالياً تطابق معايير الفلترة المحددة
                     </p>
+                    {filterMatchesByDate && (
+                      <button
+                        type="button"
+                        onClick={() => setFilterMatchesByDate(false)}
+                        className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black rounded-xl transition-colors cursor-pointer"
+                      >
+                        عرض مباريات جميع التواريخ
+                      </button>
+                    )}
                   </div>
                 ) : (
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    {filteredMatches.map((m) => (
-                      <div key={m.id} className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-sm hover:shadow-md space-y-3 transition-all">
-                        
-                        <div className="flex items-center justify-between text-[11px] font-bold text-slate-500 dark:text-slate-400 border-b border-slate-100 dark:border-slate-800 pb-2">
-                          <span className="flex items-center gap-1.5 text-emerald-700 dark:text-emerald-400 font-black">
-                            <span>{SPORTS_MAP[m.sportId]?.icon || '⚽'}</span>
-                            <span>{m.sportName || 'مباراة رياضية'}</span>
-                          </span>
-                          <span className="px-2.5 py-0.5 bg-slate-100 dark:bg-slate-800 rounded-full text-[10px] font-bold text-slate-700 dark:text-slate-300">
-                            {m.category || 'عامة'}
-                          </span>
-                        </div>
+                    {publicTabMatches.map((m, idx) => {
+                      const t1Display = formatTeamDisplayName(
+                        m.team1Id,
+                        m.team1Name || m.team1SchoolName,
+                        schools,
+                        m.team1Placeholder,
+                        m.team1SourceMatchNumber
+                      );
+                      const t2Display = formatTeamDisplayName(
+                        m.team2Id,
+                        m.team2Name || m.team2SchoolName,
+                        schools,
+                        m.team2Placeholder,
+                        m.team2SourceMatchNumber
+                      );
+                      const isT1Placeholder = isPlaceholderTeamId(m.team1Id) || /الفائز\s*من\s*المباراة/.test(t1Display);
+                      const isT2Placeholder = isPlaceholderTeamId(m.team2Id) || /الفائز\s*من\s*المباراة/.test(t2Display);
+                      const groupLabel = extractMatchGroupLabel(m);
+                      const matchNumber = m.drawMatchNumber ?? (idx + 1);
+                      const statusLower = (m.status || '').toLowerCase();
+                      const isCompleted = statusLower === 'completed';
+                      const isOngoing = statusLower === 'ongoing';
+                      const score1 = m.score1 ?? m.team1Score ?? 0;
+                      const score2 = m.score2 ?? m.team2Score ?? 0;
+                      const hasScore = isCompleted || isOngoing || ((m.score1 !== undefined || m.team1Score !== undefined) && statusLower !== 'scheduled');
+                      const isT1Winner = isCompleted && (
+                        m.winnerId === m.team1Id ||
+                        score1 > score2 ||
+                        (score1 === score2 && m.penalty1 !== undefined && m.penalty2 !== undefined && m.penalty1 > m.penalty2)
+                      );
+                      const isT2Winner = isCompleted && (
+                        m.winnerId === m.team2Id ||
+                        score2 > score1 ||
+                        (score1 === score2 && m.penalty1 !== undefined && m.penalty2 !== undefined && m.penalty2 > m.penalty1)
+                      );
+                      const sportInfo = SPORTS_MAP[m.sportId];
+                      const genderLabel = m.gender === 'Female' ? 'إناث' : m.gender === 'Male' ? 'ذكور' : '';
+                      const categoryLabel = [m.ageCategory || m.category, genderLabel].filter(Boolean).join(' • ') || 'عامة';
 
-                        {/* Teams Vertical Layout: School under School with score next to each school */}
-                        <div className="space-y-2 py-1">
-                          {/* School 1 Row */}
-                          <div className={`flex items-center justify-between p-2.5 rounded-xl border transition-colors ${
-                            m.status === 'Completed' && (m.team1Score ?? 0) > (m.team2Score ?? 0)
-                              ? 'bg-emerald-50/90 dark:bg-emerald-950/40 border-emerald-300 dark:border-emerald-800 shadow-2xs'
-                              : 'bg-slate-50 dark:bg-slate-800/60 border-slate-200 dark:border-slate-700'
-                          }`}>
-                            <div className="flex items-center gap-2.5 min-w-0">
-                              <span className="w-6 h-6 rounded-lg bg-emerald-600 text-white flex items-center justify-center text-[10px] font-black shrink-0 shadow-2xs">
-                                1
+                      return (
+                        <div key={m.id} className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-sm hover:shadow-md space-y-3 transition-all">
+                          {/* Top Row: Sport, Category & Match Status */}
+                          <div className="flex items-center justify-between gap-2 text-[11px] font-bold text-slate-500 dark:text-slate-400 border-b border-slate-100 dark:border-slate-800 pb-2">
+                            <span className="flex items-center gap-1.5 text-emerald-700 dark:text-emerald-400 font-black truncate">
+                              <span>{sportInfo?.icon || '⚽'}</span>
+                              <span>{m.sportName || sportInfo?.name || 'مباراة رياضية'}</span>
+                            </span>
+                            <span className="px-2.5 py-0.5 bg-slate-100 dark:bg-slate-800 rounded-full text-[10px] font-bold text-slate-700 dark:text-slate-300 shrink-0">
+                              {categoryLabel}
+                            </span>
+                          </div>
+
+                          {/* Match Number, Stage & Group Badges */}
+                          <div className="flex items-center flex-wrap gap-1.5 text-[10px] font-black">
+                            <span className="px-2.5 py-0.5 bg-blue-100 dark:bg-blue-950/80 text-blue-900 dark:text-blue-200 border border-blue-200 dark:border-blue-800 rounded-lg">
+                              المباراة رقم {matchNumber}
+                            </span>
+                            <span className="px-2.5 py-0.5 bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700 rounded-lg font-bold">
+                              الدور: {m.stage?.trim() || 'دور المجموعات'}
+                            </span>
+                            {groupLabel && (
+                              <span className="px-2.5 py-0.5 bg-purple-100 dark:bg-purple-950/80 text-purple-900 dark:text-purple-200 border border-purple-200 dark:border-purple-800 rounded-lg">
+                                {groupLabel.startsWith('المجموعة') ? groupLabel : `المجموعة: ${groupLabel}`}
                               </span>
-                              <div className="min-w-0">
-                                <p className="text-xs font-black text-slate-900 dark:text-white truncate">
-                                  {m.team1SchoolName || m.team1Name}
-                                </p>
-                                {m.team1SchoolName && m.team1Name !== m.team1SchoolName && (
-                                  <p className="text-[10px] text-slate-500 dark:text-slate-400 truncate">
-                                    {m.team1Name}
+                            )}
+                          </div>
+
+                          {/* Teams Vertical Layout: Team 1 & Team 2 */}
+                          <div className="space-y-2 py-0.5">
+                            {/* Team 1 Row */}
+                            <div className={`flex items-center justify-between p-2.5 rounded-xl border transition-colors ${
+                              isT1Winner
+                                ? 'bg-emerald-50/90 dark:bg-emerald-950/40 border-emerald-300 dark:border-emerald-800 shadow-2xs'
+                                : isT1Placeholder
+                                ? 'bg-indigo-50/60 dark:bg-indigo-950/30 border-indigo-200 dark:border-indigo-800'
+                                : 'bg-slate-50 dark:bg-slate-800/60 border-slate-200 dark:border-slate-700'
+                            }`}>
+                              <div className="flex items-center gap-2.5 min-w-0">
+                                <span className={`w-6 h-6 rounded-lg text-white flex items-center justify-center text-[10px] font-black shrink-0 shadow-2xs ${
+                                  isT1Placeholder ? 'bg-indigo-500' : 'bg-emerald-600'
+                                }`}>
+                                  1
+                                </span>
+                                <div className="min-w-0">
+                                  <p className={`text-xs font-black truncate ${
+                                    isT1Placeholder ? 'text-indigo-800 dark:text-indigo-300' : 'text-slate-900 dark:text-white'
+                                  }`} title={t1Display}>
+                                    {t1Display}
                                   </p>
-                                )}
+                                </div>
+                              </div>
+
+                              <div className="font-mono font-black text-sm sm:text-base px-3 py-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl shrink-0 shadow-2xs text-slate-900 dark:text-white">
+                                {hasScore ? score1 : '-'}
                               </div>
                             </div>
 
-                            <div className="font-mono font-black text-sm sm:text-base px-3 py-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl shrink-0 shadow-2xs text-slate-900 dark:text-white">
-                              {m.status === 'Completed' ? (m.team1Score ?? 0) : '-'}
-                            </div>
-                          </div>
-
-                          {/* School 2 Row */}
-                          <div className={`flex items-center justify-between p-2.5 rounded-xl border transition-colors ${
-                            m.status === 'Completed' && (m.team2Score ?? 0) > (m.team1Score ?? 0)
-                              ? 'bg-emerald-50/90 dark:bg-emerald-950/40 border-emerald-300 dark:border-emerald-800 shadow-2xs'
-                              : 'bg-slate-50 dark:bg-slate-800/60 border-slate-200 dark:border-slate-700'
-                          }`}>
-                            <div className="flex items-center gap-2.5 min-w-0">
-                              <span className="w-6 h-6 rounded-lg bg-indigo-600 text-white flex items-center justify-center text-[10px] font-black shrink-0 shadow-2xs">
-                                2
-                              </span>
-                              <div className="min-w-0">
-                                <p className="text-xs font-black text-slate-900 dark:text-white truncate">
-                                  {m.team2SchoolName || m.team2Name}
-                                </p>
-                                {m.team2SchoolName && m.team2Name !== m.team2SchoolName && (
-                                  <p className="text-[10px] text-slate-500 dark:text-slate-400 truncate">
-                                    {m.team2Name}
+                            {/* Team 2 Row */}
+                            <div className={`flex items-center justify-between p-2.5 rounded-xl border transition-colors ${
+                              isT2Winner
+                                ? 'bg-emerald-50/90 dark:bg-emerald-950/40 border-emerald-300 dark:border-emerald-800 shadow-2xs'
+                                : isT2Placeholder
+                                ? 'bg-indigo-50/60 dark:bg-indigo-950/30 border-indigo-200 dark:border-indigo-800'
+                                : 'bg-slate-50 dark:bg-slate-800/60 border-slate-200 dark:border-slate-700'
+                            }`}>
+                              <div className="flex items-center gap-2.5 min-w-0">
+                                <span className={`w-6 h-6 rounded-lg text-white flex items-center justify-center text-[10px] font-black shrink-0 shadow-2xs ${
+                                  isT2Placeholder ? 'bg-indigo-500' : 'bg-indigo-600'
+                                }`}>
+                                  2
+                                </span>
+                                <div className="min-w-0">
+                                  <p className={`text-xs font-black truncate ${
+                                    isT2Placeholder ? 'text-indigo-800 dark:text-indigo-300' : 'text-slate-900 dark:text-white'
+                                  }`} title={t2Display}>
+                                    {t2Display}
                                   </p>
-                                )}
+                                </div>
+                              </div>
+
+                              <div className="font-mono font-black text-sm sm:text-base px-3 py-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl shrink-0 shadow-2xs text-slate-900 dark:text-white">
+                                {hasScore ? score2 : '-'}
                               </div>
                             </div>
 
-                            <div className="font-mono font-black text-sm sm:text-base px-3 py-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl shrink-0 shadow-2xs text-slate-900 dark:text-white">
-                              {m.status === 'Completed' ? (m.team2Score ?? 0) : '-'}
+                            {isCompleted && score1 === score2 && m.penalty1 !== undefined && m.penalty2 !== undefined && (
+                              <div className="text-center text-[10px] font-black text-amber-800 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-lg py-1">
+                                ضربات الجزاء: ({m.penalty1} - {m.penalty2})
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Footer: Venue, Date/Time & Status */}
+                          <div className="flex flex-wrap items-center justify-between gap-2 text-[10px] text-slate-500 dark:text-slate-400 pt-2 border-t border-slate-100 dark:border-slate-800">
+                            <div className="flex items-center gap-2 min-w-0 flex-wrap">
+                              <span className="flex items-center gap-1 truncate">
+                                <MapPin className="w-3 h-3 text-slate-400 shrink-0" />
+                                <span className="truncate">{m.venueName || 'الملعب الرياضي'}</span>
+                              </span>
+                              {m.date && (
+                                <span className="flex items-center gap-1 font-mono font-bold text-slate-600 dark:text-slate-300">
+                                  <Calendar className="w-3 h-3 text-slate-400 shrink-0" />
+                                  <span>{formatMatchDate(m.date)}</span>
+                                  {m.startTime && <span>• {m.startTime}</span>}
+                                </span>
+                              )}
                             </div>
+                            <span className={`px-2 py-0.5 rounded font-bold shrink-0 ${
+                              isCompleted
+                                ? 'bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300'
+                                : isOngoing
+                                ? 'bg-red-100 dark:bg-red-950 text-red-700 dark:text-red-300 animate-pulse'
+                                : 'bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300'
+                            }`}>
+                              {isCompleted ? 'مباراة منتهية ✅' : isOngoing ? 'جارية الآن 🔴' : 'مباراة قادمة ⏳'}
+                            </span>
                           </div>
                         </div>
-
-                        <div className="flex items-center justify-between text-[10px] text-slate-500 dark:text-slate-400 pt-2 border-t border-slate-100 dark:border-slate-800">
-                          <span className="flex items-center gap-1">
-                            <MapPin className="w-3 h-3 text-slate-400 shrink-0" />
-                            <span>{m.venueName || 'الملعب الرياضي'}</span>
-                          </span>
-                          <span className={`px-2 py-0.5 rounded font-bold ${
-                            m.status === 'Completed'
-                              ? 'bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300'
-                              : 'bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300'
-                          }`}>
-                            {m.status === 'Completed' ? 'مباراة منتهية ✅' : 'مباراة قادمة ⏳'}
-                          </span>
-                        </div>
-
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>

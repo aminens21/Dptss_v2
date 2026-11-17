@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { Match, School, Venue, Tournament, Referee, Student, User, BlockedSchedulePeriod } from '../types';
 import { X, CalendarDays, Clock, MapPin, Trophy, AlertTriangle, AlertCircle, Calendar, ArrowRight, ShieldCheck, Lock, Users, Tag, UserCheck, Plus, Building, Info, Search, CheckCircle2, MessageCircle } from 'lucide-react';
-import { SPORTS_MAP, AGE_CATEGORIES, GENDER_MAP, DataService, getAgeCategoriesForSeason, normalizeCategoryKey, normalizeDateToYmd, EDUCATIONAL_CYCLE_LABELS, getMatchEducationalCycles, findBlockedPeriodForDate, normalizeArabicSearch, schoolNamesMatch } from '../lib/dataService';
+import { SPORTS_MAP, AGE_CATEGORIES, GENDER_MAP, DataService, getAgeCategoriesForSeason, normalizeCategoryKey, normalizeDateToYmd, EDUCATIONAL_CYCLE_LABELS, getMatchEducationalCycles, findBlockedPeriodForDate, normalizeArabicSearch, schoolNamesMatch, normalizeTournamentAffiliation } from '../lib/dataService';
 import { useAuth, isSuperAdminEmail } from '../contexts/AuthContext';
 import { resolveHostSchoolForMatch, findRefereeContact, generateRefereeMatchNotificationMessage, getWhatsAppUrl } from '../lib/whatsappService';
 import { MatchBroadcastDiffusionModal, MatchBroadcastDiffusionTarget } from './MatchBroadcastDiffusionModal';
@@ -89,6 +89,7 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
   const [team1Id, setTeam1Id] = useState(schools[0]?.id || 'sch-1');
   const [team2Id, setTeam2Id] = useState(schools[1]?.id || 'sch-2');
   const [stage, setStage] = useState('دور المجموعات');
+  const [drawMatchNumber, setDrawMatchNumber] = useState<number>(1);
   const [sportId, setSportId] = useState(effectiveSportId || availableTournaments[0]?.sportId || 'football');
   const [ageCategory, setAgeCategory] = useState<string>(initialCategory || availableTournaments[0]?.ageCategory || 'U12');
   const [gender, setGender] = useState<'Male' | 'Female' | 'Mixed'>(initialGender || availableTournaments[0]?.gender || 'Male');
@@ -182,6 +183,7 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
       setTeam1Id(editingMatch.team1Id);
       setTeam2Id(editingMatch.team2Id);
       setStage(editingMatch.stage);
+      setDrawMatchNumber(editingMatch.drawMatchNumber && editingMatch.drawMatchNumber > 0 ? editingMatch.drawMatchNumber : 1);
       setSportId(editingMatch.sportId || 'football');
       if (editingMatch.ageCategory) setAgeCategory(editingMatch.ageCategory);
       if (editingMatch.gender) setGender(editingMatch.gender);
@@ -537,6 +539,31 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
     }
   }, [eligibleSchools, editingMatch]);
 
+  const suggestedBranchMatchNumber = useMemo(() => {
+    const selectedTourn = availableTournaments.find(t => t.id === tournamentId);
+    const targetAff = normalizeTournamentAffiliation(selectedTourn?.affiliationType || affiliationType, selectedTourn?.name);
+    const targetNormCat = normalizeCategoryKey(ageCategory || selectedTourn?.ageCategory || 'U15');
+    const siblingNums = matches
+      .filter(m => {
+        if (m.sportId !== currentSport) return false;
+        const mCat = m.ageCategory ? normalizeCategoryKey(m.ageCategory) : (m.category ? normalizeCategoryKey(m.category) : '');
+        if (mCat && mCat !== targetNormCat) return false;
+        if (gender !== 'Mixed' && m.gender && m.gender !== gender) return false;
+        const mAff = normalizeTournamentAffiliation(m.affiliationType);
+        if (mAff !== targetAff) return false;
+        return true;
+      })
+      .map(m => Number(m.drawMatchNumber || 0))
+      .filter(n => Number.isFinite(n) && n > 0);
+    return (siblingNums.length > 0 ? Math.max(...siblingNums) : 0) + 1;
+  }, [matches, availableTournaments, tournamentId, currentSport, ageCategory, gender, affiliationType]);
+
+  useEffect(() => {
+    if (isOpen && !editingMatch) {
+      setDrawMatchNumber(suggestedBranchMatchNumber);
+    }
+  }, [isOpen, editingMatch, suggestedBranchMatchNumber]);
+
   if (!isOpen) return null;
 
   const handleNextDay = () => {
@@ -637,11 +664,12 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
         sportId: resolvedSportId,
         directorateId: editingMatch?.directorateId || activeDirId,
         stage,
+        drawMatchNumber: Number(drawMatchNumber) > 0 ? Number(drawMatchNumber) : suggestedBranchMatchNumber,
         team1Id,
         team2Id,
-        ageCategory,
+        ageCategory: normalizeCategoryKey(ageCategory || selectedTourn?.ageCategory || 'U15'),
         gender,
-        affiliationType: selectedTourn?.affiliationType || affiliationType || editingMatch?.affiliationType || 'non_club',
+        affiliationType: normalizeTournamentAffiliation(selectedTourn?.affiliationType || affiliationType || editingMatch?.affiliationType, selectedTourn?.name),
         date: normalizedDate,
         startTime,
         venueId: resolvedVenueId,
@@ -947,8 +975,8 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
             ) : null}
           </div>
 
-          {/* Sport & Stage */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          {/* Sport, Stage & Match Number */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
               <div className="flex items-center justify-between mb-1">
                 <label className="block text-xs font-bold text-slate-700">الرياضة</label>
@@ -980,6 +1008,18 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
                     ))}
                 </select>
               )}
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">رقم المباراة <span className="text-red-500">*</span></label>
+              <input
+                type="number"
+                min={1}
+                required
+                value={drawMatchNumber}
+                onChange={(e) => setDrawMatchNumber(Math.max(1, parseInt(e.target.value, 10) || 1))}
+                className="w-full text-xs rounded-lg border border-slate-200 px-3 py-2 text-slate-800 font-black focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
             </div>
 
             <div>

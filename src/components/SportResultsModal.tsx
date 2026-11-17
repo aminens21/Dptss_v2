@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { Sport, Tournament, Match, School, Venue, Student, User, Referee } from '../types';
 import { DataService, isClubTournament, GENDER_MAP, SPORTS_MAP, getAgeCategoriesForSeason, normalizeCategoryKey, canUserApproveSportResult, areSportIdsEquivalent, normalizeCanonicalSportId } from '../lib/dataService';
-import { computeGroupStandings, formatTeamDisplayName, isPlaceholderTeamId, isKnockoutBracketMatch, ComputedGroupStandings } from '../lib/drawTournamentUtils';
+import { computeGroupStandings, formatTeamDisplayName, isPlaceholderTeamId, isKnockoutBracketMatch, ComputedGroupStandings, hasValidMatchTeams, extractMatchGroupLabel } from '../lib/drawTournamentUtils';
 import { CrossCountryPodiumView } from './CrossCountryPodiumView';
 import { AthleticsResultsView } from './AthleticsResultsView';
 import { CrossCountryCategoryResult } from '../types';
@@ -342,41 +342,47 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
 
   // Filtered matches for active branch (selectedAffiliation) and active filters
   const activeBranchMatches = useMemo(() => {
-    return sportMatches.filter(m => {
-      const mAff = getMatchAffiliation(m);
-      if (selectedAffiliation !== mAff) return false;
+    return sportMatches
+      .filter(m => {
+        if (!hasValidMatchTeams(m, schools)) return false;
 
-      // Category filter
-      if (selectedCategory !== 'ALL') {
-        const mCat = (m.ageCategory || '').toLowerCase();
-        const selCat = selectedCategory.toLowerCase();
-        if (mCat !== selCat && !mCat.includes(selCat) && !selCat.includes(mCat)) return false;
-      }
+        const mAff = getMatchAffiliation(m);
+        if (selectedAffiliation !== mAff) return false;
 
-      // Gender filter
-      if (selectedGender !== 'ALL' && m.gender !== selectedGender) return false;
+        // Category filter
+        if (selectedCategory !== 'ALL') {
+          const mCat = (m.ageCategory || '').toLowerCase();
+          const selCat = selectedCategory.toLowerCase();
+          if (mCat !== selCat && !mCat.includes(selCat) && !selCat.includes(mCat)) return false;
+        }
 
-      // Status filter
-      if (statusFilter !== 'ALL' && m.status !== statusFilter) return false;
+        // Gender filter
+        if (selectedGender !== 'ALL' && m.gender !== selectedGender) return false;
 
-      // Search query
-      if (searchQuery.trim()) {
-        const q = searchQuery.toLowerCase();
-        const t1 = formatTeamDisplayName(m.team1Id, m.team1Name, schools);
-        const t2 = formatTeamDisplayName(m.team2Id, m.team2Name, schools);
-        const v = venues.find(v => v.id === m.venueId)?.name || '';
-        const stage = m.stage || '';
-        const matchStr = `${t1} ${t2} ${v} ${stage}`.toLowerCase();
-        if (!matchStr.includes(q)) return false;
-      }
+        // Status filter
+        if (statusFilter !== 'ALL' && m.status !== statusFilter) return false;
 
-      return true;
-    });
+        // Search query
+        if (searchQuery.trim()) {
+          const q = searchQuery.toLowerCase();
+          const t1 = formatTeamDisplayName(m.team1Id, m.team1Name, schools, m.team1Placeholder, m.team1SourceMatchNumber);
+          const t2 = formatTeamDisplayName(m.team2Id, m.team2Name, schools, m.team2Placeholder, m.team2SourceMatchNumber);
+          const v = venues.find(v => v.id === m.venueId)?.name || m.venueName || '';
+          const stage = m.stage || '';
+          const group = extractMatchGroupLabel(m);
+          const matchStr = `${t1} ${t2} ${v} ${stage} ${group} ${m.drawMatchNumber || ''}`.toLowerCase();
+          if (!matchStr.includes(q)) return false;
+        }
+
+        return true;
+      })
+      .sort((a, b) => (a.drawMatchNumber ?? 9999) - (b.drawMatchNumber ?? 9999));
   }, [sportMatches, selectedAffiliation, selectedCategory, selectedGender, statusFilter, searchQuery, schools, venues, tournaments]);
 
   // Matches for standings & knockout bracket in current branch + category + gender (ignores statusFilter)
   const branchStandingsBuckets = useMemo(() => {
     const scoped = sportMatches.filter(m => {
+      if (!hasValidMatchTeams(m, schools)) return false;
       if (getMatchAffiliation(m) !== selectedAffiliation) return false;
       if (selectedCategory !== 'ALL') {
         const mCat = (m.ageCategory || '').toLowerCase();
@@ -1172,9 +1178,11 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
                           </div>
                         ) : (
                           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                            {activeBranchMatches.map((m) => {
-                              const t1Name = getSchoolName(m.team1Id, m.team1Name);
-                              const t2Name = getSchoolName(m.team2Id, m.team2Name);
+                            {activeBranchMatches.map((m, idx) => {
+                              const t1Name = formatTeamDisplayName(m.team1Id, m.team1Name || m.team1SchoolName, schools, m.team1Placeholder, m.team1SourceMatchNumber);
+                              const t2Name = formatTeamDisplayName(m.team2Id, m.team2Name || m.team2SchoolName, schools, m.team2Placeholder, m.team2SourceMatchNumber);
+                              const groupLabel = extractMatchGroupLabel(m);
+                              const matchNum = m.drawMatchNumber ?? (idx + 1);
                               const hasPendingSlot = isPlaceholderTeamId(m.team1Id) || isPlaceholderTeamId(m.team2Id);
                               const vName = getVenueName(m.venueId, m.venueName, m.hostSchoolId);
                               const hostSchoolObj = resolveHostSchoolForMatch(m, schools);
@@ -1213,12 +1221,20 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
                                       : 'border-slate-150 hover:border-blue-300'
                                   )}
                                 >
-                                  {/* Compact Header: Round, Category, Gender, Status */}
+                                  {/* Compact Header: Match Number, Group, Round, Category, Gender, Status */}
                                   <div className="flex items-center justify-between text-[10px] font-bold text-slate-500 border-b border-slate-100/80 pb-2">
                                     <div className="flex items-center gap-1.5 flex-wrap">
-                                      <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 font-black">
-                                        {m.stage || 'دور المجموعات'}
+                                      <span className="px-1.5 py-0.5 rounded bg-blue-100 text-blue-900 font-black">
+                                        المباراة رقم {matchNum}
                                       </span>
+                                      <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-800 font-black">
+                                        الدور: {m.stage || 'دور المجموعات'}
+                                      </span>
+                                      {groupLabel && (
+                                        <span className="px-1.5 py-0.5 rounded bg-purple-100 text-purple-900 font-black">
+                                          {groupLabel}
+                                        </span>
+                                      )}
                                       {m.ageCategory && (
                                         <span className="px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 font-extrabold">
                                           {m.ageCategory}

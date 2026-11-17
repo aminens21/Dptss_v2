@@ -1,5 +1,6 @@
 import { Tournament, Match, School, Sport, Venue, Referee, User } from '../types';
 import { SPORTS_MAP, normalizeDateToYmd, isClubTournament, normalizeCategoryKey } from './dataService';
+import { hasValidMatchTeams, formatTeamDisplayName } from './drawTournamentUtils';
 import toast from 'react-hot-toast';
 
 export type ProgramAffiliationFilter = 'ALL' | 'non_club' | 'club_affiliated' | 'open';
@@ -274,9 +275,10 @@ export function buildAllCalendarEvents(
     return clean;
   };
 
-  // Build program events exclusively from scheduled/recorded matches
+  // Build program events exclusively from scheduled/recorded matches with valid team names
   matches.forEach(m => {
     if (!m.date) return;
+    if (!hasValidMatchTeams(m, schools)) return;
     const parentT =
       (m.tournamentId ? tournaments.find(t => t.id === m.tournamentId) : undefined) ||
       tournaments.find(
@@ -297,8 +299,8 @@ export function buildAllCalendarEvents(
       else if (parentT.scope === 'regional' || parentT.name.includes('جهوي') || parentT.name.includes('الجهوية')) sc = 'regional';
     }
 
-    const school1 = schools.find(s => s.id === m.team1Id)?.name || m.team1Name || m.team1SchoolName || 'فريق 1';
-    const school2 = schools.find(s => s.id === m.team2Id)?.name || m.team2Name || m.team2SchoolName || 'فريق 2';
+    const school1 = formatTeamDisplayName(m.team1Id, m.team1Name || m.team1SchoolName, schools, m.team1Placeholder, m.team1SourceMatchNumber);
+    const school2 = formatTeamDisplayName(m.team2Id, m.team2Name || m.team2SchoolName, schools, m.team2Placeholder, m.team2SourceMatchNumber);
     const venueObj = venues.find(v => v.id === m.venueId || v.name === m.venueId);
     const resolvedVenueName =
       m.venueName?.trim() ||

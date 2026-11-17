@@ -544,7 +544,9 @@ export const AppLayout: React.FC = () => {
   // 8. الاعدادات والضوابط
   const canSendNotifications = isCentralAdmin || isTechCommitteeHead || userProfile?.role === 'SPORT_MANAGER';
 
-  const userRoleKey: RoleKey = userProfile?.isTechCommitteeHead
+  const userRoleKey: RoleKey = isSuperOrCentral
+    ? 'CENTRAL_ADMIN'
+    : userProfile?.isTechCommitteeHead
     ? 'TECH_COMMITTEE_HEAD'
     : (userProfile?.role as RoleKey) || 'TEACHER';
 
@@ -591,6 +593,9 @@ export const AppLayout: React.FC = () => {
   // Role display helper
   const getRoleLabel = (user?: any) => {
     if (!user) return 'مستخدم';
+    if (user.email && String(user.email).trim().toLowerCase() === 'sayhihassan@gmail.com') {
+      return 'مشرف تربوي';
+    }
     if (user.isTechCommitteeHead) {
       return 'رئيس لجنة تقنية إقليمية';
     }

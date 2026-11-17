@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { Match, School, Venue, Tournament, User } from '../types';
 import { SPORTS_MAP } from '../lib/dataService';
-import { formatTeamDisplayName } from '../lib/drawTournamentUtils';
+import { formatTeamDisplayName, hasValidMatchTeams } from '../lib/drawTournamentUtils';
 import { AthleticsService } from '../lib/athleticsService';
 import {
   Trophy,
@@ -70,6 +70,7 @@ export const RefereeMatchesView: React.FC<RefereeMatchesViewProps> = ({
   const refereeMatches = useMemo(() => {
     return matches.filter((m) => {
       if (!targetName) return false;
+      if (!hasValidMatchTeams(m, schools)) return false;
 
       // Match against referees array (names)
       if (Array.isArray(m.referees)) {
@@ -89,7 +90,7 @@ export const RefereeMatchesView: React.FC<RefereeMatchesViewProps> = ({
 
       return false;
     });
-  }, [matches, targetName]);
+  }, [matches, schools, targetName]);
 
   // Apply search & status filters on the referee's matches
   const filteredMatches = useMemo(() => {

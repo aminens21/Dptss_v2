@@ -273,7 +273,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             };
 
             // Migrate/Save under the new auth uid in Firestore so it's linked to their Auth account
-            if (!DataService.isCloudSyncPaused() && (docId !== user.uid || (isSuperAdmin && data.role !== 'CENTRAL_ADMIN'))) {
+            if (!DataService.isCloudSyncPaused() && (docId !== user.uid || (isSuperAdmin && (data.role !== 'CENTRAL_ADMIN' || !data.isSuperAdmin)))) {
               try {
                 const cleanDoc: Record<string, any> = {};
                 Object.entries(profile).forEach(([k, v]) => {
@@ -302,7 +302,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             const managerDocId = `mgr_${cleanUserEmail.replace(/[^a-z0-9]/g, '_')}`;
             let mgrFound = false;
             let detectedRole: Role = isSuperAdmin ? 'CENTRAL_ADMIN' : (managedDirectorate ? 'CENTRAL_ADMIN' : 'TEACHER');
-            let detectedName = user.displayName || (isSuperAdmin ? 'المسير المركزي الرئيسي' : user.email?.split('@')[0] || 'مستخدم');
+            let detectedName = user.displayName || (isSuperAdmin ? (cleanUserEmail === 'sayhihassan@gmail.com' ? 'حسن السايحي' : 'المسير المركزي الرئيسي') : user.email?.split('@')[0] || 'مستخدم');
             let detectedSportId: string | undefined = undefined;
             let detectedTournamentId: string | undefined = undefined;
             let detectedWorkLocation: string | undefined = undefined;
@@ -404,7 +404,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           if (isSuper) {
             setUserProfile({
               id: user.uid,
-              fullName: 'المسير المركزي الرئيسي',
+              fullName: cleanUserEmail === 'sayhihassan@gmail.com' ? 'حسن السايحي' : 'المسير المركزي الرئيسي',
               email: cleanUserEmail,
               role: 'CENTRAL_ADMIN',
               isSuperAdmin: true,
@@ -432,7 +432,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const loginAsDemo = (role: Role, customName?: string, customEmail?: string, sportId?: string, assignedTournamentId?: string, extraFields?: Partial<User>) => {
     const defaultInfo = DEMO_PROFILES[role] || DEMO_PROFILES.CENTRAL_ADMIN;
     const targetEmail = (customEmail || defaultInfo.email).trim().toLowerCase();
-    const isSuper = isSuperAdminEmail(targetEmail) || (role === 'CENTRAL_ADMIN' && (targetEmail === 'aminens21@gmail.com' || targetEmail === 'omrhaman.figuig@gmail.com'));
+    const isSuper = isSuperAdminEmail(targetEmail) || (role === 'CENTRAL_ADMIN' && (targetEmail === 'aminens21@gmail.com' || targetEmail === 'omrhaman.figuig@gmail.com' || targetEmail === 'sayhihassan@gmail.com'));
 
     const demoProfile: User = {
       id: `demo-${role.toLowerCase()}`,

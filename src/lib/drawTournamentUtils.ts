@@ -23,23 +23,184 @@ export function stripPlaceholderPrefix(value?: string): string {
   return value.startsWith(TBD_TEAM_PREFIX) ? value.slice(TBD_TEAM_PREFIX.length) : value;
 }
 
+const INVALID_TEAM_NAME_TOKENS = new Set([
+  '',
+  'غير محدد',
+  'غير معروف',
+  'تحديد لاحق',
+  'بدون فريق',
+  'tbd',
+  'unknown',
+  'null',
+  'undefined',
+  '-',
+  '—',
+  'vs',
+  'فريق 1',
+  'فريق 2',
+  'الفريق الأول',
+  'الفريق الثاني'
+]);
+
+function isWinnerPlaceholderLabel(value?: string): boolean {
+  if (!value) return false;
+  const clean = stripPlaceholderPrefix(value).trim();
+  return (
+    /الفائز\s*من\s*المباراة/.test(clean) ||
+    /متأهل\s*من/.test(clean)
+  );
+}
+
+function looksLikeUnresolvedInternalId(rawId: string): boolean {
+  const trimmed = rawId.trim();
+  if (!trimmed) return true;
+  if (
+    trimmed.startsWith('sch-') ||
+    trimmed.startsWith('custom-team-') ||
+    trimmed.startsWith('team-') ||
+    trimmed.startsWith('node-') ||
+    trimmed.startsWith('gen-match-')
+  ) {
+    return true;
+  }
+  // Purely ASCII ID without spaces (e.g., Firestore auto-id) when no readable name is available
+  return !/[\u0600-\u06FF]/.test(trimmed) && !/\s/.test(trimmed) && trimmed.length >= 6;
+}
+
+export function isValidMatchTeamSlot(params: {
+  teamId?: string;
+  teamName?: string;
+  schoolName?: string;
+  placeholder?: string;
+  sourceMatchNumber?: number;
+  schools: School[];
+}): boolean {
+  const { teamId, teamName, schoolName, placeholder, sourceMatchNumber, schools } = params;
+
+  if (typeof sourceMatchNumber === 'number' && sourceMatchNumber > 0) {
+    return true;
+  }
+
+  if (
+    isWinnerPlaceholderLabel(placeholder) ||
+    isWinnerPlaceholderLabel(teamName) ||
+    isWinnerPlaceholderLabel(schoolName) ||
+    isWinnerPlaceholderLabel(teamId)
+  ) {
+    return true;
+  }
+
+  const cleanId = (teamId || '').trim();
+  if (cleanId && !isPlaceholderTeamId(cleanId)) {
+    const matchedSchool = schools.find((s) => s.id === cleanId);
+    if (matchedSchool?.name && matchedSchool.name.trim()) {
+      return true;
+    }
+  }
+
+  const cleanSchoolName = stripPlaceholderPrefix((schoolName || '').trim());
+  if (cleanSchoolName && !INVALID_TEAM_NAME_TOKENS.has(cleanSchoolName.toLowerCase())) {
+    return true;
+  }
+
+  const cleanTeamName = stripPlaceholderPrefix((teamName || '').trim());
+  if (cleanTeamName && !INVALID_TEAM_NAME_TOKENS.has(cleanTeamName.toLowerCase())) {
+    return true;
+  }
+
+  const strippedId = stripPlaceholderPrefix(cleanId);
+  if (
+    strippedId &&
+    !INVALID_TEAM_NAME_TOKENS.has(strippedId.toLowerCase()) &&
+    !looksLikeUnresolvedInternalId(strippedId)
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+export function hasValidMatchTeams(
+  match: {
+    team1Id?: string;
+    team2Id?: string;
+    team1Name?: string;
+    team2Name?: string;
+    team1SchoolName?: string;
+    team2SchoolName?: string;
+    team1Placeholder?: string;
+    team2Placeholder?: string;
+    team1SourceMatchNumber?: number;
+    team2SourceMatchNumber?: number;
+  },
+  schools: School[]
+): boolean {
+  const side1Valid = isValidMatchTeamSlot({
+    teamId: match.team1Id,
+    teamName: match.team1Name,
+    schoolName: match.team1SchoolName,
+    placeholder: match.team1Placeholder,
+    sourceMatchNumber: match.team1SourceMatchNumber,
+    schools
+  });
+  const side2Valid = isValidMatchTeamSlot({
+    teamId: match.team2Id,
+    teamName: match.team2Name,
+    schoolName: match.team2SchoolName,
+    placeholder: match.team2Placeholder,
+    sourceMatchNumber: match.team2SourceMatchNumber,
+    schools
+  });
+  return side1Valid && side2Valid;
+}
+
+export function extractMatchGroupLabel(match: { groupName?: string; stage?: string }): string {
+  const explicit = (match.groupName || '').trim();
+  if (explicit) return explicit;
+  const stage = (match.stage || '').trim();
+  if (!stage) return '';
+  const grpMatch = stage.match(/(المجموعة\s+[^\s-–(]+(?:\s*\([^)]+\))?)/);
+  if (grpMatch?.[1]) return grpMatch[1].trim();
+  return '';
+}
+
 export function formatTeamDisplayName(
   teamId: string | undefined,
   fallbackName: string | undefined,
-  schools: School[]
+  schools: School[],
+  placeholder?: string,
+  sourceMatchNumber?: number
 ): string {
   if (teamId && isPlaceholderTeamId(teamId)) {
-    return fallbackName?.trim() || stripPlaceholderPrefix(teamId);
+    const resolved = (placeholder || fallbackName || stripPlaceholderPrefix(teamId)).trim();
+    if (resolved && !INVALID_TEAM_NAME_TOKENS.has(resolved.toLowerCase())) {
+      return resolved;
+    }
+    if (sourceMatchNumber && sourceMatchNumber > 0) {
+      return `الفائز من المباراة رقم ${sourceMatchNumber}`;
+    }
+  }
+  if (sourceMatchNumber && sourceMatchNumber > 0 && (!teamId || isPlaceholderTeamId(teamId))) {
+    const resolved = (placeholder || fallbackName || '').trim();
+    return resolved && !INVALID_TEAM_NAME_TOKENS.has(resolved.toLowerCase())
+      ? resolved
+      : `الفائز من المباراة رقم ${sourceMatchNumber}`;
   }
   if (teamId) {
     const sch = schools.find((s) => s.id === teamId);
     if (sch?.name) return sch.name;
   }
   if (fallbackName && fallbackName.trim()) {
-    return stripPlaceholderPrefix(fallbackName.trim());
+    const clean = stripPlaceholderPrefix(fallbackName.trim());
+    if (clean && !INVALID_TEAM_NAME_TOKENS.has(clean.toLowerCase())) {
+      return clean;
+    }
   }
   if (teamId && teamId.trim()) {
-    return stripPlaceholderPrefix(teamId.trim());
+    const cleanId = stripPlaceholderPrefix(teamId.trim());
+    if (cleanId && !INVALID_TEAM_NAME_TOKENS.has(cleanId.toLowerCase())) {
+      return cleanId;
+    }
   }
   return 'غير محدد';
 }

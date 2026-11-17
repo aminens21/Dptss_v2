@@ -2822,17 +2822,61 @@ export const DataService = {
     const docRef = doc(collection(db, 'matches'));
     const realId = docRef.id;
 
+    const localList = getLocal<Match>(STORAGE_KEYS.MATCHES, []).map(normalizeMatchRecord);
+    const activeDirNormalized = match.directorateId || (activeDirId === 'all' ? 'taourirt' : activeDirId);
+    const localTournaments = getLocal<Tournament>(STORAGE_KEYS.TOURNAMENTS, []);
+    const matchedTourn = match.tournamentId ? localTournaments.find(t => t.id === match.tournamentId) : undefined;
+    const resolvedAgeCat = match.ageCategory
+      ? normalizeCategoryKey(match.ageCategory)
+      : matchedTourn?.ageCategory
+      ? normalizeCategoryKey(matchedTourn.ageCategory)
+      : undefined;
+    const resolvedGender = match.gender || matchedTourn?.gender;
+    const resolvedAff = normalizeTournamentAffiliation(
+      match.affiliationType || matchedTourn?.affiliationType,
+      matchedTourn?.name
+    );
+
+    let resolvedMatchNumber = match.drawMatchNumber && Number(match.drawMatchNumber) > 0
+      ? Number(match.drawMatchNumber)
+      : undefined;
+
+    if (!resolvedMatchNumber) {
+      const siblingNumbers = localList
+        .filter(lm => {
+          if ((lm.directorateId || 'taourirt') !== activeDirNormalized) return false;
+          if (match.sportId && lm.sportId !== match.sportId) return false;
+          if (resolvedAgeCat) {
+            const lmCat = lm.ageCategory ? normalizeCategoryKey(lm.ageCategory) : (lm.category ? normalizeCategoryKey(lm.category) : '');
+            if (lmCat !== resolvedAgeCat) return false;
+          }
+          if (resolvedGender && resolvedGender !== 'Mixed' && lm.gender && lm.gender !== resolvedGender) {
+            return false;
+          }
+          const lmAff = normalizeTournamentAffiliation(lm.affiliationType);
+          if (lmAff !== resolvedAff) return false;
+          return true;
+        })
+        .map(lm => Number(lm.drawMatchNumber || 0))
+        .filter(n => Number.isFinite(n) && n > 0);
+      const maxExisting = siblingNumbers.length > 0 ? Math.max(...siblingNumbers) : 0;
+      resolvedMatchNumber = maxExisting + 1;
+    }
+
     const normalizedDate = normalizeDateToYmd(match.date);
     const matchWithDir = {
       ...match,
+      ...(resolvedAgeCat ? { ageCategory: resolvedAgeCat } : {}),
+      ...(resolvedGender ? { gender: resolvedGender } : {}),
+      affiliationType: resolvedAff,
+      drawMatchNumber: resolvedMatchNumber,
       date: normalizedDate,
-      directorateId: match.directorateId || (activeDirId === 'all' ? 'taourirt' : activeDirId)
+      directorateId: activeDirNormalized
     };
     const newMatch: Match = normalizeMatchRecord({
       ...matchWithDir,
       id: realId
     } as Match);
-    const localList = getLocal<Match>(STORAGE_KEYS.MATCHES, []).map(normalizeMatchRecord);
     const filtered = localList.filter(m => m.id !== realId);
     setLocal(STORAGE_KEYS.MATCHES, [newMatch, ...filtered]);
     markPendingWrite('matches', realId);
@@ -3389,11 +3433,40 @@ export const DataService = {
   },
 
   subscribeToTournaments(callback: (tournaments: Tournament[]) => void): () => void {
+    const normalizeAndDedupe = (rawList: Tournament[]): Tournament[] => {
+      const activeDirId = this.getActiveDirectorateId() || 'taourirt';
+      const branchWinnerMap = new Map<string, Tournament>();
+      rawList.forEach((raw) => {
+        if (!raw || !raw.id || isRecentlyDeleted('tournaments', raw.id)) return;
+        const cleanCat = normalizeCategoryKey(raw.ageCategory || raw.name || 'U15');
+        const cleanAff = normalizeTournamentAffiliation(raw.affiliationType, raw.name);
+        const normT: Tournament = {
+          ...raw,
+          directorateId: raw.directorateId || 'taourirt',
+          ageCategory: cleanCat,
+          gender: raw.gender || 'Mixed',
+          affiliationType: cleanAff
+        };
+        const branchKey = `${normT.directorateId}__${normT.sportId}__${(normT.seasonId || '2026/2027').trim()}__${cleanCat}__${normT.gender}__${cleanAff}`;
+        const existing = branchWinnerMap.get(branchKey);
+        if (!existing) {
+          branchWinnerMap.set(branchKey, normT);
+          return;
+        }
+        if (existing.id.startsWith('tourn-') && !normT.id.startsWith('tourn-')) {
+          branchWinnerMap.set(branchKey, normT);
+        }
+      });
+      const deduped = Array.from(branchWinnerMap.values());
+      if (!activeDirId || activeDirId === 'all') return deduped;
+      return deduped.filter(t => (t.directorateId || 'taourirt') === activeDirId);
+    };
+
     const emitLocal = () => {
       const localList = getLocal<Tournament>(STORAGE_KEYS.TOURNAMENTS, []).filter(
         lt => lt && lt.id && !isRecentlyDeleted('tournaments', lt.id)
       );
-      callback(localList);
+      callback(normalizeAndDedupe(localList));
     };
     const handleLocalUpdate = () => {
       if (isCloudSyncPaused()) emitLocal();
@@ -3412,19 +3485,19 @@ export const DataService = {
             name: data.name || '',
             sportId: data.sportId || '',
             seasonId: data.seasonId || '',
-            directorateId: data.directorateId || '',
-            ageCategory: data.ageCategory || '',
-            gender: data.gender || 'Mixed',
+            directorateId: data.directorateId || 'taourirt',
             level: data.level || '',
             scope: data.scope || 'Provincial',
             status: data.status || 'Scheduled',
             description: data.description || '',
-            affiliationType: data.affiliationType || 'non_club',
             managerName: data.managerName || '',
             managerPhone: data.managerPhone || '',
             managerEmail: data.managerEmail || '',
             accessCode: data.accessCode || '',
             ...data,
+            ageCategory: normalizeCategoryKey(data.ageCategory || data.name || 'U15'),
+            gender: data.gender || 'Mixed',
+            affiliationType: normalizeTournamentAffiliation(data.affiliationType, data.name),
             startDate: data.startDate?.toDate ? data.startDate.toDate() : (data.startDate ? new Date(data.startDate) : undefined),
             endDate: data.endDate?.toDate ? data.endDate.toDate() : (data.endDate ? new Date(data.endDate) : undefined),
             registrationDeadline: data.registrationDeadline?.toDate ? data.registrationDeadline.toDate() : (data.registrationDeadline ? new Date(data.registrationDeadline) : undefined),
@@ -3437,9 +3510,9 @@ export const DataService = {
           lt => lt && lt.id && isPendingWrite('tournaments', lt.id) && !isRecentlyDeleted('tournaments', lt.id)
         );
         localPending.forEach(lt => tournsMap.set(lt.id, lt));
-        const list = Array.from(tournsMap.values());
-        setLocal(STORAGE_KEYS.TOURNAMENTS, list);
-        callback(list);
+        const allNormalized = Array.from(tournsMap.values());
+        setLocal(STORAGE_KEYS.TOURNAMENTS, allNormalized);
+        callback(normalizeAndDedupe(allNormalized));
       }, (err) => {
         console.warn("Real-time tournaments listener error:", err);
       });
@@ -3456,11 +3529,16 @@ export const DataService = {
   },
 
   subscribeToMatches(callback: (matches: Match[]) => void): () => void {
+    const scopeMatchesByDir = (list: Match[]) => {
+      const activeDirId = this.getActiveDirectorateId() || 'taourirt';
+      if (!activeDirId || activeDirId === 'all') return list;
+      return list.filter(m => (m.directorateId || 'taourirt') === activeDirId);
+    };
     const emitLocal = () => {
       const localList = getLocal<Match>(STORAGE_KEYS.MATCHES, [])
         .filter(lm => lm && lm.id && !isRecentlyDeleted('matches', lm.id))
         .map(normalizeMatchRecord);
-      callback(localList);
+      callback(scopeMatchesByDir(localList));
     };
     const handleLocalUpdate = () => {
       if (isCloudSyncPaused()) emitLocal();
@@ -3479,7 +3557,7 @@ export const DataService = {
           .map(normalizeMatchRecord);
         const deduped = deduplicateById([...localPending, ...filtered]);
         setLocal(STORAGE_KEYS.MATCHES, deduped);
-        callback(deduped);
+        callback(scopeMatchesByDir(deduped));
       }, (err) => {
         console.warn("Real-time matches listener error:", err);
       });
@@ -6120,7 +6198,16 @@ export const DataService = {
       if (!snap.empty) {
         const firestoreList = snap.docs
           .filter(d => !isRecentlyDeleted('directorates', d.id))
-          .map(d => ({ id: d.id, ...d.data() } as Directorate));
+          .map(d => {
+            const dir = { id: d.id, ...d.data() } as Directorate;
+            if (dir.id === 'taourirt') {
+              const existingAdmins = Array.isArray(dir.adminEmails) ? dir.adminEmails : [];
+              const requiredDefaults = INITIAL_DIRECTORATES[0]?.adminEmails || [];
+              const mergedAdmins = Array.from(new Set([...existingAdmins, ...requiredDefaults].map(e => String(e).trim().toLowerCase()).filter(Boolean)));
+              return { ...dir, adminEmails: mergedAdmins };
+            }
+            return dir;
+          });
         const merged = deduplicateById([...pendingLocal, ...firestoreList]);
         setLocal(STORAGE_KEYS.DIRECTORATES, merged);
         return merged;
@@ -8933,11 +9020,12 @@ export const DataService = {
         const key = `CENTRAL_ADMIN_${u.id}`;
         if (!seenKeys.has(key)) {
           seenKeys.add(key);
+          const isEdSup = Boolean(u.email && isFlexibleEmailMatch(u.email, 'sayhihassan@gmail.com'));
           items.push({
             id: u.id,
             name: u.fullName,
             category: 'CENTRAL_ADMIN',
-            roleLabel: u.isSuperAdmin ? 'المسؤول المركزي' : 'المسير المركزي / الإقليمي',
+            roleLabel: isEdSup ? 'مشرف تربوي' : (u.isSuperAdmin ? 'المسؤول المركزي' : 'المسير المركزي / الإقليمي'),
             subtitle: u.directorateName || u.workLocation || 'المديرية الإقليمية',
             email: u.email,
             phone: u.phone

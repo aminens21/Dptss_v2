@@ -3,7 +3,7 @@ import { useSearchParams, useNavigate } from 'react-router-dom';
 import clsx from 'clsx';
 import { useAuth } from '../contexts/AuthContext';
 import { DataService, SPORTS_MAP, GENDER_MAP, deduplicateById, AGE_CATEGORIES, isClubTournament, getAgeCategoriesForSeason, normalizeCategoryKey, getCustomCategoryName, getCustomCategoryDetails, canUserApproveSportResult, normalizeCanonicalSportId, areSportIdsEquivalent } from '../lib/dataService';
-import { formatTeamDisplayName } from '../lib/drawTournamentUtils';
+import { formatTeamDisplayName, hasValidMatchTeams } from '../lib/drawTournamentUtils';
 import { Match, School, Venue, Tournament, Sport, Student, User, Referee } from '../types';
 import { CountdownTimer } from '../components/CountdownTimer';
 import {
@@ -620,6 +620,8 @@ export const Matches: React.FC = () => {
         : (sportTournaments.length > 0);
 
       const sportMatches = isProgrammed ? matches.filter(m => {
+        if (!hasValidMatchTeams(m, schools)) return false;
+
         // Directorate filter check
         if (activeDirId && activeDirId !== 'all') {
           const matchDir = m.directorateId || 'taourirt';
@@ -793,7 +795,7 @@ export const Matches: React.FC = () => {
         isClub
       };
     });
-  }, [sportsConfig, tournaments, matches, affiliationFilter, activeSeason, teachers, students]);
+  }, [sportsConfig, tournaments, matches, schools, affiliationFilter, activeSeason, teachers, students]);
 
   // Filtered sports list for Level 1 (Open / Programmed tournaments ALWAYS on top)
   const filteredSports = useMemo(() => {

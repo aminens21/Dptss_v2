@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { DataService, SPORTS_MAP } from '../lib/dataService';
-import { computeGroupStandings, formatTeamDisplayName } from '../lib/drawTournamentUtils';
+import { computeGroupStandings, formatTeamDisplayName, hasValidMatchTeams, extractMatchGroupLabel, isPlaceholderTeamId } from '../lib/drawTournamentUtils';
 import { Match, School, Venue, CrossCountryCategoryResult, AthleticsCategoryResult, Student, Directorate, Sport, Tournament } from '../types';
 import { CROSS_COUNTRY_CATEGORIES } from '../lib/crossCountryConfig';
 import { AthleticsService } from '../lib/athleticsService';
@@ -86,7 +86,12 @@ export const PublicResults: React.FC = () => {
     toast.success(`تم التبديل لعرض نتائج: ${dirObj?.name || newDirId}`);
   };
 
-  const getSchoolName = (id: string, fallbackName?: string) => formatTeamDisplayName(id, fallbackName, schools);
+  const getSchoolName = (
+    id: string,
+    fallbackName?: string,
+    placeholder?: string,
+    sourceMatchNumber?: number
+  ) => formatTeamDisplayName(id, fallbackName, schools, placeholder, sourceMatchNumber);
   const getVenueName = (id: string, fallbackName?: string) => venues.find(ven => ven.id === id)?.name || fallbackName || id;
 
   const getMatchSport = (m: Match): { id: string; name: string; icon: string } => {
@@ -127,10 +132,12 @@ export const PublicResults: React.FC = () => {
     return list;
   }, [sportsConfig]);
 
-  // Matches sorting and filtering
+  // Matches sorting and filtering (only matches with valid team1 & team2 names or winner placeholders)
   const filteredMatches = useMemo(() => {
     return matches
       .filter(m => {
+        if (!hasValidMatchTeams(m, schools)) return false;
+
         // Sport filter
         if (selectedSportId !== 'ALL') {
           const matchSport = getMatchSport(m);
@@ -148,24 +155,30 @@ export const PublicResults: React.FC = () => {
         // Search query filter
         if (searchQuery.trim()) {
           const q = searchQuery.toLowerCase();
-          const team1 = getSchoolName(m.team1Id, m.team1Name).toLowerCase();
-          const team2 = getSchoolName(m.team2Id, m.team2Name).toLowerCase();
-          const venue = getVenueName(m.venueId).toLowerCase();
+          const team1 = getSchoolName(m.team1Id, m.team1Name || m.team1SchoolName, m.team1Placeholder, m.team1SourceMatchNumber).toLowerCase();
+          const team2 = getSchoolName(m.team2Id, m.team2Name || m.team2SchoolName, m.team2Placeholder, m.team2SourceMatchNumber).toLowerCase();
+          const venue = getVenueName(m.venueId, m.venueName).toLowerCase();
           const stage = (m.stage || '').toLowerCase();
+          const group = extractMatchGroupLabel(m).toLowerCase();
           const sp = getMatchSport(m).name.toLowerCase();
-          return team1.includes(q) || team2.includes(q) || venue.includes(q) || stage.includes(q) || sp.includes(q);
+          const numStr = m.drawMatchNumber ? String(m.drawMatchNumber) : '';
+          return team1.includes(q) || team2.includes(q) || venue.includes(q) || stage.includes(q) || group.includes(q) || sp.includes(q) || numStr.includes(q);
         }
 
         return true;
       })
-      .sort((a, b) => parseDateToTimestampMs(b.date) - parseDateToTimestampMs(a.date));
+      .sort((a, b) => {
+        const numDiff = (a.drawMatchNumber ?? 9999) - (b.drawMatchNumber ?? 9999);
+        if (numDiff !== 0) return numDiff;
+        return parseDateToTimestampMs(b.date) - parseDateToTimestampMs(a.date);
+      });
   }, [matches, selectedSportId, statusFilter, searchQuery, sportsConfig, tournaments, schools, venues]);
 
   const publicSportGroupStandings = useMemo(() => {
     if (selectedSportId === 'ALL' || selectedSportId === 'cross_country' || selectedSportId === 'athletics') {
       return [];
     }
-    const sportScoped = matches.filter(m => getMatchSport(m).id === selectedSportId);
+    const sportScoped = matches.filter(m => hasValidMatchTeams(m, schools) && getMatchSport(m).id === selectedSportId);
     const byBranch = new Map<string, { label: string; matches: Match[] }>();
     sportScoped.forEach(m => {
       const cat = m.ageCategory || 'عام';
@@ -188,13 +201,14 @@ export const PublicResults: React.FC = () => {
 
   // Match statistics
   const stats = useMemo(() => {
-    const completed = matches.filter(m => m.status?.toLowerCase() === 'completed' || m.status?.toLowerCase() === 'ongoing' || m.score1 !== undefined || m.score2 !== undefined || m.team1Score !== undefined || m.team2Score !== undefined);
+    const validMatches = matches.filter(m => hasValidMatchTeams(m, schools));
+    const completed = validMatches.filter(m => m.status?.toLowerCase() === 'completed' || m.status?.toLowerCase() === 'ongoing' || m.score1 !== undefined || m.score2 !== undefined || m.team1Score !== undefined || m.team2Score !== undefined);
     const totalGoals = completed.reduce((sum, m) => sum + (m.score1 ?? m.team1Score ?? 0) + (m.score2 ?? m.team2Score ?? 0), 0);
-    const completedCount = matches.filter(m => m.status?.toLowerCase() === 'completed').length;
-    const ongoingCount = matches.filter(m => m.status?.toLowerCase() === 'ongoing').length;
-    const scheduledCount = matches.filter(m => m.status?.toLowerCase() === 'scheduled' || !m.status).length;
-    return { totalGoals, completedCount, ongoingCount, scheduledCount, totalMatches: matches.length };
-  }, [matches]);
+    const completedCount = validMatches.filter(m => m.status?.toLowerCase() === 'completed').length;
+    const ongoingCount = validMatches.filter(m => m.status?.toLowerCase() === 'ongoing').length;
+    const scheduledCount = validMatches.filter(m => m.status?.toLowerCase() === 'scheduled' || !m.status).length;
+    return { totalGoals, completedCount, ongoingCount, scheduledCount, totalMatches: validMatches.length };
+  }, [matches, schools]);
 
   // Cross Country List Processing
   const crossCountryList = useMemo(() => {
@@ -753,8 +767,14 @@ export const PublicResults: React.FC = () => {
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 lg:gap-6">
-                {filteredMatches.map(m => {
+                {filteredMatches.map((m, idx) => {
                   const matchSport = getMatchSport(m);
+                  const team1Label = getSchoolName(m.team1Id, m.team1Name || m.team1SchoolName, m.team1Placeholder, m.team1SourceMatchNumber);
+                  const team2Label = getSchoolName(m.team2Id, m.team2Name || m.team2SchoolName, m.team2Placeholder, m.team2SourceMatchNumber);
+                  const groupLabel = extractMatchGroupLabel(m);
+                  const matchNum = m.drawMatchNumber ?? (idx + 1);
+                  const isT1Placeholder = isPlaceholderTeamId(m.team1Id) || /الفائز\s*من\s*المباراة/.test(team1Label);
+                  const isT2Placeholder = isPlaceholderTeamId(m.team2Id) || /الفائز\s*من\s*المباراة/.test(team2Label);
                   return (
                     <div key={m.id} className="bg-white p-6 rounded-3xl border border-slate-200 shadow-xs hover:shadow-md transition-all space-y-4">
                       <div className="flex justify-between items-center text-[10px] font-bold text-slate-500 border-b border-slate-100 pb-2">
@@ -780,10 +800,24 @@ export const PublicResults: React.FC = () => {
                         </span>
                       </div>
 
+                      <div className="flex items-center flex-wrap gap-1.5 text-[10px] font-black">
+                        <span className="px-2 py-0.5 bg-blue-50 text-blue-800 border border-blue-200 rounded-lg">
+                          المباراة رقم {matchNum}
+                        </span>
+                        <span className="px-2 py-0.5 bg-slate-100 text-slate-800 border border-slate-200 rounded-lg font-bold">
+                          الدور: {m.stage?.trim() || 'دور المجموعات'}
+                        </span>
+                        {groupLabel && (
+                          <span className="px-2 py-0.5 bg-purple-50 text-purple-800 border border-purple-200 rounded-lg">
+                            {groupLabel.startsWith('المجموعة') ? groupLabel : `المجموعة: ${groupLabel}`}
+                          </span>
+                        )}
+                      </div>
+
                       <div className="flex items-center justify-between py-3 px-3 bg-slate-50/90 rounded-2xl border border-slate-100">
                         <div className="flex-1 text-right min-w-0">
-                          <span className="text-xs font-black text-slate-900 truncate block" title={getSchoolName(m.team1Id, m.team1Name)}>
-                            {getSchoolName(m.team1Id, m.team1Name)}
+                          <span className={cn("text-xs font-black truncate block", isT1Placeholder ? "text-indigo-700" : "text-slate-900")} title={team1Label}>
+                            {team1Label}
                           </span>
                         </div>
                         <div className="px-3 py-1 bg-white rounded-xl border border-slate-200 shadow-2xs font-mono font-black text-sm text-blue-700 shrink-0 mx-2">
@@ -794,8 +828,8 @@ export const PublicResults: React.FC = () => {
                           )}
                         </div>
                         <div className="flex-1 text-left min-w-0">
-                          <span className="text-xs font-black text-slate-900 truncate block" title={getSchoolName(m.team2Id, m.team2Name)}>
-                            {getSchoolName(m.team2Id, m.team2Name)}
+                          <span className={cn("text-xs font-black truncate block", isT2Placeholder ? "text-indigo-700" : "text-slate-900")} title={team2Label}>
+                            {team2Label}
                           </span>
                         </div>
                       </div>

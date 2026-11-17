@@ -168,6 +168,13 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
   const [isFullScreen, setIsFullScreen] = useState(false);
   const [isPdfModalOpen, setIsPdfModalOpen] = useState(false);
   const [isDrawModalOpen, setIsDrawModalOpen] = useState(false);
+  const [drawTarget, setDrawTarget] = useState<{
+    tournamentId?: string;
+    affiliation?: 'non_club' | 'club_affiliated' | 'open';
+    category?: string;
+    gender?: string;
+    lockToInitialBranch?: boolean;
+  } | null>(null);
   const [selectedSchoolNameForView, setSelectedSchoolNameForView] = useState<string | null>(null);
   const [pdfSchoolName, setPdfSchoolName] = useState<string | null>(null);
   const [pdfPreselectedCat, setPdfPreselectedCat] = useState<string>('ALL');
@@ -1130,6 +1137,217 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
     }
   };
 
+  const openScopedDrawModal = (targetTournament?: Tournament | null) => {
+    const resolvedTourn = targetTournament || selectedBranchTournament || (sportTournaments.length === 1 ? sportTournaments[0] : null);
+    if (resolvedTourn) {
+      setDrawTarget({
+        tournamentId: resolvedTourn.id,
+        affiliation: normalizeTournamentAffiliation(resolvedTourn.affiliationType, resolvedTourn.name),
+        category: normalizeCategoryKey(resolvedTourn.ageCategory || ''),
+        gender: resolvedTourn.gender || 'ALL',
+        lockToInitialBranch: true
+      });
+    } else if (activeBranchModal) {
+      setDrawTarget({
+        affiliation: activeBranchModal,
+        category: selectedCatId && selectedCatId !== 'ALL' ? normalizeCategoryKey(selectedCatId) : undefined,
+        gender: selectedGender && selectedGender !== 'ALL' ? selectedGender : undefined,
+        lockToInitialBranch: false
+      });
+    } else {
+      setDrawTarget(null);
+    }
+    setIsDrawModalOpen(true);
+  };
+
+  const handleExportAffiliationExcel = (
+    affType: 'non_club' | 'club_affiliated' | 'open',
+    branchCategory?: string,
+    branchGender?: string
+  ) => {
+    if (!sport) return;
+    const normBranchCat = branchCategory && branchCategory !== 'ALL' ? normalizeCategoryKey(branchCategory) : undefined;
+    const normBranchGender = branchGender && branchGender !== 'ALL' && branchGender !== 'Mixed' && branchGender !== 'Both'
+      ? branchGender
+      : undefined;
+
+    const matchingStudents = sportStudents.filter(s => {
+      if (!s) return false;
+      const sAff = normalizeTournamentAffiliation(s.affiliationType);
+      if (sAff !== affType) return false;
+      if (normBranchCat && normalizeCategoryKey(s.category) !== normBranchCat) return false;
+      if (normBranchGender && (s.gender || 'Male') !== normBranchGender) return false;
+      if (DataService.isSchoolWithdrawn({
+        sportId: sport.id,
+        ageCategory: normBranchCat || normalizeCategoryKey(s.category),
+        gender: normBranchGender || s.gender,
+        affiliationType: affType
+      }, s.schoolId, s.schoolName)) {
+        return false;
+      }
+      return true;
+    });
+
+    const confirmedForBranch = getConfirmedSchoolsForSport(sport.id).filter(conf => {
+      if (!conf?.schoolName) return false;
+      if (!doesConfirmationMatchBranch(conf, {
+        affiliationType: affType,
+        category: normBranchCat,
+        gender: normBranchGender
+      })) {
+        return false;
+      }
+      return !DataService.isSchoolWithdrawn({
+        sportId: sport.id,
+        ageCategory: normBranchCat,
+        gender: normBranchGender,
+        affiliationType: affType
+      }, conf.schoolId, conf.schoolName);
+    });
+
+    if (matchingStudents.length === 0 && confirmedForBranch.length === 0) {
+      toast.error('لا توجد مشاركات مسجلة أو مؤكدة في هذا الصنف حالياً');
+      return;
+    }
+
+    const affLabel = affType === 'club_affiliated'
+      ? 'المنتمين للأندية'
+      : affType === 'open'
+      ? 'البطولات المفتوحة'
+      : 'غير المنتمين للأندية';
+
+    const loadToastId = toast.loading(`جاري تحضير لائحة مشاركات (${affLabel})...`);
+    try {
+      const workbook = XLSX.utils.book_new();
+
+      const studentRows = matchingStudents.map((p, index) => {
+        const coach = resolveSchoolCoach({
+          schoolName: p.schoolName,
+          sportId: sport.id,
+          students: matchingStudents.filter(st => schoolNamesMatch(st.schoolName, p.schoolName)),
+          schools,
+          teachers,
+          confirmations
+        });
+        const row: Record<string, any> = {
+          'الرقم الترتيبي': index + 1,
+          'الاسم الكامل': p.fullName || '',
+          'رقم مسار': p.massarNumber || '-',
+          'الجنس': p.gender === 'Female' ? 'أنثى' : 'ذكر',
+          'تاريخ الازدياد': p.birthDate || '-',
+          'الفئة العمرية': `${getDistinctCategoryLabel(p.category, p.gender)} (${normalizeCategoryKey(p.category)})`,
+          'المؤسسة التعليمية': p.schoolName || '',
+          'الصنف': affLabel,
+          'المؤطر الرياضي': p.coachName || coach.fullName || '-',
+          'هاتف المؤطر': p.coachPhone || coach.phone || '-'
+        };
+        if (sport.id === 'athletics') {
+          row['التخصص الفرعي'] = p.athleticsSpecialty || 'غير محدد';
+        }
+        return row;
+      });
+
+      const schoolMap = new Map<string, {
+        schoolName: string;
+        confirmed: boolean;
+        studentsCount: number;
+        categories: Set<string>;
+        coachName: string;
+        coachPhone: string;
+      }>();
+
+      confirmedForBranch.forEach(conf => {
+        const key = normalizeArabicMatchText(conf.schoolName);
+        if (!key) return;
+        const entry = schoolMap.get(key) || {
+          schoolName: conf.schoolName,
+          confirmed: false,
+          studentsCount: 0,
+          categories: new Set<string>(),
+          coachName: conf.teacherName || '',
+          coachPhone: conf.teacherPhone || ''
+        };
+        entry.confirmed = true;
+        if (!entry.coachName && conf.teacherName) entry.coachName = conf.teacherName;
+        if (!entry.coachPhone && conf.teacherPhone) entry.coachPhone = conf.teacherPhone;
+        getEffectiveConfirmedBranches(conf).forEach(b => {
+          if (normalizeTournamentAffiliation(b.affiliationType) !== affType) return;
+          if (normBranchCat && normalizeCategoryKey(b.category) !== normBranchCat) return;
+          if (normBranchGender && (b.gender as string) !== 'Both' && b.gender !== normBranchGender) return;
+          entry.categories.add(`${getDistinctCategoryLabel(b.category, b.gender)} (${normalizeCategoryKey(b.category)})`);
+        });
+        schoolMap.set(key, entry);
+      });
+
+      matchingStudents.forEach(st => {
+        const key = normalizeArabicMatchText(st.schoolName || '');
+        if (!key) return;
+        const existing = schoolMap.get(key) || {
+          schoolName: st.schoolName || '',
+          confirmed: false,
+          studentsCount: 0,
+          categories: new Set<string>(),
+          coachName: st.coachName || '',
+          coachPhone: st.coachPhone || ''
+        };
+        existing.studentsCount += 1;
+        existing.categories.add(`${getDistinctCategoryLabel(st.category, st.gender)} (${normalizeCategoryKey(st.category)})`);
+        if (!existing.coachName && st.coachName) existing.coachName = st.coachName;
+        if (!existing.coachPhone && st.coachPhone) existing.coachPhone = st.coachPhone;
+        schoolMap.set(key, existing);
+      });
+
+      const schoolRows = Array.from(schoolMap.values()).map((entry, idx) => {
+        const coach = resolveSchoolCoach({
+          schoolName: entry.schoolName,
+          sportId: sport.id,
+          students: matchingStudents.filter(st => schoolNamesMatch(st.schoolName, entry.schoolName)),
+          schools,
+          teachers,
+          confirmations
+        });
+        return {
+          'الرقم الترتيبي': idx + 1,
+          'المؤسسة التعليمية': entry.schoolName,
+          'الصنف': affLabel,
+          'حالة المشاركة': entry.confirmed ? 'مشاركة مؤكدة' : 'لوائح مسجلة',
+          'عدد المشاركين المسجلين': entry.studentsCount,
+          'الفئات المعنية': Array.from(entry.categories).join(' • ') || '-',
+          'المؤطر الرياضي': entry.coachName || coach.fullName || '-',
+          'هاتف المؤطر': entry.coachPhone || coach.phone || '-'
+        };
+      });
+
+      if (studentRows.length > 0) {
+        const wsStudents = XLSX.utils.json_to_sheet(studentRows);
+        wsStudents['!views'] = [{ RTL: true }];
+        XLSX.utils.book_append_sheet(workbook, wsStudents, 'المشاركون المسجلون');
+      }
+
+      if (schoolRows.length > 0) {
+        const wsSchools = XLSX.utils.json_to_sheet(schoolRows);
+        wsSchools['!views'] = [{ RTL: true }];
+        XLSX.utils.book_append_sheet(workbook, wsSchools, 'المؤسسات المشاركة');
+      }
+
+      const scopeSuffix = [
+        affType === 'club_affiliated' ? 'المنتمين_للأندية' : affType === 'open' ? 'المفتوحة' : 'غير_المنتمين',
+        normBranchCat || '',
+        normBranchGender === 'Female' ? 'إناث' : normBranchGender === 'Male' ? 'ذكور' : ''
+      ].filter(Boolean).join('_');
+
+      const fileName = `مشاركات_${(sport.name || 'رياضة').replace(/\s+/g, '_')}_${scopeSuffix}.xlsx`;
+      XLSX.writeFile(workbook, fileName);
+
+      toast.dismiss(loadToastId);
+      toast.success(`تم تحميل لائحة مشاركات (${affLabel}) بنجاح!`);
+    } catch (e) {
+      console.error(e);
+      toast.dismiss(loadToastId);
+      toast.error('تعذر تحميل ملف المشاركات');
+    }
+  };
+
   const handleExportCategoryExcel = (catId: string) => {
     const isAll = catId === 'ALL';
     const targets = isAll ? sportStudents : sportStudents.filter(s => s.category === catId);
@@ -1228,7 +1446,7 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
             {canManage && isProgrammed && (
               <button
                 type="button"
-                onClick={() => setIsDrawModalOpen(true)}
+                onClick={() => openScopedDrawModal(selectedBranchTournament)}
                 className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 text-white text-xs font-black shadow-xs flex items-center gap-1.5 transition-all cursor-pointer select-none"
                 title="إجراء القرعة الإلكترونية وبرمجة المباريات وتعيين الحكام لهذه الرياضة"
               >
@@ -1371,20 +1589,37 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
                     </strong>
                   </div>
 
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setSelectedAffiliation('non_club');
-                      setSelectedBranchTournament(null);
-                      setSelectedSchoolNameForView(null);
-                      setActiveBranchModal('non_club');
-                    }}
-                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black shadow-xs transition-all cursor-pointer flex items-center justify-center gap-1.5 hover:scale-102 active:scale-98"
-                  >
-                    <span>دخول واستعراض بطولات هذا الصنف 🔓</span>
-                    <ChevronLeft className="w-4 h-4" />
-                  </button>
+                  <div className="flex flex-wrap items-center justify-end gap-2">
+                    {canManage && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleExportAffiliationExcel('non_club');
+                        }}
+                        className="px-3 py-2 bg-slate-100 hover:bg-blue-50 text-blue-800 border border-blue-200 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                        title="تحميل لائحة المشاركات والمؤسسات لغير المنتمين للأندية (Excel)"
+                      >
+                        <Download className="w-3.5 h-3.5" />
+                        <span>تحميل المشاركات</span>
+                      </button>
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSelectedAffiliation('non_club');
+                        setSelectedBranchTournament(null);
+                        setSelectedSchoolNameForView(null);
+                        setActiveBranchModal('non_club');
+                      }}
+                      className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black shadow-xs transition-all cursor-pointer flex items-center justify-center gap-1.5 hover:scale-102 active:scale-98"
+                    >
+                      <span>دخول واستعراض بطولات هذا الصنف 🔓</span>
+                      <ChevronLeft className="w-4 h-4" />
+                    </button>
+                  </div>
                 </div>
               </div>
             )}
@@ -1444,20 +1679,37 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
                     </strong>
                   </div>
 
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setSelectedAffiliation('club_affiliated');
-                      setSelectedBranchTournament(null);
-                      setSelectedSchoolNameForView(null);
-                      setActiveBranchModal('club_affiliated');
-                    }}
-                    className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-black shadow-xs transition-all cursor-pointer flex items-center justify-center gap-1.5 hover:scale-102 active:scale-98"
-                  >
-                    <span>دخول واستعراض بطولات هذا الصنف 🔓</span>
-                    <ChevronLeft className="w-4 h-4" />
-                  </button>
+                  <div className="flex flex-wrap items-center justify-end gap-2">
+                    {canManage && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleExportAffiliationExcel('club_affiliated');
+                        }}
+                        className="px-3 py-2 bg-white hover:bg-amber-100 text-amber-900 border border-amber-300 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                        title="تحميل لائحة المشاركات والمؤسسات للمنتمين للأندية (Excel)"
+                      >
+                        <Download className="w-3.5 h-3.5" />
+                        <span>تحميل المشاركات</span>
+                      </button>
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSelectedAffiliation('club_affiliated');
+                        setSelectedBranchTournament(null);
+                        setSelectedSchoolNameForView(null);
+                        setActiveBranchModal('club_affiliated');
+                      }}
+                      className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-black shadow-xs transition-all cursor-pointer flex items-center justify-center gap-1.5 hover:scale-102 active:scale-98"
+                    >
+                      <span>دخول واستعراض بطولات هذا الصنف 🔓</span>
+                      <ChevronLeft className="w-4 h-4" />
+                    </button>
+                  </div>
                 </div>
               </div>
             )}
@@ -1516,20 +1768,37 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
                     </strong>
                   </div>
 
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setSelectedAffiliation('open');
-                      setSelectedBranchTournament(null);
-                      setSelectedSchoolNameForView(null);
-                      setActiveBranchModal('open');
-                    }}
-                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black shadow-xs transition-all cursor-pointer flex items-center justify-center gap-1.5 hover:scale-102 active:scale-98"
-                  >
-                    <span>دخول واستعراض بطولات هذا الصنف 🔓</span>
-                    <ChevronLeft className="w-4 h-4" />
-                  </button>
+                  <div className="flex flex-wrap items-center justify-end gap-2">
+                    {canManage && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleExportAffiliationExcel('open');
+                        }}
+                        className="px-3 py-2 bg-white hover:bg-emerald-100 text-emerald-900 border border-emerald-300 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                        title="تحميل لائحة المشاركات والمؤسسات للبطولات المفتوحة (Excel)"
+                      >
+                        <Download className="w-3.5 h-3.5" />
+                        <span>تحميل المشاركات</span>
+                      </button>
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSelectedAffiliation('open');
+                        setSelectedBranchTournament(null);
+                        setSelectedSchoolNameForView(null);
+                        setActiveBranchModal('open');
+                      }}
+                      className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black shadow-xs transition-all cursor-pointer flex items-center justify-center gap-1.5 hover:scale-102 active:scale-98"
+                    >
+                      <span>دخول واستعراض بطولات هذا الصنف 🔓</span>
+                      <ChevronLeft className="w-4 h-4" />
+                    </button>
+                  </div>
                 </div>
               </div>
             )}
@@ -2154,7 +2423,7 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
                             </div>
                           </div>
 
-                          <div className="mt-4 pt-3 border-t border-slate-100 flex items-center gap-2">
+                          <div className="mt-4 pt-3 border-t border-slate-100 flex flex-wrap items-center gap-2">
                             <button
                               type="button"
                               onClick={(e) => {
@@ -2174,6 +2443,36 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
                               <span>دخول واستعراض المؤسسات المشاركة 🔓</span>
                               <ChevronLeft className="w-4 h-4" />
                             </button>
+                            {canManage && (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleExportAffiliationExcel(
+                                    normalizeTournamentAffiliation(tAff, t.name),
+                                    tCat,
+                                    tGender
+                                  );
+                                }}
+                                title="تحميل مشاركات هذه الفئة (Excel)"
+                                className="p-2.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 rounded-xl transition-colors cursor-pointer shrink-0"
+                              >
+                                <Download className="w-4 h-4" />
+                              </button>
+                            )}
+                            {canManage && !['athletics', 'cross_country', 'table_tennis'].includes(sport.id) && (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  openScopedDrawModal(t);
+                                }}
+                                title="إجراء القرعة الإلكترونية لهذه الفئة فقط"
+                                className="p-2.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-xl transition-colors cursor-pointer shrink-0"
+                              >
+                                <Shuffle className="w-4 h-4" />
+                              </button>
+                            )}
                             {canManage && !String(t.id).startsWith('virtual-') && (
                               <button
                                 type="button"
@@ -2264,17 +2563,32 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-2 shrink-0">
+                    <div className="flex flex-wrap items-center gap-2 shrink-0">
                       <span className="text-[11px] font-bold text-slate-600 bg-slate-100 px-3 py-1.5 rounded-xl border border-slate-200">
                         عدد المؤسسات: {participatingSchools.length}
                       </span>
+                      {canManage && !['athletics', 'cross_country', 'table_tennis'].includes(sport.id) && (
+                        <button
+                          type="button"
+                          onClick={() => openScopedDrawModal(selectedBranchTournament)}
+                          className="px-3 py-1.5 bg-indigo-600 text-white hover:bg-indigo-700 rounded-xl text-xs font-black flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
+                        >
+                          <Shuffle className="w-3.5 h-3.5" />
+                          <span>إجراء القرعة لهذه الفئة</span>
+                        </button>
+                      )}
                       {canManage && (
                         <button
-                          onClick={() => handleExportCategoryExcel('ALL')}
+                          type="button"
+                          onClick={() => handleExportAffiliationExcel(
+                            normalizeTournamentAffiliation(selectedBranchTournament.affiliationType || activeBranchModal || 'non_club', selectedBranchTournament.name),
+                            normalizeCategoryKey(selectedBranchTournament.ageCategory),
+                            selectedBranchTournament.gender
+                          )}
                           className="px-3 py-1.5 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
                         >
                           <Download className="w-3.5 h-3.5" />
-                          <span>تصدير Excel</span>
+                          <span>تحميل مشاركات الفئة (Excel)</span>
                         </button>
                       )}
                     </div>
@@ -3561,10 +3875,17 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
       {isDrawModalOpen && sport && (
         <ElectronicDrawModal
           isOpen={isDrawModalOpen}
-          onClose={() => setIsDrawModalOpen(false)}
+          onClose={() => {
+            setIsDrawModalOpen(false);
+            setDrawTarget(null);
+          }}
           currentUser={userProfile}
           initialSportId={sport.id}
-          initialTournamentId={sportTournaments.length === 1 ? sportTournaments[0].id : undefined}
+          initialTournamentId={drawTarget?.tournamentId ?? (selectedBranchTournament?.id || (sportTournaments.length === 1 ? sportTournaments[0].id : undefined))}
+          initialAffiliation={drawTarget?.affiliation ?? (selectedBranchTournament ? normalizeTournamentAffiliation(selectedBranchTournament.affiliationType, selectedBranchTournament.name) : activeBranchModal || undefined)}
+          initialCategory={drawTarget?.category ?? (selectedBranchTournament ? normalizeCategoryKey(selectedBranchTournament.ageCategory) : undefined)}
+          initialGender={drawTarget?.gender ?? selectedBranchTournament?.gender}
+          lockToInitialBranch={drawTarget?.lockToInitialBranch ?? Boolean(selectedBranchTournament)}
           onMatchesCreated={() => {
             if (onRefreshData) onRefreshData();
           }}
