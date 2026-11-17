@@ -1298,7 +1298,10 @@ export const SportsConfig: React.FC = () => {
                         type="button"
                         onClick={() => {
                           const allHrefs = sidebarItemsList.map(i => i.href);
-                          setRolePermissions(prev => ({ ...prev, [role.key]: allHrefs }));
+                          setRolePermissions(prev => {
+                            const existingActions = (prev[role.key] || []).filter(h => h.startsWith('action:') || h === '/permissions');
+                            return { ...prev, [role.key]: Array.from(new Set([...allHrefs, ...existingActions])) };
+                          });
                         }}
                         className="text-[10px] font-bold text-blue-600 hover:underline cursor-pointer"
                       >
@@ -1308,7 +1311,10 @@ export const SportsConfig: React.FC = () => {
                       <button
                         type="button"
                         onClick={() => {
-                          setRolePermissions(prev => ({ ...prev, [role.key]: [] }));
+                          setRolePermissions(prev => {
+                            const existingActions = (prev[role.key] || []).filter(h => h.startsWith('action:'));
+                            return { ...prev, [role.key]: existingActions };
+                          });
                         }}
                         className="text-[10px] font-bold text-slate-500 hover:underline cursor-pointer"
                       >

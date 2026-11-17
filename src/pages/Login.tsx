@@ -196,6 +196,25 @@ export const Login: React.FC = () => {
     return Boolean(ymd && ymd.startsWith(targetYmd));
   };
 
+  // Select a specific program date and enforce date filtering on the main matches view
+  const selectProgramDate = (ymd: string) => {
+    setSelectedDate(ymd);
+    setFilterMatchesByDate(true);
+    const parts = ymd.split('-');
+    if (parts.length === 3) {
+      const y = Number(parts[0]);
+      const m = Number(parts[1]) - 1;
+      if (!Number.isNaN(y) && !Number.isNaN(m)) {
+        setCurrentCalendarMonth(prev =>
+          prev.getFullYear() === y && prev.getMonth() === m ? prev : new Date(y, m, 1)
+        );
+      }
+    }
+    if (selectedSport !== 'cross_country' && selectedSport !== 'athletics') {
+      setActivePublicTab('MATCHES');
+    }
+  };
+
   // Date Bar state & Scroll Ref
   const [dateOffset, setDateOffset] = useState(0);
   const dateBarScrollRef = useRef<HTMLDivElement>(null);
@@ -209,7 +228,7 @@ export const Login: React.FC = () => {
       const m = String(current.getMonth() + 1).padStart(2, '0');
       const d = String(current.getDate()).padStart(2, '0');
       const newYmd = `${y}-${m}-${d}`;
-      setSelectedDate(newYmd);
+      selectProgramDate(newYmd);
       setDateOffset(prev => prev - 1);
     }
   };
@@ -223,7 +242,7 @@ export const Login: React.FC = () => {
       const m = String(current.getMonth() + 1).padStart(2, '0');
       const d = String(current.getDate()).padStart(2, '0');
       const newYmd = `${y}-${m}-${d}`;
-      setSelectedDate(newYmd);
+      selectProgramDate(newYmd);
       setDateOffset(prev => prev + 1);
     }
   };
@@ -1524,13 +1543,18 @@ export const Login: React.FC = () => {
       }
     });
     const monthDatesWithMatches = Array.from(set).sort();
-    const todayYmd = new Date().toISOString().split('T')[0];
+    const formatLocalYmd = (d: Date) =>
+      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const todayYmd = formatLocalYmd(new Date());
 
     const handlePrevDay = () => {
       try {
-        const d = new Date(selectedDate);
+        const parts = selectedDate.split('-');
+        const d = parts.length === 3
+          ? new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]))
+          : new Date(selectedDate);
         d.setDate(d.getDate() - 1);
-        setSelectedDate(d.toISOString().split('T')[0]);
+        selectProgramDate(formatLocalYmd(d));
       } catch (e) {
         // ignore
       }
@@ -1538,9 +1562,12 @@ export const Login: React.FC = () => {
 
     const handleNextDay = () => {
       try {
-        const d = new Date(selectedDate);
+        const parts = selectedDate.split('-');
+        const d = parts.length === 3
+          ? new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]))
+          : new Date(selectedDate);
         d.setDate(d.getDate() + 1);
-        setSelectedDate(d.toISOString().split('T')[0]);
+        selectProgramDate(formatLocalYmd(d));
       } catch (e) {
         // ignore
       }
@@ -1571,7 +1598,7 @@ export const Login: React.FC = () => {
             <div className="flex items-center gap-1.5 shrink-0">
               <button
                 type="button"
-                onClick={() => setSelectedDate(todayYmd)}
+                onClick={() => selectProgramDate(todayYmd)}
                 className={`px-2.5 py-1 text-[10px] font-black rounded-xl border transition-all cursor-pointer ${
                   selectedDate === todayYmd
                     ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
@@ -1665,7 +1692,7 @@ export const Login: React.FC = () => {
                           <button
                             key={dt}
                             type="button"
-                            onClick={() => setSelectedDate(dt)}
+                            onClick={() => selectProgramDate(dt)}
                             className="px-2 py-0.5 bg-emerald-100 dark:bg-emerald-900/60 text-emerald-800 dark:text-emerald-200 rounded-lg font-black hover:bg-emerald-200 transition-colors cursor-pointer"
                           >
                             {dt.slice(8)} {ARABIC_MONTHS[currentCalendarMonth.getMonth()]}
@@ -1797,7 +1824,7 @@ export const Login: React.FC = () => {
                       key={dayNum}
                       type="button"
                       onClick={() => {
-                        setSelectedDate(cellYmd);
+                        selectProgramDate(cellYmd);
                         setMobileProgramTab('daily');
                       }}
                       className={`h-7 rounded-xl flex flex-col items-center justify-center relative font-bold text-[11px] transition-all cursor-pointer ${
@@ -1829,7 +1856,7 @@ export const Login: React.FC = () => {
                       key={dt}
                       type="button"
                       onClick={() => {
-                        setSelectedDate(dt);
+                        selectProgramDate(dt);
                         setMobileProgramTab('daily');
                       }}
                       className="px-2 py-0.5 bg-emerald-100 dark:bg-emerald-900/60 text-emerald-800 dark:text-emerald-200 rounded-lg font-black hover:bg-emerald-200 transition-colors cursor-pointer"
@@ -1923,7 +1950,7 @@ export const Login: React.FC = () => {
                 <button
                   key={dayNum}
                   type="button"
-                  onClick={() => setSelectedDate(cellYmd)}
+                  onClick={() => selectProgramDate(cellYmd)}
                   className={`h-7 sm:h-8 rounded-xl flex flex-col items-center justify-center relative font-bold text-[11px] sm:text-xs transition-all cursor-pointer ${
                     isSelected
                       ? 'bg-emerald-600 text-white font-black shadow-md shadow-emerald-600/30 scale-105 ring-2 ring-emerald-400'
@@ -1975,8 +2002,8 @@ export const Login: React.FC = () => {
                       <button
                         key={dt}
                         type="button"
-                        onClick={() => setSelectedDate(dt)}
-                        className="px-2 py-0.5 bg-emerald-100 dark:bg-emerald-900/60 text-emerald-800 dark:text-emerald-200 rounded-md font-bold hover:bg-emerald-200 transition-colors"
+                        onClick={() => selectProgramDate(dt)}
+                        className="px-2 py-0.5 bg-emerald-100 dark:bg-emerald-900/60 text-emerald-800 dark:text-emerald-200 rounded-md font-bold hover:bg-emerald-200 transition-colors cursor-pointer"
                       >
                         {dt.slice(8)} {ARABIC_MONTHS[currentCalendarMonth.getMonth()]}
                       </button>
@@ -3263,7 +3290,9 @@ export const Login: React.FC = () => {
                   <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-8 text-center space-y-3 shadow-xs transition-colors">
                     <Calendar className="w-12 h-12 text-slate-300 dark:text-slate-700 mx-auto" />
                     <p className="text-sm font-bold text-slate-700 dark:text-slate-300">
-                      لا توجد مباريات مسجلة حالياً تطابق معايير الفلترة المحددة
+                      {filterMatchesByDate
+                        ? `لا توجد مباريات مسجلة في تاريخ ${selectedDate} تطابق معايير الفلترة المحددة`
+                        : 'لا توجد مباريات مسجلة حالياً تطابق معايير الفلترة المحددة'}
                     </p>
                     {filterMatchesByDate && (
                       <button

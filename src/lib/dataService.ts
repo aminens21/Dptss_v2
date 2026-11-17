@@ -6038,30 +6038,12 @@ export const DataService = {
       ]
     };
 
-    const ensureNewRoutes = (perms: RoleSidebarPermissions): RoleSidebarPermissions => {
-      if (!perms || typeof perms !== 'object') return DEFAULT_PERMISSIONS;
-      const res = { ...perms };
-      (['CENTRAL_ADMIN', 'TECH_COMMITTEE_HEAD', 'SPORT_MANAGER'] as const).forEach(role => {
-        if (res[role] && Array.isArray(res[role]) && !res[role].includes('/helper-apps')) {
-          const list = [...res[role]];
-          const matchIdx = list.indexOf('/matches');
-          if (matchIdx !== -1) {
-            list.splice(matchIdx + 1, 0, '/helper-apps');
-          } else {
-            list.push('/helper-apps');
-          }
-          res[role] = list;
-        }
-      });
-      return res;
-    };
-
     try {
       const docSnap = await getDoc(doc(db, 'settings', 'role_sidebar_permissions'));
       if (docSnap.exists()) {
         const firestoreData = docSnap.data() as RoleSidebarPermissions;
         if (firestoreData && typeof firestoreData === 'object') {
-          const merged = ensureNewRoutes({ ...DEFAULT_PERMISSIONS, ...firestoreData });
+          const merged = { ...DEFAULT_PERMISSIONS, ...firestoreData };
           localStorage.setItem('taourirt_role_sidebar_permissions', JSON.stringify(merged));
           return merged;
         }
@@ -6075,7 +6057,7 @@ export const DataService = {
       if (local) {
         const parsed = JSON.parse(local);
         if (parsed && typeof parsed === 'object') {
-          return ensureNewRoutes({ ...DEFAULT_PERMISSIONS, ...parsed });
+          return { ...DEFAULT_PERMISSIONS, ...parsed };
         }
       }
     } catch (e) {
@@ -6204,20 +6186,8 @@ export const DataService = {
     return onSnapshot(docRef, (docSnap) => {
       if (docSnap.exists()) {
         const data = docSnap.data() as RoleSidebarPermissions;
-        if (data) {
+        if (data && typeof data === 'object') {
           const res = { ...data };
-          (['CENTRAL_ADMIN', 'TECH_COMMITTEE_HEAD', 'SPORT_MANAGER'] as const).forEach(role => {
-            if (res[role] && Array.isArray(res[role]) && !res[role].includes('/helper-apps')) {
-              const list = [...res[role]];
-              const matchIdx = list.indexOf('/matches');
-              if (matchIdx !== -1) {
-                list.splice(matchIdx + 1, 0, '/helper-apps');
-              } else {
-                list.push('/helper-apps');
-              }
-              res[role] = list;
-            }
-          });
           localStorage.setItem('taourirt_role_sidebar_permissions', JSON.stringify(res));
           callback(res);
           window.dispatchEvent(new CustomEvent('sidebarPermissionsChanged', { detail: res }));

@@ -27,7 +27,13 @@ export const useRolePermissions = () => {
       console.warn("Failed to fetch fresh permissions in hook:", err);
     });
 
-    // 3. Listen to sidebarPermissionsChanged events
+    // 3. Subscribe to real-time updates & window events
+    const unsub = DataService.subscribeToRoleSidebarPermissions((perms) => {
+      if (perms) {
+        setPermissions(perms);
+      }
+    });
+
     const handleChanged = (e: Event) => {
       const customEvent = e as CustomEvent;
       if (customEvent.detail) {
@@ -37,22 +43,41 @@ export const useRolePermissions = () => {
 
     window.addEventListener('sidebarPermissionsChanged', handleChanged);
     return () => {
+      unsub();
       window.removeEventListener('sidebarPermissionsChanged', handleChanged);
     };
   }, []);
 
+  const resolveEffectiveRoleKey = (): RoleKey | null => {
+    if (!userProfile?.role && !userProfile?.isTechCommitteeHead && !userProfile?.isSuperAdmin) return null;
+    if (
+      userProfile?.role === 'CENTRAL_ADMIN' ||
+      userProfile?.role === 'SUPER_ADMIN' ||
+      userProfile?.isSuperAdmin === true
+    ) {
+      return 'CENTRAL_ADMIN';
+    }
+    if (
+      userProfile?.isTechCommitteeHead === true ||
+      userProfile?.role === 'TECH_HEAD' ||
+      (userProfile?.role as string) === 'TECH_COMMITTEE_HEAD'
+    ) {
+      return 'TECH_COMMITTEE_HEAD';
+    }
+    return (userProfile?.role as RoleKey) || 'TEACHER';
+  };
+
   const canDo = (actionKey: string): boolean => {
-    // If no user, no permissions allowed
-    if (!userProfile?.role) return false;
+    const userRole = resolveEffectiveRoleKey();
+    if (!userRole) return false;
 
     // Super Admin / Central Admin has absolute bypass for everything
-    if (userProfile.role === 'CENTRAL_ADMIN') return true;
+    if (userRole === 'CENTRAL_ADMIN') return true;
 
-    const userRole = userProfile.role as RoleKey;
-    const allowed = permissions?.[userRole] || [];
+    const allowed = permissions?.[userRole];
 
-    // Fallback defaults if the array is empty or permissions aren't loaded yet
-    if (!permissions || !permissions[userRole] || permissions[userRole].length === 0) {
+    // Fallback defaults if permissions aren't loaded yet or role key is not configured
+    if (!permissions || !Array.isArray(allowed)) {
       const DEFAULT_ACTIONS: Record<RoleKey, string[]> = {
         CENTRAL_ADMIN: [
           'action:export_data', 'action:import_data', 'action:edit_results', 'action:register_students', 'action:manage_schedule', 'action:delete_records'
@@ -76,5 +101,23 @@ export const useRolePermissions = () => {
     return allowed.includes(actionKey);
   };
 
-  return { permissions, canDo };
+  const canAccessRoute = (href: string): boolean => {
+    const userRole = resolveEffectiveRoleKey();
+    if (!userRole) return false;
+    if (userRole === 'CENTRAL_ADMIN') return true;
+    const allowed = permissions?.[userRole];
+    if (!permissions || !Array.isArray(allowed)) {
+      const DEFAULT_ROUTES: Record<RoleKey, string[]> = {
+        CENTRAL_ADMIN: ['/dashboard', '/schools', '/tournaments', '/teachers', '/tech-committee', '/referees', '/matches', '/helper-apps', '/posters-certificates', '/statistics', '/sports-config', '/permissions'],
+        TECH_COMMITTEE_HEAD: ['/dashboard', '/schools', '/tournaments', '/teachers', '/tech-committee', '/referees', '/matches', '/helper-apps', '/posters-certificates', '/statistics', '/sports-config'],
+        SPORT_MANAGER: ['/dashboard', '/schools', '/tournaments', '/teachers', '/referees', '/matches', '/helper-apps', '/posters-certificates', '/statistics'],
+        TEACHER: ['/dashboard', '/schools', '/tournaments', '/matches', '/posters-certificates', '/statistics'],
+        REFEREE: ['/dashboard', '/matches', '/statistics']
+      };
+      return DEFAULT_ROUTES[userRole]?.includes(href) || false;
+    }
+    return allowed.includes(href);
+  };
+
+  return { permissions, canDo, canAccessRoute };
 };

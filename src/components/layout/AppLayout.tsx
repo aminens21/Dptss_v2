@@ -341,12 +341,24 @@ export const AppLayout: React.FC = () => {
     return () => clearInterval(timer);
   }, [isCloudSyncPaused]);
 
-  const [rolePermissions, setRolePermissions] = useState<RoleSidebarPermissions>({
-    CENTRAL_ADMIN: ['/dashboard', '/tournaments', '/schools', '/teachers', '/tech-committee', '/referees', '/matches', '/helper-apps', '/posters-certificates', '/statistics', '/directorates', '/sports-config'],
-    TECH_COMMITTEE_HEAD: ['/dashboard', '/tournaments', '/schools', '/teachers', '/tech-committee', '/referees', '/matches', '/helper-apps', '/posters-certificates', '/statistics', '/sports-config'],
-    SPORT_MANAGER: ['/dashboard', '/tournaments', '/schools', '/teachers', '/referees', '/matches', '/helper-apps', '/posters-certificates', '/statistics'],
-    TEACHER: ['/dashboard', '/tournaments', '/schools', '/matches', '/posters-certificates', '/statistics'],
-    REFEREE: ['/dashboard', '/matches', '/statistics']
+  const [rolePermissions, setRolePermissions] = useState<RoleSidebarPermissions>(() => {
+    const defaults: RoleSidebarPermissions = {
+      CENTRAL_ADMIN: ['/dashboard', '/tournaments', '/schools', '/teachers', '/tech-committee', '/referees', '/matches', '/helper-apps', '/posters-certificates', '/statistics', '/directorates', '/sports-config', '/permissions'],
+      TECH_COMMITTEE_HEAD: ['/dashboard', '/tournaments', '/schools', '/teachers', '/tech-committee', '/referees', '/matches', '/helper-apps', '/posters-certificates', '/statistics', '/sports-config'],
+      SPORT_MANAGER: ['/dashboard', '/tournaments', '/schools', '/teachers', '/referees', '/matches', '/helper-apps', '/posters-certificates', '/statistics'],
+      TEACHER: ['/dashboard', '/tournaments', '/schools', '/matches', '/posters-certificates', '/statistics'],
+      REFEREE: ['/dashboard', '/matches', '/statistics']
+    };
+    try {
+      const saved = localStorage.getItem('taourirt_role_sidebar_permissions');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed && typeof parsed === 'object') {
+          return { ...defaults, ...parsed };
+        }
+      }
+    } catch {}
+    return defaults;
   });
   
   useEffect(() => {
@@ -546,7 +558,7 @@ export const AppLayout: React.FC = () => {
 
   const userRoleKey: RoleKey = isSuperOrCentral
     ? 'CENTRAL_ADMIN'
-    : userProfile?.isTechCommitteeHead
+    : isTechCommitteeHead
     ? 'TECH_COMMITTEE_HEAD'
     : (userProfile?.role as RoleKey) || 'TEACHER';
 
@@ -563,15 +575,6 @@ export const AppLayout: React.FC = () => {
     : (defaultRoleHrefs[userRoleKey] || defaultRoleHrefs.TEACHER);
 
   const allowedHrefs = [...rawHrefs];
-  // Ensure /helper-apps is visible for admin and committee roles if not yet in stored permissions
-  if ((userProfile?.isSuperAdmin || userRoleKey === 'CENTRAL_ADMIN' || userRoleKey === 'TECH_COMMITTEE_HEAD' || userRoleKey === 'SPORT_MANAGER') && !allowedHrefs.includes('/helper-apps')) {
-    const matchIdx = allowedHrefs.indexOf('/matches');
-    if (matchIdx !== -1) {
-      allowedHrefs.splice(matchIdx + 1, 0, '/helper-apps');
-    } else {
-      allowedHrefs.push('/helper-apps');
-    }
-  }
 
   const allNavItems = [
     { name: 'الرئيسية', href: '/dashboard', icon: LayoutDashboard },

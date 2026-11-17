@@ -32,7 +32,9 @@ import { ElectronicDrawModal } from '../components/ElectronicDrawModal';
 import { BibGeneratorModal } from '../components/BibGeneratorModal';
 import { AthleticsBibGeneratorModal } from '../components/AthleticsBibGeneratorModal';
 import { AthleticsChampionshipModal } from '../components/AthleticsChampionshipModal';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import { useRolePermissions } from '../hooks/useRolePermissions';
 import toast from 'react-hot-toast';
 
 // Custom App Icon for "تدبير البطولة المدرسية لألعاب القوى"
@@ -110,7 +112,9 @@ export const BibScannerAppIcon: React.FC<{ size?: number; className?: string }> 
 };
 
 export const HelperApps: React.FC = () => {
+  const navigate = useNavigate();
   const { userProfile } = useAuth();
+  const { permissions, canAccessRoute } = useRolePermissions();
   const [results, setResults] = useState<Record<string, CrossCountryCategoryResult>>({});
   const [schools, setSchools] = useState<School[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
@@ -322,6 +326,29 @@ export const HelperApps: React.FC = () => {
       </div>
     );
   };
+
+  if (permissions && !canAccessRoute('/helper-apps')) {
+    return (
+      <div className="max-w-xl mx-auto my-12 p-8 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl shadow-sm text-center space-y-4 select-none" dir="rtl">
+        <div className="w-14 h-14 mx-auto rounded-2xl bg-amber-50 dark:bg-amber-950/60 border border-amber-200 dark:border-amber-800 flex items-center justify-center text-amber-600 dark:text-amber-400">
+          <ShieldAlert className="w-7 h-7" />
+        </div>
+        <h2 className="text-lg font-black text-slate-900 dark:text-white">
+          قسم التطبيقات المساعدة غير مفعل لصلاحيات حسابك
+        </h2>
+        <p className="text-xs font-medium text-slate-500 dark:text-slate-400 leading-relaxed">
+          يرجى مراجعة المسؤول الإقليمي في حال الحاجة لتفعيل صلاحية الولوج إلى هذا القسم من الإعدادات والضوابط.
+        </p>
+        <button
+          type="button"
+          onClick={() => navigate('/dashboard')}
+          className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-black rounded-xl transition-all cursor-pointer"
+        >
+          العودة إلى الرئيسية
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto px-4 sm:px-6 py-6 select-none" dir="rtl">
