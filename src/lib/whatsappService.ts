@@ -68,26 +68,49 @@ export const generateTeacherWhatsAppMessage = (
   params: WhatsAppMessageParams,
   isTeam1: boolean = true
 ): string => {
-  return generateDirectConciseMatchReminder(params);
+  const sportPart = params.sportName ? ` في رياضة *${params.sportName}*` : '';
+  const team1 = params.team1SchoolName || 'الفريق الأول';
+  const team2 = params.team2SchoolName || 'الفريق الثاني';
+  const ownSchool = params.schoolName || (isTeam1 ? team1 : team2);
+  const opponent = isTeam1 ? team2 : team1;
+  const datePart = params.dateStr ? `يوم *${params.dateStr}* ` : '';
+  const time = params.timeStr || '10:00';
+  const venue = params.venueName || 'المكان المحدد';
+
+  return `السلام عليكم الأستاذ(ة) المؤطر(ة) لمؤسسة *${ownSchool}*،
+نذكركم بموعد مشاركة فريق مؤسستكم${sportPart} أمام فريق *${opponent}* ${datePart}على الساعة *${time}* بـ *${venue}*.
+المرجو تهيئة التلميذات والتلاميذ وإحضار اللوائح والرخص الرياضية في الموعد المحدد.`;
 };
 
 /**
- * Generates official WhatsApp notification message for the Referee
+ * Generates official WhatsApp notification message for the Referee (distinct officiating wording)
  */
 export const generateRefereeWhatsAppMessage = (
   params: WhatsAppMessageParams,
-  _refereeRole: string = 'الحكم الرئيسي'
+  refereeRole: string = 'حكم المباراة'
 ): string => {
-  return generateDirectConciseMatchReminder(params);
+  const sportPart = params.sportName ? ` (${params.sportName})` : '';
+  const team1 = params.team1SchoolName || 'الفريق الأول';
+  const team2 = params.team2SchoolName || 'الفريق الثاني';
+  const datePart = params.dateStr ? `يوم *${params.dateStr}* ` : '';
+  const time = params.timeStr || '10:00';
+  const venue = params.venueName || 'المكان المحدد';
+
+  return `🏁 *تكليف تحكيمي${sportPart}*
+الصفة التحكيمية: *${refereeRole}*
+نخبركم بتكليفكم لتحكيم المقابلة بين *${team1}* و *${team2}* ${datePart}على الساعة *${time}* بـ *${venue}*.
+المرجو الحضور قبل انطلاق المقابلة بوقت كافٍ لمعاينة فضاء التباري وإعداد ورقة التحكيم.`;
 };
 
 /**
  * Generates a detailed formal WhatsApp notification specifically for a Referee assigned to a match
  */
 export const generateRefereeMatchNotificationMessage = (
-  params: WhatsAppMessageParams & { refereeName?: string }
+  params: WhatsAppMessageParams & { refereeName?: string; refereeRole?: string }
 ): string => {
-  const refGreeting = params.refereeName ? `السلام عليكم الأستاذ(ة) *${params.refereeName}*،` : 'السلام عليكم،';
+  const cleanName = (params.refereeName || '').replace(/\s*\(أستاذ\)\s*/g, '').trim();
+  const refGreeting = cleanName ? `السلام عليكم الحكم(ة) *${cleanName}*،` : 'السلام عليكم،';
+  const roleLine = params.refereeRole ? `\n📋 صفة التعيين: *${params.refereeRole}*` : '';
   const sportLine = params.sportName ? `\n🏆 الرياضة: *${params.sportName}*` : '';
   const categoryParts = [params.ageCategory, params.gender].filter(Boolean).join(' • ');
   const stageLine = params.stageName || categoryParts
@@ -100,13 +123,13 @@ export const generateRefereeMatchNotificationMessage = (
   const venuePart = params.venueName || 'المكان المحدد';
 
   return `${refGreeting}
-نخبركم بتكليفكم ضمن طاقم التحكيم للمقابلة الرياضية المدرسية التالية:${sportLine}${stageLine}
+نخبركم بتكليفكم ضمن طاقم التحكيم لإدارة المقابلة الرياضية المدرسية التالية:${roleLine}${sportLine}${stageLine}
 🆚 المواجهة: *${team1}* ضد *${team2}*
 📅 التاريخ: *${datePart}*
 ⏰ التوقيت: *${timePart}*
 📍 مكان الإجراء: *${venuePart}*
 
-المرجو الحضور قبل موعد انطلاق المباراة بوقت كافٍ. بالتوفيق!`;
+المرجو الحضور قبل موعد انطلاق المباراة بـ 30 دقيقة لمعاينة الملعب وإعداد ورقة التحكيم. بالتوفيق في مهمتكم التحكيمية!`;
 };
 
 const normalizeArabicForLookup = (text?: string): string => {
@@ -168,9 +191,18 @@ export const findRefereeContact = (
  */
 export const generatePrincipalWhatsAppMessage = (
   params: WhatsAppMessageParams,
-  _isTeam1: boolean = true
+  isTeam1: boolean = true
 ): string => {
-  return generateDirectConciseMatchReminder(params);
+  const schoolName = params.schoolName || (isTeam1 ? params.team1SchoolName : params.team2SchoolName) || 'مؤسستكم';
+  const opponent = isTeam1 ? params.team2SchoolName : params.team1SchoolName;
+  const sportPart = params.sportName ? ` في *${params.sportName}*` : '';
+  const datePart = params.dateStr ? `يوم *${params.dateStr}* ` : '';
+  const time = params.timeStr || '10:00';
+  const venue = params.venueName || 'المكان المحدد';
+
+  return `السلام عليكم السيد(ة) مدير(ة) *${schoolName}*،
+نخبركم ببرمجة مقابلة فريق مؤسستكم${sportPart} ضد *${opponent}* ${datePart}على الساعة *${time}* بـ *${venue}*.
+المرجو التفضل بتسهيل مشاركة التلميذات والتلاميذ والأستاذ(ة) المؤطر(ة).`;
 };
 
 /**
@@ -315,8 +347,51 @@ export interface MatchDiffusionStakeholder {
 }
 
 /**
- * Generates a unified official broadcast message ("Nouvelle diffusion") for all match stakeholders
- * containing Date, Time, Venue, Sport/Category, and the two competing teams.
+ * Generates an official broadcast message specifically phrased for Referees ("طاقم التحكيم")
+ */
+export const generateRefereeBroadcastDiffusionMessage = (
+  params: WhatsAppMessageParams & {
+    tableReferees?: string[];
+    fieldReferees?: string[];
+  }
+): string => {
+  const sportPart = params.sportName ? `\n🏆 البطولة: *${params.sportName}*` : '';
+  const metaParts = [params.ageCategory, params.gender, params.stageName].filter(Boolean).join(' • ');
+  const metaLine = metaParts ? ` (${metaParts})` : '';
+  const team1 = params.team1SchoolName || 'الفريق الأول';
+  const team2 = params.team2SchoolName || 'الفريق الثاني';
+  const datePart = params.dateStr || 'حسب البرنامج';
+  const timePart = params.timeStr || '10:00';
+  const venuePart = params.venueName || 'الفضاء الرياضي المحدد';
+
+  const getOrd = (i: number) => (i === 0 ? 'الحكم الأول' : i === 1 ? 'الحكم الثاني' : `الحكم ${i + 1}`);
+  const cleanTag = (n: string) => (n || '').replace(/\s*\(أستاذ\)\s*/g, '').trim();
+  const assignmentLines: string[] = [];
+  if (params.tableReferees && params.tableReferees.length > 0) {
+    assignmentLines.push(
+      `📋 حكام الطاولة: ${params.tableReferees.map((n, i) => `${getOrd(i)} (${cleanTag(n)})`).join(' • ')}`
+    );
+  }
+  if (params.fieldReferees && params.fieldReferees.length > 0) {
+    assignmentLines.push(
+      `📋 حكام الساحة: ${params.fieldReferees.map((n, i) => `${getOrd(i)} (${cleanTag(n)})`).join(' • ')}`
+    );
+  }
+  const assignmentBlock = assignmentLines.length > 0 ? `\n${assignmentLines.join('\n')}` : '';
+  const notesLine = params.notes?.trim() ? `\n📝 ملاحظة تنظيمية: ${params.notes.trim()}` : '';
+
+  return `🏁 *تكليف رسمي لطاقم التحكيم — مقابلة رياضية مدرسية*${sportPart}${metaLine}
+🆚 المواجهة: *${team1}* ضد *${team2}*
+📅 التاريخ: *${datePart}*
+⏰ التوقيت: *${timePart}*
+📍 مكان الإجراء: *${venuePart}*${assignmentBlock}${notesLine}
+
+المرجو من السادة الحكام المعيّنين الحضور قبل موعد انطلاق المقابلة بـ 30 دقيقة لمعاينة الملعب وإعداد ورقة التحكيم. بالتوفيق في مهمتكم!`;
+};
+
+/**
+ * Generates an official broadcast message ("Nouvelle diffusion") for institutional/team stakeholders
+ * (Host Principal, Team Principals, Coaches & Teachers)
  */
 export const generateUnifiedMatchDiffusionMessage = (params: WhatsAppMessageParams): string => {
   const sportPart = params.sportName ? `\n🏆 البطولة: *${params.sportName}*` : '';
@@ -329,13 +404,13 @@ export const generateUnifiedMatchDiffusionMessage = (params: WhatsAppMessagePara
   const venuePart = params.venueName || 'الفضاء الرياضي المحدد';
   const notesLine = params.notes?.trim() ? `\n📝 ملاحظة: ${params.notes.trim()}` : '';
 
-  return `📢 *إشعار رسمي ببرمجة مقابلة رياضية مدرسية*${sportPart}${metaLine}
+  return `📢 *إشعار إداري وتنظيمي ببرمجة مقابلة رياضية مدرسية*${sportPart}${metaLine}
 🆚 الفريقان المتنافسان: *${team1}* ضد *${team2}*
 📅 التاريخ: *${datePart}*
 ⏰ الساعة: *${timePart}*
 📍 مكان الإجراء: *${venuePart}*${notesLine}
 
-المرجو من كافة المعنيين بالمباراة اتخاذ الترتيبات اللازمة في الموعد المحدد. بالتوفيق للجميع!`;
+المرجو من السادة مديري المؤسسات التعليمية والأساتذة المؤطرين اتخاذ الترتيبات التنظيمية والتربوية اللازمة وتيسير حضور ومشاركة التلميذات والتلاميذ في الموعد المحدد. بالتوفيق للجميع!`;
 };
 
 /**
@@ -396,6 +471,8 @@ export const buildMatchDiffusionStakeholders = (input: {
   venueId?: string;
   venueName?: string;
   referees?: string[];
+  tableReferees?: string[];
+  fieldReferees?: string[];
   schools?: Array<{
     id: string;
     name: string;
@@ -499,9 +576,15 @@ export const buildMatchDiffusionStakeholders = (input: {
     return null;
   };
 
-  // 1. Assigned Referees
-  const cleanRefs = (input.referees || []).map(r => r?.trim()).filter(Boolean) as string[];
-  cleanRefs.forEach((refEntry, idx) => {
+  // 1. Assigned Referees (Categorized into Table & Field Officials when provided)
+  const getOrdinalLabel = (i: number) =>
+    i === 0 ? 'الحكم الأول' : i === 1 ? 'الحكم الثاني' : i === 2 ? 'الحكم الثالث' : `الحكم ${i + 1}`;
+  const cleanTag = (n: string) => (n || '').replace(/\s*\(أستاذ\)\s*/g, '').trim();
+
+  const tableEntries = (input.tableReferees || []).map(r => r?.trim()).filter(Boolean) as string[];
+  const fieldEntries = (input.fieldReferees || []).map(r => r?.trim()).filter(Boolean) as string[];
+
+  const addRefEntry = (refEntry: string, idx: number, roleLabel: string, keyPrefix: string) => {
     const contact = findRefereeContact(refEntry, refereesList, teachersList);
     const refObj = refereesList.find(
       r => r.id === refEntry || normalizeArabicForLookup(r.fullName) === normalizeArabicForLookup(contact.name || refEntry)
@@ -510,15 +593,29 @@ export const buildMatchDiffusionStakeholders = (input: {
       t => t.id === refEntry || normalizeArabicForLookup(t.fullName) === normalizeArabicForLookup(contact.name || refEntry)
     );
     pushStakeholder({
-      id: `ref-${idx}-${refEntry}`,
-      name: contact.name || refEntry,
-      roleLabel: cleanRefs.length > 1 ? `حكم المباراة (${idx + 1})` : 'حكم المباراة',
+      id: `${keyPrefix}-${idx}-${refEntry}`,
+      name: cleanTag(contact.name || refEntry),
+      roleLabel,
       roleCategory: 'referee',
       phone: contact.phone || '',
       userId: teacherObj?.id,
       refereeId: refObj?.id
     });
-  });
+  };
+
+  if (tableEntries.length > 0 || fieldEntries.length > 0) {
+    tableEntries.forEach((entry, idx) =>
+      addRefEntry(entry, idx, `حكم الطاولة • ${getOrdinalLabel(idx)}`, 'tbl-ref')
+    );
+    fieldEntries.forEach((entry, idx) =>
+      addRefEntry(entry, idx, `حكم الساحة • ${getOrdinalLabel(idx)}`, 'fld-ref')
+    );
+  } else {
+    const cleanRefs = (input.referees || []).map(r => r?.trim()).filter(Boolean) as string[];
+    cleanRefs.forEach((refEntry, idx) =>
+      addRefEntry(refEntry, idx, cleanRefs.length > 1 ? `حكم المباراة (${idx + 1})` : 'حكم المباراة', 'ref')
+    );
+  }
 
   // 2. Host School Director (when venue is a school)
   const hostSchool = resolveHostSchoolForMatch(

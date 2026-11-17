@@ -83,6 +83,10 @@ export interface GeneratedDrawMatch {
   referee2Name?: string;
   refereeIds?: string[];
   refereeNames?: string[];
+  tableRefereeIds?: string[];
+  tableRefereeNames?: string[];
+  fieldRefereeIds?: string[];
+  fieldRefereeNames?: string[];
   notes?: string;
 }
 
@@ -251,6 +255,8 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
   const [bulkVenueName, setBulkVenueName] = useState<string>('');
   const [bulkRefereeId, setBulkRefereeId] = useState<string>('');
   const [bulkRefereeIds, setBulkRefereeIds] = useState<string[]>([]);
+  const [bulkTableRefereeIds, setBulkTableRefereeIds] = useState<string[]>(['', '']);
+  const [bulkFieldRefereeIds, setBulkFieldRefereeIds] = useState<string[]>(['', '']);
   const [showAllRefereesFallback, setShowAllRefereesFallback] = useState<boolean>(false);
   const [diffusionTarget, setDiffusionTarget] = useState<MatchBroadcastDiffusionTarget | null>(null);
   const [blockedPeriods, setBlockedPeriods] = useState<BlockedSchedulePeriod[]>([]);
@@ -428,8 +434,9 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
     }
   }, [selectedTournamentId, confirmations, tournaments]);
 
-  // Combined Referees List (Official Referees + Qualified Teachers, strictly deduplicated by ID)
+  // Combined Referees List (Official Referees + Qualified Teachers, strictly deduplicated by ID, no (أستاذ) suffix)
   const combinedRefereesList = useMemo(() => {
+    const cleanRefName = (val?: string) => (val || '').replace(/\s*\(أستاذ\)\s*/g, '').replace(/\s+/g, ' ').trim();
     const list: {
       id: string;
       name: string;
@@ -444,12 +451,13 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
     referees.forEach(r => {
       if (!r || !r.id || seenIds.has(r.id)) return;
       seenIds.add(r.id);
+      const cleanFull = cleanRefName(r.fullName);
       const specs = r.specialty || [];
       const specLabels = specs.map(s => SPORTS_MAP[s]?.name || s).join('، ');
       list.push({
         id: r.id,
-        name: `حكم رسمي: ${r.fullName}`,
-        fullName: r.fullName,
+        name: cleanFull,
+        fullName: cleanFull,
         phone: r.phone,
         specialty: specLabels,
         specialtiesList: specs,
@@ -461,7 +469,6 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
       if (!t || !t.id) return;
       const specs = t.refereeSpecialty || [];
       if (seenIds.has(t.id)) {
-        // If already added via referees, merge any missing specialties
         const existing = list.find(item => item.id === t.id);
         if (existing) {
           const merged = Array.from(new Set([...existing.specialtiesList, ...specs]));
@@ -471,11 +478,12 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
         return;
       }
       seenIds.add(t.id);
+      const cleanFull = cleanRefName(t.fullName);
       const specLabels = specs.map(s => SPORTS_MAP[s]?.name || s).join('، ');
       list.push({
         id: t.id,
-        name: `أستاذ(ة): ${t.fullName} (${t.workLocation || 'مؤسسة'})`,
-        fullName: t.fullName,
+        name: t.workLocation ? `${cleanFull} (${t.workLocation})` : cleanFull,
+        fullName: cleanFull,
         phone: t.phone,
         specialty: specLabels,
         specialtiesList: specs,
@@ -1041,9 +1049,6 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
     const selectedHost = manualVenueMode === 'school'
       ? schools.find(s => s.id === manualHostSchoolId) || schools.find(s => s.id === t1.id)
       : undefined;
-    const defaultRef = sportSpecializedReferees[0] || combinedRefereesList[0] || null;
-    const initialRefIds = defaultRef ? [defaultRef.id] : [];
-    const initialRefNames = defaultRef ? [defaultRef.fullName || defaultRef.name] : [];
 
     const newMatch: GeneratedDrawMatch = {
       id: `manual-match-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
@@ -1063,10 +1068,12 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
         manualVenueMode === 'custom'
           ? (manualVenueName.trim() || venues[0]?.name || 'القاعة المغطاة')
           : (selectedHost?.name || venues[0]?.name || 'القاعة المغطاة'),
-      refereeId: defaultRef?.id,
-      refereeName: defaultRef?.name,
-      refereeIds: initialRefIds,
-      refereeNames: initialRefNames
+      refereeIds: [],
+      refereeNames: [],
+      tableRefereeIds: ['', ''],
+      tableRefereeNames: ['', ''],
+      fieldRefereeIds: ['', ''],
+      fieldRefereeNames: ['', '']
     };
 
     pushMatchHistorySnapshot(generatedMatches);
@@ -1114,9 +1121,6 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
 
       const defaultVenue = venues[0]?.name || 'القاعة المغطاة';
       const defaultDate = new Date().toISOString().slice(0, 10);
-      const defaultRef = sportSpecializedReferees[0] || (combinedRefereesList[0] || null);
-      const initialRefIds = defaultRef ? [defaultRef.id] : [];
-      const initialRefNames = defaultRef ? [defaultRef.fullName || defaultRef.name] : [];
 
       const groups: { groupName: string; teams: { id: string; name: string }[] }[] = [];
       for (let i = 0; i < effectiveGroupCount; i++) {
@@ -1165,10 +1169,10 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
         defaultDate,
         defaultVenueId: venues[0]?.id || 'v1',
         defaultVenueName: defaultVenue,
-        defaultRefId: defaultRef?.id,
-        defaultRefName: defaultRef?.name,
-        initialRefIds,
-        initialRefNames,
+        defaultRefId: undefined,
+        defaultRefName: undefined,
+        initialRefIds: [] as string[],
+        initialRefNames: [] as string[],
         schools
       };
 
@@ -1183,13 +1187,21 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
         matchesList = generateRoundRobinDrawMatches(groups, drawSystem, drawDefaults);
       }
 
+      const initializedMatches = matchesList.map(m => ({
+        ...m,
+        tableRefereeIds: ['', ''],
+        tableRefereeNames: ['', ''],
+        fieldRefereeIds: ['', ''],
+        fieldRefereeNames: ['', '']
+      }));
+
       setDrawnGroups(groups);
       setByeTeams(newByeTeams);
       setMatchHistory([]);
       setSavedMatchIds([]);
       setShowManualBuilder(false);
       setStep3SchoolSearchQuery('');
-      setGeneratedMatches(matchesList);
+      setGeneratedMatches(initializedMatches);
       setIsDrawing(false);
       setStep(3);
       toast.success(
@@ -1202,10 +1214,10 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
     }, 700);
   };
 
-  // Update match details (date, time, venue)
-  const handleUpdateMatchField = (matchId: string, field: keyof GeneratedDrawMatch, value: string) => {
+  // Update match details (date, time, venue, match number)
+  const handleUpdateMatchField = (matchId: string, field: keyof GeneratedDrawMatch, value: string | number) => {
     pushMatchHistorySnapshot(generatedMatches);
-    setGeneratedMatches(prev => 
+    setGeneratedMatches(prev =>
       prev.map(m => {
         if (m.id !== matchId) return m;
         return { ...m, [field]: value };
@@ -1213,78 +1225,113 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
     );
   };
 
-  // Add a referee to a specific match (supports multiple referees per match)
-  const handleAddRefereeToMatch = (matchId: string, refereeId: string) => {
-    if (!refereeId) return;
-    const ref = combinedRefereesList.find(r => r.id === refereeId);
-    if (!ref) return;
+  const getRefOrdinalLabel = (idx: number) => {
+    if (idx === 0) return 'حكم الأول';
+    if (idx === 1) return 'حكم الثاني';
+    if (idx === 2) return 'حكم الثالث';
+    if (idx === 3) return 'حكم الرابع';
+    return `حكم ${idx + 1}`;
+  };
 
+  const resolveRefCleanName = (refId: string) => {
+    if (!refId) return '';
+    const refObj = combinedRefereesList.find(r => r.id === refId);
+    return (refObj?.fullName || refObj?.name || '').replace(/\s*\(أستاذ\)\s*/g, '').trim();
+  };
+
+  const buildSyncedRefereeFields = (nextTableSlots: string[], nextFieldSlots: string[]) => {
+    const nextTableNames = nextTableSlots.map(id => resolveRefCleanName(id));
+    const nextFieldNames = nextFieldSlots.map(id => resolveRefCleanName(id));
+
+    const validFieldIds = nextFieldSlots.filter(Boolean);
+    const validTableIds = nextTableSlots.filter(Boolean);
+    const combinedIds = Array.from(new Set([...validFieldIds, ...validTableIds]));
+    const combinedNames = combinedIds.map(id => resolveRefCleanName(id)).filter(Boolean);
+
+    return {
+      tableRefereeIds: nextTableSlots,
+      tableRefereeNames: nextTableNames,
+      fieldRefereeIds: nextFieldSlots,
+      fieldRefereeNames: nextFieldNames,
+      refereeIds: combinedIds,
+      refereeNames: combinedNames,
+      refereeId: combinedIds[0] || undefined,
+      refereeName: combinedNames[0] || undefined,
+      referee2Id: combinedIds[1] || undefined,
+      referee2Name: combinedNames[1] || undefined
+    };
+  };
+
+  const handleSetMatchCategoryReferee = (
+    matchId: string,
+    role: 'table' | 'field',
+    slotIdx: number,
+    refereeId: string
+  ) => {
     pushMatchHistorySnapshot(generatedMatches);
     setGeneratedMatches(prev =>
       prev.map(m => {
         if (m.id !== matchId) return m;
-        const currentIds = m.refereeIds && m.refereeIds.length > 0
-          ? [...m.refereeIds]
-          : (m.refereeId ? [m.refereeId] : []);
-        const currentNames = m.refereeNames && m.refereeNames.length > 0
-          ? [...m.refereeNames]
-          : (m.refereeName ? [m.refereeName] : []);
-
-        if (currentIds.includes(refereeId)) return m;
-
-        const updatedIds = [...currentIds, refereeId];
-        const updatedNames = [...currentNames, ref.fullName || ref.name];
-
+        const curTable = m.tableRefereeIds ? [...m.tableRefereeIds] : ['', ''];
+        const curField = m.fieldRefereeIds ? [...m.fieldRefereeIds] : ['', ''];
+        if (role === 'table') {
+          curTable[slotIdx] = refereeId;
+        } else {
+          curField[slotIdx] = refereeId;
+        }
         return {
           ...m,
-          refereeIds: updatedIds,
-          refereeNames: updatedNames,
-          refereeId: updatedIds[0] || undefined,
-          refereeName: updatedNames[0] || undefined,
-          referee2Id: updatedIds[1] || undefined,
-          referee2Name: updatedNames[1] || undefined
+          ...buildSyncedRefereeFields(curTable, curField)
         };
       })
     );
   };
 
-  // Remove a referee from a specific match
-  const handleRemoveRefereeFromMatch = (matchId: string, refereeIdToRemove: string) => {
+  const handleAddCategorySlotToMatch = (matchId: string, role: 'table' | 'field') => {
     pushMatchHistorySnapshot(generatedMatches);
     setGeneratedMatches(prev =>
       prev.map(m => {
         if (m.id !== matchId) return m;
-        const currentIds = m.refereeIds && m.refereeIds.length > 0
-          ? [...m.refereeIds]
-          : (m.refereeId ? [m.refereeId] : []);
-        const currentNames = m.refereeNames && m.refereeNames.length > 0
-          ? [...m.refereeNames]
-          : (m.refereeName ? [m.refereeName] : []);
-
-        const newIds: string[] = [];
-        const newNames: string[] = [];
-
-        currentIds.forEach((id, idx) => {
-          if (id !== refereeIdToRemove) {
-            newIds.push(id);
-            newNames.push(currentNames[idx] || '');
-          }
-        });
-
+        const curTable = m.tableRefereeIds ? [...m.tableRefereeIds] : ['', ''];
+        const curField = m.fieldRefereeIds ? [...m.fieldRefereeIds] : ['', ''];
+        if (role === 'table') {
+          curTable.push('');
+        } else {
+          curField.push('');
+        }
         return {
           ...m,
-          refereeIds: newIds,
-          refereeNames: newNames,
-          refereeId: newIds[0] || undefined,
-          refereeName: newNames[0] || undefined,
-          referee2Id: newIds[1] || undefined,
-          referee2Name: newNames[1] || undefined
+          ...buildSyncedRefereeFields(curTable, curField)
         };
       })
     );
   };
 
-  // Apply batch date, venue & multi-referee to all matches
+  const handleRemoveCategorySlotFromMatch = (
+    matchId: string,
+    role: 'table' | 'field',
+    slotIdx: number
+  ) => {
+    pushMatchHistorySnapshot(generatedMatches);
+    setGeneratedMatches(prev =>
+      prev.map(m => {
+        if (m.id !== matchId) return m;
+        const curTable = m.tableRefereeIds ? [...m.tableRefereeIds] : ['', ''];
+        const curField = m.fieldRefereeIds ? [...m.fieldRefereeIds] : ['', ''];
+        if (role === 'table') {
+          curTable.splice(slotIdx, 1);
+        } else {
+          curField.splice(slotIdx, 1);
+        }
+        return {
+          ...m,
+          ...buildSyncedRefereeFields(curTable, curField)
+        };
+      })
+    );
+  };
+
+  // Apply batch date, venue & structured table/field referees to all matches
   const handleApplyBatchSchedule = () => {
     const selectedBulkHostSchool = bulkVenueMode === 'school'
       ? schools.find(s => s.id === bulkHostSchoolId)
@@ -1293,31 +1340,30 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
       ? Boolean(selectedBulkHostSchool)
       : Boolean(bulkVenueName.trim());
 
-    if (!bulkDate && !hasBulkVenue && bulkRefereeIds.length === 0 && !bulkRefereeId) {
+    const hasBulkTableRefs = bulkTableRefereeIds.some(Boolean);
+    const hasBulkFieldRefs = bulkFieldRefereeIds.some(Boolean);
+    const hasLegacyBulkRefs = bulkRefereeIds.length > 0 || Boolean(bulkRefereeId);
+
+    if (!bulkDate && !hasBulkVenue && !hasBulkTableRefs && !hasBulkFieldRefs && !hasLegacyBulkRefs) {
       toast.error('يرجى تحديد التاريخ، المكان أو اختيار حكم واحد على الأقل لتعميمه');
       return;
     }
 
-    const effectiveBulkIds = bulkRefereeIds.length > 0 
-      ? bulkRefereeIds 
-      : (bulkRefereeId ? [bulkRefereeId] : []);
-
-    const bulkRefNames = effectiveBulkIds
-      .map(id => {
-        const r = combinedRefereesList.find(ref => ref.id === id);
-        return r?.fullName || r?.name;
-      })
-      .filter(Boolean) as string[];
-
     pushMatchHistorySnapshot(generatedMatches);
-    setGeneratedMatches(prev => 
+    setGeneratedMatches(prev =>
       prev.map(m => {
-        const updatedRefIds = effectiveBulkIds.length > 0 
-          ? effectiveBulkIds 
-          : (m.refereeIds || (m.refereeId ? [m.refereeId] : []));
-        const updatedRefNames = effectiveBulkIds.length > 0 
-          ? bulkRefNames 
-          : (m.refereeNames || (m.refereeName ? [m.refereeName] : []));
+        const nextTable = hasBulkTableRefs
+          ? [...bulkTableRefereeIds]
+          : (m.tableRefereeIds ? [...m.tableRefereeIds] : ['', '']);
+        const nextField = hasBulkFieldRefs
+          ? [...bulkFieldRefereeIds]
+          : (m.fieldRefereeIds ? [...m.fieldRefereeIds] : ['', '']);
+
+        let syncedRefs = buildSyncedRefereeFields(nextTable, nextField);
+        if (!hasBulkTableRefs && !hasBulkFieldRefs && hasLegacyBulkRefs) {
+          const effectiveBulkIds = bulkRefereeIds.length > 0 ? bulkRefereeIds : (bulkRefereeId ? [bulkRefereeId] : []);
+          syncedRefs = buildSyncedRefereeFields(nextTable, effectiveBulkIds);
+        }
 
         let nextVenueMode = m.venueMode || 'school';
         let nextHostSchoolId = m.hostSchoolId || '';
@@ -1346,16 +1392,11 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
           hostSchoolId: nextHostSchoolId,
           venueId: nextVenueId,
           venueName: nextVenueName,
-          refereeIds: updatedRefIds,
-          refereeNames: updatedRefNames,
-          refereeId: updatedRefIds[0] || undefined,
-          refereeName: updatedRefNames[0] || undefined,
-          referee2Id: updatedRefIds[1] || undefined,
-          referee2Name: updatedRefNames[1] || undefined
+          ...syncedRefs
         };
       })
     );
-    toast.success('تم تعميم التوقيت والمكان والحكام المتخصصين على جميع المباريات');
+    toast.success('تم تعميم التوقيت والمكان وحكام الطاولة والساحة على جميع المباريات');
   };
 
   // Blocked date lookup helper for any generated match
@@ -1535,9 +1576,14 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
       const createdIds: string[] = [];
       const tempIdToFirestoreId: Record<string, string> = {};
       for (const gm of generatedMatches) {
-        const allRefs = gm.refereeIds && gm.refereeIds.length > 0
-          ? gm.refereeIds
-          : (gm.refereeId ? [gm.refereeId] : []);
+        const cleanTableRefs = (gm.tableRefereeIds || []).filter(Boolean);
+        const cleanFieldRefs = (gm.fieldRefereeIds || []).filter(Boolean);
+        const allRefs = Array.from(new Set([
+          ...cleanFieldRefs,
+          ...cleanTableRefs,
+          ...(gm.refereeIds || []),
+          ...(gm.refereeId ? [gm.refereeId] : [])
+        ].filter(Boolean)));
 
         const resolvedHost = gm.venueMode !== 'custom'
           ? resolveHostSchoolForMatch({ hostSchoolId: gm.hostSchoolId, venueId: gm.venueId, venueName: gm.venueName }, schools)
@@ -1573,6 +1619,8 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
           referee1Id: allRefs[0] || undefined,
           referee2Id: allRefs[1] || undefined,
           referees: allRefs,
+          tableReferees: cleanTableRefs,
+          fieldReferees: cleanFieldRefs,
           notes: gm.notes?.trim() || '',
           status: 'Scheduled',
           updatedAt: new Date()
@@ -1629,19 +1677,33 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
   const handleExportExcel = () => {
     if (generatedMatches.length === 0) return;
 
-    const data = generatedMatches.map((m, idx) => ({
-      'رقم المقابلة': idx + 1,
-      'البطولة': selectedTournament?.name || '',
-      'المرحلة / الدور': m.stage,
-      'الفريق الأول': m.team1Name,
-      'الفريق الثاني': m.team2Name,
-      'تاريخ الإجراء': m.date,
-      'توقيت الانطلاق': m.time,
-      'مكان الإجراء': m.venueName,
-      'حكام المقابلة': (m.refereeNames && m.refereeNames.length > 0)
-        ? m.refereeNames.join(' + ')
-        : (m.refereeName || 'غير محدد')
-    }));
+    const data = generatedMatches.map((m, idx) => {
+      const tableRefs = (m.tableRefereeIds || [])
+        .map((id, i) => {
+          const nm = resolveRefCleanName(id) || (m.tableRefereeNames?.[i] || '').replace(/\s*\(أستاذ\)\s*/g, '').trim();
+          return nm ? `${getRefOrdinalLabel(i)}: ${nm}` : '';
+        })
+        .filter(Boolean);
+      const fieldRefs = (m.fieldRefereeIds || [])
+        .map((id, i) => {
+          const nm = resolveRefCleanName(id) || (m.fieldRefereeNames?.[i] || '').replace(/\s*\(أستاذ\)\s*/g, '').trim();
+          return nm ? `${getRefOrdinalLabel(i)}: ${nm}` : '';
+        })
+        .filter(Boolean);
+
+      return {
+        'رقم المقابلة': m.drawMatchNumber ?? (idx + 1),
+        'البطولة': selectedTournament?.name || '',
+        'المرحلة / الدور': m.stage,
+        'الفريق الأول': m.team1Name,
+        'الفريق الثاني': m.team2Name,
+        'تاريخ الإجراء': m.date,
+        'توقيت الانطلاق': m.time,
+        'مكان الإجراء': m.venueName,
+        'حكام الطاولة': tableRefs.length > 0 ? tableRefs.join(' • ') : 'غير محدد',
+        'حكام الساحة': fieldRefs.length > 0 ? fieldRefs.join(' • ') : 'غير محدد'
+      };
+    });
 
     const ws = XLSX.utils.json_to_sheet(data);
     const wb = XLSX.utils.book_new();
@@ -2765,62 +2827,106 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
                     )}
                   </div>
 
-                  <div>
-                    <label className="block text-[10px] font-bold text-slate-600 mb-1">إضافة حكام لتعميمهم:</label>
-                    <select
-                      value=""
-                      onChange={(e) => {
-                        if (e.target.value && !bulkRefereeIds.includes(e.target.value)) {
-                          setBulkRefereeIds(prev => [...prev, e.target.value]);
-                        }
-                      }}
-                      className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-xl font-bold text-slate-800 cursor-pointer"
-                    >
-                      <option value="">+ إضافة حكم متخصص للتعميم...</option>
-                      {activeRefereesList
-                        .filter(ref => !bulkRefereeIds.includes(ref.id))
-                        .map((ref, rIdx) => (
-                          <option key={`bulk-ref-opt-${ref.id}-${rIdx}`} value={ref.id}>
-                            {ref.name} {ref.specialty ? `[${ref.specialty}]` : ''}
-                          </option>
+                  <div className="sm:col-span-4 grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-2 border-t border-emerald-200/70">
+                    {/* Bulk Table Referees */}
+                    <div className="bg-sky-50/90 border border-sky-200 rounded-2xl p-2.5 space-y-1.5">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] font-black text-sky-950">📋 حكام الطاولة (للتعميم):</span>
+                        <button
+                          type="button"
+                          onClick={() => setBulkTableRefereeIds(prev => [...prev, ''])}
+                          className="px-2 py-0.5 rounded-lg bg-sky-600 hover:bg-sky-700 text-white text-[10px] font-bold flex items-center gap-1 cursor-pointer"
+                        >
+                          <Plus className="w-3 h-3" />
+                          <span>إضافة حكم</span>
+                        </button>
+                      </div>
+                      <div className="space-y-1.5">
+                        {bulkTableRefereeIds.map((slotVal, sIdx) => (
+                          <div key={`bulk-table-slot-${sIdx}`} className="flex items-center gap-1.5">
+                            <span className="text-[10px] font-black text-sky-900 w-16 shrink-0">
+                              {getRefOrdinalLabel(sIdx)}:
+                            </span>
+                            <select
+                              value={slotVal}
+                              onChange={(e) => {
+                                const v = e.target.value;
+                                setBulkTableRefereeIds(prev => prev.map((x, i) => (i === sIdx ? v : x)));
+                              }}
+                              className="flex-1 min-w-0 px-2 py-1 bg-white border border-sky-200 rounded-lg font-bold text-slate-800 text-[10px] cursor-pointer"
+                            >
+                              <option value="">-- اختر {getRefOrdinalLabel(sIdx)} --</option>
+                              {activeRefereesList
+                                .filter(ref => ref.id === slotVal || (!bulkTableRefereeIds.includes(ref.id) && !bulkFieldRefereeIds.includes(ref.id)))
+                                .map((ref, rIdx) => (
+                                  <option key={`bulk-tbl-${sIdx}-${ref.id}-${rIdx}`} value={ref.id}>
+                                    {ref.name} {ref.specialty ? `[${ref.specialty}]` : ''}
+                                  </option>
+                                ))}
+                            </select>
+                            <button
+                              type="button"
+                              onClick={() => setBulkTableRefereeIds(prev => prev.filter((_, i) => i !== sIdx))}
+                              className="p-1 text-rose-500 hover:bg-rose-50 rounded-lg cursor-pointer shrink-0"
+                              title="حذف الحكم"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
                         ))}
-                    </select>
+                      </div>
+                    </div>
+
+                    {/* Bulk Field Referees */}
+                    <div className="bg-amber-50/90 border border-amber-200 rounded-2xl p-2.5 space-y-1.5">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] font-black text-amber-950">🏁 حكام الساحة (للتعميم):</span>
+                        <button
+                          type="button"
+                          onClick={() => setBulkFieldRefereeIds(prev => [...prev, ''])}
+                          className="px-2 py-0.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-[10px] font-bold flex items-center gap-1 cursor-pointer"
+                        >
+                          <Plus className="w-3 h-3" />
+                          <span>إضافة حكم</span>
+                        </button>
+                      </div>
+                      <div className="space-y-1.5">
+                        {bulkFieldRefereeIds.map((slotVal, sIdx) => (
+                          <div key={`bulk-field-slot-${sIdx}`} className="flex items-center gap-1.5">
+                            <span className="text-[10px] font-black text-amber-900 w-16 shrink-0">
+                              {getRefOrdinalLabel(sIdx)}:
+                            </span>
+                            <select
+                              value={slotVal}
+                              onChange={(e) => {
+                                const v = e.target.value;
+                                setBulkFieldRefereeIds(prev => prev.map((x, i) => (i === sIdx ? v : x)));
+                              }}
+                              className="flex-1 min-w-0 px-2 py-1 bg-white border border-amber-200 rounded-lg font-bold text-slate-800 text-[10px] cursor-pointer"
+                            >
+                              <option value="">-- اختر {getRefOrdinalLabel(sIdx)} --</option>
+                              {activeRefereesList
+                                .filter(ref => ref.id === slotVal || (!bulkTableRefereeIds.includes(ref.id) && !bulkFieldRefereeIds.includes(ref.id)))
+                                .map((ref, rIdx) => (
+                                  <option key={`bulk-fld-${sIdx}-${ref.id}-${rIdx}`} value={ref.id}>
+                                    {ref.name} {ref.specialty ? `[${ref.specialty}]` : ''}
+                                  </option>
+                                ))}
+                            </select>
+                            <button
+                              type="button"
+                              onClick={() => setBulkFieldRefereeIds(prev => prev.filter((_, i) => i !== sIdx))}
+                              className="p-1 text-rose-500 hover:bg-rose-50 rounded-lg cursor-pointer shrink-0"
+                              title="حذف الحكم"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
                   </div>
                 </div>
-
-                {/* Display selected bulk referee chips */}
-                {bulkRefereeIds.length > 0 && (
-                  <div className="flex flex-wrap items-center gap-1.5 pt-1 border-t border-emerald-200/60">
-                    <span className="text-[10px] font-bold text-slate-600">الحكام المختارون للتعميم:</span>
-                    {bulkRefereeIds.map((refId, idx) => {
-                      const refObj = combinedRefereesList.find(r => r.id === refId);
-                      return (
-                        <span
-                          key={`bulk-chip-${refId}-${idx}`}
-                          className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-amber-100 border border-amber-300 text-amber-950 rounded-xl text-xs font-bold shadow-2xs"
-                        >
-                          <UserCheck className="w-3.5 h-3.5 text-amber-700" />
-                          <span>الحكم {idx + 1}: {refObj?.fullName || refObj?.name}</span>
-                          <button
-                            type="button"
-                            onClick={() => setBulkRefereeIds(prev => prev.filter(id => id !== refId))}
-                            className="hover:text-red-700 hover:bg-amber-200 rounded-full p-0.5 transition-colors cursor-pointer"
-                            title="إزالة"
-                          >
-                            <X className="w-3 h-3 text-red-600" />
-                          </button>
-                        </span>
-                      );
-                    })}
-                    <button
-                      type="button"
-                      onClick={() => setBulkRefereeIds([])}
-                      className="text-[10px] font-bold text-red-600 hover:text-red-800 underline mr-1 cursor-pointer"
-                    >
-                      مسح التحديد
-                    </button>
-                  </div>
-                )}
 
                 {/* Live Cross-Sport Bulk Venue Availability Banner */}
                 {bulkOccupancy.hasVenueSelection && (
@@ -3274,8 +3380,8 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
                           </div>
                         </div>
 
-                        {/* Match Inputs: Date, Time, Venue & Multi-Referee */}
-                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
+                        {/* Match Inputs: Date & Time & Venue */}
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
                           <div>
                             <label className="block text-[10px] font-bold text-slate-500 mb-0.5">التاريخ:</label>
                             <input
@@ -3409,99 +3515,133 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
                               />
                             )}
                           </div>
-
-                          {/* ⭐ MULTI-REFEREE ASSIGNMENT FIELD ⭐ */}
-                          <div className="bg-amber-50/60 p-2.5 rounded-xl border border-amber-300/80 space-y-1.5">
-                            <div className="flex items-center justify-between text-[10px] font-black text-amber-950">
-                              <span className="flex items-center gap-1">
-                                <UserCheck className="w-3.5 h-3.5 text-amber-700" />
-                                <span>حكام المقابلة ({currentSportName}):</span>
-                              </span>
-                              <span className="text-[9px] text-amber-700 font-bold">
-                                (متعدد)
-                              </span>
-                            </div>
-
-                            {/* Assigned Referee Chips with Direct WhatsApp Notification */}
-                            {assignedRefIds.length > 0 && (
-                              <div className="flex flex-wrap gap-1">
-                                {assignedRefIds.map((refId, idx) => {
-                                  const refObj = combinedRefereesList.find(r => r.id === refId);
-                                  const displayName = refObj?.fullName || match.refereeNames?.[idx] || 'حكم';
-                                  const fallbackContact = refObj?.phone
-                                    ? { name: displayName, phone: refObj.phone }
-                                    : findRefereeContact(displayName, referees, teachers);
-                                  const waMsg = generateRefereeMatchNotificationMessage({
-                                    refereeName: fallbackContact.name || displayName,
-                                    sportName: currentSportName,
-                                    ageCategory: selectedTournament?.ageCategory,
-                                    gender: selectedTournament?.gender ? (GENDER_MAP[selectedTournament.gender]?.name || selectedTournament.gender) : undefined,
-                                    stageName: match.stage,
-                                    team1SchoolName: match.team1Name,
-                                    team2SchoolName: match.team2Name,
-                                    dateStr: match.date,
-                                    timeStr: match.time || '10:00',
-                                    venueName: match.venueName || 'المكان المحدد'
-                                  });
-                                  return (
-                                    <span
-                                      key={`match-${match.id}-chip-${refId}-${idx}`}
-                                      className="inline-flex items-center gap-1 px-2 py-0.5 bg-white border border-amber-300 text-amber-950 rounded-lg text-[10px] font-bold shadow-2xs"
-                                    >
-                                      <span className="w-3.5 h-3.5 rounded-full bg-amber-500 text-white flex items-center justify-center text-[8px] font-black shrink-0">
-                                        {idx + 1}
-                                      </span>
-                                      <span className="truncate max-w-[110px]" title={displayName}>
-                                        {displayName}
-                                      </span>
-                                      <a
-                                        href={getWhatsAppUrl(fallbackContact.phone, waMsg)}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        title={fallbackContact.phone ? `إرسال إشعار واتساب للحكم ${displayName} (${fallbackContact.phone})` : `إرسال إشعار واتساب للحكم ${displayName}`}
-                                        className="text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 rounded-full p-0.5 transition-colors"
-                                      >
-                                        <MessageCircle className="w-3 h-3" />
-                                      </a>
-                                      <button
-                                        type="button"
-                                        onClick={() => handleRemoveRefereeFromMatch(match.id, refId)}
-                                        className="text-slate-400 hover:text-red-600 rounded-full p-0.5 transition-colors cursor-pointer"
-                                        title="إزالة الحكم"
-                                      >
-                                        <X className="w-3 h-3" />
-                                      </button>
-                                    </span>
-                                  );
-                                })}
-                              </div>
-                            )}
-
-                            {/* Dropdown to add another specialized referee */}
-                            <select
-                              value=""
-                              onChange={(e) => {
-                                if (e.target.value) {
-                                  handleAddRefereeToMatch(match.id, e.target.value);
-                                }
-                              }}
-                              className="w-full px-2 py-1 bg-white border border-amber-300 rounded-lg font-bold text-amber-950 cursor-pointer text-[10px] focus:ring-1 focus:ring-amber-500"
-                            >
-                              <option value="">
-                                {assignedRefIds.length > 0
-                                  ? `+ إضافة حكم آخر متخصص في ${currentSportName}...`
-                                  : `-- تعيين حكم متخصص في ${currentSportName} --`}
-                              </option>
-                              {activeRefereesList
-                                .filter(ref => !assignedRefIds.includes(ref.id))
-                                .map((ref, rIdx) => (
-                                  <option key={`match-${match.id}-ref-opt-${ref.id}-${rIdx}`} value={ref.id}>
-                                    {ref.name} {ref.specialty ? `[${ref.specialty}]` : ''}
-                                  </option>
-                                ))}
-                            </select>
-                          </div>
                         </div>
+
+                        {/* ⭐ STRUCTURED TABLE & FIELD REFEREES ASSIGNMENT PANEL ⭐ */}
+                        {(() => {
+                          const tableSlots = match.tableRefereeIds ?? ['', ''];
+                          const fieldSlots = match.fieldRefereeIds ?? ['', ''];
+                          const allTakenInMatch = [...tableSlots, ...fieldSlots].filter(Boolean);
+
+                          const renderCategoryBox = (
+                            role: 'table' | 'field',
+                            slots: string[],
+                            title: string,
+                            accentStyle: { box: string; header: string; addBtn: string; label: string; selectBorder: string }
+                          ) => (
+                            <div className={`${accentStyle.box} p-2.5 rounded-xl border space-y-2`}>
+                              <div className="flex items-center justify-between gap-2">
+                                <span className={`text-[11px] font-black flex items-center gap-1.5 ${accentStyle.header}`}>
+                                  <UserCheck className="w-3.5 h-3.5 shrink-0" />
+                                  <span>{title}</span>
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => handleAddCategorySlotToMatch(match.id, role)}
+                                  className={`px-2 py-0.5 rounded-lg text-white text-[10px] font-bold flex items-center gap-1 cursor-pointer transition-colors ${accentStyle.addBtn}`}
+                                >
+                                  <Plus className="w-3 h-3" />
+                                  <span>إضافة حكم</span>
+                                </button>
+                              </div>
+
+                              {slots.length === 0 ? (
+                                <p className="text-[10px] text-slate-500 font-bold text-center py-1">
+                                  لا يوجد حكام في هذه الفئة — اضغط «إضافة حكم» للتعيين
+                                </p>
+                              ) : (
+                                <div className="space-y-1.5">
+                                  {slots.map((slotRefId, slotIdx) => {
+                                    const ordLabel = getRefOrdinalLabel(slotIdx);
+                                    const refObj = slotRefId ? combinedRefereesList.find(r => r.id === slotRefId) : undefined;
+                                    const displayName = refObj?.fullName || (slotRefId ? resolveRefCleanName(slotRefId) : '');
+                                    const fallbackContact = refObj?.phone
+                                      ? { name: displayName, phone: refObj.phone }
+                                      : (displayName ? findRefereeContact(displayName, referees, teachers) : { name: '', phone: '' });
+                                    const roleTitle = `${role === 'table' ? 'حكم الطاولة' : 'حكم الساحة'} • ${ordLabel}`;
+                                    const waMsg = displayName
+                                      ? generateRefereeMatchNotificationMessage({
+                                          refereeName: fallbackContact.name || displayName,
+                                          refereeRole: roleTitle,
+                                          sportName: currentSportName,
+                                          ageCategory: selectedTournament?.ageCategory,
+                                          gender: selectedTournament?.gender ? (GENDER_MAP[selectedTournament.gender]?.name || selectedTournament.gender) : undefined,
+                                          stageName: match.stage,
+                                          team1SchoolName: match.team1Name,
+                                          team2SchoolName: match.team2Name,
+                                          dateStr: match.date,
+                                          timeStr: match.time || '10:00',
+                                          venueName: match.venueName || 'المكان المحدد'
+                                        })
+                                      : '';
+
+                                    return (
+                                      <div key={`${match.id}-${role}-slot-${slotIdx}`} className="flex items-center gap-1.5">
+                                        <span className={`text-[10px] font-black w-16 shrink-0 ${accentStyle.label}`}>
+                                          {ordLabel} -
+                                        </span>
+                                        <select
+                                          value={slotRefId}
+                                          onChange={(e) => handleSetMatchCategoryReferee(match.id, role, slotIdx, e.target.value)}
+                                          className={`flex-1 min-w-0 px-2 py-1 bg-white border rounded-lg font-bold text-slate-800 text-[10px] cursor-pointer ${accentStyle.selectBorder}`}
+                                        >
+                                          <option value="">-- اختر {ordLabel} ({currentSportName}) --</option>
+                                          {activeRefereesList
+                                            .filter(ref => ref.id === slotRefId || !allTakenInMatch.includes(ref.id))
+                                            .map((ref, rIdx) => (
+                                              <option key={`${match.id}-${role}-${slotIdx}-${ref.id}-${rIdx}`} value={ref.id}>
+                                                {ref.name} {ref.specialty ? `[${ref.specialty}]` : ''}
+                                              </option>
+                                            ))}
+                                        </select>
+
+                                        {displayName && (
+                                          <a
+                                            href={getWhatsAppUrl(fallbackContact.phone, waMsg)}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            title={fallbackContact.phone ? `إرسال تكليف واتساب للحكم ${displayName} (${fallbackContact.phone})` : `إرسال تكليف واتساب للحكم ${displayName}`}
+                                            className="p-1 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 rounded-lg transition-colors shrink-0"
+                                          >
+                                            <MessageCircle className="w-3.5 h-3.5" />
+                                          </a>
+                                        )}
+
+                                        <button
+                                          type="button"
+                                          onClick={() => handleRemoveCategorySlotFromMatch(match.id, role, slotIdx)}
+                                          className="p-1 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer shrink-0"
+                                          title={`حذف ${ordLabel}`}
+                                        >
+                                          <Trash2 className="w-3.5 h-3.5" />
+                                        </button>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                            </div>
+                          );
+
+                          return (
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+                              {renderCategoryBox('table', tableSlots, 'حكام الطاولة', {
+                                box: 'bg-sky-50/70 border-sky-200',
+                                header: 'text-sky-950',
+                                addBtn: 'bg-sky-600 hover:bg-sky-700',
+                                label: 'text-sky-900',
+                                selectBorder: 'border-sky-300 focus:ring-1 focus:ring-sky-500'
+                              })}
+                              {renderCategoryBox('field', fieldSlots, 'حكام الساحة', {
+                                box: 'bg-amber-50/70 border-amber-300/80',
+                                header: 'text-amber-950',
+                                addBtn: 'bg-amber-600 hover:bg-amber-700',
+                                label: 'text-amber-950',
+                                selectBorder: 'border-amber-300 focus:ring-1 focus:ring-amber-500'
+                              })}
+                            </div>
+                          );
+                        })()}
 
                         {/* Optional Match Notes Field */}
                         <div className="pt-2 border-t border-slate-100">
@@ -3610,12 +3750,13 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
 
               <div className="space-y-3 max-h-[520px] overflow-y-auto pr-1">
                 {generatedMatches.map((gm, idx) => {
+                  const tableNames = (gm.tableRefereeIds || []).map((rId, i) => resolveRefCleanName(rId) || (gm.tableRefereeNames?.[i] || '').replace(/\s*\(أستاذ\)\s*/g, '').trim()).filter(Boolean);
+                  const fieldNames = (gm.fieldRefereeIds || []).map((rId, i) => resolveRefCleanName(rId) || (gm.fieldRefereeNames?.[i] || '').replace(/\s*\(أستاذ\)\s*/g, '').trim()).filter(Boolean);
                   const assignedIds = gm.refereeIds && gm.refereeIds.length > 0
                     ? gm.refereeIds
                     : (gm.refereeId ? [gm.refereeId] : []);
                   const resolvedRefereeNames = assignedIds.map((rId, rIdx) => {
-                    const refObj = combinedRefereesList.find(r => r.id === rId);
-                    return refObj?.fullName || gm.refereeNames?.[rIdx] || rId;
+                    return resolveRefCleanName(rId) || (gm.refereeNames?.[rIdx] || '').replace(/\s*\(أستاذ\)\s*/g, '').trim() || rId;
                   }).filter(Boolean);
                   const hostSch = gm.venueMode !== 'custom'
                     ? resolveHostSchoolForMatch({ hostSchoolId: gm.hostSchoolId, venueId: gm.venueId, venueName: gm.venueName }, schools)
@@ -3628,7 +3769,7 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
                       <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-slate-100">
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 text-[10px] font-black">
-                            مقابلة #{idx + 1} • {gm.stage}
+                            مقابلة #{gm.drawMatchNumber ?? idx + 1} • {gm.stage}
                           </span>
                           <span className="text-xs sm:text-sm font-black text-slate-900">
                             {gm.team1Name} <span className="text-slate-400 font-normal">ضد</span> {gm.team2Name}
@@ -3643,7 +3784,17 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
 
                       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
                         <div className="flex flex-wrap items-center gap-1.5 text-[10px] font-bold text-slate-600">
-                          {resolvedRefereeNames.length > 0 && (
+                          {tableNames.length > 0 && (
+                            <span className="px-2 py-0.5 rounded-lg bg-sky-50 text-sky-900 border border-sky-200">
+                              📋 حكام الطاولة: {tableNames.map((n, i) => `${getRefOrdinalLabel(i)}: ${n}`).join(' ، ')}
+                            </span>
+                          )}
+                          {fieldNames.length > 0 && (
+                            <span className="px-2 py-0.5 rounded-lg bg-amber-50 text-amber-800 border border-amber-200">
+                              🏁 حكام الساحة: {fieldNames.map((n, i) => `${getRefOrdinalLabel(i)}: ${n}`).join(' ، ')}
+                            </span>
+                          )}
+                          {tableNames.length === 0 && fieldNames.length === 0 && resolvedRefereeNames.length > 0 && (
                             <span className="px-2 py-0.5 rounded-lg bg-amber-50 text-amber-800 border border-amber-200">
                               🏁 الحكام: {resolvedRefereeNames.join(' ، ')}
                             </span>
@@ -3674,7 +3825,10 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
                               venueName: effectiveVenueName,
                               dateStr: gm.date,
                               timeStr: gm.time || '10:00',
-                              referees: resolvedRefereeNames
+                              referees: resolvedRefereeNames,
+                              tableReferees: tableNames,
+                              fieldReferees: fieldNames,
+                              notes: gm.notes
                             });
                           }}
                           className="px-4 py-2 rounded-xl bg-gradient-to-l from-emerald-600 via-teal-600 to-emerald-700 hover:from-emerald-700 hover:to-teal-800 text-white text-xs font-black shadow-2xs transition-all cursor-pointer flex items-center justify-center gap-2 shrink-0"

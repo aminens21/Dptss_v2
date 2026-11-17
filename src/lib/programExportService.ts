@@ -27,7 +27,10 @@ export interface CalendarExportEvent {
   organizer?: string;
   coordinator?: string;
   referees?: string[];
+  tableReferees?: string[];
+  fieldReferees?: string[];
   refereesText?: string;
+  refereesHtml?: string;
   notes?: string;
 }
 
@@ -255,6 +258,67 @@ export const OFFICIAL_PROPOSED_PROGRAM: Omit<CalendarExportEvent, 'sportName' | 
   }
 ];
 
+export interface ResolvedMatchReferees {
+  tableRefs: string[];
+  fieldRefs: string[];
+  allRefs: string[];
+  hasReferees: boolean;
+}
+
+export function getOrdinalRefLabel(idx: number): string {
+  if (idx === 0) return 'الحكم الأول';
+  if (idx === 1) return 'الحكم الثاني';
+  if (idx === 2) return 'الحكم الثالث';
+  if (idx === 3) return 'الحكم الرابع';
+  return `الحكم ${idx + 1}`;
+}
+
+export function resolveMatchRefereesInfo(
+  m: Match,
+  referees: Referee[] = [],
+  users: User[] = []
+): ResolvedMatchReferees {
+  const stripTeacherTag = (name: string): string =>
+    (name || '').replace(/\s*\(أستاذ\)\s*/g, '').replace(/\s+/g, ' ').trim();
+
+  const resolveSingle = (rawEntry?: string): string => {
+    const clean = stripTeacherTag(rawEntry || '');
+    if (!clean) return '';
+    const refMatch = referees.find(r => r.id === clean || stripTeacherTag(r.fullName || '') === clean);
+    if (refMatch?.fullName) return stripTeacherTag(refMatch.fullName);
+    const userMatch = users.find(u => u.id === clean || stripTeacherTag(u.fullName || '') === clean);
+    if (userMatch?.fullName) return stripTeacherTag(userMatch.fullName);
+    const isOpaqueId =
+      /^(ref[-_]|usr[-_]|mgr[-_]|teacher[-_])[A-Za-z0-9_-]*$/i.test(clean) ||
+      (/^[A-Za-z0-9_-]{16,}$/.test(clean) && !/\s/.test(clean));
+    return isOpaqueId ? '' : clean;
+  };
+
+  const dedupePreserveOrder = (arr: string[]) => Array.from(new Set(arr.filter(Boolean)));
+
+  const tableRefs = dedupePreserveOrder(
+    (Array.isArray(m.tableReferees) ? m.tableReferees : []).map(resolveSingle)
+  );
+  const fieldRefs = dedupePreserveOrder(
+    (Array.isArray(m.fieldReferees) ? m.fieldReferees : []).map(resolveSingle)
+  );
+  const categorizedSet = new Set([...tableRefs, ...fieldRefs]);
+
+  const extraRefs = dedupePreserveOrder([
+    ...(Array.isArray(m.referees) ? m.referees : []).map(resolveSingle),
+    ...(m.referee1Id ? [resolveSingle(m.referee1Id)] : []),
+    ...(m.referee2Id ? [resolveSingle(m.referee2Id)] : [])
+  ]).filter(name => !categorizedSet.has(name));
+
+  const allRefs = dedupePreserveOrder([...tableRefs, ...fieldRefs, ...extraRefs]);
+  return {
+    tableRefs,
+    fieldRefs,
+    allRefs,
+    hasReferees: allRefs.length > 0
+  };
+}
+
 export function buildAllCalendarEvents(
   tournaments: Tournament[],
   matches: Match[],
@@ -264,16 +328,6 @@ export function buildAllCalendarEvents(
   teachers: User[] = []
 ): CalendarExportEvent[] {
   const list: CalendarExportEvent[] = [];
-
-  const resolveRefereeName = (rawEntry: string): string => {
-    const clean = (rawEntry || '').trim();
-    if (!clean) return '';
-    const refMatch = referees.find(r => r.id === clean || r.fullName === clean);
-    if (refMatch?.fullName) return refMatch.fullName;
-    const tchMatch = teachers.find(t => t.id === clean || t.fullName === clean);
-    if (tchMatch?.fullName) return tchMatch.fullName;
-    return clean;
-  };
 
   // Build program events exclusively from scheduled/recorded matches with valid team names
   matches.forEach(m => {
@@ -310,14 +364,36 @@ export function buildAllCalendarEvents(
       m.venueId ||
       'الملعب الإقليمي';
 
-    const rawRefs = [
-      ...(Array.isArray(m.referees) ? m.referees : []),
-      ...(m.referee1Id ? [m.referee1Id] : []),
-      ...(m.referee2Id ? [m.referee2Id] : [])
-    ]
-      .map(r => resolveRefereeName(r))
-      .filter(Boolean);
-    const uniqueRefs = Array.from(new Set(rawRefs));
+    const { tableRefs: tableRefNames, fieldRefs: fieldRefNames, allRefs: uniqueRefs } =
+      resolveMatchRefereesInfo(m, referees, teachers);
+
+    const textParts: string[] = [];
+    const htmlParts: string[] = [];
+    if (tableRefNames.length > 0) {
+      const formattedTable = tableRefNames.map((name, i) => `${getOrdinalRefLabel(i)}: ${name}`).join(' • ');
+      textParts.push(`حكام الطاولة (${formattedTable})`);
+      htmlParts.push(
+        `<div style="margin-bottom: 3px;"><span style="font-weight: 800; color: #0369a1;">حكام الطاولة:</span> ${tableRefNames
+          .map((name, i) => `<span style="white-space: nowrap;">${getOrdinalRefLabel(i)}: <strong>${name}</strong></span>`)
+          .join(' • ')}</div>`
+      );
+    }
+    if (fieldRefNames.length > 0) {
+      const formattedField = fieldRefNames.map((name, i) => `${getOrdinalRefLabel(i)}: ${name}`).join(' • ');
+      textParts.push(`حكام الساحة (${formattedField})`);
+      htmlParts.push(
+        `<div><span style="font-weight: 800; color: #047857;">حكام الساحة:</span> ${fieldRefNames
+          .map((name, i) => `<span style="white-space: nowrap;">${getOrdinalRefLabel(i)}: <strong>${name}</strong></span>`)
+          .join(' • ')}</div>`
+      );
+    }
+
+    const refereesText = textParts.length > 0
+      ? textParts.join(' | ')
+      : (uniqueRefs.length > 0 ? uniqueRefs.join(' • ') : '-');
+    const refereesHtml = htmlParts.length > 0
+      ? htmlParts.join('')
+      : (uniqueRefs.length > 0 ? uniqueRefs.join(' • ') : '-');
 
     const affiliationType = resolveMatchAffiliation(m, tournaments);
     const userNote = (m.notes || '').trim();
@@ -337,7 +413,10 @@ export function buildAllCalendarEvents(
       gender: m.gender || parentT?.gender || 'Male',
       organizer: 'لجنة التحكيم والبرمجة بالمديرية',
       referees: uniqueRefs,
-      refereesText: uniqueRefs.length > 0 ? uniqueRefs.join(' • ') : '-',
+      tableReferees: tableRefNames,
+      fieldReferees: fieldRefNames,
+      refereesText,
+      refereesHtml,
       notes: userNote
     });
   });
@@ -479,7 +558,7 @@ export function generateProgramHtml({
         </td>
         <td style="border: 1px solid #cbd5e1; padding: 7px 6px; font-size: 10.5px; color: #334155;">${ev.category || '-'}</td>
         <td style="border: 1px solid #cbd5e1; padding: 7px 8px; font-size: 10.5px; color: #334155;">${ev.venue || '-'}</td>
-        <td style="border: 1px solid #cbd5e1; padding: 7px 8px; font-size: 10.5px; color: #1e293b;">${ev.refereesText || (ev.referees && ev.referees.length > 0 ? ev.referees.join(' • ') : '-')}</td>
+        <td style="border: 1px solid #cbd5e1; padding: 7px 8px; font-size: 10.5px; color: #1e293b;">${ev.refereesHtml || ev.refereesText || (ev.referees && ev.referees.length > 0 ? ev.referees.map(r => r.replace(/\s*\(أستاذ\)\s*/g, '').trim()).join(' • ') : '-')}</td>
         ${showNotesColumn ? `<td style="border: 1px solid #cbd5e1; padding: 7px 6px; font-size: 10px; color: #334155;">${ev.notes?.trim() || '-'}</td>` : ''}
       </tr>
     `;
@@ -530,20 +609,8 @@ export function generateProgramHtml({
         </p>
       </div>
 
-      <!-- Scope / Filter Tag Pills for Print View -->
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; font-size: 11px; font-weight: bold; color: #334155; border-bottom: 1px dashed #cbd5e1; padding-bottom: 6px;">
-        <div>
-          <span>نطاق التغطية: </span>
-          <span style="color: #1e3a8a;">
-            ${scopeFilter === 'ALL' ? 'الشامل (إقليمي، جهوي، وطني)' : scopeFilter === 'provincial' ? 'بطولة إقليمية (تاوريرت)' : scopeFilter === 'regional' ? 'بطولة جهوية (جهة الشرق)' : 'بطولة وطنية (المملكة)'}
-          </span>
-        </div>
-        <div>
-          <span>الرياضات المشمولة: </span>
-          <span style="color: #047857;">
-            ${isAllSports ? 'كافة الرياضات المعتمدة' : selectedSportIds.map(id => SPORTS_MAP[id]?.name || id).join('، ')}
-          </span>
-        </div>
+      <!-- Extraction Date Line -->
+      <div style="display: flex; justify-content: flex-end; align-items: center; margin-bottom: 10px; font-size: 10.5px; font-weight: bold; color: #475569; border-bottom: 1px dashed #cbd5e1; padding-bottom: 5px;">
         <div>
           <span>تاريخ الاستخراج: </span>
           <span>${new Date().toLocaleDateString('ar-MA')}</span>

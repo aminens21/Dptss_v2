@@ -4100,6 +4100,7 @@ export const DataService = {
         };
         return {
           ...r,
+          fullName: (r.fullName || '').replace(/\s*\(أستاذ\)\s*/g, '').trim(),
           phone: (matchedUser.phone && matchedUser.phone.trim()) ? matchedUser.phone.trim() : r.phone,
           photoUrl: matchedUser.photoUrl || r.photoUrl,
           workLocation: r.workLocation || matchedUser.workLocation,
@@ -4111,7 +4112,10 @@ export const DataService = {
           specialtyDiplomas: Object.keys(mergedDiplomas).length > 0 ? mergedDiplomas : undefined
         };
       }
-      return r;
+      return {
+        ...r,
+        fullName: (r.fullName || '').replace(/\s*\(أستاذ\)\s*/g, '').trim()
+      };
     });
 
     const teacherReferees: Referee[] = usersList
@@ -4119,7 +4123,7 @@ export const DataService = {
       .map(t => ({
         id: t.id,
         teacherId: t.id,
-        fullName: t.fullName + ' (أستاذ)',
+        fullName: (t.fullName || '').replace(/\s*\(أستاذ\)\s*/g, '').trim(),
         phone: t.phone || 'غير محدد',
         specialty: Array.isArray(t.refereeSpecialty) ? t.refereeSpecialty : [t.refereeSpecialty || 'كرة القدم'],
         diploma: t.refereeDiploma,
@@ -5932,33 +5936,79 @@ export const DataService = {
   async triggerMatchNotification(type: 'create' | 'update' | 'result', match: Match) {
     try {
       const schools = await this.getSchools();
-      const s1Name = schools.find(s => s.id === match.team1Id)?.name || 'الفريق الأول';
-      const s2Name = schools.find(s => s.id === match.team2Id)?.name || 'الفريق الثاني';
+      const s1Name = match.team1Name || schools.find(s => s.id === match.team1Id)?.name || 'الفريق الأول';
+      const s2Name = match.team2Name || schools.find(s => s.id === match.team2Id)?.name || 'الفريق الثاني';
       const sportName = SPORTS_MAP[match.sportId]?.name || 'التخصص الرياضي';
-      
-      let title = '';
-      let body = '';
-      
+      const venuePart = match.venueName ? ` بـ ${match.venueName}` : '';
       const formattedDate = match.date ? formatMatchDate(match.date) : '';
-      if (type === 'create') {
-        title = `🏆 برمجة مباراة جديدة: ${sportName}`;
-        body = `تمت برمجة مباراة جديدة في ${sportName} بين ${s1Name} و ${s2Name} يوم ${formattedDate} على الساعة ${match.startTime}.`;
-      } else if (type === 'update') {
-        title = `📅 تعديل مباراة: ${sportName}`;
-        body = `تم تحديث تفاصيل أو موعد المباراة بين ${s1Name} و ${s2Name} في منافسات ${sportName}. الموعد الجديد: يوم ${formattedDate} في تمام الساعة ${match.startTime}.`;
+
+      const assignedRefUserIds = Array.from(
+        new Set([
+          ...(Array.isArray(match.tableReferees) ? match.tableReferees : []),
+          ...(Array.isArray(match.fieldReferees) ? match.fieldReferees : []),
+          ...(Array.isArray(match.referees) ? match.referees : []),
+          ...(match.referee1Id ? [match.referee1Id] : []),
+          ...(match.referee2Id ? [match.referee2Id] : [])
+        ].filter(Boolean))
+      );
+
+      if (type === 'create' || type === 'update') {
+        const refTitle =
+          type === 'create'
+            ? `🏁 تكليف تحكيمي: ${sportName}`
+            : `🏁 تعديل تكليف تحكيمي: ${sportName}`;
+
+        const assignmentSummaryParts: string[] = [];
+        if (Array.isArray(match.tableReferees) && match.tableReferees.filter(Boolean).length > 0) {
+          assignmentSummaryParts.push(`حكام الطاولة (${match.tableReferees.filter(Boolean).length})`);
+        }
+        if (Array.isArray(match.fieldReferees) && match.fieldReferees.filter(Boolean).length > 0) {
+          assignmentSummaryParts.push(`حكام الساحة (${match.fieldReferees.filter(Boolean).length})`);
+        }
+        const assignmentSuffix = assignmentSummaryParts.length > 0 ? ` [${assignmentSummaryParts.join(' • ')}]` : '';
+
+        const refBody =
+          type === 'create'
+            ? `تم تكليفكم ضمن طاقم التحكيم${assignmentSuffix} لإدارة مقابلة ${sportName} بين ${s1Name} و ${s2Name} يوم ${formattedDate} على الساعة ${match.startTime}${venuePart}. المرجو الحضور قبل موعد الانطلاق بوقت كافٍ لمعاينة الملعب وإعداد ورقة التحكيم.`
+            : `تم تحديث تفاصيل أو موعد المقابلة المكلفين بتحكيمها${assignmentSuffix} في ${sportName} بين ${s1Name} و ${s2Name}. الموعد الجديد: يوم ${formattedDate} على الساعة ${match.startTime}${venuePart}.`;
+
+        const stakeholdersTitle =
+          type === 'create'
+            ? `🏆 إشعار ببرمجة مباراة: ${sportName}`
+            : `📅 تعديل موعد مباراة: ${sportName}`;
+        const stakeholdersBody =
+          type === 'create'
+            ? `نخبر المؤسسات التعليمية المشاركة والأطر التربوية المؤطرة ببرمجة مقابلة ${sportName} بين ${s1Name} و ${s2Name} يوم ${formattedDate} على الساعة ${match.startTime}${venuePart}. المرجو اتخاذ الترتيبات التنظيمية وتيسير مشاركة التلاميذ.`
+            : `نخبر المؤسسات والأطر التربوية المعنية بتحديث موعد المقابلة بين ${s1Name} و ${s2Name} في ${sportName}: يوم ${formattedDate} على الساعة ${match.startTime}${venuePart}.`;
+
+        await Promise.all([
+          this.addNotification({
+            title: refTitle,
+            body: refBody,
+            sportId: match.sportId,
+            role: 'REFEREE',
+            userIds: assignedRefUserIds
+          }),
+          this.addNotification({
+            title: stakeholdersTitle,
+            body: stakeholdersBody,
+            sportId: match.sportId,
+            role: 'TEACHER',
+            userIds: []
+          })
+        ]);
       } else if (type === 'result') {
-        title = `⚽ نتيجة مباراة: ${sportName}`;
+        const title = `⚽ نتيجة مباراة معتمدة: ${sportName}`;
         const scoreText = match.score1 !== undefined && match.score2 !== undefined ? `(${match.score1} - ${match.score2})` : '';
-        body = `تم تسجيل نتيجة المباراة في ${sportName} بين ${s1Name} و ${s2Name}: ${scoreText}. حالة المباراة: ${match.status === 'Completed' ? 'منتهية' : match.status}.`;
+        const body = `تم تسجيل واعتماد نتيجة المباراة في ${sportName} بين ${s1Name} و ${s2Name}: ${scoreText}. حالة المباراة: ${match.status === 'Completed' ? 'منتهية' : match.status}.`;
+        await this.addNotification({
+          title,
+          body,
+          sportId: match.sportId,
+          role: 'ALL',
+          userIds: []
+        });
       }
-      
-      await this.addNotification({
-        title,
-        body,
-        sportId: match.sportId,
-        role: 'ALL',
-        userIds: []
-      });
     } catch (err) {
       console.error("Error triggering match notification:", err);
     }
@@ -6198,16 +6248,7 @@ export const DataService = {
       if (!snap.empty) {
         const firestoreList = snap.docs
           .filter(d => !isRecentlyDeleted('directorates', d.id))
-          .map(d => {
-            const dir = { id: d.id, ...d.data() } as Directorate;
-            if (dir.id === 'taourirt') {
-              const existingAdmins = Array.isArray(dir.adminEmails) ? dir.adminEmails : [];
-              const requiredDefaults = INITIAL_DIRECTORATES[0]?.adminEmails || [];
-              const mergedAdmins = Array.from(new Set([...existingAdmins, ...requiredDefaults].map(e => String(e).trim().toLowerCase()).filter(Boolean)));
-              return { ...dir, adminEmails: mergedAdmins };
-            }
-            return dir;
-          });
+          .map(d => ({ id: d.id, ...d.data() } as Directorate));
         const merged = deduplicateById([...pendingLocal, ...firestoreList]);
         setLocal(STORAGE_KEYS.DIRECTORATES, merged);
         return merged;
@@ -9020,12 +9061,11 @@ export const DataService = {
         const key = `CENTRAL_ADMIN_${u.id}`;
         if (!seenKeys.has(key)) {
           seenKeys.add(key);
-          const isEdSup = Boolean(u.email && isFlexibleEmailMatch(u.email, 'sayhihassan@gmail.com'));
           items.push({
             id: u.id,
             name: u.fullName,
             category: 'CENTRAL_ADMIN',
-            roleLabel: isEdSup ? 'مشرف تربوي' : (u.isSuperAdmin ? 'المسؤول المركزي' : 'المسير المركزي / الإقليمي'),
+            roleLabel: u.isSuperAdmin ? 'المسؤول المركزي' : 'المسير المركزي / الإقليمي',
             subtitle: u.directorateName || u.workLocation || 'المديرية الإقليمية',
             email: u.email,
             phone: u.phone

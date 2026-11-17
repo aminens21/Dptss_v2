@@ -1,10 +1,11 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { DataService, SPORTS_MAP } from '../lib/dataService';
 import { computeGroupStandings, formatTeamDisplayName, hasValidMatchTeams, extractMatchGroupLabel, isPlaceholderTeamId } from '../lib/drawTournamentUtils';
-import { Match, School, Venue, CrossCountryCategoryResult, AthleticsCategoryResult, Student, Directorate, Sport, Tournament } from '../types';
+import { resolveMatchRefereesInfo, getOrdinalRefLabel } from '../lib/programExportService';
+import { Match, School, Venue, CrossCountryCategoryResult, AthleticsCategoryResult, Student, Directorate, Sport, Tournament, Referee, User } from '../types';
 import { CROSS_COUNTRY_CATEGORIES } from '../lib/crossCountryConfig';
 import { AthleticsService } from '../lib/athleticsService';
-import { MapPin, Trophy, Goal, Users, Award, Calendar, ChevronDown, X, Medal, Sparkles, Filter, Activity, Building2, Search, CheckCircle2, Clock } from 'lucide-react';
+import { MapPin, Trophy, Goal, Users, Award, Calendar, ChevronDown, X, Medal, Sparkles, Filter, Activity, Building2, Search, CheckCircle2, Clock, ShieldCheck } from 'lucide-react';
 import { cn, formatMatchDate, parseDateToTimestampMs } from '../lib/utils';
 import toast from 'react-hot-toast';
 
@@ -19,6 +20,8 @@ export const PublicResults: React.FC = () => {
   const [ccResults, setCcResults] = useState<Record<string, CrossCountryCategoryResult>>({});
   const [athResults, setAthResults] = useState<Record<string, AthleticsCategoryResult>>({});
   const [directorates, setDirectorates] = useState<Directorate[]>([]);
+  const [referees, setReferees] = useState<Referee[]>([]);
+  const [usersDirectory, setUsersDirectory] = useState<User[]>([]);
   const [selectedDirId, setSelectedDirId] = useState<string>(DataService.getActiveDirectorateId() || 'taourirt');
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
@@ -32,7 +35,7 @@ export const PublicResults: React.FC = () => {
     setLoading(true);
     const effectiveDirId = dirId || selectedDirId;
     try {
-      const [dirs, m, t, sports, s, v, stds, ccr, ath] = await Promise.all([
+      const [dirs, m, t, sports, s, v, stds, ccr, ath, refs, usrs] = await Promise.all([
         DataService.getDirectorates(),
         DataService.getMatches(effectiveDirId),
         DataService.getTournaments(effectiveDirId),
@@ -41,7 +44,9 @@ export const PublicResults: React.FC = () => {
         DataService.getVenues(),
         DataService.getStudents(effectiveDirId),
         DataService.getCrossCountryResults(effectiveDirId),
-        DataService.getAthleticsResults(effectiveDirId)
+        DataService.getAthleticsResults(effectiveDirId),
+        DataService.getReferees().catch(() => [] as Referee[]),
+        DataService.getUsers().catch(() => [] as User[])
       ]);
       setDirectorates(dirs);
       setMatches(m);
@@ -52,6 +57,8 @@ export const PublicResults: React.FC = () => {
       setStudents(stds);
       setCcResults(ccr);
       setAthResults(ath);
+      setReferees(refs || []);
+      setUsersDirectory(usrs || []);
     } catch (err) {
       console.error("Error loading public data:", err);
     } finally {
@@ -775,6 +782,8 @@ export const PublicResults: React.FC = () => {
                   const matchNum = m.drawMatchNumber ?? (idx + 1);
                   const isT1Placeholder = isPlaceholderTeamId(m.team1Id) || /الفائز\s*من\s*المباراة/.test(team1Label);
                   const isT2Placeholder = isPlaceholderTeamId(m.team2Id) || /الفائز\s*من\s*المباراة/.test(team2Label);
+                  const refInfo = resolveMatchRefereesInfo(m, referees, usersDirectory);
+                  const hasCategorizedRefs = refInfo.tableRefs.length > 0 || refInfo.fieldRefs.length > 0;
                   return (
                     <div key={m.id} className="bg-white p-6 rounded-3xl border border-slate-200 shadow-xs hover:shadow-md transition-all space-y-4">
                       <div className="flex justify-between items-center text-[10px] font-bold text-slate-500 border-b border-slate-100 pb-2">
@@ -833,6 +842,44 @@ export const PublicResults: React.FC = () => {
                           </span>
                         </div>
                       </div>
+
+                      {refInfo.hasReferees ? (
+                        <div className="bg-slate-50/90 border border-slate-200/80 rounded-xl px-3 py-2 space-y-1.5">
+                          {hasCategorizedRefs ? (
+                            <>
+                              {refInfo.tableRefs.length > 0 && (
+                                <div className="flex items-start gap-1.5 text-[10px] leading-relaxed">
+                                  <span className="px-1.5 py-0.5 rounded-md bg-sky-100 text-sky-800 font-black shrink-0">حكام الطاولة</span>
+                                  <span className="font-bold text-slate-700">
+                                    {refInfo.tableRefs.map((name, i) => `${getOrdinalRefLabel(i)}: ${name}`).join(' • ')}
+                                  </span>
+                                </div>
+                              )}
+                              {refInfo.fieldRefs.length > 0 && (
+                                <div className="flex items-start gap-1.5 text-[10px] leading-relaxed">
+                                  <span className="px-1.5 py-0.5 rounded-md bg-emerald-100 text-emerald-800 font-black shrink-0">حكام الساحة</span>
+                                  <span className="font-bold text-slate-700">
+                                    {refInfo.fieldRefs.map((name, i) => `${getOrdinalRefLabel(i)}: ${name}`).join(' • ')}
+                                  </span>
+                                </div>
+                              )}
+                            </>
+                          ) : (
+                            <div className="flex items-start gap-1.5 text-[10px] leading-relaxed">
+                              <span className="px-1.5 py-0.5 rounded-md bg-indigo-100 text-indigo-800 font-black shrink-0">الحكام</span>
+                              <span className="font-bold text-slate-700">{refInfo.allRefs.join(' • ')}</span>
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="bg-slate-50/70 border border-dashed border-slate-200 rounded-xl px-3 py-1.5 flex items-center justify-between gap-2 text-[10px]">
+                          <span className="font-black text-slate-500 flex items-center gap-1">
+                            <ShieldCheck className="w-3 h-3 text-slate-400 shrink-0" />
+                            <span>الحكام:</span>
+                          </span>
+                          <span className="font-bold text-slate-400">لم يحدد طاقم التحكيم بعد</span>
+                        </div>
+                      )}
 
                       <div className="flex items-center justify-between text-[10px] text-slate-500 font-medium px-1">
                         <div className="flex items-center gap-1">

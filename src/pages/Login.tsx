@@ -55,11 +55,11 @@ import {
 } from 'firebase/auth';
 import { doc, setDoc, getDoc, serverTimestamp, query, collection, where, getDocs } from 'firebase/firestore';
 import { auth, db } from '../firebase/config';
-import { User, Role, Directorate, School, Tournament, Match, Student, CrossCountryCategoryResult, AthleticsCategoryResult, AthleticsWinner, Sport } from '../types';
+import { User, Role, Directorate, School, Tournament, Match, Student, CrossCountryCategoryResult, AthleticsCategoryResult, AthleticsWinner, Sport, Referee } from '../types';
 import { DataService, SPORTS_MAP, getAgeCategoriesForSeason, getCategoryYearsLabel, normalizeCategoryKey, normalizeTournamentAffiliation } from '../lib/dataService';
 import { calculateTeamRankings, resolveRunnerParticipationType } from '../lib/crossCountryConfig';
 import { hasValidMatchTeams, formatTeamDisplayName, extractMatchGroupLabel, isPlaceholderTeamId, computeGroupStandings } from '../lib/drawTournamentUtils';
-import { resolveMatchAffiliation } from '../lib/programExportService';
+import { resolveMatchAffiliation, resolveMatchRefereesInfo, getOrdinalRefLabel } from '../lib/programExportService';
 import { AppLogo } from '../components/AppLogo';
 import { SportsIntroAnimation } from '../components/SportsIntroAnimation';
 import { CrossCountryPodiumView } from '../components/CrossCountryPodiumView';
@@ -108,6 +108,8 @@ export const Login: React.FC = () => {
   const [crossCountryResults, setCrossCountryResults] = useState<Record<string, CrossCountryCategoryResult>>({});
   const [athleticsResults, setAthleticsResults] = useState<Record<string, AthleticsCategoryResult>>({});
   const [sportsConfig, setSportsConfig] = useState<Sport[]>([]);
+  const [referees, setReferees] = useState<Referee[]>([]);
+  const [usersDirectory, setUsersDirectory] = useState<User[]>([]);
   const [loadingData, setLoadingData] = useState(true);
 
   // Public Filters
@@ -120,7 +122,7 @@ export const Login: React.FC = () => {
   const [selectedDate, setSelectedDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [filterMatchesByDate, setFilterMatchesByDate] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [activePublicTab, setActivePublicTab] = useState<'CC_PODIUM' | 'ATHLETICS' | 'MATCHES' | 'TOURNAMENTS'>('CC_PODIUM');
+  const [activePublicTab, setActivePublicTab] = useState<'CC_PODIUM' | 'ATHLETICS' | 'MATCHES' | 'TOURNAMENTS'>('MATCHES');
   
   // Refs for horizontal scrolling containers
   const categoryScrollRef = useRef<HTMLDivElement>(null);
@@ -380,7 +382,7 @@ export const Login: React.FC = () => {
         setActiveDirectorate(activeDir);
       }
 
-      const [dirs, schs, tours, mtchs, stds, ccRes, athRes, sps] = await Promise.all([
+      const [dirs, schs, tours, mtchs, stds, ccRes, athRes, sps, refs, usrs] = await Promise.all([
         DataService.getDirectorates(),
         DataService.getSchools(effectiveDirId),
         DataService.getTournaments(effectiveDirId),
@@ -388,13 +390,17 @@ export const Login: React.FC = () => {
         DataService.getStudents(effectiveDirId),
         DataService.getCrossCountryResults(effectiveDirId),
         DataService.getAthleticsResults(effectiveDirId),
-        DataService.getSportsConfig()
+        DataService.getSportsConfig(),
+        DataService.getReferees().catch(() => [] as Referee[]),
+        DataService.getUsers().catch(() => [] as User[])
       ]);
 
       setDirectorates(dirs || []);
       setSchools(schs || []);
       setTournaments(tours || []);
       setSportsConfig(sps || []);
+      setReferees(refs || []);
+      setUsersDirectory(usrs || []);
 
       // Inject Demo Matches only if directorate is taourirt and none exist
       let finalMatches = mtchs || [];
@@ -693,11 +699,10 @@ export const Login: React.FC = () => {
       const cleanEmail = (googleUser.email || '').toLowerCase().trim();
 
       if (isSuperAdminEmail(cleanEmail)) {
-        const isEducationalSupervisor = cleanEmail === 'sayhihassan@gmail.com';
         try {
           await setDoc(doc(db, 'users', googleUser.uid), {
             id: googleUser.uid,
-            fullName: googleUser.displayName || (isEducationalSupervisor ? 'حسن السايحي' : 'المسير المركزي الرئيسي'),
+            fullName: googleUser.displayName || 'المسير المركزي الرئيسي',
             email: cleanEmail,
             role: 'CENTRAL_ADMIN',
             isSuperAdmin: true,
@@ -708,11 +713,7 @@ export const Login: React.FC = () => {
         } catch (err) {
           console.warn("Could not persist super admin user doc:", err);
         }
-        toast.success(
-          isEducationalSupervisor
-            ? `مرحباً بك ذ. حسن السايحي! تم تسجيل الدخول بصلاحيات المشرف التربوي الشاملة (${cleanEmail})`
-            : `مرحباً بك! تم تسجيل الدخول بصلاحيات المشرف العام المركزي (${cleanEmail})`
-        );
+        toast.success(`مرحباً بك! تم تسجيل الدخول بصلاحيات المشرف العام المركزي (${cleanEmail})`);
         navigate('/dashboard', { replace: true });
         return;
       }
@@ -1498,15 +1499,15 @@ export const Login: React.FC = () => {
     { id: 5, icon: '🏁', text: 'تحميل الشواهد التقديرية ومحاضر المباريات والنتائج الرسمية متاح مباشرة عبر المنصة.' }
   ];
 
-  // Auto select first programmed sport if selectedSport is ALL or invalid
+  // Keep selectedSport valid if a specific sport was removed from programmed sports, while preserving 'ALL'
   useEffect(() => {
-    if (programmedSportsEntries.length > 0) {
+    if (programmedSportsEntries.length > 0 && selectedSport !== 'ALL') {
       const keys = programmedSportsEntries.map(([k]) => k);
-      if (selectedSport === 'ALL' || !keys.includes(selectedSport)) {
-        setSelectedSport(keys[0]);
+      if (!keys.includes(selectedSport)) {
+        setSelectedSport('ALL');
       }
     }
-  }, [programmedSportsEntries]);
+  }, [programmedSportsEntries, selectedSport]);
 
   // Interactive Monthly Calendar & Daily Program Widget (نافذة البرنامج اليومي والشهرية)
   const renderMonthlyProgramWidget = (isMobile = false) => {
@@ -1679,6 +1680,7 @@ export const Login: React.FC = () => {
                     const t2Display = formatTeamDisplayName(m.team2Id, m.team2Name || m.team2SchoolName, schools, m.team2Placeholder, m.team2SourceMatchNumber);
                     const grpLabel = extractMatchGroupLabel(m);
                     const matchNum = m.drawMatchNumber ?? (mIdx + 1);
+                    const refInfo = resolveMatchRefereesInfo(m, referees, usersDirectory);
                     return (
                       <div key={m.id} className="p-3 bg-slate-50 dark:bg-slate-800 rounded-2xl space-y-1.5 border border-slate-200/80 dark:border-slate-700/60 shadow-xs hover:border-emerald-400 transition-all">
                         <div className="flex items-center justify-between gap-1 text-[10px] font-black">
@@ -1703,6 +1705,16 @@ export const Login: React.FC = () => {
                             <span className="truncate">{t1Display} VS {t2Display}</span>
                           </span>
                         </div>
+
+                        {refInfo.hasReferees && (
+                          <div className="flex items-start gap-1 text-[10px] font-bold text-slate-600 dark:text-slate-300 pt-1 border-t border-slate-200/70 dark:border-slate-700/60">
+                            <ShieldCheck className="w-3 h-3 text-indigo-500 shrink-0 mt-0.5" />
+                            <span className="leading-snug">
+                              <span className="font-black text-indigo-700 dark:text-indigo-300">الحكام: </span>
+                              {refInfo.allRefs.join(' • ')}
+                            </span>
+                          </div>
+                        )}
 
                         <div className="flex items-center justify-between text-[10px] text-slate-500 dark:text-slate-400 font-bold">
                           <span className="flex items-center gap-1 truncate"><MapPin className="w-2.5 h-2.5" /> {m.venueName || 'الملعب الرياضي'}</span>
@@ -1978,6 +1990,7 @@ export const Login: React.FC = () => {
                 const t2Display = formatTeamDisplayName(m.team2Id, m.team2Name || m.team2SchoolName, schools, m.team2Placeholder, m.team2SourceMatchNumber);
                 const grpLabel = extractMatchGroupLabel(m);
                 const matchNum = m.drawMatchNumber ?? (mIdx + 1);
+                const refInfo = resolveMatchRefereesInfo(m, referees, usersDirectory);
                 return (
                   <div key={m.id} className="p-2.5 bg-slate-50 dark:bg-slate-800 rounded-2xl space-y-1.5 border border-slate-200/80 dark:border-slate-700/60 hover:border-emerald-300 transition-all">
                     <div className="flex items-center justify-between gap-1 text-[10px] font-black">
@@ -2002,6 +2015,16 @@ export const Login: React.FC = () => {
                         <span className="truncate">{t1Display} VS {t2Display}</span>
                       </span>
                     </div>
+
+                    {refInfo.hasReferees && (
+                      <div className="flex items-start gap-1 text-[10px] font-bold text-slate-600 dark:text-slate-300 pt-1 border-t border-slate-200/70 dark:border-slate-700/60">
+                        <ShieldCheck className="w-3 h-3 text-indigo-500 shrink-0 mt-0.5" />
+                        <span className="leading-snug">
+                          <span className="font-black text-indigo-700 dark:text-indigo-300">الحكام: </span>
+                          {refInfo.allRefs.join(' • ')}
+                        </span>
+                      </div>
+                    )}
 
                     <div className="flex items-center justify-between text-[10px] text-slate-500 dark:text-slate-400">
                       <span className="flex items-center gap-1"><MapPin className="w-2.5 h-2.5" /> {m.venueName || 'الملعب'}</span>
@@ -2367,6 +2390,25 @@ export const Login: React.FC = () => {
                 className="flex-1 overflow-x-auto overflow-y-hidden relative py-0.5 group cursor-grab active:cursor-grabbing no-scrollbar"
               >
                 <div className="flex items-center gap-1.5 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      triggerSportsBarPause();
+                      setSelectedSport('ALL');
+                      setActivePublicTab('MATCHES');
+                      setSelectedCategory('ALL');
+                      setSelectedGender('ALL');
+                    }}
+                    className={`px-3.5 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer flex items-center gap-1.5 shrink-0 ${
+                      selectedSport === 'ALL'
+                        ? 'bg-emerald-500 text-white shadow-md shadow-emerald-500/20 font-black scale-105'
+                        : 'bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white border border-slate-200 dark:border-slate-700/60'
+                    }`}
+                  >
+                    <span className="text-sm">🏆</span>
+                    <span>جميع الرياضات</span>
+                  </button>
+
                   {programmedSportsEntries.map(([sportKey, sport]) => {
                     const isSelected = selectedSport === sportKey;
                     return (
@@ -3135,7 +3177,7 @@ export const Login: React.FC = () => {
                       <span>
                         {selectedSport !== 'ALL'
                           ? `مباريات وبرمجة ${SPORTS_MAP[selectedSport]?.name || ''}`
-                          : 'المباريات المبرمجة والنتائج'}
+                          : 'المباريات المبرمجة والنتائج (جميع الرياضات)'}
                       </span>
                     </span>
                     <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-200 border border-emerald-200 dark:border-emerald-800">
@@ -3273,6 +3315,8 @@ export const Login: React.FC = () => {
                       const sportInfo = SPORTS_MAP[m.sportId];
                       const genderLabel = m.gender === 'Female' ? 'إناث' : m.gender === 'Male' ? 'ذكور' : '';
                       const categoryLabel = [m.ageCategory || m.category, genderLabel].filter(Boolean).join(' • ') || 'عامة';
+                      const refInfo = resolveMatchRefereesInfo(m, referees, usersDirectory);
+                      const hasCategorizedRefs = refInfo.tableRefs.length > 0 || refInfo.fieldRefs.length > 0;
 
                       return (
                         <div key={m.id} className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-sm hover:shadow-md space-y-3 transition-all">
@@ -3366,6 +3410,53 @@ export const Login: React.FC = () => {
                               </div>
                             )}
                           </div>
+
+                          {/* Referees Section (طاقم التحكيم) */}
+                          {refInfo.hasReferees ? (
+                            <div className="bg-slate-50/90 dark:bg-slate-800/50 border border-slate-200/80 dark:border-slate-700/70 rounded-xl px-3 py-2 space-y-1.5">
+                              {hasCategorizedRefs ? (
+                                <>
+                                  {refInfo.tableRefs.length > 0 && (
+                                    <div className="flex items-start gap-1.5 text-[10px] leading-relaxed">
+                                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-sky-100 dark:bg-sky-950/80 text-sky-800 dark:text-sky-300 font-black shrink-0">
+                                        حكام الطاولة
+                                      </span>
+                                      <span className="font-bold text-slate-700 dark:text-slate-200">
+                                        {refInfo.tableRefs.map((name, i) => `${getOrdinalRefLabel(i)}: ${name}`).join(' • ')}
+                                      </span>
+                                    </div>
+                                  )}
+                                  {refInfo.fieldRefs.length > 0 && (
+                                    <div className="flex items-start gap-1.5 text-[10px] leading-relaxed">
+                                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-emerald-100 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300 font-black shrink-0">
+                                        حكام الساحة
+                                      </span>
+                                      <span className="font-bold text-slate-700 dark:text-slate-200">
+                                        {refInfo.fieldRefs.map((name, i) => `${getOrdinalRefLabel(i)}: ${name}`).join(' • ')}
+                                      </span>
+                                    </div>
+                                  )}
+                                </>
+                              ) : (
+                                <div className="flex items-start gap-1.5 text-[10px] leading-relaxed">
+                                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-indigo-100 dark:bg-indigo-950/80 text-indigo-800 dark:text-indigo-300 font-black shrink-0">
+                                    الحكام
+                                  </span>
+                                  <span className="font-bold text-slate-700 dark:text-slate-200">
+                                    {refInfo.allRefs.join(' • ')}
+                                  </span>
+                                </div>
+                              )}
+                            </div>
+                          ) : (
+                            <div className="bg-slate-50/70 dark:bg-slate-800/40 border border-dashed border-slate-200 dark:border-slate-700/70 rounded-xl px-3 py-1.5 flex items-center justify-between gap-2 text-[10px]">
+                              <span className="font-black text-slate-500 dark:text-slate-400 flex items-center gap-1">
+                                <ShieldCheck className="w-3 h-3 text-slate-400 shrink-0" />
+                                <span>الحكام:</span>
+                              </span>
+                              <span className="font-bold text-slate-400 dark:text-slate-500">لم يحدد طاقم التحكيم بعد</span>
+                            </div>
+                          )}
 
                           {/* Footer: Venue, Date/Time & Status */}
                           <div className="flex flex-wrap items-center justify-between gap-2 text-[10px] text-slate-500 dark:text-slate-400 pt-2 border-t border-slate-100 dark:border-slate-800">

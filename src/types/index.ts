@@ -2,8 +2,7 @@ export type Role = 'CENTRAL_ADMIN' | 'SPORT_MANAGER' | 'TEACHER' | 'REFEREE' | '
 
 export const SUPER_ADMIN_EMAILS = [
   'aminens21@gmail.com',
-  'omrhaman.figuig@gmail.com',
-  'sayhihassan@gmail.com'
+  'omrhaman.figuig@gmail.com'
 ];
 
 export interface Directorate {
@@ -301,6 +300,8 @@ export interface Match {
   referee1Id?: string;
   referee2Id?: string;
   referees?: string[]; // Array to support more than 2 referees
+  tableReferees?: string[]; // حكام الطاولة (الأول، الثاني، ...)
+  fieldReferees?: string[]; // حكام الساحة (الأول، الثاني، ...)
   status: 'Scheduled' | 'Ongoing' | 'Completed' | 'Postponed' | 'Cancelled';
   score1?: number;
   score2?: number;

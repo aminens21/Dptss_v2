@@ -1099,6 +1099,8 @@ export const DailyWhatsAppNotificationCenter: React.FC<DailyWhatsAppNotification
                         type="button"
                         onClick={() => {
                           const rawRefs = [
+                            ...(m.tableReferees || []),
+                            ...(m.fieldReferees || []),
                             ...(m.referees || []),
                             ...(m.referee1Id ? [m.referee1Id] : []),
                             ...(m.referee2Id ? [m.referee2Id] : [])
@@ -1120,6 +1122,8 @@ export const DailyWhatsAppNotificationCenter: React.FC<DailyWhatsAppNotification
                             dateStr: item.dateString,
                             timeStr: m.startTime || '10:00',
                             referees: Array.from(new Set(rawRefs)),
+                            tableReferees: Array.isArray(m.tableReferees) ? m.tableReferees : undefined,
+                            fieldReferees: Array.isArray(m.fieldReferees) ? m.fieldReferees : undefined,
                             notes: m.notes
                           });
                         }}

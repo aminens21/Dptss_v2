@@ -25,6 +25,8 @@ import {
   buildMatchDiffusionStakeholders,
   buildMatchResultApprovalStakeholders,
   generateUnifiedMatchDiffusionMessage,
+  generateRefereeBroadcastDiffusionMessage,
+  generateRefereeMatchNotificationMessage,
   generateApprovedResultDiffusionMessage,
   generateDiffusionVCardContent,
   getWhatsAppUrl,
@@ -50,6 +52,8 @@ export interface MatchBroadcastDiffusionTarget {
   dateStr: string;
   timeStr: string;
   referees?: string[];
+  tableReferees?: string[];
+  fieldReferees?: string[];
   notes?: string;
   score1?: number;
   score2?: number;
@@ -88,6 +92,8 @@ export const MatchBroadcastDiffusionModal: React.FC<MatchBroadcastDiffusionModal
   const [phoneDraft, setPhoneDraft] = useState('');
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [customMessage, setCustomMessage] = useState('');
+  const [refereeMessage, setRefereeMessage] = useState('');
+  const [activeMessageTab, setActiveMessageTab] = useState<'others' | 'referees'>('others');
   const [showIndividualFallback, setShowIndividualFallback] = useState(false);
   const [copiedPhones, setCopiedPhones] = useState(false);
 
@@ -150,6 +156,8 @@ export const MatchBroadcastDiffusionModal: React.FC<MatchBroadcastDiffusionModal
           venueId: target.venueId,
           venueName: target.venueName,
           referees: target.referees,
+          tableReferees: target.tableReferees,
+          fieldReferees: target.fieldReferees,
           schools: effectiveSchools,
           refereesList: effectiveReferees,
           teachersList: effectiveTeachers,
@@ -197,7 +205,25 @@ export const MatchBroadcastDiffusionModal: React.FC<MatchBroadcastDiffusionModal
             venueName: target.venueName,
             notes: target.notes
           });
+
+    const refMsg = generateRefereeBroadcastDiffusionMessage({
+      sportName,
+      ageCategory: target.ageCategory,
+      gender: genderAr,
+      stageName: target.stageName,
+      team1SchoolName: target.team1Name,
+      team2SchoolName: target.team2Name,
+      dateStr: target.dateStr,
+      timeStr: target.timeStr,
+      venueName: target.venueName,
+      tableReferees: target.tableReferees,
+      fieldReferees: target.fieldReferees,
+      notes: target.notes
+    });
+
     setCustomMessage(msg);
+    setRefereeMessage(refMsg);
+    setActiveMessageTab('others');
     setShowIndividualFallback(false);
     setEditingStakeholderId(null);
   }, [isOpen, target]);
@@ -209,6 +235,8 @@ export const MatchBroadcastDiffusionModal: React.FC<MatchBroadcastDiffusionModal
   if (!isOpen || !target) return null;
 
   const selectedStakeholders = stakeholders.filter(s => selectedIds.includes(s.id));
+  const selectedReferees = selectedStakeholders.filter(s => s.roleCategory === 'referee');
+  const selectedOthers = selectedStakeholders.filter(s => s.roleCategory !== 'referee');
   const validPhoneStakeholders = selectedStakeholders.filter(s => sanitizePhoneNumber(s.phone).length >= 9);
 
   const toggleSelect = (id: string) => {
@@ -287,40 +315,44 @@ export const MatchBroadcastDiffusionModal: React.FC<MatchBroadcastDiffusionModal
     toast.success('تم تحميل بطاقة لائحة المعنيين (.vcf) جاهزة لـ Nouvelle diffusion');
   };
 
-  const handleUnifiedNouvelleDiffusion = async () => {
-    if (selectedStakeholders.length === 0) {
-      toast.error('يرجى تحديد معني واحد على الأقل في لائحة البث');
+  const handleSegmentedDiffusion = async (audience: 'referees' | 'others') => {
+    const recipients = audience === 'referees' ? selectedReferees : selectedOthers;
+    if (recipients.length === 0) {
+      toast.error(audience === 'referees' ? 'لا يوجد حكام محددون لإشعارهم' : 'لا يوجد معنيون آخرون محددون');
       return;
     }
 
-    // 1. Send instant in-app notification to all registered stakeholders
+    const messageToSend = audience === 'referees' ? refereeMessage : customMessage;
+    const validPhones = recipients.filter(s => sanitizePhoneNumber(s.phone).length >= 9);
+
     try {
-      const userIds = Array.from(new Set(selectedStakeholders.map(s => s.userId).filter(Boolean) as string[]));
+      const userIds = Array.from(new Set(recipients.map(s => s.userId).filter(Boolean) as string[]));
       await DataService.addNotification({
-        title: isResultMode
-          ? `✅ النتيجة النهائية المصادق عليها: ${target.team1Name} (${target.score1 ?? 0}) - (${target.score2 ?? 0}) ${target.team2Name}`
-          : `📢 إشعار ببرمجة مقابلة: ${target.team1Name} ضد ${target.team2Name}`,
-        body: customMessage,
+        title:
+          audience === 'referees'
+            ? `🏁 تكليف تحكيمي: ${target.team1Name} ضد ${target.team2Name}`
+            : isResultMode
+            ? `✅ النتيجة النهائية المصادق عليها: ${target.team1Name} (${target.score1 ?? 0}) - (${target.score2 ?? 0}) ${target.team2Name}`
+            : `📢 إشعار ببرمجة مقابلة: ${target.team1Name} ضد ${target.team2Name}`,
+        body: messageToSend,
         sportId: target.sportId,
-        role: 'ALL',
+        role: audience === 'referees' ? 'REFEREE' : 'TEACHER',
         ...(userIds.length > 0 ? { userIds } : {})
       });
     } catch (e) {
       console.warn('In-app notification error:', e);
     }
 
-    // 2. Copy recipients phone numbers to clipboard to assist WhatsApp Nouvelle diffusion selection
-    if (validPhoneStakeholders.length > 0) {
+    if (validPhones.length > 0) {
       try {
-        const numbers = validPhoneStakeholders.map(s => `+${sanitizePhoneNumber(s.phone)}`).join(', ');
+        const numbers = validPhones.map(s => `+${sanitizePhoneNumber(s.phone)}`).join(', ');
         await navigator.clipboard.writeText(numbers);
       } catch {
-        // Ignore clipboard permission errors inside iframe
+        // Ignore clipboard errors
       }
     }
 
-    // 3. Open WhatsApp multi-recipient / Nouvelle diffusion picker with the unified message pre-filled
-    const waBroadcastUrl = `https://wa.me/?text=${encodeURIComponent(customMessage)}`;
+    const waBroadcastUrl = `https://wa.me/?text=${encodeURIComponent(messageToSend)}`;
     const link = document.createElement('a');
     link.href = waBroadcastUrl;
     link.target = '_blank';
@@ -330,8 +362,70 @@ export const MatchBroadcastDiffusionModal: React.FC<MatchBroadcastDiffusionModal
     document.body.removeChild(link);
 
     toast.success(
-      `تم تجهيز الرسالة الموحدة وإشعار المنصة! حدد لائحة البث (Nouvelle diffusion) أو المعنيين (${selectedStakeholders.length}) في واتساب للإرسال دفعة واحدة.`
+      audience === 'referees'
+        ? `تم تجهيز إشعار الحكام (${recipients.length}) ونسخ أرقامهم لإرسالها عبر واتساب.`
+        : `تم تجهيز إشعار المديرين والمؤطرين (${recipients.length}) ونسخ أرقامهم لإرسالها عبر واتساب.`
     );
+  };
+
+  const handleUnifiedNouvelleDiffusion = async () => {
+    if (selectedStakeholders.length === 0) {
+      toast.error('يرجى تحديد معني واحد على الأقل في لائحة البث');
+      return;
+    }
+
+    if (!isResultMode && selectedReferees.length > 0 && selectedOthers.length > 0) {
+      // Send distinct in-app notifications for Referees vs Other Stakeholders simultaneously
+      try {
+        const refUserIds = Array.from(new Set(selectedReferees.map(s => s.userId).filter(Boolean) as string[]));
+        const otherUserIds = Array.from(new Set(selectedOthers.map(s => s.userId).filter(Boolean) as string[]));
+        await Promise.all([
+          DataService.addNotification({
+            title: `🏁 تكليف تحكيمي: ${target.team1Name} ضد ${target.team2Name}`,
+            body: refereeMessage,
+            sportId: target.sportId,
+            role: 'REFEREE',
+            ...(refUserIds.length > 0 ? { userIds: refUserIds } : {})
+          }),
+          DataService.addNotification({
+            title: `📢 إشعار ببرمجة مقابلة: ${target.team1Name} ضد ${target.team2Name}`,
+            body: customMessage,
+            sportId: target.sportId,
+            role: 'TEACHER',
+            ...(otherUserIds.length > 0 ? { userIds: otherUserIds } : {})
+          })
+        ]);
+      } catch (e) {
+        console.warn('In-app notification error:', e);
+      }
+
+      const activeMsg = activeMessageTab === 'referees' ? refereeMessage : customMessage;
+      const targetGroup = activeMessageTab === 'referees' ? selectedReferees : selectedOthers;
+      const validPhones = targetGroup.filter(s => sanitizePhoneNumber(s.phone).length >= 9);
+      if (validPhones.length > 0) {
+        try {
+          await navigator.clipboard.writeText(validPhones.map(s => `+${sanitizePhoneNumber(s.phone)}`).join(', '));
+        } catch {}
+      }
+
+      const waBroadcastUrl = `https://wa.me/?text=${encodeURIComponent(activeMsg)}`;
+      const link = document.createElement('a');
+      link.href = waBroadcastUrl;
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+
+      toast.success(
+        activeMessageTab === 'referees'
+          ? 'تم إرسال إشعارات المنصة بشكل منفصل، وفتح واتساب بنص تكليف الحكام!'
+          : 'تم إرسال إشعارات المنصة بشكل منفصل، وفتح واتساب بنص المعنيين الآخرين!'
+      );
+      return;
+    }
+
+    await handleSegmentedDiffusion(selectedReferees.length > 0 && selectedOthers.length === 0 ? 'referees' : 'others');
   };
 
   const roleBadgeClass = (cat: MatchDiffusionStakeholder['roleCategory']) => {
@@ -438,26 +532,49 @@ export const MatchBroadcastDiffusionModal: React.FC<MatchBroadcastDiffusionModal
             </div>
           </div>
 
-          {/* Primary Hero Unified Diffusion Action */}
+          {/* Primary Hero Segmented Diffusion Actions */}
           <div className="bg-emerald-950 text-white rounded-2xl p-3.5 sm:p-4 space-y-3 shadow-md border border-emerald-800">
             <div className="flex items-center justify-between gap-2">
               <span className="text-xs font-black text-emerald-200 flex items-center gap-1.5">
                 <Users className="w-4 h-4 text-emerald-400" />
-                <span>إرسال جماعي عبر لائحة بث واتساب (Nouvelle diffusion)</span>
+                <span>إرسال إشعارات واتساب (بصياغة مخصصة للحكام والآخرين)</span>
               </span>
               <span className="text-[10px] font-bold bg-white/10 px-2 py-0.5 rounded-md tabular-nums">
                 {selectedStakeholders.length} محدد
               </span>
             </div>
 
-            <button
-              type="button"
-              onClick={handleUnifiedNouvelleDiffusion}
-              className="w-full min-h-[46px] py-2.5 px-4 rounded-xl bg-emerald-500 hover:bg-emerald-400 active:scale-[0.99] text-slate-950 font-black text-xs sm:text-sm flex items-center justify-center gap-2 shadow-lg transition-all cursor-pointer"
-            >
-              <Send className="w-4 h-4 shrink-0" />
-              <span>إخبار جميع المعنيين الآن (Nouvelle diffusion)</span>
-            </button>
+            {!isResultMode ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleSegmentedDiffusion('referees')}
+                  disabled={selectedReferees.length === 0}
+                  className="min-h-[44px] py-2 px-3 rounded-xl bg-amber-400 hover:bg-amber-300 disabled:opacity-45 text-slate-950 font-black text-xs flex items-center justify-center gap-1.5 shadow-md transition-all cursor-pointer disabled:cursor-not-allowed"
+                >
+                  <Send className="w-3.5 h-3.5 shrink-0" />
+                  <span>🏁 إرسال إشعار الحكام ({selectedReferees.length})</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleSegmentedDiffusion('others')}
+                  disabled={selectedOthers.length === 0}
+                  className="min-h-[44px] py-2 px-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 disabled:opacity-45 text-slate-950 font-black text-xs flex items-center justify-center gap-1.5 shadow-md transition-all cursor-pointer disabled:cursor-not-allowed"
+                >
+                  <Send className="w-3.5 h-3.5 shrink-0" />
+                  <span>🏫 إرسال لباقي المعنيين ({selectedOthers.length})</span>
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={handleUnifiedNouvelleDiffusion}
+                className="w-full min-h-[46px] py-2.5 px-4 rounded-xl bg-emerald-500 hover:bg-emerald-400 active:scale-[0.99] text-slate-950 font-black text-xs sm:text-sm flex items-center justify-center gap-2 shadow-lg transition-all cursor-pointer"
+              >
+                <Send className="w-4 h-4 shrink-0" />
+                <span>إخبار جميع المعنيين الآن (Nouvelle diffusion)</span>
+              </button>
+            )}
 
             <div className="grid grid-cols-2 gap-2">
               <button
@@ -560,17 +677,39 @@ export const MatchBroadcastDiffusionModal: React.FC<MatchBroadcastDiffusionModal
                           <Phone className="w-3.5 h-3.5" />
                         </button>
 
-                        {showIndividualFallback && (
-                          <a
-                            href={getWhatsAppUrl(item.phone, customMessage)}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-bold inline-flex items-center gap-1"
-                          >
-                            <MessageCircle className="w-3 h-3" />
-                            <span>فردي</span>
-                          </a>
-                        )}
+                        {showIndividualFallback && (() => {
+                          const indMessage =
+                            item.roleCategory === 'referee' && !isResultMode
+                              ? generateRefereeMatchNotificationMessage({
+                                  refereeName: item.name,
+                                  refereeRole: item.roleLabel,
+                                  sportName: target.sportName || SPORTS_MAP[target.sportId]?.name,
+                                  ageCategory: target.ageCategory,
+                                  gender: target.gender ? (GENDER_MAP[target.gender]?.name || target.gender) : undefined,
+                                  stageName: target.stageName,
+                                  team1SchoolName: target.team1Name,
+                                  team2SchoolName: target.team2Name,
+                                  dateStr: target.dateStr,
+                                  timeStr: target.timeStr,
+                                  venueName: target.venueName
+                                })
+                              : customMessage;
+                          return (
+                            <a
+                              href={getWhatsAppUrl(item.phone, indMessage)}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className={`px-2.5 py-1.5 rounded-lg text-white text-[10px] font-bold inline-flex items-center gap-1 ${
+                                item.roleCategory === 'referee'
+                                  ? 'bg-amber-600 hover:bg-amber-700'
+                                  : 'bg-emerald-600 hover:bg-emerald-700'
+                              }`}
+                            >
+                              <MessageCircle className="w-3 h-3" />
+                              <span>{item.roleCategory === 'referee' ? 'تكليف الحكم' : 'فردي'}</span>
+                            </a>
+                          );
+                        })()}
                       </div>
                     </div>
 
@@ -600,18 +739,48 @@ export const MatchBroadcastDiffusionModal: React.FC<MatchBroadcastDiffusionModal
             </div>
           </div>
 
-          {/* Unified Broadcast Message Editor */}
-          <div className="space-y-1.5">
+          {/* Segmented Broadcast Message Editor (Referees vs Other Stakeholders) */}
+          <div className="space-y-2">
+            {!isResultMode && (
+              <div className="flex items-center gap-1.5 bg-slate-200/70 p-1 rounded-xl text-[11px] font-black">
+                <button
+                  type="button"
+                  onClick={() => setActiveMessageTab('others')}
+                  className={`flex-1 py-1.5 px-2.5 rounded-lg transition-all cursor-pointer ${
+                    activeMessageTab === 'others'
+                      ? 'bg-emerald-600 text-white shadow-xs'
+                      : 'text-slate-700 hover:bg-white/60'
+                  }`}
+                >
+                  🏫 صياغة إشعار باقي المعنيين
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveMessageTab('referees')}
+                  className={`flex-1 py-1.5 px-2.5 rounded-lg transition-all cursor-pointer ${
+                    activeMessageTab === 'referees'
+                      ? 'bg-amber-500 text-slate-950 shadow-xs'
+                      : 'text-slate-700 hover:bg-white/60'
+                  }`}
+                >
+                  🏁 صياغة إشعار الحكام (تكليف تحكيمي)
+                </button>
+              </div>
+            )}
+
             <div className="flex items-center justify-between">
               <label className="text-xs font-black text-slate-800">
-                نص الإشعار الموحد (التاريخ، الساعة، المكان، والفريقان):
+                {!isResultMode && activeMessageTab === 'referees'
+                  ? 'نص إشعار وتكليف الحكام (مخصص للطاقم التحكيمي):'
+                  : 'نص إشعار المديرين والمؤطرين (تنظيمياً وتربوياً):'}
               </label>
               <button
                 type="button"
                 onClick={async () => {
+                  const activeText = !isResultMode && activeMessageTab === 'referees' ? refereeMessage : customMessage;
                   try {
-                    await navigator.clipboard.writeText(customMessage);
-                    toast.success('تم نسخ نص الإشعار الموحد');
+                    await navigator.clipboard.writeText(activeText);
+                    toast.success('تم نسخ نص الإشعار');
                   } catch {
                     toast.error('تعذر نسخ النص');
                   }
@@ -624,8 +793,12 @@ export const MatchBroadcastDiffusionModal: React.FC<MatchBroadcastDiffusionModal
             </div>
             <textarea
               rows={5}
-              value={customMessage}
-              onChange={e => setCustomMessage(e.target.value)}
+              value={!isResultMode && activeMessageTab === 'referees' ? refereeMessage : customMessage}
+              onChange={e =>
+                !isResultMode && activeMessageTab === 'referees'
+                  ? setRefereeMessage(e.target.value)
+                  : setCustomMessage(e.target.value)
+              }
               className="w-full rounded-2xl border border-slate-200 bg-white p-3 text-xs text-slate-800 leading-relaxed focus:outline-none focus:ring-2 focus:ring-emerald-500"
             />
           </div>
