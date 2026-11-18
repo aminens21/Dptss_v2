@@ -64,12 +64,9 @@ export const TournamentResetModal: React.FC<TournamentResetModalProps> = ({
   };
 
   const doesMatchBelongToSport = (m: Match, targetSportId: string) => {
-    if (areSportIdsEquivalent(m.sportId, targetSportId, sportsConfig)) return true;
-    if (m.tournamentId) {
-      const parentSport = tournamentSportMap.get(m.tournamentId);
-      if (parentSport && areSportIdsEquivalent(parentSport, targetSportId, sportsConfig)) return true;
-    }
-    return false;
+    const parentSport = m.tournamentId ? tournamentSportMap.get(m.tournamentId) : undefined;
+    const effectiveSport = (m.sportId && String(m.sportId).trim()) || parentSport;
+    return effectiveSport ? areSportIdsEquivalent(effectiveSport, targetSportId, sportsConfig) : false;
   };
 
   // Allowed sports list for dropdown & display
@@ -199,7 +196,7 @@ export const TournamentResetModal: React.FC<TournamentResetModalProps> = ({
   const executeReset = async (action: ResetActionKind) => {
     if (isExecuting) return;
     if (isScopedToTechHead && (!allowedSportIds || allowedSportIds.length === 0)) {
-      toast.error('لا توجد أي رياضة مسندة لحسابك لتصفير معطياتها.');
+      toast.error('لا توجد أي رياضة مسندة لحسابك لحذف معطياتها.');
       return;
     }
 
@@ -217,46 +214,53 @@ export const TournamentResetModal: React.FC<TournamentResetModalProps> = ({
         if (res.resetAthletics) extraParts.push('نتائج ألعاب القوى');
         const extraText = extraParts.length > 0 ? ` و${extraParts.join(' و')}` : '';
         toast.success(
-          `تم تصفير نتائج المباريات بنجاح (${res.resetMatchesCount} مباراة${extraText}) مع الإبقاء على برنامج المباريات.`
+          `تم حذف نتائج المباريات بنجاح (${res.resetMatchesCount} مباراة${extraText}) مع الإبقاء على برنامج المباريات.`
         );
       } else if (action === 'SPECIFIC_TOURNAMENT_RESULTS') {
-        if (!selectedSportId) {
-          toast.error('يرجى اختيار البطولة / الرياضة المراد تصفير نتائجها');
+        const cleanSportId = String(selectedSportId || '').trim();
+        if (!cleanSportId || !availableSports.some(s => s.id === cleanSportId)) {
+          toast.error('يرجى اختيار البطولة / الرياضة المراد حذف نتائجها');
           setIsExecuting(false);
           return;
         }
         const res = await DataService.resetMatchResultsByScope({
           allowedSportIds: scopeIds,
-          sportId: selectedSportId,
+          sportId: cleanSportId,
           tournamentId: selectedTournamentId !== 'ALL' ? selectedTournamentId : undefined
         });
         await onResetComplete();
         const sportLabel =
-          availableSports.find(s => s.id === selectedSportId)?.name ||
-          SPORTS_MAP[selectedSportId]?.name ||
-          selectedSportId;
+          availableSports.find(s => s.id === cleanSportId)?.name ||
+          SPORTS_MAP[cleanSportId]?.name ||
+          cleanSportId;
+        const detailsParts: string[] = [];
+        if (res.resetMatchesCount > 0) detailsParts.push(`${res.resetMatchesCount} مباراة`);
+        if (res.resetCrossCountry) detailsParts.push('نتائج العدو الريفي');
+        if (res.resetAthletics) detailsParts.push('نتائج ألعاب القوى');
+        const detailsText = detailsParts.length > 0 ? ` (${detailsParts.join('، ')})` : '';
         toast.success(
-          `تم تصفير نتائج بطولة «${sportLabel}» بنجاح (${res.resetMatchesCount} مباراة).`
+          `تم حذف نتائج بطولة «${sportLabel}» بنجاح${detailsText} دون المساس بباقي الرياضات.`
         );
       } else if (action === 'SPECIFIC_TOURNAMENT_MATCHES') {
-        if (!selectedSportId) {
+        const cleanSportId = String(selectedSportId || '').trim();
+        if (!cleanSportId || !availableSports.some(s => s.id === cleanSportId)) {
           toast.error('يرجى اختيار البطولة / الرياضة المراد حذف مبارياتها');
           setIsExecuting(false);
           return;
         }
         const res = await DataService.clearScheduledMatchesByScope({
           allowedSportIds: scopeIds,
-          sportId: selectedSportId,
+          sportId: cleanSportId,
           tournamentId: selectedTournamentId !== 'ALL' ? selectedTournamentId : undefined
         });
         await onResetComplete();
         const sportLabel =
-          availableSports.find(s => s.id === selectedSportId)?.name ||
-          SPORTS_MAP[selectedSportId]?.name ||
-          selectedSportId;
+          availableSports.find(s => s.id === cleanSportId)?.name ||
+          SPORTS_MAP[cleanSportId]?.name ||
+          cleanSportId;
         if (res.deletedMatchesCount > 0) {
           toast.success(
-            `تم تصفير وحذف مباريات بطولة «${sportLabel}» بنجاح (${res.deletedMatchesCount} مباراة).`
+            `تم حذف مباريات بطولة «${sportLabel}» بنجاح (${res.deletedMatchesCount} مباراة).`
           );
         } else {
           toast('لا توجد مباريات مبرمجة مطابقة للحذف في هذا الاختيار.', { icon: 'ℹ️' });
@@ -268,7 +272,7 @@ export const TournamentResetModal: React.FC<TournamentResetModalProps> = ({
         await onResetComplete();
         if (res.deletedMatchesCount > 0) {
           toast.success(
-            `تم تصفير ومسح جميع المباريات المبرمجة بنجاح (${res.deletedMatchesCount} مباراة).`
+            `تم حذف جميع المباريات المبرمجة بنجاح (${res.deletedMatchesCount} مباراة).`
           );
         } else {
           toast('لا توجد مباريات مبرمجة مطابقة للحذف ضمن رياضتك حالياً.', { icon: 'ℹ️' });
@@ -282,8 +286,8 @@ export const TournamentResetModal: React.FC<TournamentResetModalProps> = ({
         const res = await resetAllBellsForAllUsers();
         toast.success(
           res.deletedCount > 0
-            ? `تم تصفير الجرس لجميع المشرفين والأساتذة والحكام بنجاح (حذف ${res.deletedCount} إشعار).`
-            : 'تم تصفير الجرس لجميع المشرفين والأساتذة والحكام بنجاح.'
+            ? `تم حذف إشعارات الجرس لجميع المشرفين والأساتذة والحكام بنجاح (حذف ${res.deletedCount} إشعار).`
+            : 'تم حذف إشعارات الجرس لجميع المشرفين والأساتذة والحكام بنجاح.'
         );
       }
 
@@ -291,9 +295,9 @@ export const TournamentResetModal: React.FC<TournamentResetModalProps> = ({
     } catch (error: any) {
       console.error('Reset action error:', error);
       if (error?.message === 'UNAUTHORIZED_SPORT_RESET') {
-        toast.error('غير مسموح لك بتصفير رياضة خارج تخصصك المسند.');
+        toast.error('غير مسموح لك بحذف معطيات رياضة خارج تخصصك المسند.');
       } else {
-        toast.error('حدث خطأ أثناء تنفيذ عملية التصفير');
+        toast.error('حدث خطأ أثناء تنفيذ عملية الحذف');
       }
     } finally {
       setIsExecuting(false);
@@ -326,12 +330,12 @@ export const TournamentResetModal: React.FC<TournamentResetModalProps> = ({
             {isExecuting ? (
               <>
                 <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                <span>جاري التصفير...</span>
+                <span>جاري الحذف...</span>
               </>
             ) : (
               <>
                 <CheckCircle2 className="w-3.5 h-3.5" />
-                <span>تأكيد التصفير الآن</span>
+                <span>تأكيد الحذف الآن</span>
               </>
             )}
           </button>
@@ -361,7 +365,7 @@ export const TournamentResetModal: React.FC<TournamentResetModalProps> = ({
             </div>
             <div>
               <h2 className="text-base sm:text-lg font-black leading-tight">
-                تصفير النتائج والمباريات المبرمجة
+                حذف النتائج والمباريات المبرمجة
               </h2>
               <p className="text-xs text-rose-100/90 mt-0.5 font-medium">
                 {isCentralAdmin
@@ -398,8 +402,8 @@ export const TournamentResetModal: React.FC<TournamentResetModalProps> = ({
             />
             <span className="leading-relaxed">
               {isCentralAdmin
-                ? 'تنطبق عمليات التصفير أدناه على معطيات المديرية الإقليمية النشطة حسب اختيارك (جميع البطولات أو بطولة محددة).'
-                : `يتم تطبيق كافة خيارات التصفير بشكل حصري على رياضتك المسندة فقط (${assignedSportNames.join('، ')}) دون المساس بباقي الرياضات.`}
+                ? 'تنطبق عمليات الحذف أدناه على معطيات المديرية الإقليمية النشطة حسب اختيارك (جميع البطولات أو بطولة محددة).'
+                : `يتم تطبيق كافة خيارات الحذف بشكل حصري على رياضتك المسندة فقط (${assignedSportNames.join('، ')}) دون المساس بباقي الرياضات.`}
             </span>
           </div>
 
@@ -409,7 +413,7 @@ export const TournamentResetModal: React.FC<TournamentResetModalProps> = ({
             </div>
           ) : (
             <>
-              {/* Action 1: تصفير جميع نتائج المباريات */}
+              {/* Action 1: حذف جميع نتائج المباريات */}
               <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-2xs space-y-2">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                   <div className="space-y-1">
@@ -418,7 +422,7 @@ export const TournamentResetModal: React.FC<TournamentResetModalProps> = ({
                         <Eraser className="w-4 h-4" />
                       </span>
                       <h3 className="text-sm font-black text-slate-900">
-                        1. تصفير جميع نتائج المباريات
+                        1. حذف جميع نتائج المباريات
                       </h3>
                     </div>
                     <p className="text-xs text-slate-600 leading-relaxed pr-10">
@@ -437,19 +441,19 @@ export const TournamentResetModal: React.FC<TournamentResetModalProps> = ({
                     className="px-4 py-2 rounded-xl text-xs font-black bg-amber-600 hover:bg-amber-700 text-white shadow-xs transition-all cursor-pointer shrink-0 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
                   >
                     <RotateCcw className="w-3.5 h-3.5" />
-                    <span>تصفير جميع نتائج المباريات</span>
+                    <span>حذف جميع نتائج المباريات</span>
                   </button>
                 </div>
 
                 {renderConfirmBar(
                   'ALL_MATCH_RESULTS',
                   isCentralAdmin
-                    ? `هل أنت متأكد من تصفير جميع نتائج المباريات (${scopedMatches.length} مباراة) عبر جميع الرياضات في المديرية؟ سيبقى جدول المباريات كما هو وتعاد النتائج إلى الصفر.`
-                    : `هل أنت متأكد من تصفير جميع نتائج المباريات الخاصة برياضتك (${assignedSportNames.join('، ')}) وعددها ${scopedMatches.length} مباراة؟`
+                    ? `هل أنت متأكد من حذف جميع نتائج المباريات (${scopedMatches.length} مباراة) عبر جميع الرياضات في المديرية؟ سيبقى جدول المباريات كما هو وتعاد النتائج إلى الصفر.`
+                    : `هل أنت متأكد من حذف جميع نتائج المباريات الخاصة برياضتك (${assignedSportNames.join('، ')}) وعددها ${scopedMatches.length} مباراة؟`
                 )}
               </div>
 
-              {/* Action 2: تصفير نتائج بطولة معينة */}
+              {/* Action 2: حذف نتائج بطولة معينة */}
               <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-2xs space-y-3">
                 <div className="flex items-center gap-2">
                   <span className="w-8 h-8 rounded-xl bg-blue-100 text-blue-800 flex items-center justify-center shrink-0">
@@ -457,10 +461,10 @@ export const TournamentResetModal: React.FC<TournamentResetModalProps> = ({
                   </span>
                   <div>
                     <h3 className="text-sm font-black text-slate-900">
-                      2. تصفير نتائج بطولة معينة
+                      2. حذف نتائج بطولة معينة
                     </h3>
                     <p className="text-xs text-slate-600">
-                      اختر الرياضة (والفرع إذا أردت) لتصفير نتائجها فقط دون المساس بالبطولات الأخرى.
+                      اختر الرياضة (والفرع إذا أردت) لحذف نتائجها فقط دون المساس بالبطولات الأخرى.
                     </p>
                   </div>
                 </div>
@@ -475,9 +479,7 @@ export const TournamentResetModal: React.FC<TournamentResetModalProps> = ({
                       onChange={e => {
                         setSelectedSportId(e.target.value);
                         setSelectedTournamentId('ALL');
-                        if (pendingConfirm === 'SPECIFIC_TOURNAMENT_RESULTS') {
-                          setPendingConfirm(null);
-                        }
+                        setPendingConfirm(null);
                       }}
                       className="w-full text-xs font-bold rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
                     >
@@ -498,9 +500,7 @@ export const TournamentResetModal: React.FC<TournamentResetModalProps> = ({
                       value={selectedTournamentId}
                       onChange={e => {
                         setSelectedTournamentId(e.target.value);
-                        if (pendingConfirm === 'SPECIFIC_TOURNAMENT_RESULTS') {
-                          setPendingConfirm(null);
-                        }
+                        setPendingConfirm(null);
                       }}
                       className="w-full text-xs font-bold rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
                     >
@@ -537,7 +537,7 @@ export const TournamentResetModal: React.FC<TournamentResetModalProps> = ({
                       className="px-3.5 py-2 rounded-xl text-xs font-black bg-blue-600 hover:bg-blue-700 text-white shadow-xs transition-all cursor-pointer shrink-0 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
                     >
                       <RotateCcw className="w-3.5 h-3.5" />
-                      <span>تصفير نتائج هذه البطولة</span>
+                      <span>حذف نتائج هذه البطولة</span>
                     </button>
 
                     {selectedSportId !== 'cross_country' && selectedSportId !== 'athletics' && (
@@ -556,7 +556,7 @@ export const TournamentResetModal: React.FC<TournamentResetModalProps> = ({
 
                 {renderConfirmBar(
                   'SPECIFIC_TOURNAMENT_RESULTS',
-                  `هل أنت متأكد من تصفير نتائج «${
+                  `هل أنت متأكد من حذف نتائج «${
                     availableSports.find(s => s.id === selectedSportId)?.name || selectedSportId
                   }»${
                     selectedTournamentId !== 'ALL'
@@ -564,7 +564,7 @@ export const TournamentResetModal: React.FC<TournamentResetModalProps> = ({
                           sportBranchTournaments.find(t => t.id === selectedTournamentId)?.name || ''
                         })`
                       : ''
-                  }؟`
+                  } فقط دون المساس بباقي الرياضات؟`
                 )}
 
                 {renderConfirmBar(
@@ -581,7 +581,7 @@ export const TournamentResetModal: React.FC<TournamentResetModalProps> = ({
                 )}
               </div>
 
-              {/* Action 3: تصفير جميع المباريات المبرمجة */}
+              {/* Action 3: حذف جميع المباريات المبرمجة */}
               <div className="bg-white rounded-2xl border border-rose-200 p-4 shadow-2xs space-y-2">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                   <div className="space-y-1">
@@ -590,11 +590,11 @@ export const TournamentResetModal: React.FC<TournamentResetModalProps> = ({
                         <CalendarX2 className="w-4 h-4" />
                       </span>
                       <h3 className="text-sm font-black text-rose-950">
-                        3. تصفير جميع المباريات المبرمجة
+                        3. حذف جميع المباريات المبرمجة
                       </h3>
                     </div>
                     <p className="text-xs text-slate-600 leading-relaxed pr-10">
-                      حذف ومسح جميع المباريات المبرمجة بالكامل لإعادة برمجة القرعة والمواجهات من جديد.
+                      حذف جميع المباريات المبرمجة بالكامل لإعادة برمجة القرعة والمواجهات من جديد.
                       <span className="inline-block mr-1.5 text-[11px] font-black text-rose-800 bg-rose-50 px-2 py-0.5 rounded-md border border-rose-200">
                         {scopedMatches.length} مباراة مبرمجة
                       </span>
@@ -608,7 +608,7 @@ export const TournamentResetModal: React.FC<TournamentResetModalProps> = ({
                     className="px-4 py-2 rounded-xl text-xs font-black bg-rose-600 hover:bg-rose-700 text-white shadow-xs transition-all cursor-pointer shrink-0 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
                   >
                     <CalendarX2 className="w-3.5 h-3.5" />
-                    <span>تصفير جميع المباريات المبرمجة</span>
+                    <span>حذف جميع المباريات المبرمجة</span>
                   </button>
                 </div>
 
@@ -620,7 +620,7 @@ export const TournamentResetModal: React.FC<TournamentResetModalProps> = ({
                 )}
               </div>
 
-              {/* Action 4: تصفير جرس الإشعارات لجميع المشرفين والأساتذة (حصري للمسير المركزي) */}
+              {/* Action 4: حذف إشعارات الجرس لجميع المشرفين والأساتذة (حصري للمسير المركزي) */}
               {isCentralAdmin && (
                 <div className="bg-white rounded-2xl border border-indigo-200 p-4 shadow-2xs space-y-2">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -630,11 +630,11 @@ export const TournamentResetModal: React.FC<TournamentResetModalProps> = ({
                           <BellOff className="w-4 h-4" />
                         </span>
                         <h3 className="text-sm font-black text-indigo-950">
-                          4. تصفير جرس الإشعارات لكل المشرفين والأساتذة
+                          4. حذف إشعارات الجرس لكل المشرفين والأساتذة
                         </h3>
                       </div>
                       <p className="text-xs text-slate-600 leading-relaxed pr-10">
-                        مسح وتصفير كافة إشعارات الجرس المتراكمة لدى جميع الأساتذة، رؤساء اللجن التقنية، الحكام والمشرفين دفعة واحدة (دون مسح رسائل منصة تواصل).
+                        حذف كافة إشعارات الجرس المتراكمة لدى جميع الأساتذة، رؤساء اللجن التقنية، الحكام والمشرفين دفعة واحدة (دون مسح رسائل منصة تواصل).
                       </p>
                     </div>
 
@@ -645,13 +645,13 @@ export const TournamentResetModal: React.FC<TournamentResetModalProps> = ({
                       className="px-4 py-2 rounded-xl text-xs font-black bg-indigo-600 hover:bg-indigo-700 text-white shadow-xs transition-all cursor-pointer shrink-0 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
                     >
                       <BellOff className="w-3.5 h-3.5" />
-                      <span>تصفير الجرس للجميع</span>
+                      <span>حذف إشعارات الجرس للجميع</span>
                     </button>
                   </div>
 
                   {renderConfirmBar(
                     'ALL_BELLS_FOR_SUPERVISORS',
-                    'هل أنت متأكد من تصفير جرس الإشعارات ومسح كافة التنبيهات القديمة لدى جميع الأساتذة والمشرفين والحكام؟'
+                    'هل أنت متأكد من حذف إشعارات الجرس ومسح كافة التنبيهات القديمة لدى جميع الأساتذة والمشرفين والحكام؟'
                   )}
                 </div>
               )}

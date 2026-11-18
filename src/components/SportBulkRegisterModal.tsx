@@ -278,14 +278,21 @@ export const SportBulkRegisterModal: React.FC<SportBulkRegisterModalProps> = ({
       });
     });
 
-    // Populate coach info if present
-    const firstWithCoach = matchingStudents.find(s => s.coachName);
-    if (firstWithCoach) {
-      if (firstWithCoach.coachName) setCoachName(firstWithCoach.coachName);
-      if (firstWithCoach.coachLeaseNumber) setCoachLeaseNumber(firstWithCoach.coachLeaseNumber);
-      if (firstWithCoach.coachPhone) setCoachPhone(firstWithCoach.coachPhone);
+    // Only copy coach info from existing students when an admin/coordinator opens the modal
+    // When a teacher logs in to register a branch, credit the acting teacher themselves
+    if (!isTeacher) {
+      const firstWithCoach = matchingStudents.find(s => s.coachName);
+      if (firstWithCoach) {
+        if (firstWithCoach.coachName) setCoachName(firstWithCoach.coachName);
+        if (firstWithCoach.coachLeaseNumber) setCoachLeaseNumber(firstWithCoach.coachLeaseNumber);
+        if (firstWithCoach.coachPhone) setCoachPhone(firstWithCoach.coachPhone);
+      }
+    } else if (userProfile?.fullName) {
+      setCoachName(userProfile.fullName);
+      setCoachLeaseNumber(userProfile.leaseNumber || '');
+      setCoachPhone(userProfile.phone || '');
     }
-  }, [isOpen, selectedCategory, selectedGender, selectedAffiliation, selectedSchoolId, resolvedSchoolName, allExistingStudents, sport]);
+  }, [isOpen, isTeacher, userProfile, selectedCategory, selectedGender, selectedAffiliation, selectedSchoolId, resolvedSchoolName, allExistingStudents, sport]);
 
   // Update a single slot
   const handleUpdateSlot = (slotIndex: number, field: keyof SportParticipantSlot, value: any) => {
@@ -716,9 +723,9 @@ export const SportBulkRegisterModal: React.FC<SportBulkRegisterModalProps> = ({
           schoolName: schoolNameToUse,
           sportId: sport.id,
           participationType: 'school_team',
-          coachName: coachName.trim() || (isUserAtSchool ? userProfile?.fullName : undefined) || undefined,
-          coachLeaseNumber: coachLeaseNumber.trim() || (isUserAtSchool ? userProfile?.leaseNumber : undefined) || undefined,
-          coachPhone: coachPhone.trim() || (isUserAtSchool ? userProfile?.phone : undefined) || undefined,
+          coachName: (isTeacher && userProfile?.fullName ? userProfile.fullName : coachName.trim() || (isUserAtSchool ? userProfile?.fullName : undefined)) || undefined,
+          coachLeaseNumber: (isTeacher && userProfile?.fullName ? userProfile?.leaseNumber : coachLeaseNumber.trim() || (isUserAtSchool ? userProfile?.leaseNumber : undefined)) || undefined,
+          coachPhone: (isTeacher && userProfile?.fullName ? userProfile?.phone : coachPhone.trim() || (isUserAtSchool ? userProfile?.phone : undefined)) || undefined,
           photoUrl: slot.photoUrl,
           ...(sport.id === 'athletics' ? { athleticsSpecialty: slot.athleticsSpecialty } : {})
         };

@@ -55,8 +55,8 @@ import {
 } from 'firebase/auth';
 import { doc, setDoc, getDoc, serverTimestamp, query, collection, where, getDocs } from 'firebase/firestore';
 import { auth, db } from '../firebase/config';
-import { User, Role, Directorate, School, Tournament, Match, Student, CrossCountryCategoryResult, AthleticsCategoryResult, AthleticsWinner, Sport, Referee } from '../types';
-import { DataService, SPORTS_MAP, getAgeCategoriesForSeason, getCategoryYearsLabel, normalizeCategoryKey, normalizeTournamentAffiliation } from '../lib/dataService';
+import { User, Role, Directorate, School, Tournament, Match, Student, CrossCountryCategoryResult, AthleticsCategoryResult, AthleticsWinner, Sport, Referee, AffiliationDisplayConfig } from '../types';
+import { DataService, SPORTS_MAP, getAgeCategoriesForSeason, getCategoryYearsLabel, normalizeCategoryKey, normalizeTournamentAffiliation, resolveEffectiveAffiliationMode, isAffiliationAllowedByDisplayConfig } from '../lib/dataService';
 import { calculateTeamRankings, resolveRunnerParticipationType } from '../lib/crossCountryConfig';
 import { hasValidMatchTeams, formatTeamDisplayName, extractMatchGroupLabel, isPlaceholderTeamId, computeGroupStandings } from '../lib/drawTournamentUtils';
 import { resolveMatchAffiliation, resolveMatchRefereesInfo, getOrdinalRefLabel } from '../lib/programExportService';
@@ -108,6 +108,9 @@ export const Login: React.FC = () => {
   const [crossCountryResults, setCrossCountryResults] = useState<Record<string, CrossCountryCategoryResult>>({});
   const [athleticsResults, setAthleticsResults] = useState<Record<string, AthleticsCategoryResult>>({});
   const [sportsConfig, setSportsConfig] = useState<Sport[]>([]);
+  const [affiliationDisplayConfig, setAffiliationDisplayConfig] = useState<AffiliationDisplayConfig>(() =>
+    DataService.getAffiliationDisplayConfigSync()
+  );
   const [referees, setReferees] = useState<Referee[]>([]);
   const [usersDirectory, setUsersDirectory] = useState<User[]>([]);
   const [loadingData, setLoadingData] = useState(true);
@@ -420,129 +423,10 @@ export const Login: React.FC = () => {
       setSportsConfig(sps || []);
       setReferees(refs || []);
       setUsersDirectory(usrs || []);
-
-      // Inject Demo Matches only if directorate is taourirt and none exist
-      let finalMatches = mtchs || [];
-      if (finalMatches.length === 0 && effectiveDirId === 'taourirt') {
-        const todayObj = new Date();
-        const y = todayObj.getFullYear();
-        const m = String(todayObj.getMonth() + 1).padStart(2, '0');
-        const dNum = todayObj.getDate();
-        
-        const pad = (num: number) => String(num).padStart(2, '0');
-        const dayToday = `${y}-${m}-${pad(dNum)}`;
-        const dayPlus2 = `${y}-${m}-${pad(Math.min(dNum + 2, 28))}`;
-        const dayPlus5 = `${y}-${m}-${pad(Math.min(dNum + 5, 28))}`;
-        const dayPlus8 = `${y}-${m}-${pad(Math.min(dNum + 8, 28))}`;
-        const dayMinus3 = `${y}-${m}-${pad(Math.max(dNum - 3, 1))}`;
-
-        finalMatches = [
-          { id: 'm1', sportId: 'football', sportName: 'كرة القدم', team1Name: 'ثانوية الفتح', team2Name: 'ثانوية علال الفاسي', date: dayToday, startTime: '10:00', venueName: 'الملعب البلدي', status: 'COMPLETED', team1Score: 2, team2Score: 1, category: 'U18 ذكور' },
-          { id: 'm2', sportId: 'basketball', sportName: 'كرة السلة', team1Name: 'إعدادية ابن سينا', team2Name: 'إعدادية سيدي لحسن', date: dayToday, startTime: '14:30', venueName: 'القاعة المغطاة', status: 'ONGOING', team1Score: 12, team2Score: 10, category: 'U15 إناث' },
-          { id: 'm3', sportId: 'handball', sportName: 'كرة اليد', team1Name: 'ثانوية الزيتون', team2Name: 'ثانوية الفتح', date: dayPlus2, startTime: '16:00', venueName: 'القاعة المغطاة', status: 'SCHEDULED', category: 'U18 ذكور' },
-          { id: 'm4', sportId: 'volleyball', sportName: 'الكرة الطائرة', team1Name: 'إعدادية ابن رشد', team2Name: 'إعدادية القدس', date: dayPlus5, startTime: '09:00', venueName: 'ثانوية الفتح', status: 'SCHEDULED', category: 'U15 ذكور' },
-          { id: 'm5', sportId: 'football', sportName: 'كرة القدم', team1Name: 'إعدادية سيدي لحسن', team2Name: 'إعدادية ابن رشد', date: dayPlus8, startTime: '11:00', venueName: 'الملعب البلدي', status: 'SCHEDULED', category: 'U15 ذكور' },
-          { id: 'm6', sportId: 'basketball', sportName: 'كرة السلة', team1Name: 'ثانوية الفتح', team2Name: 'ثانوية الزيتون', date: dayMinus3, startTime: '15:00', venueName: 'القاعة المغطاة', status: 'COMPLETED', team1Score: 45, team2Score: 38, category: 'U18 إناث' }
-        ] as any;
-      }
-      setMatches(finalMatches);
-
+      setMatches(mtchs || []);
       setStudents(stds || []);
-
-      // Inject Demo CC Results only if directorate is taourirt and results are empty
-      let finalCcRes = ccRes || {};
-      if (Object.keys(finalCcRes).length === 0 && effectiveDirId === 'taourirt') {
-        finalCcRes = {
-          'u12_male': {
-            categoryId: 'u12_male',
-            categoryName: 'سباق البراعم ذكور',
-            titleAr: 'سباق البراعم ذكور',
-            gender: 'Male',
-            podium: [
-              { rank: 1, fullName: 'ياسين بونو', schoolName: 'م.م دبدو', bibNumber: '102', time: '04:12', affiliationType: 'non_club' },
-              { rank: 2, fullName: 'أشرف حكيمي', schoolName: 'إعدادية ابن سينا', bibNumber: '115', time: '04:15', affiliationType: 'club_affiliated' },
-              { rank: 3, fullName: 'سفيان أمرابط', schoolName: 'إعدادية سيدي لحسن', bibNumber: '108', time: '04:20', affiliationType: 'non_club' },
-              { rank: 4, fullName: 'نايف أكرد', schoolName: 'ثانوية الفتح', bibNumber: '130', time: '04:25', affiliationType: 'non_club' }
-            ]
-          },
-          'u15_female': {
-            categoryId: 'u15_female',
-            categoryName: 'سباق الصغيرات إناث',
-            titleAr: 'سباق الصغيرات إناث',
-            gender: 'Female',
-            podium: [
-              { rank: 1, fullName: 'خديجة المرضي', schoolName: 'إعدادية القدس', bibNumber: '205', time: '05:30', affiliationType: 'club_affiliated' },
-              { rank: 2, fullName: 'نوال المتوكل', schoolName: 'إعدادية ابن سينا', bibNumber: '210', time: '05:45', affiliationType: 'non_club' },
-              { rank: 3, fullName: 'نزهة بدوان', schoolName: 'ثانوية الزيتون', bibNumber: '218', time: '06:00', affiliationType: 'non_club' }
-            ]
-          }
-        } as any;
-      }
-      setCrossCountryResults(finalCcRes);
-
-      // Inject Demo Athletics Results only if directorate is taourirt and results are empty
-      let finalAthRes = athRes || {};
-      if (Object.keys(finalAthRes).length === 0 && effectiveDirId === 'taourirt') {
-        finalAthRes = {
-          'u15_male_100m': {
-            id: 'u15_male_100m',
-            category: 'U15',
-            gender: 'Male',
-            specialtyName: 'سباق 100 متر (ذكور)',
-            specialtyType: 'track',
-            venueName: 'الملعب البلدي تاوريرت',
-            status: 'completed',
-            podium: [
-              { rank: 1, fullName: 'ياسين الفيلالي', schoolName: 'إعدادية ابن سينا', performance: '11.85 ث', bibNumber: '112', affiliation: 'non_club' },
-              { rank: 2, fullName: 'طارق الزياني', schoolName: 'إعدادية سيدي لحسن', performance: '12.10 ث', bibNumber: '114', affiliation: 'non_club' },
-              { rank: 3, fullName: 'حمزة المراكشي', schoolName: 'ثانوية علال الفاسي التأهيلية', performance: '12.35 ث', bibNumber: '118', affiliation: 'club_affiliated' }
-            ]
-          },
-          'u15_female_longjump': {
-            id: 'u15_female_longjump',
-            category: 'U15',
-            gender: 'Female',
-            specialtyName: 'القفز الطولي (إناث)',
-            specialtyType: 'field',
-            venueName: 'الملعب البلدي تاوريرت',
-            status: 'completed',
-            podium: [
-              { rank: 1, fullName: 'إيمان المنصوري', schoolName: 'إعدادية ابن سينا', performance: '4.85 م', bibNumber: '205', affiliation: 'non_club' },
-              { rank: 2, fullName: 'زينب الشاوي', schoolName: 'إعدادية سيدي لحسن', performance: '4.62 م', bibNumber: '208', affiliation: 'non_club' },
-              { rank: 3, fullName: 'أسماء البصري', schoolName: 'مجموعة مدارس دبدو الابتدائية', performance: '4.40 م', bibNumber: '211', affiliation: 'non_club' }
-            ]
-          },
-          'u18_male_800m': {
-            id: 'u18_male_800m',
-            category: 'U18',
-            gender: 'Male',
-            specialtyName: 'سباق 800 متر (فتيان)',
-            specialtyType: 'track',
-            venueName: 'الملعب البلدي تاوريرت',
-            status: 'completed',
-            podium: [
-              { rank: 1, fullName: 'أمين العلمي', schoolName: 'ثانوية الفتح التأهيلية', performance: '01:58.4', bibNumber: '304', affiliation: 'club_affiliated' },
-              { rank: 2, fullName: 'وليد السوسي', schoolName: 'ثانوية الزيتون التأهيلية', performance: '02:01.2', bibNumber: '309', affiliation: 'non_club' },
-              { rank: 3, fullName: 'مهدي الحساني', schoolName: 'ثانوية علال الفاسي التأهيلية', performance: '02:03.8', bibNumber: '315', affiliation: 'non_club' }
-            ]
-          },
-          'u18_female_shotput': {
-            id: 'u18_female_shotput',
-            category: 'U18',
-            gender: 'Female',
-            specialtyName: 'دفع الجلة 3 كغم (فتيات)',
-            specialtyType: 'field',
-            venueName: 'الملعب البلدي تاوريرت',
-            status: 'completed',
-            podium: [
-              { rank: 1, fullName: 'خديجة العمراني', schoolName: 'ثانوية الفتح التأهيلية', performance: '11.45 م', bibNumber: '401', affiliation: 'non_club' },
-              { rank: 2, fullName: 'سناء المتوكل', schoolName: 'ثانوية الزيتون التأهيلية', performance: '10.80 م', bibNumber: '406', affiliation: 'non_club' },
-              { rank: 3, fullName: 'دعاء الصابر', schoolName: 'ثانوية علال الفاسي التأهيلية', performance: '10.15 م', bibNumber: '412', affiliation: 'club_affiliated' }
-            ]
-          }
-        } as any;
-      }
-      setAthleticsResults(finalAthRes);
+      setCrossCountryResults(ccRes || {});
+      setAthleticsResults(athRes || {});
 
     } catch (err) {
       console.warn("Could not load public data in Login page:", err);
@@ -580,6 +464,13 @@ export const Login: React.FC = () => {
     });
     const unsubCcResults = DataService.subscribeCrossCountryResults((r) => setCrossCountryResults(r as Record<string, CrossCountryCategoryResult>));
     const unsubAthletics = DataService.subscribeAthleticsResults((ar) => setAthleticsResults(ar));
+    const unsubAffiliationCfg = DataService.subscribeToAffiliationDisplayConfig((cfg) => setAffiliationDisplayConfig(cfg));
+
+    const handleRefreshPublicData = () => {
+      loadAllData(activeDirIdRef.current);
+    };
+    window.addEventListener('resultsChanged', handleRefreshPublicData);
+    window.addEventListener('tournamentDataChanged', handleRefreshPublicData);
 
     return () => {
       unsubSchools();
@@ -587,6 +478,9 @@ export const Login: React.FC = () => {
       unsubMatches();
       unsubCcResults();
       unsubAthletics();
+      unsubAffiliationCfg();
+      window.removeEventListener('resultsChanged', handleRefreshPublicData);
+      window.removeEventListener('tournamentDataChanged', handleRefreshPublicData);
     };
   }, []);
 
@@ -1064,9 +958,38 @@ export const Login: React.FC = () => {
     </div>
   );
 
+  // Active tournaments (excludes Draft/Archived/inactive tournaments)
+  const activeTournaments = useMemo(() => {
+    return tournaments.filter(
+      t => (t as any).isActive !== false && t.status !== 'Draft' && t.status !== 'Archived'
+    );
+  }, [tournaments]);
+
+  const effectivePublicAffiliationMode = useMemo(() => {
+    return resolveEffectiveAffiliationMode(
+      affiliationDisplayConfig,
+      selectedSport !== 'ALL' ? selectedSport : undefined
+    );
+  }, [affiliationDisplayConfig, selectedSport]);
+
+  // Keep selectedAffiliation aligned with the Provincial Supervisor affiliation display rule
+  useEffect(() => {
+    if (effectivePublicAffiliationMode === 'non_club' && selectedAffiliation !== 'NON_CLUB') {
+      setSelectedAffiliation('NON_CLUB');
+    } else if (effectivePublicAffiliationMode === 'club_affiliated' && selectedAffiliation !== 'CLUB') {
+      setSelectedAffiliation('CLUB');
+    }
+  }, [effectivePublicAffiliationMode, selectedAffiliation]);
+
   // Filtered Tournaments for Public Catalog
   const filteredTournaments = useMemo(() => {
-    return tournaments.filter(t => {
+    return activeTournaments.filter(t => {
+      // Respect supervisor affiliation display setting
+      const tAff = normalizeTournamentAffiliation(t.affiliationType, t.name);
+      if (!isAffiliationAllowedByDisplayConfig(tAff, affiliationDisplayConfig, t.sportId)) {
+        return false;
+      }
+
       // Date Filter: Tournament starts on the selected day
       if (t.startDate && !safeDateCompare(t.startDate, selectedDate)) return false;
 
@@ -1084,25 +1007,41 @@ export const Login: React.FC = () => {
       }
       return true;
     });
-  }, [tournaments, selectedDate, selectedSport, selectedScope, selectedCategory, selectedGender, searchQuery]);
+  }, [activeTournaments, affiliationDisplayConfig, selectedDate, selectedSport, selectedScope, selectedCategory, selectedGender, searchQuery]);
 
-  // Helper predicate for Public Match filtering (enforces both teams present + sport + affiliation + category + gender + search)
+  // Helper predicate for Public Match filtering (enforces active tournament + both teams present + sport + affiliation + category + gender + search)
   const doesMatchPassPublicFilters = (m: Match, enforceSelectedDate: boolean): boolean => {
     if (!hasValidMatchTeams(m, schools)) return false;
+    if (activeTournaments.length === 0) return false;
+
+    const tourn = m.tournamentId ? activeTournaments.find(t => t.id === m.tournamentId) : undefined;
+    // Reject orphan matches whose referenced tournament was deleted/archived
+    if (m.tournamentId && !tourn) return false;
+
+    const mSport = m.sportId || tourn?.sportId;
+    if (!mSport) return false;
+
+    // Require at least one active tournament for this sport & ensure sport is not marked unprogrammed
+    const sportConf = sportsConfig.find(s => s.id === mSport);
+    if (sportConf?.isProgrammed === false) return false;
+    if (!tourn && !activeTournaments.some(t => t.sportId === mSport)) return false;
 
     if (enforceSelectedDate && (!m.date || !safeDateCompare(m.date, selectedDate))) {
       return false;
     }
 
-    const tourn = tournaments.find(t => t.id === m.tournamentId);
-    const mSport = m.sportId || tourn?.sportId;
     if (selectedSport !== 'ALL' && mSport !== selectedSport) return false;
 
+    const rawAff = m.affiliationType || tourn?.affiliationType;
+    const mAff = rawAff
+      ? normalizeTournamentAffiliation(rawAff, tourn?.name)
+      : resolveMatchAffiliation(m, activeTournaments);
+
+    if (!isAffiliationAllowedByDisplayConfig(mAff, affiliationDisplayConfig, mSport)) {
+      return false;
+    }
+
     if (selectedAffiliation !== 'ALL') {
-      const rawAff = m.affiliationType || tourn?.affiliationType;
-      const mAff = rawAff
-        ? normalizeTournamentAffiliation(rawAff, tourn?.name)
-        : resolveMatchAffiliation(m, tournaments);
       if (selectedAffiliation === 'CLUB' && mAff !== 'club_affiliated' && mAff !== 'open') return false;
       if (selectedAffiliation === 'NON_CLUB' && mAff !== 'non_club' && mAff !== 'open') return false;
     }
@@ -1161,7 +1100,7 @@ export const Login: React.FC = () => {
     return matches
       .filter(m => doesMatchPassPublicFilters(m, true))
       .sort((a, b) => (a.drawMatchNumber ?? 9999) - (b.drawMatchNumber ?? 9999));
-  }, [matches, tournaments, schools, selectedDate, selectedSport, selectedAffiliation, selectedCategory, selectedGender, searchQuery]);
+  }, [matches, activeTournaments, sportsConfig, affiliationDisplayConfig, schools, selectedDate, selectedSport, selectedAffiliation, selectedCategory, selectedGender, searchQuery]);
 
   // Filtered Matches for Public Matches Tab (all dates by default, or selectedDate when toggle active)
   const publicTabMatches = useMemo(() => {
@@ -1185,6 +1124,11 @@ export const Login: React.FC = () => {
 
   // Cross Country Results Data (Strictly Separated, Deduplicated, & Recalculated by Affiliation)
   const crossCountryList = useMemo(() => {
+    const ccSportConf = sportsConfig.find(s => s.id === 'cross_country');
+    if (ccSportConf?.isProgrammed === false) return [];
+    const hasActiveCcTournament = activeTournaments.some(t => t.sportId === 'cross_country');
+    if (!hasActiveCcTournament) return [];
+
     const list: Array<{
       key: string;
       categoryKey: string;
@@ -1316,8 +1260,12 @@ export const Login: React.FC = () => {
         };
       });
 
-      // 1. Process Non-Club Class (Only if selectedAffiliation is not CLUB)
-      if (rankedNonClub.length > 0 && selectedAffiliation !== 'CLUB') {
+      // 1. Process Non-Club Class (Only if selectedAffiliation is not CLUB and allowed by display config)
+      if (
+        rankedNonClub.length > 0 &&
+        selectedAffiliation !== 'CLUB' &&
+        isAffiliationAllowedByDisplayConfig('non_club', affiliationDisplayConfig, 'cross_country')
+      ) {
         const teamRankings = calculateTeamRankings(rankedNonClub, students);
         list.push({
           key: `${canonicalKey}_non_club`,
@@ -1328,8 +1276,12 @@ export const Login: React.FC = () => {
         });
       }
 
-      // 2. Process Club-Affiliated Class (Only if selectedAffiliation is not NON_CLUB)
-      if (rankedClub.length > 0 && selectedAffiliation !== 'NON_CLUB') {
+      // 2. Process Club-Affiliated Class (Only if selectedAffiliation is not NON_CLUB and allowed by display config)
+      if (
+        rankedClub.length > 0 &&
+        selectedAffiliation !== 'NON_CLUB' &&
+        isAffiliationAllowedByDisplayConfig('club_affiliated', affiliationDisplayConfig, 'cross_country')
+      ) {
         list.push({
           key: `${canonicalKey}_club`,
           categoryKey: canonicalKey,
@@ -1341,11 +1293,39 @@ export const Login: React.FC = () => {
     });
 
     return list;
-  }, [crossCountryResults, students, selectedAffiliation, selectedCategory, selectedGender, searchQuery]);
+  }, [crossCountryResults, activeTournaments, sportsConfig, affiliationDisplayConfig, students, selectedAffiliation, selectedCategory, selectedGender, searchQuery]);
 
   // Dynamic active tab categories with gender combo for public filters
   const activeTabCategories = useMemo(() => {
+    const formatPublicCategoryChipLabel = (cat: string, gender: string, sportId?: string): string => {
+      const normCat = normalizeCategoryKey(cat);
+      const isFem = gender === 'Female';
+      const isMixed = gender === 'Mixed';
+
+      if (normCat === 'U12') {
+        return isMixed ? 'براعم وبرعمات U12' : isFem ? 'برعمات U12' : 'براعم U12';
+      }
+      if (normCat === 'U15') {
+        return isMixed ? 'صغار وصغيرات U15' : isFem ? 'صغيرات U15' : 'صغار U15';
+      }
+      if (normCat === 'U18') {
+        return isMixed ? 'فتيان وفتيات U18' : isFem ? 'فتيات U18' : 'فتيان U18';
+      }
+      if (normCat === 'U20') {
+        return isMixed ? 'شبان وشابات U20' : isFem ? 'شابات U20' : 'شبان U20';
+      }
+
+      const customName = DataService.getCustomCategoryName(cat, sportId, sportsConfig);
+      const genderLabel = isFem ? 'إناث' : isMixed ? 'مختلط' : 'ذكور';
+      return customName !== cat ? `${customName} ${genderLabel} (${cat})` : `${cat} ${genderLabel}`;
+    };
+
     if (activePublicTab === 'CC_PODIUM') {
+      const hasActiveCcTourn = activeTournaments.some(t => t.sportId === 'cross_country');
+      const ccConf = sportsConfig.find(s => s.id === 'cross_country');
+      if (!hasActiveCcTourn || ccConf?.isProgrammed === false) {
+        return [{ id: 'ALL_ALL', cat: 'ALL', gender: 'ALL', label: 'جميع السباقات 🌟' }];
+      }
       const results = Object.values(crossCountryResults) as CrossCountryCategoryResult[];
       const uniqueCats = Array.from(new Set<string>(results.map(r => `${r.category}_${r.gender}`)));
       
@@ -1364,16 +1344,11 @@ export const Login: React.FC = () => {
         const [cat, gender] = key.split('_');
         if (!cat || !gender) return;
         
-        const genderLabel = gender === 'Male' ? 'ذكور' : gender === 'Female' ? 'إناث' : 'مختلط';
-        // Resolve custom category name from sportsConfig
-        const customName = DataService.getCustomCategoryName(cat, 'cross_country', sportsConfig);
-        const catLabel = customName !== cat ? customName : (cat === 'U12' ? 'براعم' : cat === 'U15' ? 'صغار' : cat === 'U18' ? 'فتيان' : 'شبان');
-        
         list.push({
           id: key,
           cat,
           gender: gender as any,
-          label: `${catLabel} ${genderLabel} (${cat}) 🏃`
+          label: `${formatPublicCategoryChipLabel(cat, gender, 'cross_country')} 🏃`
         });
       });
       
@@ -1381,6 +1356,11 @@ export const Login: React.FC = () => {
     }
     
     if (activePublicTab === 'ATHLETICS') {
+      const hasActiveAthTourn = activeTournaments.some(t => t.sportId === 'athletics');
+      const athConf = sportsConfig.find(s => s.id === 'athletics');
+      if (!hasActiveAthTourn || athConf?.isProgrammed === false) {
+        return [{ id: 'ALL_ALL', cat: 'ALL', gender: 'ALL', label: 'جميع المسابقات 🌟' }];
+      }
       const results = Object.values(athleticsResults) as AthleticsCategoryResult[];
       const uniqueCats = Array.from(new Set<string>(results.map(r => `${r.category}_${r.gender}`)));
       
@@ -1399,16 +1379,11 @@ export const Login: React.FC = () => {
         const [cat, gender] = key.split('_');
         if (!cat || !gender) return;
         
-        const genderLabel = gender === 'Male' ? 'ذكور' : gender === 'Female' ? 'إناث' : 'مختلط';
-        // Resolve custom category name from sportsConfig
-        const customName = DataService.getCustomCategoryName(cat, 'athletics', sportsConfig);
-        const catLabel = customName !== cat ? customName : (cat === 'U12' ? 'براعم' : cat === 'U15' ? 'صغار' : cat === 'U18' ? 'فتيان' : 'شبان');
-        
         list.push({
           id: key,
           cat,
           gender: gender as any,
-          label: `${catLabel} ${genderLabel} (${cat}) 🏅`
+          label: `${formatPublicCategoryChipLabel(cat, gender, 'athletics')} 🏅`
         });
       });
       
@@ -1416,12 +1391,15 @@ export const Login: React.FC = () => {
     }
     
     if (activePublicTab === 'MATCHES') {
-      const teamSportsTourns = tournaments.filter(t => {
+      const teamSportsTourns = activeTournaments.filter(t => {
         const isTeamSport = t.sportId !== 'cross_country' && t.sportId !== 'athletics';
         if (!isTeamSport) return false;
+        const sportConf = sportsConfig.find(s => s.id === t.sportId);
+        if (sportConf && sportConf.isProgrammed === false) return false;
         if (selectedSport !== 'ALL' && t.sportId !== selectedSport) return false;
+        const tAff = normalizeTournamentAffiliation(t.affiliationType, t.name);
+        if (!isAffiliationAllowedByDisplayConfig(tAff, affiliationDisplayConfig, t.sportId)) return false;
         if (selectedAffiliation !== 'ALL') {
-          const tAff = normalizeTournamentAffiliation(t.affiliationType, t.name);
           if (selectedAffiliation === 'CLUB' && tAff !== 'club_affiliated' && tAff !== 'open') return false;
           if (selectedAffiliation === 'NON_CLUB' && tAff !== 'non_club' && tAff !== 'open') return false;
         }
@@ -1455,18 +1433,18 @@ export const Login: React.FC = () => {
         const [cat, gender] = key.split('__');
         if (!cat || !gender) return;
         
-        const genderLabel = gender === 'Male' ? 'ذكور' : gender === 'Female' ? 'إناث' : 'مختلط';
-        // Resolve custom category name from sportsConfig
-        const customName = DataService.getCustomCategoryName(cat, selectedSport !== 'ALL' ? selectedSport : undefined, sportsConfig);
-        const catLabel = customName !== cat ? customName : (cat === 'U12' ? 'براعم' : cat === 'U15' ? 'صغار' : cat === 'U18' ? 'فتيان' : 'شبان');
-        
         const sportIcon = selectedSport !== 'ALL' ? (SPORTS_MAP[selectedSport]?.icon || '👥') : '👥';
+        const labelText = formatPublicCategoryChipLabel(
+          cat,
+          gender,
+          selectedSport !== 'ALL' ? selectedSport : undefined
+        );
 
         list.push({
           id: key,
           cat,
           gender: gender as any,
-          label: `${catLabel} ${genderLabel} (${cat}) ${sportIcon}`
+          label: `${labelText} ${sportIcon}`
         });
       });
       
@@ -1476,38 +1454,19 @@ export const Login: React.FC = () => {
     return [
       { id: 'ALL_ALL', cat: 'ALL', gender: 'ALL', label: 'جميع الفئات 🌟' }
     ];
-  }, [activePublicTab, tournaments, crossCountryResults, athleticsResults, selectedSport, selectedAffiliation, sportsConfig]);
+  }, [activePublicTab, activeTournaments, crossCountryResults, athleticsResults, selectedSport, selectedAffiliation, sportsConfig, affiliationDisplayConfig]);
 
-  // Filtered sports for sports bar: STRICTLY sports that are programmed AND open for registration
+  // Filtered sports for sports bar: STRICTLY sports that are programmed AND have active open tournaments
   const programmedSportsEntries = useMemo(() => {
     return Object.entries(SPORTS_MAP).filter(([sportKey]) => {
-      // 1. Check if sport is explicitly marked isProgrammed in sportsConfig
       const conf = sportsConfig.find(s => s.id === sportKey);
       const isConfigProgrammed = conf?.isProgrammed === true;
-      
-      // If sport is NOT explicitly programmed, exclude it immediately as per user request
       if (!isConfigProgrammed) return false;
 
-      // 2. Check if sport has open, active tournaments (Open for registration)
-      const openTournaments = tournaments.filter(t => 
-        t.sportId === sportKey && 
-        (t as any).isActive !== false &&
-        t.status !== 'Draft' && 
-        t.status !== 'Archived'
-      );
-      const hasOpenTournaments = openTournaments.length > 0;
-
-      // 3. Check if active matches exist for this sport
-      const hasMatches = matches.some(m => {
-        const tourn = tournaments.find(t => t.id === m.tournamentId);
-        const mSport = m.sportId || tourn?.sportId;
-        return mSport === sportKey;
-      });
-
-      // Show ONLY if it is programmed AND (has open tournaments OR has active matches)
-      return isConfigProgrammed && (hasOpenTournaments || hasMatches);
+      const openTournaments = activeTournaments.filter(t => t.sportId === sportKey);
+      return openTournaments.length > 0;
     });
-  }, [sportsConfig, tournaments, matches]);
+  }, [sportsConfig, activeTournaments]);
 
   // News Marquee Items
   const marqueeNews = [
@@ -2501,11 +2460,18 @@ export const Login: React.FC = () => {
             {/* FILTER BAR & SEARCH */}
             <div id="public-results-section" className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-sm space-y-4 transition-colors scroll-mt-24">
               
-              {/* PART 1: AFFILIATION (Club vs Non-club) */}
+              {/* PART 1: AFFILIATION (Club vs Non-club, governed by Provincial Supervisor display settings) */}
               <div className="flex items-center gap-2">
                 {[
-                  { id: 'CLUB', label: 'منتمين للأندية', color: 'bg-amber-500 border-amber-400 text-slate-950' },
-                  { id: 'NON_CLUB', label: 'مدرسي (غير منتمين)', color: 'bg-emerald-700 border-emerald-500 text-white' }
+                  ...(effectivePublicAffiliationMode === 'both'
+                    ? [{ id: 'ALL', label: 'الصنفين معاً (الكل)', color: 'bg-slate-900 border-slate-800 text-white' }]
+                    : []),
+                  ...(effectivePublicAffiliationMode === 'both' || effectivePublicAffiliationMode === 'club_affiliated'
+                    ? [{ id: 'CLUB', label: 'منتمين للأندية', color: 'bg-amber-500 border-amber-400 text-slate-950' }]
+                    : []),
+                  ...(effectivePublicAffiliationMode === 'both' || effectivePublicAffiliationMode === 'non_club'
+                    ? [{ id: 'NON_CLUB', label: 'مدرسي (غير منتمين)', color: 'bg-emerald-700 border-emerald-500 text-white' }]
+                    : [])
                 ].map(aff => (
                   <button
                     key={aff.id}
@@ -3019,7 +2985,12 @@ export const Login: React.FC = () => {
 
                 {/* Athletics Events Grid */}
                 {(() => {
-                  const rawItems = Object.values(athleticsResults) as AthleticsCategoryResult[];
+                  const athSportConf = sportsConfig.find(s => s.id === 'athletics');
+                  const hasActiveAthTournament = activeTournaments.some(t => t.sportId === 'athletics');
+                  const rawItems =
+                    athSportConf?.isProgrammed !== false && hasActiveAthTournament
+                      ? (Object.values(athleticsResults) as AthleticsCategoryResult[])
+                      : [];
                   const items = rawItems.filter((item: AthleticsCategoryResult) => {
                     if (selectedCategory !== 'ALL' && item.category !== selectedCategory) return false;
                     if (selectedGender !== 'ALL' && item.gender !== selectedGender) return false;
@@ -3445,16 +3416,6 @@ export const Login: React.FC = () => {
                             <div className="bg-slate-50/90 dark:bg-slate-800/50 border border-slate-200/80 dark:border-slate-700/70 rounded-xl px-3 py-2 space-y-1.5">
                               {hasCategorizedRefs ? (
                                 <>
-                                  {refInfo.tableRefs.length > 0 && (
-                                    <div className="flex items-start gap-1.5 text-[10px] leading-relaxed">
-                                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-sky-100 dark:bg-sky-950/80 text-sky-800 dark:text-sky-300 font-black shrink-0">
-                                        حكام الطاولة
-                                      </span>
-                                      <span className="font-bold text-slate-700 dark:text-slate-200">
-                                        {refInfo.tableRefs.map((name, i) => `${getOrdinalRefLabel(i)}: ${name}`).join(' • ')}
-                                      </span>
-                                    </div>
-                                  )}
                                   {refInfo.fieldRefs.length > 0 && (
                                     <div className="flex items-start gap-1.5 text-[10px] leading-relaxed">
                                       <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-emerald-100 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300 font-black shrink-0">
@@ -3462,6 +3423,16 @@ export const Login: React.FC = () => {
                                       </span>
                                       <span className="font-bold text-slate-700 dark:text-slate-200">
                                         {refInfo.fieldRefs.map((name, i) => `${getOrdinalRefLabel(i)}: ${name}`).join(' • ')}
+                                      </span>
+                                    </div>
+                                  )}
+                                  {refInfo.tableRefs.length > 0 && (
+                                    <div className="flex items-start gap-1.5 text-[10px] leading-relaxed">
+                                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-sky-100 dark:bg-sky-950/80 text-sky-800 dark:text-sky-300 font-black shrink-0">
+                                        حكام الطاولة
+                                      </span>
+                                      <span className="font-bold text-slate-700 dark:text-slate-200">
+                                        {refInfo.tableRefs.map((name, i) => `${getOrdinalRefLabel(i)}: ${name}`).join(' • ')}
                                       </span>
                                     </div>
                                   )}

@@ -137,6 +137,16 @@ export interface RoleSidebarPermissions {
 
 export type AffiliationType = 'non_club' | 'club_affiliated' | 'open' | 'espoir_non_club' | 'sports_tracks' | 'espoir_club' | string;
 
+export type AffiliationDisplayMode = 'both' | 'non_club' | 'club_affiliated';
+
+export interface AffiliationDisplayConfig {
+  directorateId?: string;
+  globalMode: AffiliationDisplayMode;
+  sportModes?: Record<string, AffiliationDisplayMode>;
+  updatedAt?: any;
+  updatedBy?: string;
+}
+
 export interface Tournament {
   id: string;
   name: string;
@@ -214,6 +224,13 @@ export interface SchoolTournamentConfirmation {
     category: string;
     gender: 'Male' | 'Female';
     affiliationType: string;
+  }>;
+  branchTeachers?: Record<string, {
+    teacherId: string;
+    teacherName: string;
+    teacherPhone?: string;
+    teacherLeaseNumber?: string;
+    confirmedAt?: string;
   }>;
 }
 

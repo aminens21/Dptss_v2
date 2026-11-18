@@ -23,7 +23,13 @@ export const CreateSchoolModal: React.FC<CreateSchoolModalProps> = ({
   const [educationSector, setEducationSector] = useState<'public' | 'private'>(() =>
     initialData ? getSchoolEducationSector(initialData) : 'public'
   );
-  const [commune, setCommune] = useState(initialData?.commune || 'تاوريرت المركز');
+  const [commune, setCommune] = useState(
+    initialData?.commune === 'تنكرفا'
+      ? 'تنشرفي'
+      : initialData?.commune === 'تاوريرت'
+      ? 'تاوريرت المركز'
+      : initialData?.commune || 'تاوريرت المركز'
+  );
   const [teacherName, setTeacherName] = useState(initialData?.coordinatorName || initialData?.teacherName || '');
   const [phone, setPhone] = useState(initialData?.phone || '');
   const [principalName, setPrincipalName] = useState(initialData?.principalName || '');
@@ -211,6 +217,7 @@ export const CreateSchoolModal: React.FC<CreateSchoolModalProps> = ({
               >
                 <option value="تاوريرت المركز">تاوريرت المركز</option>
                 <option value="العيون سيدي ملوك">العيون سيدي ملوك</option>
+                <option value="عين لحجر">عين لحجر</option>
                 <option value="دبدو">دبدو</option>
                 <option value="سيدي لحسن">سيدي لحسن</option>
                 <option value="سيدي علي بلقاسم">سيدي علي بلقاسم</option>
@@ -218,7 +225,7 @@ export const CreateSchoolModal: React.FC<CreateSchoolModalProps> = ({
                 <option value="قطيطير">قطيطير</option>
                 <option value="أهل واد زا">أهل واد زا</option>
                 <option value="ملقى الويدان">ملقى الويدان</option>
-                <option value="تنكرفا">تنكرفا</option>
+                <option value="تنشرفي">تنشرفي</option>
                 <option value="أولاد امحمد">أولاد امحمد</option>
                 <option value="مشرع حمادي">مشرع حمادي</option>
               </select>

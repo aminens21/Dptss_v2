@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useMemo } from 'react';
-import { DataService, SPORTS_MAP, deduplicateById, normalizeSchoolCycleType } from '../lib/dataService';
-import { School, Match, Student, Tournament, Sport, Directorate, CrossCountryCategoryResult } from '../types';
+import { DataService, SPORTS_MAP, deduplicateById, normalizeSchoolCycleType, normalizeArabicMatchText, schoolNamesMatch, isClubTournament, isSchoolSectorAllowedForTournament, isAffiliationAllowedByDisplayConfig, getEffectiveConfirmedBranches, normalizeCategoryKey } from '../lib/dataService';
+import { School, Match, Student, Tournament, Sport, Directorate, CrossCountryCategoryResult, SchoolTournamentConfirmation, Referee, User, AffiliationDisplayConfig } from '../types';
 import { CROSS_COUNTRY_CATEGORIES, calculateTeamRankings } from '../lib/crossCountryConfig';
 import {
   BarChart3,
@@ -39,11 +39,17 @@ export const Statistics: React.FC = () => {
   const [tournaments, setTournaments] = useState<Tournament[]>([]);
   const [sportsConfig, setSportsConfig] = useState<Sport[]>([]);
   const [crossCountryResults, setCrossCountryResults] = useState<Record<string, CrossCountryCategoryResult>>({});
+  const [confirmations, setConfirmations] = useState<SchoolTournamentConfirmation[]>([]);
+  const [refereesList, setRefereesList] = useState<Referee[]>([]);
+  const [usersList, setUsersList] = useState<User[]>([]);
+  const [affiliationDisplayConfig, setAffiliationDisplayConfig] = useState<AffiliationDisplayConfig>(() =>
+    DataService.getAffiliationDisplayConfigSync()
+  );
   const [loading, setLoading] = useState(true);
   const [selectedSchoolAchievements, setSelectedSchoolAchievements] = useState<{ schoolName: string; achievements: any[] } | null>(null);
 
   // Filters & View Mode
-  const [activeTab, setActiveTab] = useState<'results' | 'participation' | 'sports' | 'matches'>('results');
+  const [activeTab, setActiveTab] = useState<'results' | 'participation' | 'tournaments_zones' | 'referees' | 'sports' | 'matches'>('results');
   const [activeKpiFocus, setActiveKpiFocus] = useState<'schools' | 'students' | 'matches' | 'sports' | null>(null);
   const [rankingViewMode, setRankingViewMode] = useState<'cards' | 'table'>(() =>
     typeof window !== 'undefined' && window.innerWidth < 768 ? 'cards' : 'table'
@@ -55,7 +61,7 @@ export const Statistics: React.FC = () => {
 
   const handleKpiCardClick = (
     focus: 'schools' | 'students' | 'matches' | 'sports',
-    targetTab: 'results' | 'participation' | 'sports' | 'matches'
+    targetTab: 'results' | 'participation' | 'tournaments_zones' | 'referees' | 'sports' | 'matches'
   ) => {
     setActiveKpiFocus(focus);
     setActiveTab(targetTab);
@@ -79,6 +85,8 @@ export const Statistics: React.FC = () => {
     window.addEventListener('directorateChanged', handleDirChange);
     window.addEventListener('crossCountryResultsUpdated', handleCCChange);
     window.addEventListener('dataSynchronized', handleCCChange);
+    window.addEventListener('schoolConfirmationsUpdated', handleCCChange);
+    window.addEventListener('schoolWithdrawalsUpdated', handleCCChange);
 
     const unsubscribeCC = DataService.subscribeCrossCountryResults((liveResults) => {
       if (liveResults) {
@@ -110,10 +118,16 @@ export const Statistics: React.FC = () => {
       loadAllData();
     });
 
+    const unsubscribeAffiliationCfg = DataService.subscribeToAffiliationDisplayConfig((cfg) => {
+      setAffiliationDisplayConfig(cfg);
+    });
+
     return () => {
       window.removeEventListener('directorateChanged', handleDirChange);
       window.removeEventListener('crossCountryResultsUpdated', handleCCChange);
       window.removeEventListener('dataSynchronized', handleCCChange);
+      window.removeEventListener('schoolConfirmationsUpdated', handleCCChange);
+      window.removeEventListener('schoolWithdrawalsUpdated', handleCCChange);
       if (unsubscribeCC) unsubscribeCC();
       if (unsubscribeTournaments) unsubscribeTournaments();
       if (unsubscribeMatches) unsubscribeMatches();
@@ -121,6 +135,7 @@ export const Statistics: React.FC = () => {
       if (unsubscribeStudents) unsubscribeStudents();
       if (unsubscribeVenues) unsubscribeVenues();
       if (unsubscribeSportsConfig) unsubscribeSportsConfig();
+      if (unsubscribeAffiliationCfg) unsubscribeAffiliationCfg();
     };
   }, []);
 
@@ -128,20 +143,26 @@ export const Statistics: React.FC = () => {
     setLoading(true);
     try {
       const activeDirId = DataService.getActiveDirectorateId();
-      const [sList, mList, stList, tList, cfgList, activeDir, ccRes] = await Promise.all([
+      const [sList, mList, stList, tList, cfgList, activeDir, ccRes, confList, refList, uList, affCfg] = await Promise.all([
         DataService.getSchools(),
         DataService.getMatches(),
         DataService.getStudents(),
         DataService.getTournaments(),
         DataService.getSportsConfig(),
         DataService.getActiveDirectorate(),
-        DataService.getCrossCountryResults()
+        DataService.getCrossCountryResults(),
+        DataService.getSchoolConfirmations().catch(() => [] as SchoolTournamentConfirmation[]),
+        DataService.getReferees().catch(() => [] as Referee[]),
+        DataService.getUsers().catch(() => [] as User[]),
+        DataService.getAffiliationDisplayConfig().catch(() => DataService.getAffiliationDisplayConfigSync())
       ]);
 
-      const dirSchools = sList.filter(s => (s.directorateId || 'taourirt') === activeDirId);
-      const dirMatches = mList.filter(m => !activeDirId || activeDirId === 'all' || (m.directorateId || 'taourirt') === activeDirId || (!m.directorateId && activeDirId === 'taourirt'));
-      const dirStudents = stList.filter(st => (st.directorateId || 'taourirt') === activeDirId);
-      const dirTournaments = tList.filter(t => (t.directorateId || 'taourirt') === activeDirId);
+      const isAllDirs = !activeDirId || activeDirId === 'all';
+      const dirSchools = isAllDirs ? sList : sList.filter(s => (s.directorateId || 'taourirt') === activeDirId);
+      const dirMatches = isAllDirs ? mList : mList.filter(m => (m.directorateId || 'taourirt') === activeDirId || (!m.directorateId && activeDirId === 'taourirt'));
+      const dirStudents = isAllDirs ? stList : stList.filter(st => (st.directorateId || 'taourirt') === activeDirId);
+      const dirTournaments = isAllDirs ? tList : tList.filter(t => (t.directorateId || 'taourirt') === activeDirId);
+      const dirConfirmations = isAllDirs ? confList : confList.filter(c => !c.directorateId || c.directorateId === activeDirId);
 
       setActiveDirObj(activeDir);
       setSchools(deduplicateById<School>(dirSchools));
@@ -150,6 +171,10 @@ export const Statistics: React.FC = () => {
       setTournaments(deduplicateById<Tournament>(dirTournaments));
       setSportsConfig(cfgList);
       if (ccRes) setCrossCountryResults(ccRes);
+      setConfirmations(dirConfirmations);
+      setRefereesList(refList || []);
+      setUsersList(uList || []);
+      if (affCfg) setAffiliationDisplayConfig(affCfg);
     } catch (e) {
       console.error('Error loading stats data:', e);
     } finally {
@@ -157,11 +182,55 @@ export const Statistics: React.FC = () => {
     }
   };
 
+  // Normalize commune names ("تنكرفا" -> "تنشرفي", "تاوريرت" -> "تاوريرت المركز") & resolve educational zone (Zone 1 vs Zone 2)
+  const normalizeCommuneDisplay = (commune?: string): string => {
+    const raw = (commune || '').trim();
+    if (!raw) return 'تاوريرت المركز';
+    const norm = normalizeArabicMatchText(raw);
+    if (norm.includes('تنكرف') || norm.includes('تنكرفا') || norm.includes('تنشرف')) {
+      return 'تنشرفي';
+    }
+    if (norm === 'تاوريرت' || norm === 'تاوريرت المركز') {
+      return 'تاوريرت المركز';
+    }
+    if (norm.includes('العيون سيدي ملوك') || norm === 'العيون' || (norm.includes('العيون') && norm.includes('ملوك'))) {
+      return 'العيون سيدي ملوك';
+    }
+    if (norm.includes('عين لحجر') || norm.includes('عين الحجر')) {
+      return 'عين لحجر';
+    }
+    return raw;
+  };
+
+  const getEducationalZone = (commune?: string, schoolName?: string): 'zone1' | 'zone2' => {
+    const clean = normalizeCommuneDisplay(commune);
+    const norm = normalizeArabicMatchText(clean);
+    const isElAioun = norm.includes('العيون سيدي ملوك') || norm === 'العيون' || (norm.includes('العيون') && norm.includes('ملوك'));
+    const isAinLahjar = norm.includes('عين لحجر') || norm.includes('عين الحجر');
+    if (isElAioun || isAinLahjar) return 'zone1';
+
+    // Fallback when school commune is missing/defaulted to Taourirt Center but school name explicitly belongs to Zone 1
+    if ((!commune || !commune.trim() || norm === 'تاوريرت المركز') && schoolName) {
+      const nameNorm = normalizeArabicMatchText(schoolName);
+      if (nameNorm.includes('العيون سيدي ملوك') || nameNorm.includes('عين لحجر') || nameNorm.includes('عين الحجر')) {
+        return 'zone1';
+      }
+    }
+    return 'zone2';
+  };
+
+  const matchesZoneOrCommuneFilter = (commune?: string, schoolName?: string): boolean => {
+    if (selectedCommune === 'ALL') return true;
+    if (selectedCommune === 'ZONE_1') return getEducationalZone(commune, schoolName) === 'zone1';
+    if (selectedCommune === 'ZONE_2') return getEducationalZone(commune, schoolName) === 'zone2';
+    return normalizeCommuneDisplay(commune) === selectedCommune;
+  };
+
   // Distinct communes list
   const communes = useMemo(() => {
     const set = new Set<string>();
     schools.forEach((s) => {
-      if (s.commune) set.add(s.commune);
+      if (s.commune) set.add(normalizeCommuneDisplay(s.commune));
     });
     return Array.from(set).sort();
   }, [schools]);
@@ -195,7 +264,7 @@ export const Statistics: React.FC = () => {
         schoolId: s.id,
         schoolName: s.name,
         type: normalizeSchoolCycleType(s),
-        commune: s.commune || 'تاوريرت',
+        commune: normalizeCommuneDisplay(s.commune),
         firstPlaces: 0,
         secondPlaces: 0,
         thirdPlaces: 0,
@@ -590,7 +659,7 @@ export const Statistics: React.FC = () => {
     return list
       .filter((item) => {
         if (selectedType !== 'ALL' && item.type !== selectedType) return false;
-        if (selectedCommune !== 'ALL' && item.commune !== selectedCommune) return false;
+        if (!matchesZoneOrCommuneFilter(item.commune, item.schoolName)) return false;
         if (searchQuery.trim()) {
           const q = searchQuery.toLowerCase().trim();
           if (!item.schoolName.toLowerCase().includes(q) && !item.commune.toLowerCase().includes(q)) return false;
@@ -634,7 +703,7 @@ export const Statistics: React.FC = () => {
         schoolId: s.id,
         schoolName: s.name,
         type: normalizeSchoolCycleType(s),
-        commune: s.commune || 'تاوريرت',
+        commune: normalizeCommuneDisplay(s.commune),
         maleStudents: 0,
         femaleStudents: 0,
         totalStudents: 0,
@@ -651,7 +720,7 @@ export const Statistics: React.FC = () => {
           schoolId: found?.id || st.schoolId,
           schoolName: targetSchoolName,
           type: found ? normalizeSchoolCycleType(found) : normalizeSchoolCycleType({ name: targetSchoolName }),
-          commune: found?.commune || 'تاوريرت',
+          commune: normalizeCommuneDisplay(found?.commune),
           maleStudents: 0,
           femaleStudents: 0,
           totalStudents: 0,
@@ -680,7 +749,7 @@ export const Statistics: React.FC = () => {
     return list
       .filter((item) => {
         if (selectedType !== 'ALL' && item.type !== selectedType) return false;
-        if (selectedCommune !== 'ALL' && item.commune !== selectedCommune) return false;
+        if (!matchesZoneOrCommuneFilter(item.commune, item.schoolName)) return false;
         if (searchQuery.trim()) {
           const q = searchQuery.toLowerCase().trim();
           if (!item.schoolName.toLowerCase().includes(q) && !item.commune.toLowerCase().includes(q)) return false;
@@ -744,23 +813,31 @@ export const Statistics: React.FC = () => {
       }
     });
 
-    // For Cross Country: count completed race podiums
+    // For Cross Country: count completed race podiums ONLY if Cross Country tournament is active
+    const hasCCTourn = tournaments.some(t => t.sportId === 'cross_country' && t.status !== 'Draft' && (t as any).isActive !== false);
     if (map['cross_country']) {
-      const ccCompletedRaces = CROSS_COUNTRY_CATEGORIES.filter(c => crossCountryResults[c.id]?.podium && crossCountryResults[c.id].podium.length > 0).length;
+      const ccCompletedRaces = hasCCTourn
+        ? CROSS_COUNTRY_CATEGORIES.filter(c => crossCountryResults[c.id]?.podium && crossCountryResults[c.id].podium.length > 0).length
+        : 0;
       map['cross_country'].matchesCount = ccCompletedRaces;
     }
 
     return Object.values(map).sort((a, b) => b.studentsCount - a.studentsCount);
-  }, [students, matches, crossCountryResults]);
+  }, [students, matches, tournaments, crossCountryResults]);
 
-  // Total summary counts
+  // Total summary counts (no hardcoded CC ghost counts when Cross Country isn't programmed)
   const summaryCounts = useMemo(() => {
+    const activeTourns = tournaments.filter(t => t.status !== 'Draft' && (t as any).isActive !== false);
+    const hasCCTourn = activeTourns.some(t => t.sportId === 'cross_country');
     const totalStudents = students.length;
     const totalBoys = students.filter((s) => s.gender === 'Male').length;
     const totalGirls = students.filter((s) => s.gender === 'Female').length;
-    const ccCompletedCount = CROSS_COUNTRY_CATEGORIES.filter(c => crossCountryResults[c.id]?.podium && crossCountryResults[c.id].podium.length > 0).length;
+    const ccCompletedCount = hasCCTourn
+      ? CROSS_COUNTRY_CATEGORIES.filter(c => crossCountryResults[c.id]?.podium && crossCountryResults[c.id].podium.length > 0).length
+      : 0;
+    const ccTotalCount = hasCCTourn ? 8 : 0;
     const completedMatches = matches.filter((m) => m.status === 'Completed').length + ccCompletedCount;
-    const totalMatchesCount = matches.length + 8; // Including 8 Cross Country races
+    const totalMatchesCount = matches.length + ccTotalCount;
     return {
       schools: schools.length,
       students: totalStudents,
@@ -768,9 +845,376 @@ export const Statistics: React.FC = () => {
       girls: totalGirls,
       matches: totalMatchesCount,
       completedMatches,
-      tournaments: tournaments.length + 1 // Including Cross Country Championship
+      tournaments: activeTourns.length
     };
   }, [schools, students, matches, tournaments, crossCountryResults]);
+
+  // 4. Championship Participation Rates by Educational Cycle & Zone (Zone 1: El Aioun & Ain Lahjar, Zone 2: Tansharfi/Tankarfa & Rest)
+  const tournamentParticipationByCycleAndZone = useMemo(() => {
+    const CYCLE_ORDER: Array<'ابتدائي' | 'إعدادي' | 'تأهيلي' | 'خصوصي'> = ['ابتدائي', 'إعدادي', 'تأهيلي', 'خصوصي'];
+
+    const isSchoolCycleAllowedByTourn = (school: School, tourn: Tournament): boolean => {
+      if (!isSchoolSectorAllowedForTournament(school, tourn)) return false;
+
+      const sCycle = normalizeSchoolCycleType(school);
+      const rawLevel = (tourn.level || '').trim();
+      const normRawLevel = normalizeArabicMatchText(rawLevel);
+      const isAllOrEmptyLevel = !rawLevel || rawLevel.toUpperCase() === 'ALL' || normRawLevel.includes('جميع');
+      const levelTokens = rawLevel.split(/[,،/]+/).map(x => x.trim().toLowerCase()).filter(Boolean);
+
+      const matchesLevelToken = (targetCycle: 'ابتدائي' | 'إعدادي' | 'تأهيلي') => {
+        if (isAllOrEmptyLevel) return true;
+        return levelTokens.some(tok => {
+          if (targetCycle === 'ابتدائي') return tok === 'primary' || tok.includes('ابتدائ');
+          if (targetCycle === 'إعدادي') return tok === 'middle' || tok.includes('إعداد') || tok.includes('اعداد');
+          if (targetCycle === 'تأهيلي') return tok === 'high' || tok.includes('تأهيل') || tok.includes('تاهيل') || tok.includes('ثانوي');
+          return false;
+        });
+      };
+
+      const lvlPrimary = matchesLevelToken('ابتدائي');
+      const lvlMiddle = matchesLevelToken('إعدادي');
+      const lvlHigh = matchesLevelToken('تأهيلي');
+
+      const rawAge = String(tourn.ageCategory || '').trim();
+      const normAgeUpper = rawAge.toUpperCase();
+      const normAgeAr = normalizeArabicMatchText(rawAge);
+      const isAllAge = !rawAge || normAgeUpper === 'ALL' || normAgeAr.includes('جميع');
+      const hasU12 = normAgeUpper.includes('U12') || normAgeUpper.includes('U13') || normAgeAr.includes('براعم') || normAgeAr.includes('برعمات');
+      const hasU15 = normAgeUpper.includes('U15') || normAgeAr.includes('صغار') || normAgeAr.includes('صغيرات');
+      const hasU18OrU20 =
+        normAgeUpper.includes('U18') ||
+        normAgeUpper.includes('U20') ||
+        normAgeAr.includes('فتيان') ||
+        normAgeAr.includes('فتيات') ||
+        normAgeAr.includes('شبان') ||
+        normAgeAr.includes('شابات');
+      const hasExplicitStandardAge = hasU12 || hasU15 || hasU18OrU20;
+
+      const isExclusivelyPrimaryLevel = !isAllOrEmptyLevel && lvlPrimary && !lvlMiddle && !lvlHigh;
+      const isExclusivelyMiddleLevel = !isAllOrEmptyLevel && lvlMiddle && !lvlPrimary && !lvlHigh;
+      const isExclusivelyHighLevel = !isAllOrEmptyLevel && lvlHigh && !lvlPrimary && !lvlMiddle;
+
+      // Check whether the sport definition itself supports U12 (Primary)
+      const sportMetaCfg = sportsConfig.find(sc => sc.id === tourn.sportId);
+      const sportSupportsU12 =
+        !sportMetaCfg?.ageCategories?.length ||
+        sportMetaCfg.ageCategories.some(c => {
+          const cu = String(c || '').toUpperCase();
+          return cu.includes('U12') || cu.includes('U13');
+        }) ||
+        (sportMetaCfg.customAgeCategories || []).some(c => {
+          const cu = String(c?.id || c?.name || '').toUpperCase();
+          return cu.includes('U12') || cu.includes('U13');
+        });
+
+      const allowsPrimary =
+        lvlPrimary &&
+        (isExclusivelyPrimaryLevel ||
+          (hasExplicitStandardAge ? hasU12 : isAllAge && sportSupportsU12));
+
+      const allowsMiddle =
+        lvlMiddle &&
+        (isExclusivelyMiddleLevel || !hasExplicitStandardAge || isAllAge || hasU15);
+
+      const allowsHigh =
+        lvlHigh &&
+        (isExclusivelyHighLevel || !hasExplicitStandardAge || isAllAge || hasU18OrU20);
+
+      if (sCycle === 'ابتدائي') return allowsPrimary;
+      if (sCycle === 'إعدادي') return allowsMiddle;
+      if (sCycle === 'تأهيلي') return allowsHigh;
+      if (sCycle === 'خصوصي') {
+        const sTypeAndName = normalizeArabicMatchText(`${school.type || ''} ${school.name || ''}`);
+        const hintsPrimary = sTypeAndName.includes('ابتدائ');
+        const hintsMiddle = sTypeAndName.includes('اعداد') || sTypeAndName.includes('إعداد');
+        const hintsHigh = sTypeAndName.includes('تاهيل') || sTypeAndName.includes('تأهيل');
+        if (!hintsPrimary && !hintsMiddle && !hintsHigh) {
+          return allowsPrimary || allowsMiddle || allowsHigh;
+        }
+        return (hintsPrimary && allowsPrimary) || (hintsMiddle && allowsMiddle) || (hintsHigh && allowsHigh);
+      }
+      return false;
+    };
+
+    const activeTourns = tournaments.filter(t => {
+      if (t.status === 'Draft' || (t as any).isActive === false) return false;
+      const tAff = t.affiliationType || (isClubTournament(t) ? 'club_affiliated' : 'non_club');
+      if (!isAffiliationAllowedByDisplayConfig(tAff, affiliationDisplayConfig, t.sportId)) return false;
+      if (selectedSport !== 'ALL' && t.sportId !== selectedSport) return false;
+      return true;
+    });
+
+    const groupedBySport = new Map<string, Tournament[]>();
+    activeTourns.forEach(t => {
+      if (!t.sportId) return;
+      if (!groupedBySport.has(t.sportId)) groupedBySport.set(t.sportId, []);
+      groupedBySport.get(t.sportId)!.push(t);
+    });
+
+    const reports: Array<{
+      sportId: string;
+      sportName: string;
+      sportIcon: string;
+      tournamentsCount: number;
+      overall: { eligible: number; participating: number; pct: number; z1Elig: number; z1Part: number; z1Pct: number; z2Elig: number; z2Part: number; z2Pct: number };
+      cycles: Array<{
+        cycle: 'ابتدائي' | 'إعدادي' | 'تأهيلي' | 'خصوصي';
+        eligible: number;
+        participating: number;
+        pct: number;
+        z1Elig: number;
+        z1Part: number;
+        z1Pct: number;
+        z2Elig: number;
+        z2Part: number;
+        z2Pct: number;
+        participatingSchoolNames: string[];
+      }>;
+    }> = [];
+
+    groupedBySport.forEach((sportTourns, sportId) => {
+      const sportMeta = SPORTS_MAP[sportId] || sportsConfig.find(s => s.id === sportId) || { name: sportId, icon: '🏆' };
+
+      // Build canonical participating school ID/name set for this sport (excluding withdrawn & disallowed affiliations)
+      const isSchoolParticipatingInSport = (school: School): boolean => {
+        const hasStudent = students.some(st => {
+          if (st.sportId !== sportId) return false;
+          if (!isAffiliationAllowedByDisplayConfig(st.affiliationType, affiliationDisplayConfig, sportId)) return false;
+          if (DataService.isSchoolWithdrawn(
+            { sportId, ageCategory: st.category, gender: st.gender, affiliationType: st.affiliationType },
+            st.schoolId,
+            st.schoolName || ''
+          )) {
+            return false;
+          }
+          return (st.schoolId && st.schoolId === school.id) || schoolNamesMatch(st.schoolName || '', school.name);
+        });
+        if (hasStudent) return true;
+
+        return confirmations.some(c => {
+          if (c.sportId !== sportId || c.status !== 'confirmed') return false;
+          const matchesSchool = (c.schoolId && c.schoolId === school.id) || schoolNamesMatch(c.schoolName || '', school.name);
+          if (!matchesSchool) return false;
+          const activeBranches = getEffectiveConfirmedBranches(c, true).filter(b =>
+            isAffiliationAllowedByDisplayConfig(b.affiliationType, affiliationDisplayConfig, sportId)
+          );
+          return activeBranches.length > 0;
+        });
+      };
+
+      const cycleBreakdown: typeof reports[number]['cycles'] = [];
+      let overallEligSet = new Set<string>();
+      let overallPartSet = new Set<string>();
+      let overallZ1EligSet = new Set<string>();
+      let overallZ1PartSet = new Set<string>();
+      let overallZ2EligSet = new Set<string>();
+      let overallZ2PartSet = new Set<string>();
+
+      CYCLE_ORDER.forEach(cycle => {
+        if (selectedType !== 'ALL' && selectedType !== cycle) return;
+
+        const eligibleSchools = schools.filter(s => {
+          if (normalizeSchoolCycleType(s) !== cycle) return false;
+          if (!matchesZoneOrCommuneFilter(s.commune, s.name)) return false;
+          return sportTourns.some(t => isSchoolCycleAllowedByTourn(s, t));
+        });
+
+        if (eligibleSchools.length === 0) return;
+
+        let z1Elig = 0;
+        let z1Part = 0;
+        let z2Elig = 0;
+        let z2Part = 0;
+        const partNames: string[] = [];
+
+        eligibleSchools.forEach(s => {
+          const zone = getEducationalZone(s.commune, s.name);
+          const participates = isSchoolParticipatingInSport(s);
+          overallEligSet.add(s.id);
+          if (zone === 'zone1') {
+            z1Elig += 1;
+            overallZ1EligSet.add(s.id);
+            if (participates) {
+              z1Part += 1;
+              overallZ1PartSet.add(s.id);
+              overallPartSet.add(s.id);
+              partNames.push(s.name);
+            }
+          } else {
+            z2Elig += 1;
+            overallZ2EligSet.add(s.id);
+            if (participates) {
+              z2Part += 1;
+              overallZ2PartSet.add(s.id);
+              overallPartSet.add(s.id);
+              partNames.push(s.name);
+            }
+          }
+        });
+
+        const totalElig = eligibleSchools.length;
+        const totalPart = z1Part + z2Part;
+        cycleBreakdown.push({
+          cycle,
+          eligible: totalElig,
+          participating: totalPart,
+          pct: totalElig > 0 ? Math.round((totalPart / totalElig) * 100) : 0,
+          z1Elig,
+          z1Part,
+          z1Pct: z1Elig > 0 ? Math.round((z1Part / z1Elig) * 100) : 0,
+          z2Elig,
+          z2Part,
+          z2Pct: z2Elig > 0 ? Math.round((z2Part / z2Elig) * 100) : 0,
+          participatingSchoolNames: partNames
+        });
+      });
+
+      if (cycleBreakdown.length === 0) return;
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase().trim();
+        const matchSport = sportMeta.name.toLowerCase().includes(q);
+        const matchSchool = cycleBreakdown.some(c => c.participatingSchoolNames.some(n => n.toLowerCase().includes(q)));
+        if (!matchSport && !matchSchool) return;
+      }
+
+      const oElig = overallEligSet.size;
+      const oPart = overallPartSet.size;
+      const oZ1Elig = overallZ1EligSet.size;
+      const oZ1Part = overallZ1PartSet.size;
+      const oZ2Elig = overallZ2EligSet.size;
+      const oZ2Part = overallZ2PartSet.size;
+
+      reports.push({
+        sportId,
+        sportName: sportMeta.name,
+        sportIcon: sportMeta.icon || '🏆',
+        tournamentsCount: sportTourns.length,
+        overall: {
+          eligible: oElig,
+          participating: oPart,
+          pct: oElig > 0 ? Math.round((oPart / oElig) * 100) : 0,
+          z1Elig: oZ1Elig,
+          z1Part: oZ1Part,
+          z1Pct: oZ1Elig > 0 ? Math.round((oZ1Part / oZ1Elig) * 100) : 0,
+          z2Elig: oZ2Elig,
+          z2Part: oZ2Part,
+          z2Pct: oZ2Elig > 0 ? Math.round((oZ2Part / oZ2Elig) * 100) : 0
+        },
+        cycles: cycleBreakdown
+      });
+    });
+
+    return reports.sort((a, b) => b.overall.pct - a.overall.pct || b.overall.participating - a.overall.participating);
+  }, [tournaments, schools, students, confirmations, sportsConfig, affiliationDisplayConfig, selectedSport, selectedType, selectedCommune, searchQuery]);
+
+  // 5. Officiated Matches Statistics per Referee Teacher Broken Down by Sport
+  const refereeOfficiatingStats = useMemo(() => {
+    const cleanRefName = (raw: string): string =>
+      String(raw || '')
+        .replace(/الحكم المعتمد/gi, '')
+        .replace(/حكم الأول|الحكم الأول|حكم أول/gi, '')
+        .replace(/حكم الثاني|الحكم الثاني|حكم ثاني/gi, '')
+        .replace(/حكم الساحة|حكام الساحة|حكم الطاولة|حكام الطاولة/gi, '')
+        .replace(/\(?\s*أستاذ\s*\)?/gi, '')
+        .replace(/^[:\-–—\s]+|[:\-–—\s]+$/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+    const refIdToName = new Map<string, string>();
+    refereesList.forEach(r => {
+      if (r.id && r.fullName) refIdToName.set(r.id.trim().toLowerCase(), cleanRefName(r.fullName));
+    });
+    usersList.forEach(u => {
+      if (u.id && u.fullName && !refIdToName.has(u.id.trim().toLowerCase())) {
+        refIdToName.set(u.id.trim().toLowerCase(), cleanRefName(u.fullName));
+      }
+    });
+
+    interface RefAccumulator {
+      key: string;
+      displayName: string;
+      allMatchIds: Set<string>;
+      completedMatchIds: Set<string>;
+      sportMatchIds: Record<string, Set<string>>;
+    }
+
+    const refMap = new Map<string, RefAccumulator>();
+
+    matches.forEach(m => {
+      if (!m || !m.id) return;
+      if (selectedSport !== 'ALL' && m.sportId !== selectedSport) return;
+      const mAff = (m as any).affiliationType || 'non_club';
+      if (!isAffiliationAllowedByDisplayConfig(mAff, affiliationDisplayConfig, m.sportId)) return;
+
+      const entries = [
+        ...(Array.isArray(m.fieldReferees) ? m.fieldReferees : []),
+        ...(Array.isArray(m.tableReferees) ? m.tableReferees : []),
+        ...(Array.isArray(m.referees) ? m.referees : []),
+        ...(m.referee1Id ? [m.referee1Id] : []),
+        ...(m.referee2Id ? [m.referee2Id] : [])
+      ];
+
+      entries.forEach(rawEntry => {
+        const trimmed = (rawEntry || '').trim();
+        if (!trimmed) return;
+        const resolvedById = refIdToName.get(trimmed.toLowerCase());
+        const cleaned = cleanRefName(resolvedById || trimmed);
+        if (!cleaned || cleaned.length < 2) return;
+        const normKey = normalizeArabicMatchText(cleaned);
+        if (!normKey) return;
+
+        if (!refMap.has(normKey)) {
+          refMap.set(normKey, {
+            key: normKey,
+            displayName: cleaned,
+            allMatchIds: new Set<string>(),
+            completedMatchIds: new Set<string>(),
+            sportMatchIds: {}
+          });
+        }
+        const acc = refMap.get(normKey)!;
+        acc.allMatchIds.add(m.id);
+        if (m.status === 'Completed') acc.completedMatchIds.add(m.id);
+        const sId = m.sportId || 'football';
+        if (!acc.sportMatchIds[sId]) acc.sportMatchIds[sId] = new Set<string>();
+        acc.sportMatchIds[sId].add(m.id);
+      });
+    });
+
+    return Array.from(refMap.values())
+      .map(acc => {
+        const sportsBreakdown = Object.entries(acc.sportMatchIds)
+          .map(([sportId, idSet]) => {
+            const spInfo = SPORTS_MAP[sportId] || sportsConfig.find(s => s.id === sportId) || { name: sportId, icon: '🏆' };
+            return {
+              sportId,
+              sportName: spInfo.name,
+              sportIcon: spInfo.icon || '🏆',
+              count: idSet.size
+            };
+          })
+          .sort((a, b) => b.count - a.count);
+
+        return {
+          key: acc.key,
+          displayName: acc.displayName,
+          totalMatches: acc.allMatchIds.size,
+          completedMatches: acc.completedMatchIds.size,
+          sportsBreakdown
+        };
+      })
+      .filter(r => {
+        if (searchQuery.trim()) {
+          const q = searchQuery.toLowerCase().trim();
+          const nameHit = r.displayName.toLowerCase().includes(q);
+          const sportHit = r.sportsBreakdown.some(sb => sb.sportName.toLowerCase().includes(q));
+          return nameHit || sportHit;
+        }
+        return true;
+      })
+      .sort((a, b) => b.totalMatches - a.totalMatches || b.completedMatches - a.completedMatches || a.displayName.localeCompare(b.displayName, 'ar'));
+  }, [matches, refereesList, usersList, sportsConfig, affiliationDisplayConfig, selectedSport, searchQuery]);
 
   const handlePrint = () => {
     window.print();
@@ -948,6 +1392,32 @@ export const Statistics: React.FC = () => {
 
             <button
               type="button"
+              onClick={() => setActiveTab('tournaments_zones')}
+              className={`min-h-[42px] px-3 sm:px-4 py-2 rounded-xl text-[11px] sm:text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer text-center ${
+                activeTab === 'tournaments_zones'
+                  ? 'bg-indigo-600 text-white shadow-xs'
+                  : 'bg-white text-slate-700 hover:bg-slate-100 border border-slate-200'
+              }`}
+            >
+              <MapPin className="w-3.5 h-3.5 shrink-0" />
+              <span>نسب المشاركة بالمناطق والأسلاك</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveTab('referees')}
+              className={`min-h-[42px] px-3 sm:px-4 py-2 rounded-xl text-[11px] sm:text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer text-center ${
+                activeTab === 'referees'
+                  ? 'bg-teal-600 text-white shadow-xs'
+                  : 'bg-white text-slate-700 hover:bg-slate-100 border border-slate-200'
+              }`}
+            >
+              <ShieldCheck className="w-3.5 h-3.5 shrink-0" />
+              <span>إحصائيات التحكيم والأساتذة</span>
+            </button>
+
+            <button
+              type="button"
               onClick={() => setActiveTab('sports')}
               className={`min-h-[42px] px-3 sm:px-4 py-2 rounded-xl text-[11px] sm:text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer text-center ${
                 activeTab === 'sports'
@@ -965,7 +1435,7 @@ export const Statistics: React.FC = () => {
             <Search className="w-3.5 h-3.5 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2" />
             <input
               type="text"
-              placeholder="بحث باسم المؤسسة أو الجماعة..."
+              placeholder={activeTab === 'referees' ? 'بحث باسم الأستاذ الحكم أو الرياضة...' : 'بحث باسم المؤسسة أو الجماعة...'}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full pr-8 pl-3 py-2 text-xs bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
@@ -1016,7 +1486,7 @@ export const Statistics: React.FC = () => {
             </div>
 
             <div className="grid grid-cols-1 sm:flex sm:flex-wrap items-stretch sm:items-center gap-2 w-full sm:w-auto">
-              {(activeTab === 'results' || activeTab === 'matches') && (
+              {(activeTab === 'results' || activeTab === 'matches' || activeTab === 'tournaments_zones' || activeTab === 'referees') && (
                 <select
                   value={selectedSport}
                   onChange={(e) => setSelectedSport(e.target.value)}
@@ -1031,7 +1501,7 @@ export const Statistics: React.FC = () => {
                 </select>
               )}
 
-              {activeTab !== 'matches' && (
+              {activeTab !== 'matches' && activeTab !== 'referees' && (
                 <>
                   <select
                     value={selectedType}
@@ -1050,7 +1520,9 @@ export const Statistics: React.FC = () => {
                     onChange={(e) => setSelectedCommune(e.target.value)}
                     className="px-2.5 py-2 sm:py-1.5 bg-slate-50 border border-slate-200 rounded-xl sm:rounded-lg font-medium text-slate-700 w-full sm:w-auto cursor-pointer"
                   >
-                    <option value="ALL">جميع الجماعات الترابية</option>
+                    <option value="ALL">جميع المناطق والجماعات الترابية</option>
+                    <option value="ZONE_1">📍 المنطقة التربوية 1 (العيون سيدي ملوك • عين لحجر)</option>
+                    <option value="ZONE_2">📍 المنطقة التربوية 2 (تاوريرت المركز • تنشرفي • باقي الجماعات)</option>
                     {communes.map((c) => (
                       <option key={c} value={c}>
                         جماعة {c}
@@ -1662,6 +2134,222 @@ export const Statistics: React.FC = () => {
                 </tbody>
               </table>
             </div>
+            )}
+          </div>
+        )}
+
+        {/* Tab: Participation Rate by Tournament, Educational Cycle & Educational Zone (1 vs 2) */}
+        {activeTab === 'tournaments_zones' && (
+          <div className="p-4 sm:p-5 space-y-5 bg-slate-50/40">
+            {/* Educational Zones Explanatory Legend */}
+            <div className="bg-indigo-50/90 border border-indigo-200 rounded-2xl p-3.5 sm:p-4 flex flex-col md:flex-row md:items-center justify-between gap-3">
+              <div className="space-y-1">
+                <h3 className="text-xs sm:text-sm font-black text-indigo-950 flex items-center gap-1.5">
+                  <MapPin className="w-4 h-4 text-indigo-600 shrink-0" />
+                  <span>نسب مشاركة المؤسسات في كل بطولة حسب الأسلاك التعليمية المعنية والمناطق التربوية</span>
+                </h3>
+                <p className="text-[11px] text-indigo-800/80 font-medium">
+                  يُحسب السلك المعني تلقائياً بناءً على إعدادات كل بطولة وعدد المؤسسات المؤهلة والمشاركة فعلياً في كل منطقة تربوية.
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2 text-[10px] font-black shrink-0">
+                <span className="px-2.5 py-1 rounded-xl bg-blue-600 text-white shadow-3xs">
+                  المنطقة التربوية 1: العيون سيدي ملوك • عين لحجر
+                </span>
+                <span className="px-2.5 py-1 rounded-xl bg-emerald-600 text-white shadow-3xs">
+                  المنطقة التربوية 2: تاوريرت المركز • تنشرفي • باقي الجماعات
+                </span>
+              </div>
+            </div>
+
+            {tournamentParticipationByCycleAndZone.length === 0 ? (
+              <div className="py-12 text-center bg-white rounded-2xl border border-slate-200 text-slate-400 text-xs">
+                لا توجد بطولات مبرمجة مطابقة لمعايير التصفية الحالية
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {tournamentParticipationByCycleAndZone.map(report => (
+                  <div key={report.sportId} className="bg-white rounded-2xl border border-slate-200 shadow-2xs overflow-hidden">
+                    {/* Championship Header */}
+                    <div className="p-3.5 sm:p-4 bg-gradient-to-r from-slate-900 to-indigo-950 text-white flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div className="flex items-center gap-2.5">
+                        <span className="w-10 h-10 rounded-xl bg-white/10 border border-white/20 flex items-center justify-center text-xl shrink-0">
+                          {report.sportIcon}
+                        </span>
+                        <div>
+                          <h4 className="text-sm font-black text-white">
+                            بطولة {report.sportName}
+                          </h4>
+                          <p className="text-[10px] text-slate-300 font-medium mt-0.5">
+                            الأسلاك المعنية: {report.cycles.map(c => c.cycle).join(' • ')}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2 text-[11px] font-black">
+                        <span className="px-2.5 py-1 rounded-xl bg-blue-500/20 border border-blue-400/30 text-blue-200 tabular-nums">
+                          م1: {report.overall.z1Part}/{report.overall.z1Elig} ({report.overall.z1Pct}%)
+                        </span>
+                        <span className="px-2.5 py-1 rounded-xl bg-emerald-500/20 border border-emerald-400/30 text-emerald-200 tabular-nums">
+                          م2: {report.overall.z2Part}/{report.overall.z2Elig} ({report.overall.z2Pct}%)
+                        </span>
+                        <span className="px-3 py-1 rounded-xl bg-amber-400 text-slate-950 tabular-nums shadow-xs">
+                          الإجمالي: {report.overall.participating}/{report.overall.eligible} ({report.overall.pct}%)
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Cycle x Zone Breakdown Table */}
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-center text-xs min-w-[640px]">
+                        <thead className="bg-slate-50 text-slate-700 border-b border-slate-200 font-bold text-[11px]">
+                          <tr>
+                            <th className="py-2.5 px-4 text-right">السلك التعليمي المعني</th>
+                            <th className="py-2.5 px-3 bg-blue-50/50 text-blue-900">
+                              المنطقة التربوية 1
+                              <div className="text-[9px] font-normal text-blue-700">العيون سيدي ملوك وعين لحجر</div>
+                            </th>
+                            <th className="py-2.5 px-3 bg-emerald-50/50 text-emerald-900">
+                              المنطقة التربوية 2
+                              <div className="text-[9px] font-normal text-emerald-700">تاوريرت المركز، تنشرفي وباقي الجماعات</div>
+                            </th>
+                            <th className="py-2.5 px-4 bg-indigo-50/50 text-indigo-950">النسبة الإجمالية بالمديرية</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {report.cycles.map(c => (
+                            <tr key={`${report.sportId}-${c.cycle}`} className="hover:bg-slate-50/80 transition-colors">
+                              <td className="py-3 px-4 text-right font-black text-slate-800">
+                                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-100 border border-slate-200">
+                                  <span>🎓</span>
+                                  <span>{c.cycle}</span>
+                                </span>
+                              </td>
+
+                              <td className="py-3 px-3 bg-blue-50/20">
+                                {c.z1Elig > 0 ? (
+                                  <div className="flex flex-col items-center gap-1">
+                                    <span className="font-black text-blue-800 tabular-nums">
+                                      {c.z1Pct}% <span className="text-[10px] font-semibold text-slate-500">({c.z1Part} من {c.z1Elig})</span>
+                                    </span>
+                                    <div className="w-24 h-1.5 bg-blue-100 rounded-full overflow-hidden">
+                                      <div className="h-full bg-blue-600 rounded-full" style={{ width: `${Math.min(100, c.z1Pct)}%` }} />
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <span className="text-slate-400 text-[11px]">لا مؤسسات معنية</span>
+                                )}
+                              </td>
+
+                              <td className="py-3 px-3 bg-emerald-50/20">
+                                {c.z2Elig > 0 ? (
+                                  <div className="flex flex-col items-center gap-1">
+                                    <span className="font-black text-emerald-800 tabular-nums">
+                                      {c.z2Pct}% <span className="text-[10px] font-semibold text-slate-500">({c.z2Part} من {c.z2Elig})</span>
+                                    </span>
+                                    <div className="w-24 h-1.5 bg-emerald-100 rounded-full overflow-hidden">
+                                      <div className="h-full bg-emerald-600 rounded-full" style={{ width: `${Math.min(100, c.z2Pct)}%` }} />
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <span className="text-slate-400 text-[11px]">لا مؤسسات معنية</span>
+                                )}
+                              </td>
+
+                              <td className="py-3 px-4 bg-indigo-50/20">
+                                <div className="flex flex-col items-center gap-1">
+                                  <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg bg-indigo-600 text-white font-black tabular-nums">
+                                    {c.pct}% ({c.participating}/{c.eligible})
+                                  </span>
+                                  <div className="w-28 h-1.5 bg-indigo-100 rounded-full overflow-hidden">
+                                    <div className="h-full bg-indigo-600 rounded-full" style={{ width: `${Math.min(100, c.pct)}%` }} />
+                                  </div>
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Tab: Officiating Statistics per Referee Teacher Broken Down by Sport */}
+        {activeTab === 'referees' && (
+          <div className="p-4 sm:p-5 space-y-4 bg-slate-50/40">
+            <div className="bg-teal-50/90 border border-teal-200 rounded-2xl p-3.5 sm:p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div>
+                <h3 className="text-xs sm:text-sm font-black text-teal-950 flex items-center gap-1.5">
+                  <ShieldCheck className="w-4 h-4 text-teal-600 shrink-0" />
+                  <span>إحصائيات المباريات المحكمة لكل أستاذ حكم حسب نوع الرياضة</span>
+                </h3>
+                <p className="text-[11px] text-teal-800/80 font-medium mt-0.5">
+                  يتم احتساب جميع التعيينات التحكيمية (حكام الساحة وحكام الطاولة) بدون تكرار، مع تفصيل العدد حسب كل نوع رياضة.
+                </p>
+              </div>
+              <span className="self-start sm:self-auto px-3 py-1 rounded-xl bg-teal-600 text-white text-xs font-black tabular-nums shrink-0">
+                {refereeOfficiatingStats.length} أستاذ حكم
+              </span>
+            </div>
+
+            {refereeOfficiatingStats.length === 0 ? (
+              <div className="py-12 text-center bg-white rounded-2xl border border-slate-200 text-slate-400 text-xs">
+                لا توجد مباريات معينة لحكام مطابقة للبحث أو التصفية الحالية
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+                {refereeOfficiatingStats.map((refStat, idx) => (
+                  <div
+                    key={refStat.key}
+                    className="bg-white rounded-2xl border border-slate-200 p-4 shadow-2xs space-y-3 hover:border-teal-300 transition-colors"
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <span className="w-8 h-8 rounded-xl bg-teal-600 text-white font-black text-xs flex items-center justify-center shrink-0 tabular-nums">
+                          {idx + 1}
+                        </span>
+                        <div className="min-w-0">
+                          <h4 className="text-sm font-black text-slate-900 truncate">
+                            {refStat.displayName}
+                          </h4>
+                          <p className="text-[11px] text-slate-500 font-semibold mt-0.5">
+                            {refStat.sportsBreakdown.map(sb => `${sb.count} ${sb.sportName}`).join('، ')}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="text-left shrink-0">
+                        <span className="inline-flex items-center gap-1 px-3 py-1 rounded-xl bg-slate-900 text-white text-xs font-black tabular-nums">
+                          <span>{refStat.totalMatches}</span>
+                          <span>{refStat.totalMatches === 1 ? 'مباراة' : 'مباريات'}</span>
+                        </span>
+                        {refStat.completedMatches > 0 && (
+                          <div className="text-[10px] font-bold text-emerald-700 mt-1 text-center tabular-nums">
+                            منجزة: {refStat.completedMatches}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap gap-1.5 pt-2 border-t border-slate-100">
+                      {refStat.sportsBreakdown.map(sb => (
+                        <span
+                          key={`${refStat.key}-${sb.sportId}`}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-teal-50 border border-teal-200 text-teal-900 text-[11px] font-bold tabular-nums"
+                        >
+                          <span>{sb.sportIcon}</span>
+                          <span>{sb.count}</span>
+                          <span>{sb.sportName}</span>
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
             )}
           </div>
         )}

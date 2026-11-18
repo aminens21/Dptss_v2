@@ -1264,7 +1264,7 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
         const targetClearKey = raceAffiliation === 'club_affiliated' ? `${activeCategory.id}_club` : activeCategory.id;
         await DataService.clearCrossCountryCategoryResult(targetClearKey);
         if (onResultsUpdated) onResultsUpdated();
-        toast.success(`تم تفريغ نتائج سباق (${activeCategory.titleAr}) وتصفير التوقيت بنجاح 🗑️`);
+        toast.success(`تم تفريغ نتائج سباق (${activeCategory.titleAr}) وحذف التوقيت بنجاح 🗑️`);
       } else if (clearScope === 'all_races') {
         // 2. Clear all 8 cross country races
         setArrivals([]);
@@ -1902,7 +1902,7 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
                       className="w-full py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-bold text-xs rounded-xl transition-all active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer border border-slate-300 dark:border-slate-700"
                     >
                       <RotateCcw className="w-4 h-4 text-slate-500 dark:text-slate-400" />
-                      <span>بدء سباق جديد وتصفير الواصلين والتوقيت 🔄</span>
+                      <span>بدء سباق جديد وحذف الواصلين والتوقيت 🔄</span>
                     </button>
                   </div>
                 ) : (
@@ -1968,7 +1968,7 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
                       setTimerRunning(false);
                       setElapsedMs(0);
                     }}
-                    title="تصفير الساعة"
+                    title="حذف التوقيت"
                     className="p-1 sm:p-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-lg sm:rounded-xl transition-colors cursor-pointer"
                   >
                     <RotateCcw className="w-3 sm:w-3.5 h-3 sm:h-3.5" />

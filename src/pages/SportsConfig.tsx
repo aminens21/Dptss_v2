@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { DataService, SPORTS_MAP, getAgeCategoriesForSeason, normalizeCategoryKey, isTeamSport, getDefaultTeamAgeCategories, EDUCATIONAL_CYCLE_LABELS } from '../lib/dataService';
-import { Sport, Tournament, RoleKey, RoleSidebarPermissions, CustomAgeCategory, TARGET_AFFILIATIONS, BlockedSchedulePeriod, EducationalCycleKey } from '../types';
+import { Sport, Tournament, RoleKey, RoleSidebarPermissions, CustomAgeCategory, TARGET_AFFILIATIONS, BlockedSchedulePeriod, EducationalCycleKey, AffiliationDisplayConfig, AffiliationDisplayMode } from '../types';
 import { useAuth, isSuperAdminEmail } from '../contexts/AuthContext';
 import { ConfirmDeleteModal } from '../components/ConfirmDeleteModal';
 import {
@@ -450,6 +450,12 @@ export const SportsConfig: React.FC = () => {
   const [periodCycles, setPeriodCycles] = useState<EducationalCycleKey[]>(['ALL']);
   const [periodNotes, setPeriodNotes] = useState('');
 
+  // Affiliation Display Configuration (Provincial Supervisor / Central Admin Only)
+  const [affiliationDisplayConfig, setAffiliationDisplayConfig] = useState<AffiliationDisplayConfig>(() =>
+    DataService.getAffiliationDisplayConfigSync()
+  );
+  const [savingAffiliationDisplay, setSavingAffiliationDisplay] = useState(false);
+
   // Official Logos State
   const [ministryLogo, setMinistryLogo] = useState<string>('');
   const [frmssLogo, setFrmssLogo] = useState<string>('');
@@ -577,14 +583,21 @@ export const SportsConfig: React.FC = () => {
     const unsubBlocked = DataService.subscribeToBlockedScheduleDates((periods) => {
       setBlockedPeriods(periods);
     });
+    const unsubAffiliation = DataService.subscribeToAffiliationDisplayConfig((cfg) => {
+      setAffiliationDisplayConfig(cfg);
+    });
     const handleDirRefresh = () => {
       DataService.getBlockedScheduleDates()
         .then((periods) => setBlockedPeriods(periods))
+        .catch(() => {});
+      DataService.getAffiliationDisplayConfig()
+        .then((cfg) => setAffiliationDisplayConfig(cfg))
         .catch(() => {});
     };
     window.addEventListener('directorateChanged', handleDirRefresh);
     return () => {
       unsubBlocked();
+      unsubAffiliation();
       window.removeEventListener('directorateChanged', handleDirRefresh);
     };
   }, []);
@@ -610,19 +623,21 @@ export const SportsConfig: React.FC = () => {
     setLoading(true);
     try {
       const activeDirId = DataService.getActiveDirectorateId();
-      const [config, season, seasons, tourns, perms, logos, blocked] = await Promise.all([
+      const [config, season, seasons, tourns, perms, logos, blocked, affCfg] = await Promise.all([
         DataService.getSportsConfig(),
         DataService.getActiveSeason(),
         DataService.getSeasons(),
         DataService.getTournaments(),
         DataService.getRoleSidebarPermissions(),
         DataService.getOfficialLogos(),
-        DataService.getBlockedScheduleDates()
+        DataService.getBlockedScheduleDates(),
+        DataService.getAffiliationDisplayConfig()
       ]);
       setSportsList(config);
       setCurrentSeason(season);
       setSeasonsList(seasons);
       setBlockedPeriods(blocked);
+      setAffiliationDisplayConfig(affCfg);
       
       const dirTourns = tourns.filter(t => (t.directorateId || 'taourirt') === activeDirId);
       setTournaments(dirTourns);
@@ -638,6 +653,28 @@ export const SportsConfig: React.FC = () => {
       toast.error('حدث خطأ أثناء تحميل إعدادات الفئات والموسم الرياضي');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleSaveAffiliationDisplayConfig = async (nextConfig?: AffiliationDisplayConfig) => {
+    if (!isCentralAdmin) {
+      toast.error('صلاحية ضبط عرض الأصناف مخصصة للمشرف الإقليمي / المسؤول المركزي فقط.');
+      return;
+    }
+    const targetConfig = nextConfig || affiliationDisplayConfig;
+    setSavingAffiliationDisplay(true);
+    try {
+      await DataService.saveAffiliationDisplayConfig({
+        ...targetConfig,
+        updatedBy: userProfile?.fullName || ''
+      });
+      setAffiliationDisplayConfig(targetConfig);
+      toast.success('تم حفظ ضوابط عرض أصناف المشاركة بنجاح على مستوى المنصة وللعموم ✅');
+    } catch (err) {
+      console.error('Error saving affiliation display config:', err);
+      toast.error('تعذر حفظ إعدادات عرض الأصناف');
+    } finally {
+      setSavingAffiliationDisplay(false);
     }
   };
 
@@ -1934,6 +1971,176 @@ export const SportsConfig: React.FC = () => {
           </button>
         </div>
       </div>
+
+      {/* Affiliation Display Controls (Provincial Supervisor / Central Admin Only) */}
+      {isCentralAdmin && (
+        <div className="bg-white p-5 rounded-2xl border border-indigo-200/90 shadow-xs space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3.5">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-xl bg-indigo-600 text-white flex items-center justify-center shrink-0 shadow-2xs">
+                <SlidersHorizontal className="h-5 w-5" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h3 className="text-xs md:text-sm font-black text-slate-900">
+                    ضوابط عرض الأصناف في المنصة وللعموم (المنتمين / غير المنتمين)
+                  </h3>
+                  <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200">
+                    خاص بالمشرف الإقليمي 🔒
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-600 mt-1 leading-relaxed">
+                  حدد إمكانية عرض الصنفين معاً (⚪ غير المنتمين للأندية + 🟡 المنتمين للأندية) أو الاقتصار على صنف واحد لجميع البطولات أو تخصيص كل بطولة رياضية على حدة.
+                </p>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              disabled={savingAffiliationDisplay}
+              onClick={() => handleSaveAffiliationDisplayConfig()}
+              className="self-end sm:self-auto px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-black rounded-xl shadow-xs transition-all flex items-center gap-2 cursor-pointer disabled:opacity-60 shrink-0"
+            >
+              {savingAffiliationDisplay ? (
+                <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Save className="h-3.5 w-3.5" />
+              )}
+              <span>حفظ إعدادات العرض</span>
+            </button>
+          </div>
+
+          {/* Global Mode Selector for All Championships */}
+          <div className="space-y-2">
+            <label className="text-xs font-black text-slate-700 block">
+              الإعداد العام لجميع البطولات بالمنصة والصفحة العمومية:
+            </label>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+              {[
+                {
+                  mode: 'both' as AffiliationDisplayMode,
+                  title: 'عرض الصنفين معاً',
+                  desc: '⚪ غير المنتمين + 🟡 المنتمين للأندية',
+                  activeClass: 'bg-indigo-600 text-white border-indigo-700 shadow-sm'
+                },
+                {
+                  mode: 'non_club' as AffiliationDisplayMode,
+                  title: '⚪ غير المنتمين للأندية فقط',
+                  desc: 'إظهار صنف المؤسسات المدرسية (غير المنتمين)',
+                  activeClass: 'bg-slate-800 text-white border-slate-900 shadow-sm'
+                },
+                {
+                  mode: 'club_affiliated' as AffiliationDisplayMode,
+                  title: '🟡 المنتمين للأندية فقط',
+                  desc: 'إظهار صنف المنتمين للعصب والجمعيات الرياضية',
+                  activeClass: 'bg-amber-500 text-slate-950 border-amber-600 shadow-sm'
+                }
+              ].map((opt) => {
+                const isActive = affiliationDisplayConfig.globalMode === opt.mode;
+                return (
+                  <button
+                    key={opt.mode}
+                    type="button"
+                    onClick={() =>
+                      setAffiliationDisplayConfig((prev) => ({
+                        ...prev,
+                        globalMode: opt.mode
+                      }))
+                    }
+                    className={`p-3 rounded-xl border text-right transition-all cursor-pointer ${
+                      isActive
+                        ? opt.activeClass
+                        : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-black">{opt.title}</span>
+                      {isActive && <CheckCircle2 className="h-4 w-4 shrink-0" />}
+                    </div>
+                    <p
+                      className={`text-[10px] mt-1 ${
+                        isActive ? 'opacity-90 font-semibold' : 'text-slate-500'
+                      }`}
+                    >
+                      {opt.desc}
+                    </p>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Per-Sport Override Selector */}
+          <div className="space-y-2 pt-2 border-t border-slate-100">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <label className="text-xs font-black text-slate-700">
+                تخصيص العرض حسب كل بطولة / رياضة (اختياري):
+              </label>
+              {Object.keys(affiliationDisplayConfig.sportModes || {}).length > 0 && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    setAffiliationDisplayConfig((prev) => ({
+                      ...prev,
+                      sportModes: {}
+                    }))
+                  }
+                  className="text-[10px] font-bold text-rose-600 hover:text-rose-800 bg-rose-50 hover:bg-rose-100 px-2.5 py-1 rounded-lg border border-rose-200 transition-colors cursor-pointer"
+                >
+                  إعادة جميع الرياضات للافتراضي العام
+                </button>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 max-h-64 overflow-y-auto p-1">
+              {sportsList.map((sp) => {
+                const overrideVal = affiliationDisplayConfig.sportModes?.[sp.id] || '';
+                return (
+                  <div
+                    key={`aff-cfg-${sp.id}`}
+                    className={`flex items-center justify-between gap-2 p-2.5 rounded-xl border transition-colors ${
+                      overrideVal
+                        ? 'bg-indigo-50/60 border-indigo-200'
+                        : 'bg-slate-50/70 border-slate-200'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="text-base shrink-0">{sp.icon || '🏆'}</span>
+                      <span className="text-[11px] font-bold text-slate-800 truncate">
+                        {sp.name}
+                      </span>
+                    </div>
+                    <select
+                      value={overrideVal}
+                      onChange={(e) => {
+                        const val = e.target.value as AffiliationDisplayMode | '';
+                        setAffiliationDisplayConfig((prev) => {
+                          const nextModes = { ...(prev.sportModes || {}) };
+                          if (!val) {
+                            delete nextModes[sp.id];
+                          } else {
+                            nextModes[sp.id] = val;
+                          }
+                          return {
+                            ...prev,
+                            sportModes: nextModes
+                          };
+                        });
+                      }}
+                      className="px-2 py-1 text-[10px] font-bold bg-white border border-slate-200 rounded-lg text-slate-700 focus:outline-none focus:ring-1 focus:ring-indigo-500 cursor-pointer shrink-0"
+                    >
+                      <option value="">يتبع الإعداد العام</option>
+                      <option value="both">الصنفين معاً</option>
+                      <option value="non_club">⚪ غير المنتمين فقط</option>
+                      <option value="club_affiliated">🟡 المنتمين فقط</option>
+                    </select>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Filter & Search Toolbar */}
       <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-xs flex flex-col sm:flex-row items-center justify-between gap-3">

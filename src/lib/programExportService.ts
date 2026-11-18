@@ -369,20 +369,20 @@ export function buildAllCalendarEvents(
 
     const textParts: string[] = [];
     const htmlParts: string[] = [];
-    if (tableRefNames.length > 0) {
-      const formattedTable = tableRefNames.map((name, i) => `${getOrdinalRefLabel(i)}: ${name}`).join(' • ');
-      textParts.push(`حكام الطاولة (${formattedTable})`);
-      htmlParts.push(
-        `<div style="margin-bottom: 3px;"><span style="font-weight: 800; color: #0369a1;">حكام الطاولة:</span> ${tableRefNames
-          .map((name, i) => `<span style="white-space: nowrap;">${getOrdinalRefLabel(i)}: <strong>${name}</strong></span>`)
-          .join(' • ')}</div>`
-      );
-    }
     if (fieldRefNames.length > 0) {
       const formattedField = fieldRefNames.map((name, i) => `${getOrdinalRefLabel(i)}: ${name}`).join(' • ');
       textParts.push(`حكام الساحة (${formattedField})`);
       htmlParts.push(
-        `<div><span style="font-weight: 800; color: #047857;">حكام الساحة:</span> ${fieldRefNames
+        `<div style="margin-bottom: 3px;"><span style="font-weight: 800; color: #047857;">حكام الساحة:</span> ${fieldRefNames
+          .map((name, i) => `<span style="white-space: nowrap;">${getOrdinalRefLabel(i)}: <strong>${name}</strong></span>`)
+          .join(' • ')}</div>`
+      );
+    }
+    if (tableRefNames.length > 0) {
+      const formattedTable = tableRefNames.map((name, i) => `${getOrdinalRefLabel(i)}: ${name}`).join(' • ');
+      textParts.push(`حكام الطاولة (${formattedTable})`);
+      htmlParts.push(
+        `<div><span style="font-weight: 800; color: #0369a1;">حكام الطاولة:</span> ${tableRefNames
           .map((name, i) => `<span style="white-space: nowrap;">${getOrdinalRefLabel(i)}: <strong>${name}</strong></span>`)
           .join(' • ')}</div>`
       );
@@ -464,6 +464,24 @@ function getOfficialLogosSync(): { ministryLogo?: string; frmssLogo?: string; mi
   return {};
 }
 
+function formatTargetCategoryWithGender(category?: string, gender?: string): string {
+  const cat = (category || '').trim();
+  const gNorm = (gender || '').trim().toLowerCase();
+  const genderLabel =
+    gNorm === 'female' || gNorm === 'إناث' || gNorm === 'اناث'
+      ? 'إناث'
+      : gNorm === 'male' || gNorm === 'ذكور'
+      ? 'ذكور'
+      : gNorm === 'mixed' || gNorm === 'مختلط'
+      ? 'مختلط'
+      : '';
+
+  if (!cat) return genderLabel || '-';
+  if (!genderLabel) return cat;
+  if (/ذكور|إناث|اناث|مختلط/.test(cat)) return cat;
+  return `${cat} ${genderLabel}`;
+}
+
 export function generateProgramHtml({
   events,
   selectedSportIds,
@@ -520,7 +538,7 @@ export function generateProgramHtml({
     } else if (selectedSportIds.length === 1) {
       const spId = selectedSportIds[0];
       const spName = SPORTS_MAP[spId]?.name || spId;
-      title = `البرنامج والمواعيد الرسمية لبطولة ${spName}`;
+      title = `البرنامج والمواعيد الرسمية للبطولة الإقليمية ${spName}`;
       filenameBase = `برنامج_بطولة_${spName.replace(/\s+/g, '_')}`;
     } else if (selectedSportIds.length === 2) {
       const sp1 = SPORTS_MAP[selectedSportIds[0]]?.name || selectedSportIds[0];
@@ -541,11 +559,10 @@ export function generateProgramHtml({
 
   const hideSportColumn = !isAllSports && selectedSportIds.length === 1;
   const showNotesColumn = filtered.some(ev => Boolean(ev.notes && ev.notes.trim().length > 0));
-  const totalColumns = 7 + (hideSportColumn ? 0 : 1) + (showNotesColumn ? 1 : 0);
+  const totalColumns = 6 + (hideSportColumn ? 0 : 1) + (showNotesColumn ? 1 : 0);
 
   const rowsHtml = filtered.length > 0 ? filtered.map((ev, index) => {
-    const scopeBadge = ev.scope === 'national' ? 'بطولة وطنية' : ev.scope === 'regional' ? 'بطولة جهوية' : 'بطولة إقليمية';
-    const scopeColor = ev.scope === 'national' ? '#b45309' : ev.scope === 'regional' ? '#047857' : '#1d4ed8';
+    const targetCategoryDisplay = formatTargetCategoryWithGender(ev.category, ev.gender);
 
     return `
       <tr style="background-color: ${index % 2 === 0 ? '#ffffff' : '#f8fafc'};">
@@ -553,10 +570,7 @@ export function generateProgramHtml({
         <td style="border: 1px solid #cbd5e1; padding: 7px 8px; text-align: center; white-space: nowrap; font-weight: bold; color: #1e3a8a; font-size: 11px;">${ev.date}${ev.time ? `<div style="font-size: 9.5px; color: #475569; margin-top: 2px;">${ev.time}</div>` : ''}</td>
         <td style="border: 1px solid #cbd5e1; padding: 7px 8px; font-weight: bold; color: #0f172a; font-size: 11px;">${ev.title}</td>
         ${!hideSportColumn ? `<td style="border: 1px solid #cbd5e1; padding: 7px 6px; text-align: center; font-size: 11px; font-weight: bold; color: #334155;">${ev.sportName}</td>` : ''}
-        <td style="border: 1px solid #cbd5e1; padding: 7px 6px; text-align: center; font-weight: bold; font-size: 10.5px; color: ${scopeColor};">
-          ${scopeBadge}
-        </td>
-        <td style="border: 1px solid #cbd5e1; padding: 7px 6px; font-size: 10.5px; color: #334155;">${ev.category || '-'}</td>
+        <td style="border: 1px solid #cbd5e1; padding: 7px 6px; text-align: center; font-weight: bold; font-size: 10.5px; color: #334155;">${targetCategoryDisplay}</td>
         <td style="border: 1px solid #cbd5e1; padding: 7px 8px; font-size: 10.5px; color: #334155;">${ev.venue || '-'}</td>
         <td style="border: 1px solid #cbd5e1; padding: 7px 8px; font-size: 10.5px; color: #1e293b;">${ev.refereesHtml || ev.refereesText || (ev.referees && ev.referees.length > 0 ? ev.referees.map(r => r.replace(/\s*\(أستاذ\)\s*/g, '').trim()).join(' • ') : '-')}</td>
         ${showNotesColumn ? `<td style="border: 1px solid #cbd5e1; padding: 7px 6px; font-size: 10px; color: #334155;">${ev.notes?.trim() || '-'}</td>` : ''}
@@ -622,13 +636,12 @@ export function generateProgramHtml({
         <thead>
           <tr style="background-color: #1e3a8a; color: #ffffff;">
             <th style="border: 1px solid #0f172a; padding: 8px 4px; text-align: center; width: 4%; font-weight: bold;">ر.ت</th>
-            <th style="border: 1px solid #0f172a; padding: 8px 6px; text-align: center; width: 11%; font-weight: bold;">تاريخ الإجراء</th>
-            <th style="border: 1px solid #0f172a; padding: 8px 8px; text-align: right; width: ${hideSportColumn ? '26%' : '23%'}; font-weight: bold;">المقابلة (مؤسسة ضد مؤسسة)</th>
-            ${!hideSportColumn ? `<th style="border: 1px solid #0f172a; padding: 8px 6px; text-align: center; width: 10%; font-weight: bold;">نوع الرياضة</th>` : ''}
-            <th style="border: 1px solid #0f172a; padding: 8px 6px; text-align: center; width: 10%; font-weight: bold;">المستوى</th>
-            <th style="border: 1px solid #0f172a; padding: 8px 6px; text-align: center; width: 12%; font-weight: bold;">الفئة المستهدفة</th>
-            <th style="border: 1px solid #0f172a; padding: 8px 6px; text-align: right; width: ${hideSportColumn ? '16%' : '13%'}; font-weight: bold;">مكان الإجراء</th>
-            <th style="border: 1px solid #0f172a; padding: 8px 6px; text-align: right; width: ${hideSportColumn ? '15%' : '11%'}; font-weight: bold;">الحكام</th>
+            <th style="border: 1px solid #0f172a; padding: 8px 6px; text-align: center; width: 12%; font-weight: bold;">تاريخ الإجراء</th>
+            <th style="border: 1px solid #0f172a; padding: 8px 8px; text-align: right; width: ${hideSportColumn ? '30%' : '26%'}; font-weight: bold;">المقابلة (مؤسسة ضد مؤسسة)</th>
+            ${!hideSportColumn ? `<th style="border: 1px solid #0f172a; padding: 8px 6px; text-align: center; width: 11%; font-weight: bold;">نوع الرياضة</th>` : ''}
+            <th style="border: 1px solid #0f172a; padding: 8px 6px; text-align: center; width: 14%; font-weight: bold;">الفئة المستهدفة</th>
+            <th style="border: 1px solid #0f172a; padding: 8px 6px; text-align: right; width: ${hideSportColumn ? '20%' : '15%'}; font-weight: bold;">مكان الإجراء</th>
+            <th style="border: 1px solid #0f172a; padding: 8px 6px; text-align: right; width: ${hideSportColumn ? '20%' : '14%'}; font-weight: bold;">الحكام</th>
             ${showNotesColumn ? `<th style="border: 1px solid #0f172a; padding: 8px 4px; text-align: center; width: 10%; font-weight: bold;">ملاحظات</th>` : ''}
           </tr>
         </thead>

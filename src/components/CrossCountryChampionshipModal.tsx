@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { Tournament, Student, School, User, Sport } from '../types';
-import { DataService, SPORTS_MAP, getAgeCategoriesForSeason, validateBirthDateForCategory, resolveSchoolCoach, schoolNamesMatch } from '../lib/dataService';
+import { Tournament, Student, School, User, Sport, AffiliationDisplayConfig } from '../types';
+import { DataService, SPORTS_MAP, getAgeCategoriesForSeason, validateBirthDateForCategory, resolveSchoolCoach, schoolNamesMatch, resolveEffectiveAffiliationMode, isAffiliationAllowedByDisplayConfig, normalizeCategoryKey } from '../lib/dataService';
+import { canUserDownloadTournamentTablePdf, buildParticipationTableRows, downloadTournamentParticipationTablePdf, formatTournamentRedBannerTitle } from '../lib/tournamentTablePdfService';
 import { useAuth } from '../contexts/AuthContext';
 import { useRolePermissions } from '../hooks/useRolePermissions';
 import {
@@ -103,12 +104,42 @@ export const CrossCountryChampionshipModal: React.FC<CrossCountryChampionshipMod
   const [isHeaderCollapsed, setIsHeaderCollapsed] = useState(false);
   const [isFullScreen, setIsFullScreen] = useState(false);
 
-  // School Participation Confirmation State
+  // School Participation Confirmation & Affiliation Display State
   const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
   const { confirmations, isSchoolConfirmed, getConfirmation, refreshConfirmations } = useSchoolConfirmations();
+  const [affiliationDisplayConfig, setAffiliationDisplayConfig] = useState<AffiliationDisplayConfig>(
+    () => DataService.getAffiliationDisplayConfigSync()
+  );
+  const [withdrawRefreshTick, setWithdrawRefreshTick] = useState(0);
+
+  useEffect(() => {
+    const unsub = DataService.subscribeToAffiliationDisplayConfig((cfg) => {
+      setAffiliationDisplayConfig(cfg);
+    });
+    const handleSyncEvents = () => {
+      setWithdrawRefreshTick(t => t + 1);
+      refreshConfirmations();
+    };
+    window.addEventListener('schoolWithdrawalsUpdated', handleSyncEvents);
+    window.addEventListener('schoolConfirmationsUpdated', handleSyncEvents);
+    return () => {
+      if (typeof unsub === 'function') unsub();
+      window.removeEventListener('schoolWithdrawalsUpdated', handleSyncEvents);
+      window.removeEventListener('schoolConfirmationsUpdated', handleSyncEvents);
+    };
+  }, [refreshConfirmations]);
+
   const effectiveSchoolName = teacherSchoolName || userProfile?.schoolName || userProfile?.workLocation || '';
+  const canonicalTeacherSchoolId = useMemo(() => {
+    const matched = schools.find(s => schoolNamesMatch(s.name, effectiveSchoolName));
+    return matched?.id || userProfile?.schoolId || effectiveSchoolName;
+  }, [schools, effectiveSchoolName, userProfile?.schoolId]);
   const isSchoolCurrentlyConfirmed = isSchoolConfirmed('cross_country', effectiveSchoolName);
   const currentConfirmationRecord = getConfirmation('cross_country', effectiveSchoolName);
+  const canDownloadParticipationTablePdf = useMemo(
+    () => canUserDownloadTournamentTablePdf(userProfile, 'cross_country'),
+    [userProfile]
+  );
 
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
@@ -141,6 +172,18 @@ export const CrossCountryChampionshipModal: React.FC<CrossCountryChampionshipMod
   }, [ccTournaments]);
 
   const [selectedAffiliationFilter, setSelectedAffiliationFilter] = useState<'ALL' | 'non_club' | 'club_affiliated'>('ALL');
+  const effectiveCcAffMode = useMemo(
+    () => resolveEffectiveAffiliationMode(affiliationDisplayConfig, 'cross_country'),
+    [affiliationDisplayConfig]
+  );
+
+  useEffect(() => {
+    if (effectiveCcAffMode === 'non_club') {
+      setSelectedAffiliationFilter('non_club');
+    } else if (effectiveCcAffMode === 'club_affiliated') {
+      setSelectedAffiliationFilter('club_affiliated');
+    }
+  }, [effectiveCcAffMode]);
 
   const { currentDeadline, currentAffiliationType } = useMemo(() => {
     const ccT = ccTournaments.find(t => selectedAffiliationFilter === 'club_affiliated' ? t.affiliationType === 'club_affiliated' : true) || ccTournaments[0];
@@ -253,17 +296,21 @@ export const CrossCountryChampionshipModal: React.FC<CrossCountryChampionshipMod
       const fallbackCoach = resolveSchoolCoach({
         schoolName: editingStudent.schoolName,
         sportId: 'cross_country',
+        category: editingStudent.category,
+        gender: editingStudent.gender,
+        affiliationType: editingStudent.affiliationType,
         students: localStudents.filter(s => s.sportId === 'cross_country' && schoolNamesMatch(s.schoolName, editingStudent.schoolName)),
         schools,
         teachers: effectiveTeachers,
         confirmations,
         currentUser: userProfile
       });
-      setEditCoachName(editingStudent.coachName || fallbackCoach.fullName || (isUserAtEditedSchool && userProfile?.fullName ? userProfile.fullName : ''));
-      setEditCoachLease(editingStudent.coachLeaseNumber || fallbackCoach.leaseNumber || (isUserAtEditedSchool && userProfile?.leaseNumber ? userProfile.leaseNumber : ''));
-      setEditCoachPhone(editingStudent.coachPhone || fallbackCoach.phone || (isUserAtEditedSchool && userProfile?.phone ? userProfile.phone : ''));
+      const preferActingTeacher = isUserAtEditedSchool && isTeacherRole && Boolean(userProfile?.fullName);
+      setEditCoachName(editingStudent.coachName || (preferActingTeacher ? userProfile?.fullName : '') || fallbackCoach.fullName || '');
+      setEditCoachLease(editingStudent.coachLeaseNumber || (preferActingTeacher ? userProfile?.leaseNumber : '') || fallbackCoach.leaseNumber || '');
+      setEditCoachPhone(editingStudent.coachPhone || (preferActingTeacher ? userProfile?.phone : '') || fallbackCoach.phone || '');
     }
-  }, [editingStudent, userProfile, activeCategory, schools, effectiveTeachers, confirmations]);
+  }, [editingStudent, userProfile, activeCategory, schools, effectiveTeachers, confirmations, isTeacherRole]);
 
   const handleEditPhotoFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -369,9 +416,22 @@ export const CrossCountryChampionshipModal: React.FC<CrossCountryChampionshipMod
     }
   };
 
-  // Filter students participating in cross country (teachers only see their own school's participants)
+  // Filter students participating in cross country (respecting teacher school isolation, withdrawals, and affiliation config)
   const ccStudents = useMemo(() => {
-    let list = localStudents.filter(s => s && s.sportId === 'cross_country');
+    let list = localStudents.filter(s => {
+      if (!s || s.sportId !== 'cross_country') return false;
+      const aff = s.affiliationType || 'non_club';
+      if (!isAffiliationAllowedByDisplayConfig(aff, affiliationDisplayConfig, 'cross_country')) return false;
+      if (DataService.isSchoolWithdrawn({
+        sportId: 'cross_country',
+        ageCategory: normalizeCategoryKey(s.category || 'U15'),
+        gender: s.gender || 'Male',
+        affiliationType: aff
+      }, s.schoolId, s.schoolName)) {
+        return false;
+      }
+      return true;
+    });
     if (isTeacherRole) {
       if (!teacherSchoolName && !userProfile?.schoolId) return [];
       const cleanSchool = (teacherSchoolName || '').trim().toLowerCase();
@@ -386,7 +446,7 @@ export const CrossCountryChampionshipModal: React.FC<CrossCountryChampionshipMod
       });
     }
     return list;
-  }, [localStudents, isTeacherRole, teacherSchoolName, userProfile?.schoolId]);
+  }, [localStudents, isTeacherRole, teacherSchoolName, userProfile?.schoolId, affiliationDisplayConfig, withdrawRefreshTick]);
 
   // Participants in active category
   const activeCategoryParticipants = useMemo(() => {
@@ -741,13 +801,14 @@ export const CrossCountryChampionshipModal: React.FC<CrossCountryChampionshipMod
                     <ConfirmedParticipationBadge
                       sportId="cross_country"
                       sportName="العدو الريفي"
-                      schoolId={userProfile?.schoolId}
+                      schoolId={canonicalTeacherSchoolId}
                       schoolName={effectiveSchoolName}
                       variant="light"
                       label="مشاركة المؤسسة مؤكدة ✓"
                       onClick={() => setIsConfirmModalOpen(true)}
                       onCancelSuccess={() => {
                         refreshConfirmations();
+                        if (onRefreshData) onRefreshData();
                       }}
                     />
                   ) : (
@@ -804,6 +865,47 @@ export const CrossCountryChampionshipModal: React.FC<CrossCountryChampionshipMod
 
                 {/* Quick Category Actions */}
                 <div className="flex flex-wrap items-center gap-2 shrink-0">
+                  {canDownloadParticipationTablePdf && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const affParam = selectedAffiliationFilter !== 'ALL'
+                          ? selectedAffiliationFilter
+                          : (effectiveCcAffMode === 'non_club' || effectiveCcAffMode === 'club_affiliated' ? effectiveCcAffMode : 'ALL');
+                        const rows = buildParticipationTableRows({
+                          sportId: 'cross_country',
+                          students: localStudents,
+                          schools,
+                          teachers: effectiveTeachers,
+                          confirmations,
+                          currentUser: userProfile,
+                          affiliationType: affParam,
+                          ageCategory: 'ALL',
+                          gender: 'ALL',
+                          isSchoolWithdrawnFn: (sId, sName, b) => DataService.isSchoolWithdrawn({
+                            sportId: 'cross_country',
+                            ageCategory: b?.category,
+                            gender: b?.gender,
+                            affiliationType: b?.affiliationType
+                          }, sId, sName)
+                        });
+                        const redTitle = formatTournamentRedBannerTitle({
+                          sportId: 'cross_country',
+                          sportName: 'العدو الريفي',
+                          affiliationType: affParam !== 'ALL' ? affParam : undefined
+                        });
+                        downloadTournamentParticipationTablePdf({
+                          redTitle,
+                          rows
+                        });
+                      }}
+                      className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-black text-xs rounded-xl flex items-center gap-1.5 cursor-pointer shadow-xs transition-colors"
+                      title="تحميل جدول المؤسسات المشاركة في بطولة العدو الريفي (PDF)"
+                    >
+                      <FileText className="h-3.5 w-3.5" />
+                      <span>تحميل جدول المشاركة (PDF)</span>
+                    </button>
+                  )}
 
                   {filterSchool !== 'ALL' && (
                     <button
@@ -907,9 +1009,15 @@ export const CrossCountryChampionshipModal: React.FC<CrossCountryChampionshipMod
                       onChange={(e) => setSelectedAffiliationFilter(e.target.value as any)}
                       className="text-xs font-bold text-amber-900 bg-amber-50/70 border border-amber-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-amber-500 cursor-pointer w-full sm:w-auto"
                     >
-                      <option value="ALL">🌟 جميع الأصناف (منتمين وغير منتمين)</option>
-                      <option value="non_club">⚪ غير المنتمين للأندية (مدرسي)</option>
-                      <option value="club_affiliated">⚽ المنتمين للأندية (Club)</option>
+                      {effectiveCcAffMode === 'both' && (
+                        <option value="ALL">🌟 جميع الأصناف (منتمين وغير منتمين)</option>
+                      )}
+                      {(effectiveCcAffMode === 'both' || effectiveCcAffMode === 'non_club') && (
+                        <option value="non_club">⚪ غير المنتمين للأندية (مدرسي)</option>
+                      )}
+                      {(effectiveCcAffMode === 'both' || effectiveCcAffMode === 'club_affiliated') && (
+                        <option value="club_affiliated">⚽ المنتمين للأندية (Club)</option>
+                      )}
                     </select>
 
                     {isTeacherRole ? (
@@ -1749,7 +1857,7 @@ export const CrossCountryChampionshipModal: React.FC<CrossCountryChampionshipMod
           sport={ccSportObject}
           tournaments={ccTournaments}
           schoolName={effectiveSchoolName}
-          schoolId={userProfile?.schoolId || effectiveSchoolName}
+          schoolId={canonicalTeacherSchoolId}
           teacherId={userProfile?.id}
           teacherName={userProfile?.fullName}
           teacherPhone={userProfile?.phone}

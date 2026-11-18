@@ -836,7 +836,7 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
   const handleResetStopwatch = () => {
     setIsTimerRunning(false);
     setElapsedMs(0);
-    toast.success(`تم تصفير الميقاتي للبدء من جديد. إجمالي الوصولات المسجلة: ${recordedLaps.length} وصول`);
+    toast.success(`تم حذف توقيت الميقاتي للبدء من جديد. إجمالي الوصولات المسجلة: ${recordedLaps.length} وصول`);
   };
 
   const handleTriggerRankSplit = () => {
@@ -3728,16 +3728,16 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                             </div>
                           </button>
 
-                          {/* زر التصفير أسفله (RESET BUTTON DIRECTLY UNDERNEATH) */}
+                          {/* زر الحذف وإعادة الضبط أسفله (RESET BUTTON DIRECTLY UNDERNEATH) */}
                           <div className="flex items-center gap-2">
                             <button
                               type="button"
                               onClick={handleResetStopwatch}
                               className="flex-1 py-3.5 px-4 bg-slate-900 hover:bg-slate-800 text-slate-200 hover:text-white border border-slate-700/80 hover:border-slate-600 rounded-2xl font-black text-xs sm:text-sm flex items-center justify-center gap-2 cursor-pointer transition-all shadow-md active:scale-98"
-                              title="تصفير العداد للبدء من جديد"
+                              title="حذف توقيت العداد للبدء من جديد"
                             >
                               <RotateCcw className="w-4 h-4 text-amber-400" />
-                              <span>🔄 زر تصفير العداد (Reset)</span>
+                              <span>🔄 زر حذف العداد (Reset)</span>
                             </button>
 
                             {isTimerRunning && (
@@ -6707,7 +6707,7 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                     <span>تفريغ بيانات السباق وإعادة الضبط</span>
                   </h3>
                   <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                    اختر المسابقة التي تريد تفريغها ومسح نتائجها وتصفير الميقاتي الخاص بها
+                    اختر المسابقة التي تريد تفريغها ومسح نتائجها وحذف توقيت الميقاتي الخاص بها
                   </p>
                 </div>
               </div>
@@ -6881,11 +6881,11 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                     ) : hasActiveTrackLaps ? (
                       <div className="p-2.5 bg-blue-50 dark:bg-blue-950/40 border border-blue-300 dark:border-blue-800 rounded-xl flex items-center gap-2 text-xs text-blue-700 dark:text-blue-300">
                         <Timer className="w-4 h-4 text-blue-600 shrink-0" />
-                        <span>توجد {recordedLaps.length} وصول مسجل في الميقاتي حالياً سيتم مسحها وتصفير الميقاتي.</span>
+                        <span>توجد {recordedLaps.length} وصول مسجل في الميقاتي حالياً سيتم مسحها وحذف توقيت الميقاتي.</span>
                       </div>
                     ) : (
                       <div className="p-2 bg-slate-50 dark:bg-slate-900/60 rounded-xl text-xs text-slate-500">
-                        ℹ️ هذا السباق فارغ حالياً، وسيتم تصفير أي توقيتات أو بيانات مؤقتة له.
+                        ℹ️ هذا السباق فارغ حالياً، وسيتم حذف أي توقيتات أو بيانات مؤقتة له.
                       </div>
                     )}
                   </div>
@@ -6919,7 +6919,7 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                           <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
                             {clearDeletePublicAndPodium
                               ? 'سيتم حذف النتائج المعتمدة وأسماء المتوجين نهائياً من منصة التتويج وصفحة النتائج الموجهة للعموم.'
-                              : 'سيتم تصفير الميقاتي والوصولات المسجلة فقط لإتاحة إجراء السباق مجدداً، مع الحفاظ على نتائج الفائزين في منصة التتويج وقسم العموم دون مسحها.'}
+                              : 'سيتم حذف توقيت الميقاتي والوصولات المسجلة فقط لإتاحة إجراء السباق مجدداً، مع الحفاظ على نتائج الفائزين في منصة التتويج وقسم العموم دون مسحها.'}
                           </p>
                         </div>
                       </label>
@@ -6951,7 +6951,7 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
                     تأكيد تفريغ بيانات السباق:
                   </h4>
                   <p className="text-[11px] text-rose-800 dark:text-rose-300 mt-1 leading-relaxed">
-                    سيتم تصفير الميقاتي ومسح توقيتات ومراتب الوصول لسباق{' '}
+                    سيتم حذف توقيت الميقاتي ومسح توقيتات ومراتب الوصول لسباق{' '}
                     <strong className="underline">
                       {disciplines.find(d => d.id === clearRaceDisciplineId)?.nameAr} ({clearRaceCategory} - {clearRaceGender === 'Male' ? 'ذكور' : 'إناث'})
                     </strong>

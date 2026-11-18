@@ -2,9 +2,9 @@ import React, { useEffect, useState, useMemo } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import clsx from 'clsx';
 import { useAuth } from '../contexts/AuthContext';
-import { DataService, SPORTS_MAP, GENDER_MAP, deduplicateById, AGE_CATEGORIES, isClubTournament, getAgeCategoriesForSeason, normalizeCategoryKey, getCustomCategoryName, getCustomCategoryDetails, canUserApproveSportResult, normalizeCanonicalSportId, areSportIdsEquivalent } from '../lib/dataService';
+import { DataService, SPORTS_MAP, GENDER_MAP, deduplicateById, AGE_CATEGORIES, isClubTournament, getAgeCategoriesForSeason, normalizeCategoryKey, getCustomCategoryName, getCustomCategoryDetails, canUserApproveSportResult, normalizeCanonicalSportId, areSportIdsEquivalent, normalizeArabicMatchText, isAffiliationAllowedByDisplayConfig } from '../lib/dataService';
 import { formatTeamDisplayName, hasValidMatchTeams } from '../lib/drawTournamentUtils';
-import { Match, School, Venue, Tournament, Sport, Student, User, Referee } from '../types';
+import { Match, School, Venue, Tournament, Sport, Student, User, Referee, AffiliationDisplayConfig } from '../types';
 import { CountdownTimer } from '../components/CountdownTimer';
 import {
   Plus,
@@ -71,6 +71,9 @@ export const Matches: React.FC = () => {
   const [crossCountryResults, setCrossCountryResults] = useState<Record<string, CrossCountryCategoryResult>>(INITIAL_CROSS_COUNTRY_RESULTS);
   const [athleticsResults, setAthleticsResults] = useState<Record<string, AthleticsEventResult>>(() => AthleticsService.getAllResults());
   const [activeSeason, setActiveSeason] = useState('2026/2027');
+  const [affiliationDisplayConfig, setAffiliationDisplayConfig] = useState<AffiliationDisplayConfig>(() =>
+    DataService.getAffiliationDisplayConfigSync()
+  );
   const [loading, setLoading] = useState(true);
 
   // Filters for Level 1 Sports overview
@@ -201,7 +204,7 @@ export const Matches: React.FC = () => {
     if (matches.length === 0) setLoading(true);
     
     try {
-      const [m, s, v, t, curSeason, ccRes, stu, config, tch] = await Promise.all([
+      const [m, s, v, t, curSeason, ccRes, stu, config, tch, refs, affCfg] = await Promise.all([
         DataService.getMatches(),
         DataService.getSchools(),
         DataService.getVenues(),
@@ -210,7 +213,9 @@ export const Matches: React.FC = () => {
         DataService.getCrossCountryResults(),
         DataService.getStudents(),
         DataService.getSportsConfig(),
-        DataService.getTeachers()
+        DataService.getTeachers(),
+        DataService.getReferees().catch(() => [] as Referee[]),
+        DataService.getAffiliationDisplayConfig().catch(() => DataService.getAffiliationDisplayConfigSync())
       ]);
       
       // Batch updates to minimize re-renders and avoid clobbering live data
@@ -228,6 +233,8 @@ export const Matches: React.FC = () => {
       if (stu) setStudents(stu);
       if (config) setSportsConfig(config);
       if (tch) setTeachers(tch);
+      if (refs) setReferees(refs);
+      if (affCfg) setAffiliationDisplayConfig(affCfg);
     } catch (error) {
       console.error('Error loading matches data:', error);
       // toast.error('حدث خطأ أثناء تحميل بيانات المباريات والنتائج');
@@ -288,6 +295,10 @@ export const Matches: React.FC = () => {
       }
     });
 
+    const unsubscribeAffiliationCfg = DataService.subscribeToAffiliationDisplayConfig((cfg) => {
+      setAffiliationDisplayConfig(cfg);
+    });
+
     // Listen to immediate local cross country updates (same device)
     const handleCCUpdate = (e: Event | { type: string, result: CrossCountryCategoryResult }) => {
       let updatedResult: CrossCountryCategoryResult | null = null;
@@ -300,10 +311,16 @@ export const Matches: React.FC = () => {
       }
 
       if (updatedResult) {
-        setCrossCountryResults(prev => ({
-          ...prev,
-          [updatedResult!.categoryId]: updatedResult!
-        }));
+        if (updatedResult.categoryId === 'all') {
+          DataService.getCrossCountryResults().then(fresh => {
+            if (fresh) setCrossCountryResults(fresh);
+          }).catch(() => {});
+        } else {
+          setCrossCountryResults(prev => ({
+            ...prev,
+            [updatedResult!.categoryId]: updatedResult!
+          }));
+        }
       }
     };
 
@@ -344,6 +361,7 @@ export const Matches: React.FC = () => {
       if (unsubscribeVenues) unsubscribeVenues();
       if (unsubscribeStudents) unsubscribeStudents();
       if (unsubscribeSportsConfig) unsubscribeSportsConfig();
+      if (unsubscribeAffiliationCfg) unsubscribeAffiliationCfg();
     };
   }, []);
 
@@ -514,12 +532,16 @@ export const Matches: React.FC = () => {
     try {
       const sportName = sportToDeleteResults.name;
       const isCC = sportToDeleteResults.id === 'cross_country';
-      await DataService.deleteSportResults(sportToDeleteResults.id, deleteSportResultsMode === 'delete_all');
+      const isAth = sportToDeleteResults.id === 'athletics' || sportToDeleteResults.id === 'track_field';
+      const deleteAllMode = !isCC && !isAth && deleteSportResultsMode === 'delete_all';
+      await DataService.deleteSportResults(sportToDeleteResults.id, deleteAllMode);
       if (isCC) {
         const freshCC = await DataService.getCrossCountryResults();
         setCrossCountryResults(freshCC);
+      } else if (isAth) {
+        setAthleticsResults(AthleticsService.getAllResults());
       }
-      toast.success(`تم حذف وتصفير نتائج بطولة ${sportName} بنجاح! 🗑️`);
+      toast.success(`تم حذف نتائج بطولة ${sportName} بنجاح! 🗑️`);
       setSportToDeleteResults(null);
       await loadData();
     } catch (error: any) {
@@ -601,7 +623,17 @@ export const Matches: React.FC = () => {
     const seasonalCats = getAgeCategoriesForSeason(activeSeason);
 
     return sportsConfig.map(sport => {
-      let sportTournaments = tournaments.filter(t => t.sportId === sport.id);
+      let sportTournaments = tournaments.filter(t => {
+        if (t.sportId !== sport.id) return false;
+        if (t.status === 'Draft' || (t as any).isActive === false) return false;
+        if (activeDirId && activeDirId !== 'all') {
+          const tDir = t.directorateId || 'taourirt';
+          if (tDir !== activeDirId) return false;
+        }
+        const tAff = t.affiliationType || (isClubTournament(t) ? 'club_affiliated' : 'non_club');
+        if (!isAffiliationAllowedByDisplayConfig(tAff, affiliationDisplayConfig, sport.id)) return false;
+        return true;
+      });
       
       // Filter tournaments by affiliation if not ALL
       if (affiliationFilter !== 'ALL') {
@@ -613,11 +645,8 @@ export const Matches: React.FC = () => {
         });
       }
 
-      // Determine if programmed / open
-      // A sport is programmed only if active tournaments exist for it
-      let isProgrammed = (sport.id === 'cross_country' || sport.id === 'athletics' || sport.id === 'track_field')
-        ? (tournaments.some(t => t.sportId === sport.id) || sportTournaments.length > 0 || true)
-        : (sportTournaments.length > 0);
+      // A sport is programmed strictly if active tournaments exist for it
+      let isProgrammed = sportTournaments.length > 0;
 
       const sportMatches = isProgrammed ? matches.filter(m => {
         if (!hasValidMatchTeams(m, schools)) return false;
@@ -638,6 +667,7 @@ export const Matches: React.FC = () => {
             : (m as any).affiliationType === 'open'
             ? 'open'
             : 'non_club';
+          if (!isAffiliationAllowedByDisplayConfig(mAff, affiliationDisplayConfig, sport.id)) return false;
           if (!sportTournaments.some(t => {
             const tAff = t.affiliationType === 'open' ? 'open' : isClubTournament(t) ? 'club_affiliated' : 'non_club';
             const catMatch = normalizeCategoryKey(t.ageCategory) === normalizeCategoryKey(m.ageCategory);
@@ -649,25 +679,28 @@ export const Matches: React.FC = () => {
           }
         }
 
-        // Affiliation check if filtered
-        if (affiliationFilter !== 'ALL') {
-          let matchAffiliation = 'non_club';
-          if (m.tournamentId) {
-            const matchedTourn = tournaments.find(t => t.id === m.tournamentId);
-            if (matchedTourn) {
-              if (matchedTourn.affiliationType) {
-                matchAffiliation = matchedTourn.affiliationType;
-              } else if (isClubTournament(matchedTourn)) {
-                matchAffiliation = 'club_affiliated';
-              } else if (matchedTourn.name && (matchedTourn.name.includes('مفتوحة') || matchedTourn.name.includes('المفتوحة'))) {
-                matchAffiliation = 'open';
-              }
+        let matchAffiliation = 'non_club';
+        if (m.tournamentId) {
+          const matchedTourn = tournaments.find(t => t.id === m.tournamentId);
+          if (matchedTourn) {
+            if (matchedTourn.affiliationType) {
+              matchAffiliation = matchedTourn.affiliationType;
+            } else if (isClubTournament(matchedTourn)) {
+              matchAffiliation = 'club_affiliated';
+            } else if (matchedTourn.name && (matchedTourn.name.includes('مفتوحة') || matchedTourn.name.includes('المفتوحة'))) {
+              matchAffiliation = 'open';
             }
           }
-          if ((m as any).affiliationType) {
-            matchAffiliation = (m as any).affiliationType;
-          }
+        }
+        if ((m as any).affiliationType) {
+          matchAffiliation = (m as any).affiliationType;
+        }
+        if (!isAffiliationAllowedByDisplayConfig(matchAffiliation, affiliationDisplayConfig, sport.id)) {
+          return false;
+        }
 
+        // Affiliation check if filtered
+        if (affiliationFilter !== 'ALL') {
           if (affiliationFilter === 'open' && matchAffiliation !== 'open') return false;
           if (affiliationFilter === 'non_club' && matchAffiliation === 'club_affiliated') return false;
           if (affiliationFilter === 'club_affiliated' && matchAffiliation !== 'club_affiliated') return false;
@@ -685,26 +718,28 @@ export const Matches: React.FC = () => {
         if (isProgrammed) {
           const isClubFilter = affiliationFilter === 'club_affiliated';
           const isNonClubFilter = affiliationFilter === 'non_club';
+          const allowNonClubCfg = isAffiliationAllowedByDisplayConfig('non_club', affiliationDisplayConfig, sport.id);
+          const allowClubCfg = isAffiliationAllowedByDisplayConfig('club_affiliated', affiliationDisplayConfig, sport.id);
 
           const ccCompleted = CROSS_COUNTRY_CATEGORIES.filter(c => {
             const nonClubRes = crossCountryResults[c.id];
             const clubRes = crossCountryResults[`${c.id}_club`];
             
             if (isClubFilter) {
-              return (clubRes?.status === 'completed') || (clubRes?.podium && clubRes.podium.length > 0 && clubRes.status !== 'running');
+              return allowClubCfg && ((clubRes?.status === 'completed') || (clubRes?.podium && clubRes.podium.length > 0 && clubRes.status !== 'running'));
             }
             if (isNonClubFilter) {
-              return (nonClubRes?.status === 'completed') || (nonClubRes?.podium && nonClubRes.podium.length > 0 && nonClubRes.status !== 'running');
+              return allowNonClubCfg && ((nonClubRes?.status === 'completed') || (nonClubRes?.podium && nonClubRes.podium.length > 0 && nonClubRes.status !== 'running'));
             }
-            const hasNonClubDone = (nonClubRes?.status === 'completed') || (nonClubRes?.podium && nonClubRes.podium.length > 0 && nonClubRes.status !== 'running');
-            const hasClubDone = (clubRes?.status === 'completed') || (clubRes?.podium && clubRes.podium.length > 0 && clubRes.status !== 'running');
+            const hasNonClubDone = allowNonClubCfg && ((nonClubRes?.status === 'completed') || (nonClubRes?.podium && nonClubRes.podium.length > 0 && nonClubRes.status !== 'running'));
+            const hasClubDone = allowClubCfg && ((clubRes?.status === 'completed') || (clubRes?.podium && clubRes.podium.length > 0 && clubRes.status !== 'running'));
             return hasNonClubDone || hasClubDone;
           }).length;
 
           const ccOngoing = CROSS_COUNTRY_CATEGORIES.filter(c => {
-            if (isClubFilter) return crossCountryResults[`${c.id}_club`]?.status === 'running';
-            if (isNonClubFilter) return crossCountryResults[c.id]?.status === 'running';
-            return crossCountryResults[c.id]?.status === 'running' || crossCountryResults[`${c.id}_club`]?.status === 'running';
+            if (isClubFilter) return allowClubCfg && crossCountryResults[`${c.id}_club`]?.status === 'running';
+            if (isNonClubFilter) return allowNonClubCfg && crossCountryResults[c.id]?.status === 'running';
+            return (allowNonClubCfg && crossCountryResults[c.id]?.status === 'running') || (allowClubCfg && crossCountryResults[`${c.id}_club`]?.status === 'running');
           }).length;
 
           completedCount = ccCompleted;
@@ -718,15 +753,21 @@ export const Matches: React.FC = () => {
           scheduledCount = 0;
         }
       } else if (sport.id === 'athletics' || sport.id === 'track_field') {
-        const totalDisciplines = AthleticsService.getDisciplines().length;
-        const athCompleted = (Object.values(athleticsResults) as AthleticsEventResult[]).filter(r => r && r.status === 'completed').length;
-        const athOngoing = (Object.values(athleticsResults) as AthleticsEventResult[]).filter(r => r && r.status === 'running').length;
+        if (isProgrammed) {
+          const totalDisciplines = AthleticsService.getDisciplines().length;
+          const athCompleted = (Object.values(athleticsResults) as AthleticsEventResult[]).filter(r => r && r.status === 'completed').length;
+          const athOngoing = (Object.values(athleticsResults) as AthleticsEventResult[]).filter(r => r && r.status === 'running').length;
 
-        completedCount = athCompleted;
-        ongoingCount = athOngoing;
-        totalMatches = Math.max(totalDisciplines, athCompleted + athOngoing);
-        scheduledCount = Math.max(0, totalMatches - athCompleted - athOngoing);
-        isProgrammed = true;
+          completedCount = athCompleted;
+          ongoingCount = athOngoing;
+          totalMatches = Math.max(totalDisciplines, athCompleted + athOngoing);
+          scheduledCount = Math.max(0, totalMatches - athCompleted - athOngoing);
+        } else {
+          completedCount = 0;
+          ongoingCount = 0;
+          totalMatches = 0;
+          scheduledCount = 0;
+        }
       }
 
       const nonClubCount = sportMatches.filter(m => {
@@ -795,7 +836,7 @@ export const Matches: React.FC = () => {
         isClub
       };
     });
-  }, [sportsConfig, tournaments, matches, schools, affiliationFilter, activeSeason, teachers, students]);
+  }, [sportsConfig, tournaments, matches, schools, affiliationFilter, activeSeason, teachers, students, crossCountryResults, athleticsResults, affiliationDisplayConfig]);
 
   // Filtered sports list for Level 1 (Open / Programmed tournaments ALWAYS on top)
   const filteredSports = useMemo(() => {
@@ -863,6 +904,70 @@ export const Matches: React.FC = () => {
   const overallCompletedCount = filteredMatches.filter(m => m.status === 'Completed').length;
   const programmedSportsCount = filteredSports.length;
 
+  // Accurate count of matches assigned to the current user as referee (across fieldReferees, tableReferees, referees, referee1Id, referee2Id)
+  const assignedRefereeMatchesCount = useMemo(() => {
+    const profile = effectiveUserProfile || userProfile;
+    if (!profile) return 0;
+
+    const cleanRef = (raw: string): string =>
+      normalizeArabicMatchText(
+        String(raw || '')
+          .replace(/الحكم المعتمد/gi, '')
+          .replace(/حكم الأول|الحكم الأول|حكم أول/gi, '')
+          .replace(/حكم الثاني|الحكم الثاني|حكم ثاني/gi, '')
+          .replace(/حكم الساحة|حكام الساحة|حكم الطاولة|حكام الطاولة/gi, '')
+          .replace(/\(?\s*أستاذ\s*\)?/gi, '')
+          .replace(/[():\-–—،,.]/g, ' ')
+          .trim()
+      );
+
+    const ids = new Set<string>();
+    const names = new Set<string>();
+    if (profile.id) ids.add(profile.id.trim().toLowerCase());
+    if (profile.fullName) {
+      const c = cleanRef(profile.fullName);
+      if (c && c.length >= 2) names.add(c);
+    }
+
+    referees.forEach(r => {
+      const rNorm = cleanRef(r.fullName || '');
+      const matchesUser =
+        (profile.id && (r as any).userId === profile.id) ||
+        (profile.email && r.email && r.email.trim().toLowerCase() === profile.email.trim().toLowerCase()) ||
+        (profile.phone && r.phone && r.phone.replace(/\s+/g, '') === profile.phone.replace(/\s+/g, '')) ||
+        (rNorm && Array.from(names).some(n => rNorm === n || (rNorm.length >= 4 && n.length >= 4 && (rNorm.includes(n) || n.includes(rNorm)))));
+      if (matchesUser) {
+        if (r.id) ids.add(r.id.trim().toLowerCase());
+        if (rNorm && rNorm.length >= 2) names.add(rNorm);
+      }
+    });
+
+    const idArr = Array.from(ids);
+    const nameArr = Array.from(names);
+    if (idArr.length === 0 && nameArr.length === 0) return 0;
+
+    return matches.filter(m => {
+      if (!hasValidMatchTeams(m, schools)) return false;
+      const entries = [
+        ...(Array.isArray(m.fieldReferees) ? m.fieldReferees : []),
+        ...(Array.isArray(m.tableReferees) ? m.tableReferees : []),
+        ...(Array.isArray(m.referees) ? m.referees : []),
+        ...(m.referee1Id ? [m.referee1Id] : []),
+        ...(m.referee2Id ? [m.referee2Id] : [])
+      ];
+      return entries.some(entry => {
+        if (!entry) return false;
+        const lower = entry.trim().toLowerCase();
+        if (!lower) return false;
+        if (idArr.includes(lower)) return true;
+        const refObj = referees.find(r => r.id && r.id.trim().toLowerCase() === lower);
+        const cleaned = cleanRef(refObj ? refObj.fullName : entry);
+        if (!cleaned) return false;
+        return nameArr.some(target => cleaned === target || (cleaned.length >= 4 && target.length >= 4 && (cleaned.includes(target) || target.includes(cleaned))));
+      });
+    }).length;
+  }, [effectiveUserProfile, userProfile, referees, matches, schools]);
+
   return (
     <div className="space-y-6 dir-rtl">
       {/* Top Header */}
@@ -908,7 +1013,7 @@ export const Matches: React.FC = () => {
               <CalendarIcon className="w-3.5 h-3.5 shrink-0" />
               <span>الرزنامة الإقليمية</span>
             </button>
-            {(userProfile?.role === 'TEACHER' || userProfile?.role === 'REFEREE' || isCentralAdmin) && (
+            {(userProfile?.role === 'TEACHER' || userProfile?.role === 'REFEREE' || isTechCommitteeHead || isSportManager || isCentralAdmin || assignedRefereeMatchesCount > 0) && (
               <button
                 onClick={() => handleTabChange('referee')}
                 className={cn(
@@ -920,6 +1025,11 @@ export const Matches: React.FC = () => {
               >
                 <Users className="w-3.5 h-3.5 shrink-0" />
                 <span>أنشطتي التحكيمية 🏁</span>
+                {assignedRefereeMatchesCount > 0 && (
+                  <span className="bg-emerald-500 text-white text-[9px] font-black px-1.5 py-0.2 rounded-full tabular-nums">
+                    {assignedRefereeMatchesCount}
+                  </span>
+                )}
               </button>
             )}
           </div>
@@ -994,8 +1104,8 @@ export const Matches: React.FC = () => {
           schools={schools}
           venues={venues}
           tournaments={tournaments}
-          refereeName={userProfile?.fullName || ''}
-          userProfile={userProfile}
+          refereeName={effectiveUserProfile?.fullName || userProfile?.fullName || ''}
+          userProfile={effectiveUserProfile || userProfile}
           onEditScore={(match) => {
             setSelectedMatchForScore(match);
           }}
@@ -1425,10 +1535,11 @@ export const Matches: React.FC = () => {
                               type="button"
                               onClick={(e) => {
                                 e.stopPropagation();
+                                setDeleteSportResultsMode('reset_scores');
                                 setSportToDeleteResults(sport);
                               }}
                               className="p-2.5 bg-rose-500/25 hover:bg-rose-500/40 text-rose-200 hover:text-white rounded-xl text-xs font-bold transition-colors cursor-pointer shrink-0 border border-rose-400/30 flex items-center justify-center group"
-                              title="حذف وتصفير نتائج رياضة العدو الريفي"
+                              title="حذف نتائج رياضة العدو الريفي"
                             >
                               <Trash2 className="w-4 h-4 group-hover:scale-110 transition-transform" />
                             </button>
@@ -1518,10 +1629,11 @@ export const Matches: React.FC = () => {
                               type="button"
                               onClick={(e) => {
                                 e.stopPropagation();
+                                setDeleteSportResultsMode('reset_scores');
                                 setSportToDeleteResults(sport);
                               }}
                               className="p-2 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-xl text-xs font-bold transition-colors cursor-pointer shrink-0 border border-rose-200/80 group"
-                              title="حذف وتصفير نتائج البطولة"
+                              title="حذف نتائج البطولة"
                             >
                               <Trash2 className="w-4 h-4 group-hover:scale-110 transition-transform" />
                             </button>
@@ -1726,10 +1838,11 @@ export const Matches: React.FC = () => {
                             type="button"
                             onClick={(e) => {
                               e.stopPropagation();
+                              setDeleteSportResultsMode('reset_scores');
                               setSportToDeleteResults(sport);
                             }}
                             className="p-2 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-xl text-xs font-bold transition-colors cursor-pointer shrink-0 border border-rose-200/80 group"
-                            title="حذف وتصفير نتائج البطولة"
+                            title="حذف نتائج البطولة"
                           >
                             <Trash2 className="w-4 h-4 group-hover:scale-110 transition-transform" />
                           </button>
@@ -1892,10 +2005,10 @@ export const Matches: React.FC = () => {
               </div>
               <div className="flex-1 space-y-1">
                 <h3 className="text-lg font-black text-slate-900 dark:text-white">
-                  حذف وتصفير نتائج بطولة {sportToDeleteResults.name}
+                  حذف نتائج بطولة {sportToDeleteResults.name}
                 </h3>
                 <p className="text-xs text-slate-500 dark:text-slate-400">
-                  يرجى تحديد خيار الحذف أدناه. هذا الإجراء سيؤثر على النتائج المعروضة للعموم في المنصة.
+                  يرجى تحديد خيار الحذف أدناه. هذا الإجراء سيؤثر فقط على نتائج هذه البطولة المعروضة للعموم في المنصة.
                 </p>
               </div>
             </div>
@@ -1907,13 +2020,13 @@ export const Matches: React.FC = () => {
                   <span>تنبيه بخصوص نتائج العدو الريفي:</span>
                 </p>
                 <p className="leading-relaxed opacity-90">
-                  سيتم حذف وتصفير جميع نتائج البوديوم ومراكز التتويج المسجلة لجميع الفئات (ذكور وإناث) وإعادة حالة المسابقة إلى وضع الإعداد الأولي. لن يتم حذف لوائح العدائين المسجلين في البطولة.
+                  سيتم حذف جميع نتائج البوديوم ومراكز التتويج المسجلة لجميع الفئات (ذكور وإناث) وإعادة حالة المسابقة إلى وضع الإعداد الأولي دون المساس بباقي الرياضات. لن يتم حذف لوائح العدائين المسجلين في البطولة.
                 </p>
               </div>
             ) : (
               <div className="space-y-3">
                 <p className="text-xs font-bold text-slate-700 dark:text-slate-300">
-                  اختر نمط الحذف والتصفير المطلوب:
+                  اختر نمط الحذف المطلوب:
                 </p>
                 <div className="space-y-2.5">
                   <label 
@@ -1932,7 +2045,7 @@ export const Matches: React.FC = () => {
                     />
                     <div className="text-xs space-y-0.5">
                       <span className="font-bold text-slate-800 dark:text-slate-200 block">
-                        تصفير النتائج والأهداف فقط (مُوصى به)
+                        حذف النتائج والأهداف فقط (مُوصى به)
                       </span>
                       <span className="text-slate-500 dark:text-slate-400 leading-relaxed block text-[11px]">
                         إلغاء نتائج وأهداف المباريات وإعادتها لحالة مبرمجة (SCHEDULED) مع الحفاظ على جدول المباريات والفرق والتواريخ.
@@ -1985,12 +2098,12 @@ export const Matches: React.FC = () => {
                 {isDeletingSportResults ? (
                   <>
                     <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                    <span>جاري الحذف والتصفير...</span>
+                    <span>جاري الحذف...</span>
                   </>
                 ) : (
                   <>
                     <Trash2 className="w-4 h-4" />
-                    <span>تأكيد الحذف والتصفير</span>
+                    <span>تأكيد الحذف</span>
                   </>
                 )}
               </button>

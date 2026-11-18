@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { Tournament, Student, School, User, Sport, Match } from '../types';
-import { SPORTS_MAP, getAgeCategoriesForSeason, normalizeCategoryKey, DataService, getCategoryYearsLabel, isTeacherLevelAllowedForTournament, getTournamentLevelAr, doesConfirmationMatchBranch, getEffectiveConfirmedBranches, formatBranchLabelAr, isSchoolSectorAllowedForTournament, getTournamentEducationSectorsAr, getSchoolEducationSector, resolveSchoolCoach, schoolNamesMatch, normalizeArabicSearch, normalizeArabicMatchText, normalizeTournamentAffiliation } from '../lib/dataService';
+import { Tournament, Student, School, User, Sport, Match, AffiliationDisplayConfig } from '../types';
+import { SPORTS_MAP, getAgeCategoriesForSeason, normalizeCategoryKey, DataService, getCategoryYearsLabel, isTeacherLevelAllowedForTournament, getTournamentLevelAr, doesConfirmationMatchBranch, getEffectiveConfirmedBranches, formatBranchLabelAr, isSchoolSectorAllowedForTournament, getTournamentEducationSectorsAr, getSchoolEducationSector, resolveSchoolCoach, schoolNamesMatch, normalizeArabicSearch, normalizeArabicMatchText, normalizeTournamentAffiliation, isAffiliationAllowedByDisplayConfig } from '../lib/dataService';
+import { canUserDownloadTournamentTablePdf, buildParticipationTableRows, downloadTournamentParticipationTablePdf, formatTournamentRedBannerTitle } from '../lib/tournamentTablePdfService';
 import { useAuth, isSuperAdminEmail } from '../contexts/AuthContext';
 import { AppLogo } from './AppLogo';
 import { CountdownTimer } from './CountdownTimer';
@@ -158,12 +159,38 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
   const [rosterLimitDraft, setRosterLimitDraft] = useState<number>(12);
   const [isSavingRosterLimit, setIsSavingRosterLimit] = useState(false);
 
-  // School Confirmation State
+  // School Confirmation & Affiliation Display State
   const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
   const { confirmations, isSchoolConfirmed, getConfirmation, getConfirmedSchoolsForSport, refreshConfirmations } = useSchoolConfirmations();
+  const [affiliationDisplayConfig, setAffiliationDisplayConfig] = useState<AffiliationDisplayConfig>(
+    () => DataService.getAffiliationDisplayConfigSync()
+  );
+  const [withdrawRefreshTick, setWithdrawRefreshTick] = useState(0);
+
+  useEffect(() => {
+    const unsub = DataService.subscribeToAffiliationDisplayConfig((cfg) => {
+      setAffiliationDisplayConfig(cfg);
+    });
+    const handleSyncEvents = () => {
+      setWithdrawRefreshTick(t => t + 1);
+      refreshConfirmations();
+    };
+    window.addEventListener('schoolWithdrawalsUpdated', handleSyncEvents);
+    window.addEventListener('schoolConfirmationsUpdated', handleSyncEvents);
+    return () => {
+      if (typeof unsub === 'function') unsub();
+      window.removeEventListener('schoolWithdrawalsUpdated', handleSyncEvents);
+      window.removeEventListener('schoolConfirmationsUpdated', handleSyncEvents);
+    };
+  }, [refreshConfirmations]);
+
   const effectiveSchoolName = teacherSchoolName || userProfile?.schoolName || userProfile?.workLocation || '';
   const isSchoolCurrentlyConfirmed = sport ? isSchoolConfirmed(sport.id, effectiveSchoolName) : false;
   const currentConfirmationRecord = sport ? getConfirmation(sport.id, effectiveSchoolName) : undefined;
+  const canDownloadParticipationTablePdf = useMemo(
+    () => (sport ? canUserDownloadTournamentTablePdf(userProfile, sport.id) : false),
+    [userProfile, sport]
+  );
   const [isHeaderCollapsed, setIsHeaderCollapsed] = useState(false);
   const [isFullScreen, setIsFullScreen] = useState(false);
   const [isPdfModalOpen, setIsPdfModalOpen] = useState(false);
@@ -235,17 +262,21 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
       const fallbackCoach = resolveSchoolCoach({
         schoolName: editingStudent.schoolName,
         sportId: sport?.id,
+        category: editingStudent.category,
+        gender: editingStudent.gender,
+        affiliationType: editingStudent.affiliationType,
         students: sportStudents.filter(s => schoolNamesMatch(s.schoolName, editingStudent.schoolName)),
         schools,
         teachers,
         confirmations,
         currentUser: userProfile
       });
-      setEditCoachName(editingStudent.coachName || fallbackCoach.fullName || (isUserAtEditedSchool && userProfile?.fullName ? userProfile.fullName : ''));
-      setEditCoachLease(editingStudent.coachLeaseNumber || fallbackCoach.leaseNumber || (isUserAtEditedSchool && userProfile?.leaseNumber ? userProfile.leaseNumber : ''));
-      setEditCoachPhone(editingStudent.coachPhone || fallbackCoach.phone || (isUserAtEditedSchool && userProfile?.phone ? userProfile.phone : ''));
+      const preferActingTeacher = isUserAtEditedSchool && isTeacherRole && Boolean(userProfile?.fullName);
+      setEditCoachName(editingStudent.coachName || (preferActingTeacher ? userProfile?.fullName : '') || fallbackCoach.fullName || '');
+      setEditCoachLease(editingStudent.coachLeaseNumber || (preferActingTeacher ? userProfile?.leaseNumber : '') || fallbackCoach.leaseNumber || '');
+      setEditCoachPhone(editingStudent.coachPhone || (preferActingTeacher ? userProfile?.phone : '') || fallbackCoach.phone || '');
     }
-  }, [editingStudent, userProfile, schools, teachers, confirmations, sport?.id]);
+  }, [editingStudent, userProfile, schools, teachers, confirmations, sport?.id, isTeacherRole]);
 
   const handleEditPhotoFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -662,16 +693,63 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
   }, [tournaments, isTeacherRole, canManage, userProfile?.teachingCadre, teacherSchoolObj]);
 
   const hasNonClubTournaments = useMemo(() => {
+    if (!sport || !isAffiliationAllowedByDisplayConfig('non_club', affiliationDisplayConfig, sport.id)) return false;
     return sportTournaments.some(t => normalizeTournamentAffiliation(t.affiliationType, t.name) === 'non_club');
-  }, [sportTournaments]);
+  }, [sportTournaments, affiliationDisplayConfig, sport]);
 
   const hasClubTournaments = useMemo(() => {
+    if (!sport || !isAffiliationAllowedByDisplayConfig('club_affiliated', affiliationDisplayConfig, sport.id)) return false;
     return sportTournaments.some(t => normalizeTournamentAffiliation(t.affiliationType, t.name) === 'club_affiliated');
-  }, [sportTournaments]);
+  }, [sportTournaments, affiliationDisplayConfig, sport]);
 
   const hasOpenTournaments = useMemo(() => {
+    if (!sport || !isAffiliationAllowedByDisplayConfig('open', affiliationDisplayConfig, sport.id)) return false;
     return sportTournaments.some(t => normalizeTournamentAffiliation(t.affiliationType, t.name) === 'open');
-  }, [sportTournaments]);
+  }, [sportTournaments, affiliationDisplayConfig, sport]);
+
+  const handleDownloadBranchPdfTable = (
+    targetTournament?: Tournament | null,
+    overrideAff?: 'non_club' | 'club_affiliated' | 'open'
+  ) => {
+    if (!sport || !canDownloadParticipationTablePdf) return;
+    const tAff = targetTournament
+      ? normalizeTournamentAffiliation(targetTournament.affiliationType, targetTournament.name)
+      : (overrideAff || activeBranchModal || 'non_club');
+    const tCat = targetTournament ? normalizeCategoryKey(targetTournament.ageCategory) : 'ALL';
+    const tGender = targetTournament ? (targetTournament.gender || 'ALL') : 'ALL';
+
+    const rows = buildParticipationTableRows({
+      sportId: sport.id,
+      students: sportStudents,
+      schools,
+      teachers,
+      confirmations,
+      currentUser: userProfile,
+      affiliationType: tAff,
+      ageCategory: tCat,
+      gender: tGender,
+      isSchoolWithdrawnFn: (sId, sName, b) => DataService.isSchoolWithdrawn({
+        sportId: sport.id,
+        ageCategory: b?.category || (tCat !== 'ALL' ? tCat : undefined),
+        gender: b?.gender || (tGender !== 'ALL' ? tGender : undefined),
+        affiliationType: b?.affiliationType || tAff
+      }, sId, sName)
+    });
+
+    const redTitle = formatTournamentRedBannerTitle({
+      sportId: sport.id,
+      sportName: sport.name,
+      levelLabel: targetTournament?.level ? getTournamentLevelAr(targetTournament.level) : (allowedSportLevelsAr || undefined),
+      affiliationType: tAff,
+      category: tCat !== 'ALL' ? tCat : undefined,
+      gender: tGender !== 'ALL' ? tGender : undefined
+    });
+
+    downloadTournamentParticipationTablePdf({
+      redTitle,
+      rows
+    });
+  };
 
   // Set default category on open or when sport changes + auto guard for teacher cadre/sector
   useEffect(() => {
@@ -874,8 +952,18 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
       const matchAff = sAffType === targetAff;
       const matchCat = targetCat === 'ALL' || sNormCat === targetCat;
       const matchGen = targetGen === 'ALL' || targetGen === 'Both' || sGen.toLowerCase() === targetGen.toLowerCase();
-      
-      return matchAff && matchCat && matchGen;
+      if (!matchAff || !matchCat || !matchGen) return false;
+
+      if (DataService.isSchoolWithdrawn({
+        sportId: sport.id,
+        tournamentId: selectedBranchTournament?.id,
+        ageCategory: sNormCat,
+        gender: sGen,
+        affiliationType: sAffType
+      }, s.schoolId, s.schoolName)) {
+        return false;
+      }
+      return true;
     });
 
     const resolveCanonicalSchoolBucket = (rawSchoolId?: string, rawSchoolName?: string) => {
@@ -959,14 +1047,16 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
 
         if (matchingBranches.length === 0) return;
 
-        const isConfWithdrawn = DataService.isSchoolWithdrawn({
-          sportId: sport?.id,
-          tournamentId: selectedBranchTournament?.id,
-          ageCategory: targetCat !== 'ALL' ? targetCat : undefined,
-          gender: targetGen !== 'ALL' ? targetGen : undefined,
-          affiliationType: targetAff
-        }, conf.schoolId, conf.schoolName);
-        if (isConfWithdrawn) return;
+        const activeNonWithdrawnBranches = matchingBranches.filter(b =>
+          !DataService.isSchoolWithdrawn({
+            sportId: sport?.id,
+            tournamentId: selectedBranchTournament?.id,
+            ageCategory: normalizeCategoryKey(b.category),
+            gender: b.gender,
+            affiliationType: b.affiliationType
+          }, conf.schoolId, conf.schoolName)
+        );
+        if (activeNonWithdrawnBranches.length === 0) return;
 
         const bucket = resolveCanonicalSchoolBucket(conf.schoolId, conf.schoolName);
         if (!bucket.key) return;
@@ -982,7 +1072,7 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
         }
 
         const schoolItem = schoolsMap[bucket.key];
-        matchingBranches.forEach(b => {
+        activeNonWithdrawnBranches.forEach(b => {
           const cat = normalizeCategoryKey(b.category);
           const gen = b.gender;
           const key = `${cat}__${gen}`;
@@ -1000,16 +1090,7 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
     }
 
     let allSchools = Object.values(schoolsMap).filter(sch => {
-      if (sch.totalCount === 0) {
-        const isWithdrawn = DataService.isSchoolWithdrawn({
-          sportId: sport?.id,
-          tournamentId: selectedBranchTournament?.id,
-          ageCategory: targetCat !== 'ALL' ? targetCat : undefined,
-          gender: targetGen !== 'ALL' ? targetGen : undefined,
-          affiliationType: targetAff
-        }, undefined, sch.name);
-        if (isWithdrawn) return false;
-      }
+      if (sch.totalCount === 0 && sch.genderCategories.length === 0) return false;
       return true;
     });
 
@@ -1031,7 +1112,7 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
       );
       return matchSchoolName || matchCategories;
     });
-  }, [sportStudents, schools, selectedAffiliation, selectedBranchTournament, selectedCatId, selectedGender, search, isTeacherRole, userProfile, teacherSchoolName, canManage, activeBranchModal, sport, getConfirmedSchoolsForSport]);
+  }, [sportStudents, schools, selectedAffiliation, selectedBranchTournament, selectedCatId, selectedGender, search, isTeacherRole, userProfile, teacherSchoolName, canManage, activeBranchModal, sport, getConfirmedSchoolsForSport, confirmations, withdrawRefreshTick]);
 
   // Students belonging to the currently selected school in this sport & affiliation
   const schoolStudents = useMemo(() => {
@@ -1886,7 +1967,7 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
                           <ConfirmedParticipationBadge
                             sportId={sport.id}
                             sportName={sport.name}
-                            schoolId={userProfile?.schoolId}
+                            schoolId={teacherSchoolObj?.id || userProfile?.schoolId || effectiveSchoolName}
                             schoolName={effectiveSchoolName}
                             variant="light"
                             label="مؤكدة ✓ (اضغط مطولاً 3ث للإلغاء)"
@@ -1899,6 +1980,7 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
                             }}
                             onCancelSuccess={() => {
                               refreshConfirmations();
+                              if (onRefreshData) onRefreshData();
                             }}
                           />
                            <button
@@ -2443,6 +2525,20 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
                               <span>دخول واستعراض المؤسسات المشاركة 🔓</span>
                               <ChevronLeft className="w-4 h-4" />
                             </button>
+                            {canDownloadParticipationTablePdf && (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleDownloadBranchPdfTable(t);
+                                }}
+                                title="تحميل جدول المؤسسات المشاركة (PDF)"
+                                className="px-2.5 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-xl transition-colors cursor-pointer shrink-0 flex items-center gap-1 text-[11px] font-black"
+                              >
+                                <FileText className="w-3.5 h-3.5" />
+                                <span>PDF</span>
+                              </button>
+                            )}
                             {canManage && (
                               <button
                                 type="button"
@@ -2575,6 +2671,17 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
                         >
                           <Shuffle className="w-3.5 h-3.5" />
                           <span>إجراء القرعة لهذه الفئة</span>
+                        </button>
+                      )}
+                      {canDownloadParticipationTablePdf && (
+                        <button
+                          type="button"
+                          onClick={() => handleDownloadBranchPdfTable(selectedBranchTournament)}
+                          className="px-3 py-1.5 bg-rose-50 text-rose-700 hover:bg-rose-100 border border-rose-200 rounded-xl text-xs font-black flex items-center gap-1.5 transition-colors cursor-pointer"
+                          title="تحميل جدول المؤسسات المشاركة في هذه البطولة بصيغة PDF"
+                        >
+                          <FileText className="w-3.5 h-3.5" />
+                          <span>تحميل جدول المشاركة (PDF)</span>
                         </button>
                       )}
                       {canManage && (
@@ -3900,7 +4007,7 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
           sport={sport}
           tournaments={sportTournaments}
           schoolName={effectiveSchoolName}
-          schoolId={userProfile?.schoolId || effectiveSchoolName}
+          schoolId={teacherSchoolObj?.id || userProfile?.schoolId || effectiveSchoolName}
           teacherId={userProfile?.id}
           teacherName={userProfile?.fullName}
           teacherPhone={userProfile?.phone}

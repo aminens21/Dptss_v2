@@ -1,5 +1,5 @@
-import React, { useState, useMemo, useEffect } from 'react';
-import { Sport, Tournament, School, SchoolTournamentConfirmation, TARGET_AFFILIATIONS } from '../types';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
+import { Sport, Tournament, School, SchoolTournamentConfirmation, AffiliationDisplayConfig, TARGET_AFFILIATIONS } from '../types';
 import {
   DataService,
   ConfirmedBranchTuple,
@@ -12,7 +12,8 @@ import {
   isSchoolSectorAllowedForTournament,
   getSchoolEducationSector,
   getTournamentEducationSectorsAr,
-  schoolNamesMatch
+  schoolNamesMatch,
+  isAffiliationAllowedByDisplayConfig
 } from '../lib/dataService';
 import { CountdownTimer } from './CountdownTimer';
 import { ConfirmedParticipationBadge } from './ConfirmedParticipationBadge';
@@ -83,6 +84,19 @@ export const ConfirmParticipationModal: React.FC<ConfirmParticipationModalProps>
   const [confirmCancelStep, setConfirmCancelStep] = useState(false);
   const [loadedTournaments, setLoadedTournaments] = useState<Tournament[]>([]);
   const [loadedSchools, setLoadedSchools] = useState<School[]>([]);
+  const [affiliationDisplayConfig, setAffiliationDisplayConfig] = useState<AffiliationDisplayConfig>(
+    () => DataService.getAffiliationDisplayConfigSync()
+  );
+  const initialConfirmedBranchesRef = useRef<ConfirmedBranchTuple[]>([]);
+
+  useEffect(() => {
+    const unsub = DataService.subscribeToAffiliationDisplayConfig((cfg) => {
+      setAffiliationDisplayConfig(cfg);
+    });
+    return () => {
+      if (typeof unsub === 'function') unsub();
+    };
+  }, []);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -235,6 +249,7 @@ export const ConfirmParticipationModal: React.FC<ConfirmParticipationModalProps>
     const catOrder = ['U12', 'U15', 'U18', 'U20', 'OPEN'];
 
     return Array.from(groupsMap.entries())
+      .filter(([affId]) => isAffiliationAllowedByDisplayConfig(affId, affiliationDisplayConfig, sport.id))
       .sort((a, b) => {
         const ia = orderAffs.indexOf(a[0]);
         const ib = orderAffs.indexOf(b[0]);
@@ -261,7 +276,7 @@ export const ConfirmParticipationModal: React.FC<ConfirmParticipationModalProps>
           items: sortedItems
         };
       });
-  }, [activeSportTournaments, availableCategories, sport]);
+  }, [activeSportTournaments, availableCategories, sport, affiliationDisplayConfig]);
 
   // Exact selected branches state (NO hidden Cartesian product & NO auto-selecting club_affiliated!)
   const [selectedBranches, setSelectedBranches] = useState<ConfirmedBranchTuple[]>(() => {
@@ -273,11 +288,16 @@ export const ConfirmParticipationModal: React.FC<ConfirmParticipationModalProps>
 
   useEffect(() => {
     if (!isOpen) return;
+    setIsEditingExisting(false);
     setConfirmCancelStep(false);
+    setNotes(confirmedRecord?.notes || '');
     if (confirmedRecord && confirmedRecord.status === 'confirmed') {
-      setSelectedBranches(getEffectiveConfirmedBranches(confirmedRecord, true));
+      const effective = getEffectiveConfirmedBranches(confirmedRecord, true);
+      setSelectedBranches(effective);
+      initialConfirmedBranchesRef.current = effective;
     } else {
       setSelectedBranches([]);
+      initialConfirmedBranchesRef.current = [];
     }
   }, [isOpen, confirmedRecord]);
 
@@ -372,6 +392,7 @@ export const ConfirmParticipationModal: React.FC<ConfirmParticipationModalProps>
       return;
     }
 
+    const canonicalSchoolId = matchedSchool?.id || schoolId || schoolName;
     const derivedCategories: string[] = Array.from(new Set<string>(selectedBranches.map(b => b.category)));
     const derivedGenders: ('Male' | 'Female')[] = Array.from(new Set<'Male' | 'Female'>(selectedBranches.map(b => b.gender)));
     const derivedAffiliations: string[] = Array.from(new Set<string>(selectedBranches.map(b => b.affiliationType)));
@@ -379,12 +400,30 @@ export const ConfirmParticipationModal: React.FC<ConfirmParticipationModalProps>
     setIsSubmitting(true);
     const toastId = toast.loading('جاري حفظ تأكيد مشاركة المؤسسة في الفروع المحددة...');
     try {
-      await DataService.cancelSchoolWithdrawal(sport.id, schoolId || schoolName);
+      const selectedKeys = new Set(selectedBranches.map(makeBranchKey));
+      const removedBranches = initialConfirmedBranchesRef.current.filter(b => !selectedKeys.has(makeBranchKey(b)));
 
+      // Clear any previous withdrawals matching newly selected or kept branches
+      for (const selBranch of selectedBranches) {
+        await DataService.cancelSchoolWithdrawal(sport.id, canonicalSchoolId, undefined, {
+          ageCategory: selBranch.category,
+          gender: selBranch.gender,
+          affiliationType: selBranch.affiliationType
+        });
+        if (canonicalSchoolId !== schoolName) {
+          await DataService.cancelSchoolWithdrawal(sport.id, schoolName, undefined, {
+            ageCategory: selBranch.category,
+            gender: selBranch.gender,
+            affiliationType: selBranch.affiliationType
+          });
+        }
+      }
+
+      // Persist updated confirmation with selected branches first
       await DataService.confirmSchoolParticipation({
         sportId: sport.id,
         sportName: sport.name,
-        schoolId: schoolId || schoolName,
+        schoolId: canonicalSchoolId,
         schoolName: schoolName,
         teacherId: teacherId || '',
         teacherName: teacherName || '',
@@ -398,8 +437,23 @@ export const ConfirmParticipationModal: React.FC<ConfirmParticipationModalProps>
         selectedBranches
       });
 
+      // Record branch withdrawals for any branch the teacher unchecked during edit
+      if (removedBranches.length > 0) {
+        for (const remBranch of removedBranches) {
+          await DataService.withdrawSchool({
+            sportId: sport.id,
+            schoolId: canonicalSchoolId,
+            schoolName,
+            ageCategory: remBranch.category,
+            gender: remBranch.gender,
+            affiliationType: remBranch.affiliationType,
+            withdrawnBy: teacherName || ''
+          });
+        }
+      }
+
       toast.dismiss(toastId);
-      toast.success(`تم تأكيد مشاركة «${schoolName}» في ${selectedBranches.length} فرع(فروع) من بطولة ${sport.name} بنجاح!`, { duration: 4500 });
+      toast.success(`تم حفظ تأكيد مشاركة «${schoolName}» في ${selectedBranches.length} فرع(فروع) من بطولة ${sport.name} بنجاح!`, { duration: 4500 });
       setIsEditingExisting(false);
       if (onConfirmSuccess) onConfirmSuccess();
       onClose();
@@ -416,7 +470,8 @@ export const ConfirmParticipationModal: React.FC<ConfirmParticipationModalProps>
     setIsCancelling(true);
     const toastId = toast.loading('جاري إلغاء تأكيد المشاركة...');
     try {
-      await DataService.cancelSchoolConfirmation(sport.id, schoolId || schoolName);
+      const canonicalSchoolId = matchedSchool?.id || schoolId || schoolName;
+      await DataService.cancelSchoolConfirmation(sport.id, canonicalSchoolId, schoolName);
       toast.dismiss(toastId);
       toast.success(`تم إلغاء تأكيد مشاركة مؤسسة «${schoolName}»`);
       setConfirmCancelStep(false);

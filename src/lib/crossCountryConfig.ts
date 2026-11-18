@@ -362,12 +362,8 @@ export const INITIAL_CROSS_COUNTRY_RESULTS: Record<string, CrossCountryCategoryR
     distance: '1500 م',
     venueName: 'مضمار حلبة ألعاب القوى بتاوريرت',
     affiliationType: 'non_club',
-    podium: [
-      { rank: 1, fullName: 'ياسين بونو', schoolName: 'م.م دبدو', bibNumber: '102', time: '04:12', affiliationType: 'non_club' },
-      { rank: 2, fullName: 'أشرف حكيمي', schoolName: 'إعدادية ابن سينا', bibNumber: '115', time: '04:15', affiliationType: 'club_affiliated' },
-      { rank: 3, fullName: 'سفيان أمرابط', schoolName: 'إعدادية سيدي لحسن', bibNumber: '108', time: '04:20', affiliationType: 'non_club' }
-    ],
-    status: 'completed'
+    podium: [],
+    status: 'setup'
   },
   u12_female: {
     categoryId: 'u12_female',

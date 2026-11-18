@@ -1,6 +1,5 @@
-import { Tournament, Match, School, Venue, User, Referee, Student, Sport, AppNotification, RoleSidebarPermissions, Directorate, DirectorateTransferRequest, SUPER_ADMIN_EMAILS, CrossCountryCategoryResult, PodiumWinner, CustomAgeCategory, AthleticsCategoryResult, AthleticsWinner, SchoolTournamentConfirmation, SchoolWithdrawalRecord, InternalMessage, CommunicationRecipientCategory, BlockedSchedulePeriod, EducationalCycleKey } from '../types';
-import { INITIAL_TOURNAMENTS, INITIAL_MATCHES, INITIAL_SCHOOLS, INITIAL_VENUES, INITIAL_DIRECTORATES } from './initialData';
-import { INITIAL_CROSS_COUNTRY_RESULTS } from './crossCountryConfig';
+import { Tournament, Match, School, Venue, User, Referee, Student, Sport, AppNotification, RoleSidebarPermissions, Directorate, DirectorateTransferRequest, SUPER_ADMIN_EMAILS, CrossCountryCategoryResult, PodiumWinner, CustomAgeCategory, AthleticsCategoryResult, AthleticsWinner, SchoolTournamentConfirmation, SchoolWithdrawalRecord, InternalMessage, CommunicationRecipientCategory, BlockedSchedulePeriod, EducationalCycleKey, AffiliationDisplayMode, AffiliationDisplayConfig } from '../types';
+import { INITIAL_TOURNAMENTS, INITIAL_SCHOOLS, INITIAL_VENUES, INITIAL_DIRECTORATES } from './initialData';
 import { db } from '../firebase/config';
 import {
   collection,
@@ -816,15 +815,16 @@ function doesMatchMatchSportScope(
   sportsList?: Sport[]
 ): boolean {
   const parentSportId = m.tournamentId ? tournamentSportMap.get(m.tournamentId) : undefined;
+  const effectiveSportId = (m.sportId && String(m.sportId).trim()) || parentSportId;
   if (allowedSet !== null) {
-    const matchDirect = isSportInAllowedSet(m.sportId, allowedSet, sportsList);
-    const matchViaParent = parentSportId ? isSportInAllowedSet(parentSportId, allowedSet, sportsList) : false;
-    if (!matchDirect && !matchViaParent) return false;
+    if (!effectiveSportId || !isSportInAllowedSet(effectiveSportId, allowedSet, sportsList)) {
+      return false;
+    }
   }
   if (targetSportId) {
-    const targetDirect = areSportIdsEquivalent(m.sportId, targetSportId, sportsList);
-    const targetViaParent = parentSportId ? areSportIdsEquivalent(parentSportId, targetSportId, sportsList) : false;
-    if (!targetDirect && !targetViaParent) return false;
+    if (!effectiveSportId || !areSportIdsEquivalent(effectiveSportId, targetSportId, sportsList)) {
+      return false;
+    }
   }
   return true;
 }
@@ -1167,7 +1167,7 @@ export function isTeacherLevelAllowedForTournament(teachingCadre?: string, tourn
   if (teacherLevelKey === 'Middle' && (tournamentLevel.includes('إعدادي') || tournamentLevel.includes('اعدادي') || allowedLevels.includes('Middle'))) return true;
   if (teacherLevelKey === 'High' && (tournamentLevel.includes('تأهيلي') || tournamentLevel.includes('تاهيلي') || tournamentLevel.includes('ثانوي') || allowedLevels.includes('High'))) return true;
 
-  return true; // Flexible fallback by default for all teachers
+  return false;
 }
 
 export function getCategoryLevel(categoryId: string): 'Primary' | 'Middle' | 'High' | 'Other' {
@@ -1406,6 +1406,9 @@ export interface ResolvedSchoolCoach {
 export function resolveSchoolCoach(params: {
   schoolName?: string;
   sportId?: string;
+  category?: string;
+  gender?: string;
+  affiliationType?: string;
   students?: Student[];
   schools?: School[];
   teachers?: User[];
@@ -1415,6 +1418,9 @@ export function resolveSchoolCoach(params: {
   const {
     schoolName = '',
     sportId,
+    category,
+    gender,
+    affiliationType,
     students = [],
     schools = [],
     teachers = [],
@@ -1527,6 +1533,36 @@ export function resolveSchoolCoach(params: {
     };
   };
 
+  const normBranchCat = category && category !== 'ALL' ? normalizeCategoryKey(category) : undefined;
+  const normBranchGen = gender && gender !== 'ALL' && gender !== 'Both' && gender !== 'Mixed' ? gender : undefined;
+  const normBranchAff = affiliationType && affiliationType !== 'ALL' ? affiliationType : undefined;
+
+  // 0. Exact branch match on student records or confirmation.branchTeachers
+  if (normBranchCat || normBranchGen || normBranchAff) {
+    const exactBranchStudent = filterSchoolStudents.find(s => {
+      if (!s.coachName || !s.coachName.trim()) return false;
+      if (sportId && s.sportId !== sportId) return false;
+      if (normBranchCat && normalizeCategoryKey(s.category) !== normBranchCat) return false;
+      if (normBranchGen && s.gender && s.gender.toLowerCase() !== normBranchGen.toLowerCase()) return false;
+      if (normBranchAff && (s.affiliationType || 'non_club') !== normBranchAff) return false;
+      return true;
+    });
+    if (exactBranchStudent) {
+      const enriched = enrichFromUsers(
+        exactBranchStudent.coachName || '',
+        exactBranchStudent.coachLeaseNumber,
+        exactBranchStudent.coachPhone
+      );
+      if (enriched.fullName) {
+        return {
+          ...enriched,
+          workLocation: cleanSchool || matchedSchool?.name || '',
+          source: 'student'
+        };
+      }
+    }
+  }
+
   // 1. Explicit coach recorded on participating students of this school (prefer matching sport)
   const sportStudentsWithCoach = filterSchoolStudents.filter(
     s => s.coachName && s.coachName.trim() !== '' && (!sportId || s.sportId === sportId)
@@ -1552,7 +1588,7 @@ export function resolveSchoolCoach(params: {
     }
   }
 
-  // 2. Active confirmation record for this school (prefer matching sport, ensure confirmor isn't a supervisor from a different school)
+  // 2. Active confirmation record for this school (prefer matching branchTeachers, then sport)
   const matchingConfs = confirmations.filter(
     c =>
       c &&
@@ -1560,19 +1596,36 @@ export function resolveSchoolCoach(params: {
       (schoolNamesMatch(c.schoolName, cleanSchool) ||
         (matchedSchool?.id && c.schoolId === matchedSchool.id))
   );
-  const isConfFromSchool = (c: SchoolTournamentConfirmation) => {
-    if (!c.teacherName?.trim()) return false;
-    if (c.teacherId && teachers.length > 0) {
-      const confUser = teachers.find(u => u.id === c.teacherId);
-      if (confUser?.workLocation && cleanSchool && !schoolNamesMatch(confUser.workLocation, cleanSchool)) {
-        return false;
+  const targetConf =
+    (sportId ? matchingConfs.find(c => c.sportId === sportId && Boolean(c.teacherName?.trim())) : undefined) ||
+    matchingConfs.find(c => Boolean(c.teacherName?.trim()));
+
+  if (targetConf && targetConf.branchTeachers && (normBranchCat || normBranchGen || normBranchAff)) {
+    const btEntry = Object.entries(targetConf.branchTeachers).find(([bKey, info]) => {
+      if (!info || !info.teacherName?.trim()) return false;
+      const [aff, cat, gen] = bKey.split('__');
+      if (normBranchAff && aff !== normBranchAff) return false;
+      if (normBranchCat && normalizeCategoryKey(cat) !== normBranchCat) return false;
+      if (normBranchGen && gen && gen.toLowerCase() !== normBranchGen.toLowerCase()) return false;
+      return true;
+    });
+    if (btEntry) {
+      const info = btEntry[1];
+      const enriched = enrichFromUsers(
+        info.teacherName,
+        info.teacherLeaseNumber,
+        info.teacherPhone,
+        info.teacherId
+      );
+      if (enriched.fullName) {
+        return {
+          ...enriched,
+          workLocation: cleanSchool || matchedSchool?.name || '',
+          source: 'confirmation'
+        };
       }
     }
-    return true;
-  };
-  const targetConf =
-    (sportId ? matchingConfs.find(c => c.sportId === sportId && isConfFromSchool(c)) : undefined) ||
-    matchingConfs.find(isConfFromSchool);
+  }
 
   if (targetConf && targetConf.teacherName?.trim()) {
     const enriched = enrichFromUsers(
@@ -2173,13 +2226,17 @@ export const DataService = {
           });
         };
 
-        // 2. Delete Matches strictly associated with this tournament (or untagged matches matching its exact branch when no sibling tournament covers it)
+        // 2. Delete Matches strictly associated with this tournament (or orphaned/untagged matches matching its exact branch, or all matches of the sport when deleting its last tournament)
         const matches = await this.getMatches();
         const matchesToDelete = matches.filter(m => {
           if (m.tournamentId) {
-            return m.tournamentId === id;
+            if (m.tournamentId === id) return true;
+            // Also remove orphaned matches pointing to non-existent tournaments of the same deleted sport when no remaining tournament exists
+            if (remainingSameSportTournaments.length === 0 && m.sportId === tournament.sportId) return true;
+            return false;
           }
           if (m.sportId !== tournament.sportId) return false;
+          if (remainingSameSportTournaments.length === 0) return true;
           const mCat = normalizeCategoryKey(m.ageCategory);
           const mAff = (m as any).affiliationType === 'club_affiliated'
             ? 'club_affiliated'
@@ -2215,6 +2272,7 @@ export const DataService = {
           const activeDirId = this.getActiveDirectorateId();
           const resultsMap = await this.getCrossCountryResults();
           const resultsToDelete = (Object.values(resultsMap) as CrossCountryCategoryResult[]).filter(r => {
+            if (remainingSameSportTournaments.length === 0) return true;
             const catMatch = normalizeCategoryKey(r.category) === normTourCat;
             const genderMatch = tournament.gender === 'Mixed' || r.gender === tournament.gender;
             if (!catMatch || !genderMatch) return false;
@@ -2237,6 +2295,11 @@ export const DataService = {
               localStorage.setItem(cacheKey, JSON.stringify(parsed));
             }
           }
+        }
+
+        // 4b. Delete Athletics Results when no athletics tournaments remain
+        if ((tournament.sportId === 'athletics' || tournament.sportId === 'track_field') && remainingSameSportTournaments.length === 0) {
+          await this.resetMatchResultsByScope({ sportId: 'athletics' }).catch(() => {});
         }
       }
 
@@ -2310,10 +2373,11 @@ export const DataService = {
   },
 
   async bulkDeleteTournamentsBySport(sportId: string): Promise<void> {
+    const cachedSports = getLocal<Sport>('taourirt_sports_config', []);
     const localList = getLocal<Tournament>(STORAGE_KEYS.TOURNAMENTS, []);
-    const tournamentsToDelete = localList.filter(t => t.sportId === sportId);
+    const tournamentsToDelete = localList.filter(t => t.sportId === sportId || areSportIdsEquivalent(t.sportId, sportId, cachedSports));
     tournamentsToDelete.forEach(t => markRecentlyDeleted('tournaments', t.id));
-    const updatedTournaments = localList.filter(t => t.sportId !== sportId);
+    const updatedTournaments = localList.filter(t => t.sportId !== sportId && !areSportIdsEquivalent(t.sportId, sportId, cachedSports));
     setLocal(STORAGE_KEYS.TOURNAMENTS, updatedTournaments);
 
     for (const tourn of tournamentsToDelete) {
@@ -2324,10 +2388,12 @@ export const DataService = {
       }
     }
 
-    // Delete associated matches
+    // Delete associated matches cleanly
     try {
       const matches = await this.getMatches();
-      const matchesToDelete = matches.filter(m => m.sportId === sportId || tournamentsToDelete.some(t => t.id === m.tournamentId));
+      const matchesToDelete = matches.filter(
+        m => m.sportId === sportId || areSportIdsEquivalent(m.sportId, sportId, cachedSports) || tournamentsToDelete.some(t => t.id === m.tournamentId)
+      );
       for (const m of matchesToDelete) {
         await this.deleteMatch(m.id);
       }
@@ -2338,7 +2404,7 @@ export const DataService = {
     // Delete associated students
     try {
       const allStudents = await this.getStudents();
-      const sportStudents = allStudents.filter(s => s.sportId === sportId);
+      const sportStudents = allStudents.filter(s => s.sportId === sportId || areSportIdsEquivalent(s.sportId, sportId, cachedSports));
       for (const s of sportStudents) {
         await this.deleteStudent(s.id);
       }
@@ -2347,7 +2413,7 @@ export const DataService = {
     }
 
     // Delete cross country results if sport is cross_country
-    if (sportId === 'cross_country') {
+    if (areSportIdsEquivalent(sportId, 'cross_country', cachedSports)) {
       try {
         const activeDirId = this.getActiveDirectorateId();
         const resultsMap = await this.getCrossCountryResults();
@@ -2356,20 +2422,30 @@ export const DataService = {
           await deleteDoc(doc(db, 'cross_country_results', docId)).catch(() => {});
         }
         const cacheKey = `taourirt_cc_results_${activeDirId}`;
-        localStorage.removeItem(cacheKey);
+        localStorage.setItem(cacheKey, '{}');
       } catch (e) {
         console.warn("Error deleting cross country results:", e);
       }
     }
 
+    // Delete athletics results if sport is athletics
+    if (areSportIdsEquivalent(sportId, 'athletics', cachedSports)) {
+      await this.resetMatchResultsByScope({ sportId: 'athletics' }).catch(() => {});
+    }
+
     try {
       const currentSports = getLocal<Sport>('taourirt_sports_config', []);
-      const updatedSports = currentSports.map(s => s.id === sportId ? { ...s, isProgrammed: false, ageCategories: [] } : s);
+      const updatedSports = currentSports.map(s =>
+        (s.id === sportId || areSportIdsEquivalent(s.id, sportId, cachedSports))
+          ? { ...s, isProgrammed: false, ageCategories: [], targetAffiliations: [] }
+          : s
+      );
       setLocal('taourirt_sports_config', updatedSports);
 
       await setDoc(doc(db, 'sports', sportId), {
         isProgrammed: false,
         ageCategories: [],
+        targetAffiliations: [],
         updatedAt: serverTimestamp()
       }, { merge: true });
     } catch (e) {
@@ -2378,6 +2454,7 @@ export const DataService = {
 
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('tournamentDataChanged', { detail: { sportId } }));
+      window.dispatchEvent(new CustomEvent('tournamentsUpdated'));
       window.dispatchEvent(new CustomEvent('matchesDataChanged'));
       window.dispatchEvent(new CustomEvent('resultsChanged'));
       window.dispatchEvent(new CustomEvent('sportsConfigChanged'));
@@ -2472,7 +2549,7 @@ export const DataService = {
           sportName: sportLabel,
           ageCategory: normCat,
           gender: refTourn.gender,
-          level: refTourn.level || 'Primary,Middle,High',
+          level: refTourn.level || (normCat === 'U12' ? 'Primary' : normCat === 'U15' ? 'Middle' : (normCat === 'U18' || normCat === 'U20') ? 'High' : 'Middle,High'),
           scope: refTourn.scope || 'Provincial',
           affiliationType: 'club_affiliated',
           targetAffiliations: ['club_affiliated'],
@@ -2784,7 +2861,7 @@ export const DataService = {
         const firestoreList = snap.docs
           .filter(d => !isRecentlyDeleted('matches', d.id))
           .map(d => normalizeMatchRecord({ ...d.data(), id: d.id } as Match));
-        const filtered = firestoreList.filter(m => m.id !== 'mat-1' && m.id !== 'mat-2' && m.id !== 'mat-3');
+        const filtered = firestoreList.filter(m => m.id !== 'mat-1' && m.id !== 'mat-2' && m.id !== 'mat-3' && m.id !== 'demo-m1' && m.id !== 'demo-m2');
         const localPending = getLocal<Match>(STORAGE_KEYS.MATCHES, [])
           .filter(lm => lm && lm.id && isPendingWrite('matches', lm.id) && !isRecentlyDeleted('matches', lm.id))
           .map(normalizeMatchRecord);
@@ -2802,10 +2879,11 @@ export const DataService = {
     }
 
     if (!fetchedFromCloud && allMatches.length === 0) {
-      const initialFallback = (all === true || activeDirId === 'taourirt') ? INITIAL_MATCHES : [];
-      const rawLocalList = getLocal<Match>(STORAGE_KEYS.MATCHES, initialFallback);
+      const rawLocalList = getLocal<Match>(STORAGE_KEYS.MATCHES, []);
       const localList = rawLocalList.map(normalizeMatchRecord);
-      const cleaned = localList.filter(m => m.id !== 'mat-1' && m.id !== 'mat-2' && m.id !== 'mat-3' && !isRecentlyDeleted('matches', m.id));
+      const cleaned = localList.filter(
+        m => m.id !== 'mat-1' && m.id !== 'mat-2' && m.id !== 'mat-3' && m.id !== 'demo-m1' && m.id !== 'demo-m2' && !isRecentlyDeleted('matches', m.id)
+      );
       setLocal(STORAGE_KEYS.MATCHES, cleaned);
       allMatches = deduplicateById(cleaned);
     }
@@ -6488,7 +6566,7 @@ export const DataService = {
       const activeDirId = this.getActiveDirectorateId();
       const activeSeason = await this.getActiveSeason();
       const cacheKey = `taourirt_cc_results_${activeDirId}`;
-      const resultsMap: Record<string, CrossCountryCategoryResult> = JSON.parse(JSON.stringify(INITIAL_CROSS_COUNTRY_RESULTS));
+      const resultsMap: Record<string, CrossCountryCategoryResult> = {};
       
       snap.docs.forEach(docSnap => {
         const data = docSnap.data();
@@ -6567,10 +6645,22 @@ export const DataService = {
    * Reset or delete all results of a specific sport for the active directorate and season
    */
   async deleteSportResults(sportId: string, deleteMatchesCompletely: boolean = false): Promise<void> {
+    const cleanSportId = String(sportId || '').trim();
+    if (!cleanSportId) {
+      throw new Error('INVALID_SPORT_ID');
+    }
+    const cachedSports = getLocal<Sport>('taourirt_sports_config', []);
+    if (
+      areSportIdsEquivalent(cleanSportId, 'cross_country', cachedSports) ||
+      areSportIdsEquivalent(cleanSportId, 'athletics', cachedSports)
+    ) {
+      await this.resetMatchResultsByScope({ sportId: cleanSportId });
+      return;
+    }
     if (deleteMatchesCompletely) {
-      await this.clearScheduledMatchesByScope({ sportId });
+      await this.clearScheduledMatchesByScope({ sportId: cleanSportId });
     } else {
-      await this.resetMatchResultsByScope({ sportId });
+      await this.resetMatchResultsByScope({ sportId: cleanSportId });
     }
   },
 
@@ -6584,9 +6674,20 @@ export const DataService = {
   } = {}): Promise<{ resetMatchesCount: number; resetCrossCountry: boolean; resetAthletics: boolean }> {
     const activeDirId = this.getActiveDirectorateId();
     const effectiveDirId = (!activeDirId || activeDirId === 'all') ? 'taourirt' : activeDirId;
-    const { allowedSportIds, sportId, tournamentId } = options;
+    const { allowedSportIds } = options;
+    if (options.sportId !== undefined && !String(options.sportId).trim()) {
+      throw new Error('INVALID_SPORT_ID');
+    }
+    if (options.tournamentId !== undefined && !String(options.tournamentId).trim()) {
+      throw new Error('INVALID_TOURNAMENT_ID');
+    }
+    const sportId = options.sportId ? String(options.sportId).trim() : undefined;
+    const tournamentId = options.tournamentId ? String(options.tournamentId).trim() : undefined;
 
-    const cachedSports = getLocal<Sport>('taourirt_sports_config', []);
+    let cachedSports = getLocal<Sport>('taourirt_sports_config', []);
+    if (cachedSports.length === 0) {
+      cachedSports = await this.getSportsConfig().catch(() => []);
+    }
     const allowedSet = buildAllowedSportSet(allowedSportIds, cachedSports);
 
     // Enforce allowedSportIds guard when role is scoped (e.g. Technical Committee Head)
@@ -6614,16 +6715,19 @@ export const DataService = {
       }
     }
 
+    const effectiveSportScope = sportId || targetTournamentObj?.sportId;
+    const hasExplicitScopeFilter = Boolean(sportId || tournamentId);
     const matchesToInspect = await this.getMatches();
     const targetMatchIds = new Set<string>();
 
     matchesToInspect.forEach(m => {
-      if (!doesMatchMatchSportScope(m, allowedSet, sportId, tournamentSportMap, cachedSports)) {
+      if (!doesMatchMatchSportScope(m, allowedSet, effectiveSportScope, tournamentSportMap, cachedSports)) {
         return;
       }
       if (tournamentId) {
         const directMatch = m.tournamentId === tournamentId;
         const metaMatch =
+          !m.tournamentId &&
           targetTournamentObj &&
           areSportIdsEquivalent(m.sportId, targetTournamentObj.sportId, cachedSports) &&
           normalizeCategoryKey(m.ageCategory) === normalizeCategoryKey(targetTournamentObj.ageCategory) &&
@@ -6731,10 +6835,11 @@ export const DataService = {
     const effectiveSportIdForSpecial = targetTournamentObj?.sportId || sportId;
     const isCrossCountryInScope = effectiveSportIdForSpecial
       ? areSportIdsEquivalent(effectiveSportIdForSpecial, 'cross_country', cachedSports)
-      : allowedSet === null || isSportInAllowedSet('cross_country', allowedSet, cachedSports);
+      : !hasExplicitScopeFilter && (allowedSet === null || isSportInAllowedSet('cross_country', allowedSet, cachedSports));
 
     let resetCrossCountry = false;
     if (isCrossCountryInScope) {
+      const activeSeason = await this.getActiveSeason();
       const ccResults = await this.getCrossCountryResults(effectiveDirId);
       const resetMap: Record<string, CrossCountryCategoryResult> = {};
       let modifiedAnyCC = false;
@@ -6755,6 +6860,9 @@ export const DataService = {
           if (catVal.podium && catVal.podium.length > 0) modifiedAnyCC = true;
           resetMap[key] = {
             ...catVal,
+            categoryId: catVal.categoryId || key,
+            directorateId: effectiveDirId,
+            seasonId: activeSeason,
             podium: [],
             status: 'setup',
             updatedAt: new Date().toISOString()
@@ -6783,14 +6891,16 @@ export const DataService = {
 
       const cacheKey = `taourirt_cc_results_${effectiveDirId}`;
       localStorage.setItem(cacheKey, JSON.stringify(resetMap));
-      this._notifyCCUpdate({ categoryId: 'all', podium: [] } as any);
-      resetCrossCountry = modifiedAnyCC;
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('crossCountryResultsUpdated'));
+      }
+      resetCrossCountry = modifiedAnyCC || isCrossCountryInScope;
     }
 
     // Check if Athletics results are within scope
     const isAthleticsInScope = effectiveSportIdForSpecial
       ? areSportIdsEquivalent(effectiveSportIdForSpecial, 'athletics', cachedSports)
-      : allowedSet === null || isSportInAllowedSet('athletics', allowedSet, cachedSports);
+      : !hasExplicitScopeFilter && (allowedSet === null || isSportInAllowedSet('athletics', allowedSet, cachedSports));
 
     let resetAthletics = false;
     if (isAthleticsInScope && !tournamentId) {
@@ -6849,9 +6959,20 @@ export const DataService = {
     tournamentId?: string;
   } = {}): Promise<{ deletedMatchesCount: number }> {
     const activeDirId = this.getActiveDirectorateId();
-    const { allowedSportIds, sportId, tournamentId } = options;
+    const { allowedSportIds } = options;
+    if (options.sportId !== undefined && !String(options.sportId).trim()) {
+      throw new Error('INVALID_SPORT_ID');
+    }
+    if (options.tournamentId !== undefined && !String(options.tournamentId).trim()) {
+      throw new Error('INVALID_TOURNAMENT_ID');
+    }
+    const sportId = options.sportId ? String(options.sportId).trim() : undefined;
+    const tournamentId = options.tournamentId ? String(options.tournamentId).trim() : undefined;
 
-    const cachedSports = getLocal<Sport>('taourirt_sports_config', []);
+    let cachedSports = getLocal<Sport>('taourirt_sports_config', []);
+    if (cachedSports.length === 0) {
+      cachedSports = await this.getSportsConfig().catch(() => []);
+    }
     const allowedSet = buildAllowedSportSet(allowedSportIds, cachedSports);
 
     if (sportId && allowedSet !== null && !isSportInAllowedSet(sportId, allowedSet, cachedSports)) {
@@ -6878,6 +6999,7 @@ export const DataService = {
       }
     }
 
+    const effectiveSportScope = sportId || targetTournamentObj?.sportId;
     const cloudMatches = await this.getMatches();
     const localCachedInDir = getLocal<Match>(STORAGE_KEYS.MATCHES, [])
       .map(normalizeMatchRecord)
@@ -6888,12 +7010,13 @@ export const DataService = {
 
     matchesToInspect.forEach(m => {
       if (!m || !m.id) return;
-      if (!doesMatchMatchSportScope(m, allowedSet, sportId, tournamentSportMap, cachedSports)) {
+      if (!doesMatchMatchSportScope(m, allowedSet, effectiveSportScope, tournamentSportMap, cachedSports)) {
         return;
       }
       if (tournamentId) {
         const directMatch = m.tournamentId === tournamentId;
         const metaMatch =
+          !m.tournamentId &&
           targetTournamentObj &&
           areSportIdsEquivalent(m.sportId, targetTournamentObj.sportId, cachedSports) &&
           normalizeCategoryKey(m.ageCategory) === normalizeCategoryKey(targetTournamentObj.ageCategory) &&
@@ -6954,9 +7077,7 @@ export const DataService = {
     try {
       const snap = await getDocs(collection(db, 'cross_country_results'));
       if (!snap.empty) {
-        // Only seed with initial demo results if the directorate is taourirt!
-        const initialSeed = (effectiveDirId === 'taourirt') ? JSON.parse(JSON.stringify(INITIAL_CROSS_COUNTRY_RESULTS)) : {};
-        const resultsMap: Record<string, CrossCountryCategoryResult> = initialSeed;
+        const resultsMap: Record<string, CrossCountryCategoryResult> = {};
         let foundAnyForDir = false;
 
         snap.docs.forEach(docSnap => {
@@ -6975,11 +7096,9 @@ export const DataService = {
           }
         });
 
-        if (foundAnyForDir || effectiveDirId === 'taourirt') {
-          this._sanitizeCrossCountryResultsMap(resultsMap);
-          localStorage.setItem(cacheKey, JSON.stringify(resultsMap));
-          return resultsMap;
-        }
+        this._sanitizeCrossCountryResultsMap(resultsMap);
+        localStorage.setItem(cacheKey, JSON.stringify(resultsMap));
+        return resultsMap;
       }
     } catch (e) {
       console.warn("Firestore fetch cross_country_results error, using local storage:", e);
@@ -6990,18 +7109,12 @@ export const DataService = {
       const local = localStorage.getItem(cacheKey);
       if (local) {
         const parsed = JSON.parse(local);
-        const initialSeed = (effectiveDirId === 'taourirt') ? JSON.parse(JSON.stringify(INITIAL_CROSS_COUNTRY_RESULTS)) : {};
-        const merged = { ...initialSeed, ...parsed };
-        return this._sanitizeCrossCountryResultsMap(merged);
+        return this._sanitizeCrossCountryResultsMap(parsed || {});
       }
     } catch (e) {
       console.error("Local storage error reading cross country results:", e);
     }
 
-    // For other directorates with no results yet, return a clean empty space
-    if (effectiveDirId === 'taourirt') {
-      return JSON.parse(JSON.stringify(INITIAL_CROSS_COUNTRY_RESULTS));
-    }
     return {};
   },
 
@@ -7129,18 +7242,8 @@ export const DataService = {
     const activeDirId = this.getActiveDirectorateId();
     const cacheKey = `taourirt_cc_results_${activeDirId}`;
 
-    // 1. Reset local cache
-    const freshMap: Record<string, CrossCountryCategoryResult> = {};
-    Object.entries(INITIAL_CROSS_COUNTRY_RESULTS).forEach(([catId, def]) => {
-      freshMap[catId] = {
-        ...def,
-        podium: [],
-        status: 'setup',
-        directorateId: activeDirId,
-        updatedAt: new Date().toISOString()
-      };
-    });
-    localStorage.setItem(cacheKey, JSON.stringify(freshMap));
+    // 1. Reset local cache cleanly to empty object (no demo winners)
+    localStorage.setItem(cacheKey, '{}');
 
     // 2. Clear all docs in Firestore
     try {
@@ -7491,7 +7594,7 @@ export const DataService = {
         setLocal(STORAGE_KEYS.MATCHES, merged);
         matchesCount = merged.length;
       } else {
-        const localList = getLocal<Match>(STORAGE_KEYS.MATCHES, INITIAL_MATCHES).map(normalizeMatchRecord);
+        const localList = getLocal<Match>(STORAGE_KEYS.MATCHES, []).map(normalizeMatchRecord);
         setLocal(STORAGE_KEYS.MATCHES, localList);
         matchesCount = localList.length;
       }
@@ -7555,11 +7658,8 @@ export const DataService = {
             resultsMap[data.categoryId || docSnap.id] = { ...data, categoryId: data.categoryId || docSnap.id };
           }
         });
-        if (Object.keys(resultsMap).length > 0) {
-          const cacheKey = `taourirt_cc_results_${activeDirId}`;
-          const merged = { ...INITIAL_CROSS_COUNTRY_RESULTS, ...resultsMap };
-          localStorage.setItem(cacheKey, JSON.stringify(merged));
-        }
+        const cacheKey = `taourirt_cc_results_${activeDirId}`;
+        localStorage.setItem(cacheKey, JSON.stringify(resultsMap));
       }
 
       if (permsSnap && permsSnap.exists()) {
@@ -7713,6 +7813,48 @@ export const DataService = {
     const derivedGenders = Array.from(new Set(normalizedBranches.map(b => b.gender)));
     const derivedAffiliations = Array.from(new Set(normalizedBranches.map(b => b.affiliationType)));
     const resolvedDir = data.directorateId || this.getActiveDirectorateId() || 'taourirt';
+    const effectiveDirId = resolvedDir === 'all' ? 'taourirt' : resolvedDir;
+    const nowIso = new Date().toISOString();
+
+    const current = getLocal<SchoolTournamentConfirmation>(STORAGE_KEYS.CONFIRMATIONS, []);
+    const existingConf = current.find(
+      c =>
+        c &&
+        c.sportId === data.sportId &&
+        (c.directorateId || 'taourirt') === effectiveDirId &&
+        (
+          c.id === confirmationId ||
+          (data.schoolId && c.schoolId === data.schoolId) ||
+          (data.schoolName && c.schoolName && schoolNamesMatch(c.schoolName, data.schoolName))
+        )
+    );
+
+    const prevBranchTeachers = existingConf?.branchTeachers || {};
+    const prevBranchKeys = new Set(
+      existingConf
+        ? getEffectiveConfirmedBranches(existingConf, false).map(
+            b => `${b.affiliationType}__${normalizeCategoryKey(b.category)}__${b.gender}`
+          )
+        : []
+    );
+
+    const nextBranchTeachers: NonNullable<SchoolTournamentConfirmation['branchTeachers']> = {};
+    normalizedBranches.forEach(b => {
+      const bKey = `${b.affiliationType}__${normalizeCategoryKey(b.category)}__${b.gender}`;
+      const isNewlyAddedBranch = !prevBranchKeys.has(bKey);
+      const prevInfo = prevBranchTeachers[bKey];
+      if (!isNewlyAddedBranch && prevInfo && prevInfo.teacherName) {
+        nextBranchTeachers[bKey] = prevInfo;
+      } else {
+        nextBranchTeachers[bKey] = {
+          teacherId: data.teacherId || '',
+          teacherName: data.teacherName || '',
+          ...(data.teacherPhone ? { teacherPhone: data.teacherPhone } : {}),
+          ...(data.teacherLeaseNumber ? { teacherLeaseNumber: data.teacherLeaseNumber } : {}),
+          confirmedAt: nowIso
+        };
+      }
+    });
 
     const payload: SchoolTournamentConfirmation = {
       ...data,
@@ -7720,21 +7862,21 @@ export const DataService = {
       genders: derivedGenders,
       affiliationTypes: derivedAffiliations,
       selectedBranches: normalizedBranches,
+      branchTeachers: nextBranchTeachers,
       id: confirmationId,
       status: 'confirmed',
-      confirmedAt: new Date().toISOString(),
-      directorateId: resolvedDir === 'all' ? 'taourirt' : resolvedDir,
+      confirmedAt: nowIso,
+      directorateId: effectiveDirId,
       seasonId: data.seasonId || '2026/2027'
     };
 
-    const current = getLocal<SchoolTournamentConfirmation>(STORAGE_KEYS.CONFIRMATIONS, []);
     const duplicateDocIds = new Set<string>();
     current.forEach(c => {
       if (
         c &&
         c.id !== confirmationId &&
         c.sportId === data.sportId &&
-        (c.directorateId || 'taourirt') === payload.directorateId &&
+        (c.directorateId || 'taourirt') === effectiveDirId &&
         (
           (data.schoolId && c.schoolId === data.schoolId) ||
           (data.schoolName && c.schoolName && schoolNamesMatch(c.schoolName, data.schoolName))
@@ -7754,7 +7896,7 @@ export const DataService = {
 
     try {
       const cleanPayload = stripUndefinedDeep(payload);
-      await setDoc(doc(db, 'school_confirmations', confirmationId), cleanPayload, { merge: true });
+      await setDoc(doc(db, 'school_confirmations', confirmationId), cleanPayload, { merge: false });
       clearPendingWrite('school_confirmations', confirmationId);
       if (duplicateDocIds.size > 0) {
         await Promise.all(
@@ -7771,21 +7913,39 @@ export const DataService = {
 
   async cancelSchoolConfirmation(sportId: string, schoolId: string, schoolName?: string): Promise<void> {
     const confirmationId = `${sportId}_${schoolId}`;
-    const cleanTargetName = (schoolName || schoolId || '').trim().toLowerCase();
+    const cleanTargetName = (schoolName || schoolId || '').trim();
+    const resolvedSchoolName = (schoolName || '').trim() || cleanTargetName;
 
     const current = getLocal<SchoolTournamentConfirmation>(STORAGE_KEYS.CONFIRMATIONS, []);
     const matchedIds = new Set<string>([confirmationId]);
+    let discoveredSchoolName = resolvedSchoolName;
+
     current.forEach(c => {
-      if (c.sportId === sportId) {
-        if (
-          c.id === confirmationId ||
-          c.schoolId === schoolId ||
-          (cleanTargetName && c.schoolName && c.schoolName.trim().toLowerCase() === cleanTargetName)
-        ) {
+      if (c && c.sportId === sportId) {
+        const idMatch = c.id === confirmationId || (schoolId && c.schoolId === schoolId);
+        const nameMatch = Boolean(cleanTargetName && c.schoolName && schoolNamesMatch(c.schoolName, cleanTargetName));
+        if (idMatch || nameMatch) {
           matchedIds.add(c.id);
+          if (c.schoolName) discoveredSchoolName = c.schoolName;
         }
       }
     });
+
+    // Also inspect Firestore confirmations for this sport so duplicate variants created under schoolId vs schoolName are all removed
+    try {
+      const snap = await getDocs(query(collection(db, 'school_confirmations'), where('sportId', '==', sportId)));
+      snap.forEach((d: any) => {
+        const data = d.data() || {};
+        const idMatch = d.id === confirmationId || (schoolId && data.schoolId === schoolId);
+        const nameMatch = Boolean(cleanTargetName && data.schoolName && schoolNamesMatch(data.schoolName, cleanTargetName));
+        if (idMatch || nameMatch) {
+          matchedIds.add(d.id);
+          if (data.schoolName) discoveredSchoolName = data.schoolName;
+        }
+      });
+    } catch {
+      // ignore offline error
+    }
 
     matchedIds.forEach(id => markRecentlyDeleted('school_confirmations', id));
     const updated = current.filter(c => !matchedIds.has(c.id));
@@ -7797,6 +7957,27 @@ export const DataService = {
       );
     } catch (err) {
       console.error('Error deleting school confirmation from Firestore:', err);
+    }
+
+    // Record a sport-wide withdrawal entry so even if students were registered under this school,
+    // the school is immediately withdrawn from the championship until explicitly re-confirmed
+    if (discoveredSchoolName) {
+      const resolvedDir = this.getActiveDirectorateId() || 'taourirt';
+      const wId = `${sportId}_sport_all_all_all_${discoveredSchoolName.trim()}`;
+      const wRecord: SchoolWithdrawalRecord = {
+        id: wId,
+        schoolName: discoveredSchoolName.trim(),
+        schoolId: schoolId || undefined,
+        sportId,
+        withdrawnAt: new Date().toISOString(),
+        directorateId: resolvedDir === 'all' ? 'taourirt' : resolvedDir
+      };
+      const curWithdrawals = getLocal<SchoolWithdrawalRecord>(STORAGE_KEYS.WITHDRAWALS, []);
+      setLocal(STORAGE_KEYS.WITHDRAWALS, deduplicateById([wRecord, ...curWithdrawals]));
+      try {
+        await setDoc(doc(db, 'school_withdrawals', wId), stripUndefinedDeep(wRecord), { merge: true });
+      } catch {}
+      window.dispatchEvent(new CustomEvent('schoolWithdrawalsUpdated', { detail: wRecord }));
     }
 
     window.dispatchEvent(new CustomEvent('schoolConfirmationsUpdated'));
@@ -8711,7 +8892,7 @@ export const DataService = {
             const updatedConfs = confirmations.map(c => c.id === matchedConf.id ? updatedConf : c);
             setLocal(STORAGE_KEYS.CONFIRMATIONS, updatedConfs);
             try {
-              await setDoc(doc(db, 'school_confirmations', matchedConf.id), stripUndefinedDeep(updatedConf), { merge: true });
+              await setDoc(doc(db, 'school_confirmations', matchedConf.id), stripUndefinedDeep(updatedConf), { merge: false });
             } catch (e) {
               console.warn(e);
             }
@@ -8734,44 +8915,76 @@ export const DataService = {
     affiliationType?: string;
   }, schoolId?: string, schoolName?: string): boolean {
     if (!schoolName && !schoolId) return false;
-    const cleanName = (schoolName || '').trim().toLowerCase();
+    const cleanName = (schoolName || '').trim();
     const cleanId = (schoolId || '').trim().toLowerCase();
     const withdrawals = getLocal<SchoolWithdrawalRecord>(STORAGE_KEYS.WITHDRAWALS, []);
 
-    const normCat = params.ageCategory ? normalizeCategoryKey(params.ageCategory) : undefined;
-    const targetGen = params.gender;
-    const targetAff = params.affiliationType;
+    const normCat = params.ageCategory && params.ageCategory !== 'ALL' ? normalizeCategoryKey(params.ageCategory) : undefined;
+    const targetGen = params.gender && params.gender !== 'ALL' && params.gender !== 'Both' && params.gender !== 'Mixed' ? params.gender : undefined;
+    const targetAff = params.affiliationType && params.affiliationType !== 'ALL' ? params.affiliationType : undefined;
     const targetTournId = params.tournamentId;
     const targetSport = params.sportId;
 
     return withdrawals.some(w => {
-      const wName = (w.schoolName || '').trim().toLowerCase();
+      if (!w) return false;
+      const wName = (w.schoolName || '').trim();
       const wId = (w.schoolId || '').trim().toLowerCase();
-      const matchSchool = (cleanName && (wName === cleanName || wName.includes(cleanName) || cleanName.includes(wName))) ||
-                          (cleanId && (wId === cleanId || wId === cleanName));
+      const matchSchool =
+        (cleanId && wId && wId === cleanId) ||
+        (cleanName && wName && schoolNamesMatch(wName, cleanName)) ||
+        (cleanId && wName && wName.toLowerCase() === cleanId);
       if (!matchSchool) return false;
 
       if (targetTournId && w.tournamentId && w.tournamentId === targetTournId) return true;
       if (targetSport && w.sportId && w.sportId !== targetSport) return false;
-      if (normCat && w.ageCategory && w.ageCategory !== normCat) return false;
-      if (targetGen && targetGen !== 'Both' && targetGen !== 'Mixed' && w.gender && w.gender !== 'Both' && w.gender !== 'Mixed' && w.gender.toLowerCase() !== targetGen.toLowerCase()) return false;
-      if (targetAff && w.affiliationType && w.affiliationType !== targetAff) return false;
+      if (normCat && w.ageCategory && normalizeCategoryKey(w.ageCategory) !== normCat) return false;
+      if (targetGen && w.gender && w.gender !== 'Both' && w.gender !== 'Mixed' && w.gender !== 'ALL' && w.gender.toLowerCase() !== targetGen.toLowerCase()) return false;
+      if (targetAff && w.affiliationType && w.affiliationType !== 'ALL' && w.affiliationType !== targetAff) return false;
 
       return true;
     });
   },
 
-  async cancelSchoolWithdrawal(sportId: string, schoolNameOrId: string, tournamentId?: string): Promise<void> {
-    const clean = schoolNameOrId.trim().toLowerCase();
+  async cancelSchoolWithdrawal(
+    sportId: string,
+    schoolNameOrId: string,
+    tournamentId?: string,
+    branch?: { ageCategory?: string; gender?: string; affiliationType?: string }
+  ): Promise<void> {
+    const clean = (schoolNameOrId || '').trim();
+    const cleanLower = clean.toLowerCase();
     const current = getLocal<SchoolWithdrawalRecord>(STORAGE_KEYS.WITHDRAWALS, []);
     const removedIds: string[] = [];
+
+    const normBranchCat = branch?.ageCategory ? normalizeCategoryKey(branch.ageCategory) : undefined;
+    const branchGen = branch?.gender;
+    const branchAff = branch?.affiliationType;
+
+    const doesWithdrawalMatchTarget = (w: SchoolWithdrawalRecord): boolean => {
+      const matchSchool =
+        (w.schoolId && w.schoolId.toLowerCase() === cleanLower) ||
+        (w.schoolName && (w.schoolName.toLowerCase() === cleanLower || schoolNamesMatch(w.schoolName, clean)));
+      if (!matchSchool) return false;
+      if (w.sportId !== sportId) return false;
+      if (tournamentId && w.tournamentId && w.tournamentId !== tournamentId) return false;
+
+      if (branch) {
+        const isSportWide = !w.ageCategory && !w.gender && !w.affiliationType && !w.tournamentId;
+        if (isSportWide) return true;
+        const catMatches = !w.ageCategory || !normBranchCat || normalizeCategoryKey(w.ageCategory) === normBranchCat;
+        const genMatches = !w.gender || !branchGen || w.gender === 'Both' || w.gender === 'Mixed' || w.gender.toLowerCase() === branchGen.toLowerCase();
+        const affMatches = !w.affiliationType || !branchAff || w.affiliationType === branchAff;
+        return catMatches && genMatches && affMatches;
+      }
+      return true;
+    };
+
     const updated = current.filter(w => {
-      const matchSchool = (w.schoolName && w.schoolName.toLowerCase() === clean) || (w.schoolId && w.schoolId.toLowerCase() === clean);
-      if (!matchSchool) return true;
-      if (w.sportId !== sportId) return true;
-      if (tournamentId && w.tournamentId && w.tournamentId !== tournamentId) return true;
-      if (w.id) removedIds.push(w.id);
-      return false;
+      if (doesWithdrawalMatchTarget(w)) {
+        if (w.id) removedIds.push(w.id);
+        return false;
+      }
+      return true;
     });
     setLocal(STORAGE_KEYS.WITHDRAWALS, updated);
     if (removedIds.length > 0) {
@@ -9222,6 +9435,154 @@ export const DataService = {
     } catch (e) {
       console.warn('saveBlockedScheduleDates saved locally; Firestore sync pending:', e);
     }
+  },
+
+  // ============================================================================
+  // AFFILIATION DISPLAY CONFIGURATION (إعدادات عرض الأصناف: منتمين / غير منتمين)
+  // ============================================================================
+  getAffiliationDisplayConfigSync(directorateId?: string): AffiliationDisplayConfig {
+    const activeDirId = directorateId || this.getActiveDirectorateId() || 'taourirt';
+    const effectiveDir = activeDirId === 'all' ? 'taourirt' : activeDirId;
+    const localKey = `taourirt_affiliation_display_config_${effectiveDir}`;
+    try {
+      const raw = localStorage.getItem(localKey);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && (parsed.globalMode === 'both' || parsed.globalMode === 'non_club' || parsed.globalMode === 'club_affiliated')) {
+          return {
+            directorateId: effectiveDir,
+            globalMode: parsed.globalMode,
+            sportModes: parsed.sportModes || {},
+            updatedAt: parsed.updatedAt,
+            updatedBy: parsed.updatedBy
+          };
+        }
+      }
+    } catch {}
+    return {
+      directorateId: effectiveDir,
+      globalMode: 'both',
+      sportModes: {}
+    };
+  },
+
+  async getAffiliationDisplayConfig(directorateId?: string): Promise<AffiliationDisplayConfig> {
+    const activeDirId = directorateId || this.getActiveDirectorateId() || 'taourirt';
+    const effectiveDir = activeDirId === 'all' ? 'taourirt' : activeDirId;
+    const localKey = `taourirt_affiliation_display_config_${effectiveDir}`;
+    const localFallback = this.getAffiliationDisplayConfigSync(effectiveDir);
+
+    if (this.isCloudSyncPaused()) {
+      return localFallback;
+    }
+
+    try {
+      const snap = await fbGetDoc(doc(db, 'settings', `affiliation_display_${effectiveDir}`));
+      if (snap.exists()) {
+        const data = snap.data() as any;
+        const cfg: AffiliationDisplayConfig = {
+          directorateId: effectiveDir,
+          globalMode: data.globalMode === 'non_club' || data.globalMode === 'club_affiliated' ? data.globalMode : 'both',
+          sportModes: data.sportModes && typeof data.sportModes === 'object' ? data.sportModes : {},
+          updatedAt: data.updatedAt,
+          updatedBy: data.updatedBy
+        };
+        try {
+          localStorage.setItem(localKey, JSON.stringify(cfg));
+        } catch {}
+        return cfg;
+      }
+    } catch (e) {
+      console.warn('Error fetching affiliation display config:', e);
+    }
+
+    return localFallback;
+  },
+
+  subscribeToAffiliationDisplayConfig(
+    callback: (config: AffiliationDisplayConfig) => void,
+    directorateId?: string
+  ): () => void {
+    const activeDirId = directorateId || this.getActiveDirectorateId() || 'taourirt';
+    const effectiveDir = activeDirId === 'all' ? 'taourirt' : activeDirId;
+    const localKey = `taourirt_affiliation_display_config_${effectiveDir}`;
+
+    callback(this.getAffiliationDisplayConfigSync(effectiveDir));
+
+    const handleLocal = () => {
+      callback(this.getAffiliationDisplayConfigSync(effectiveDir));
+    };
+    window.addEventListener('affiliationDisplayConfigUpdated', handleLocal);
+    window.addEventListener('directorateChanged', handleLocal);
+
+    if (this.isCloudSyncPaused()) {
+      return () => {
+        window.removeEventListener('affiliationDisplayConfigUpdated', handleLocal);
+        window.removeEventListener('directorateChanged', handleLocal);
+      };
+    }
+
+    const unsub = fbOnSnapshot(
+      doc(db, 'settings', `affiliation_display_${effectiveDir}`),
+      (snap) => {
+        if (snap.exists()) {
+          const data = snap.data() as any;
+          const cfg: AffiliationDisplayConfig = {
+            directorateId: effectiveDir,
+            globalMode: data.globalMode === 'non_club' || data.globalMode === 'club_affiliated' ? data.globalMode : 'both',
+            sportModes: data.sportModes && typeof data.sportModes === 'object' ? data.sportModes : {},
+            updatedAt: data.updatedAt,
+            updatedBy: data.updatedBy
+          };
+          try {
+            localStorage.setItem(localKey, JSON.stringify(cfg));
+          } catch {}
+          callback(cfg);
+        }
+      },
+      () => {
+        handleLocal();
+      }
+    );
+
+    return () => {
+      window.removeEventListener('affiliationDisplayConfigUpdated', handleLocal);
+      window.removeEventListener('directorateChanged', handleLocal);
+      try {
+        unsub();
+      } catch {}
+    };
+  },
+
+  async saveAffiliationDisplayConfig(
+    config: AffiliationDisplayConfig,
+    directorateId?: string
+  ): Promise<void> {
+    const activeDirId = directorateId || this.getActiveDirectorateId() || 'taourirt';
+    const effectiveDir = activeDirId === 'all' ? 'taourirt' : activeDirId;
+    const localKey = `taourirt_affiliation_display_config_${effectiveDir}`;
+
+    const cleanConfig: AffiliationDisplayConfig = {
+      directorateId: effectiveDir,
+      globalMode: config.globalMode === 'non_club' || config.globalMode === 'club_affiliated' ? config.globalMode : 'both',
+      sportModes: config.sportModes || {},
+      updatedAt: new Date().toISOString(),
+      updatedBy: config.updatedBy || ''
+    };
+
+    try {
+      localStorage.setItem(localKey, JSON.stringify(cleanConfig));
+    } catch {}
+    window.dispatchEvent(new CustomEvent('affiliationDisplayConfigUpdated', { detail: cleanConfig }));
+
+    try {
+      await fbSetDoc(doc(db, 'settings', `affiliation_display_${effectiveDir}`), {
+        ...cleanConfig,
+        updatedAt: serverTimestamp()
+      });
+    } catch (e) {
+      console.warn('saveAffiliationDisplayConfig saved locally; Firestore sync pending:', e);
+    }
   }
 };
 
@@ -9437,6 +9798,37 @@ export function findBlockedPeriodForDate(
   }
 
   return null;
+}
+
+export function resolveEffectiveAffiliationMode(
+  config: AffiliationDisplayConfig | null | undefined,
+  sportId?: string
+): AffiliationDisplayMode {
+  if (!config) return 'both';
+  if (sportId && config.sportModes && config.sportModes[sportId]) {
+    const sm = config.sportModes[sportId];
+    if (sm === 'both' || sm === 'non_club' || sm === 'club_affiliated') {
+      return sm;
+    }
+  }
+  if (config.globalMode === 'non_club' || config.globalMode === 'club_affiliated') {
+    return config.globalMode;
+  }
+  return 'both';
+}
+
+export function isAffiliationAllowedByDisplayConfig(
+  affiliationType: string | undefined,
+  config: AffiliationDisplayConfig | null | undefined,
+  sportId?: string
+): boolean {
+  const mode = resolveEffectiveAffiliationMode(config, sportId);
+  if (mode === 'both') return true;
+  const aff = (affiliationType || 'non_club').trim();
+  if (aff === 'open') return true;
+  if (mode === 'non_club') return aff !== 'club_affiliated';
+  if (mode === 'club_affiliated') return aff === 'club_affiliated';
+  return true;
 }
 
 

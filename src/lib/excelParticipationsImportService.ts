@@ -240,14 +240,14 @@ function inferCommuneFromSchoolName(schoolName: string): string {
   if (s.includes('دبدو')) return 'دبدو';
   if (s.includes('ملقى الويدان') || s.includes('ملقى')) return 'ملقى الويدان';
   if (s.includes('مستكمار')) return 'مستكمار';
-  if (s.includes('تنشرفي')) return 'تنشرفي';
+  if (s.includes('تنشرفي') || s.includes('تنكرفا')) return 'تنشرفي';
   if (s.includes('أهل واد زا') || s.includes('اهل واد زا')) return 'أهل واد زا';
   if (s.includes('سيدي لحسن')) return 'سيدي لحسن';
   if (s.includes('سيدي علي بلقاسم')) return 'سيدي علي بلقاسم';
   if (s.includes('القطيبات')) return 'القطيبات';
-  if (s.includes('عين لحجر')) return 'عين لحجر';
+  if (s.includes('عين لحجر') || s.includes('عين الحجر')) return 'عين لحجر';
   if (s.includes('مشرع حمادي')) return 'مشرع حمادي';
-  return 'تاوريرت';
+  return 'تاوريرت المركز';
 }
 
 export function detectSportIdFromText(text: string): string | null {
@@ -1593,6 +1593,14 @@ export async function executeAdditiveExcelImport(
           if (!excludedOpKeys.has(opKey)) {
             const affPrefix = affId === 'club_affiliated' ? 'بطولة المنتمين للأندية' : 'بطولة غير المنتمين للأندية';
             const affShort = affId === 'club_affiliated' ? 'منتمين للأندية' : 'غير منتمين';
+            const derivedLevel =
+              branch.category === 'U12'
+                ? 'Primary'
+                : branch.category === 'U15'
+                ? 'Middle'
+                : branch.category === 'U18' || branch.category === 'U20'
+                ? 'High'
+                : 'Middle,High';
             const newTournament: Tournament = {
               id: realId,
               name: `${affPrefix} ${branch.category} ${genLabel}`,
@@ -1601,7 +1609,7 @@ export async function executeAdditiveExcelImport(
               sportName: sportLabel,
               ageCategory: branch.category,
               gender: branch.gender,
-              level: 'Primary,Middle,High',
+              level: derivedLevel,
               scope: 'Provincial',
               affiliationType: affId,
               targetAffiliations: [affId],

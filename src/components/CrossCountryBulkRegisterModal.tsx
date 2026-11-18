@@ -375,14 +375,21 @@ export const CrossCountryBulkRegisterModal: React.FC<CrossCountryBulkRegisterMod
 
     setSlots(newSlots);
 
-    // If existing students have coach info, use it if our coach fields are blank
-    const firstWithCoach = matchingStudents.find(s => s.coachName);
-    if (firstWithCoach) {
-      if (firstWithCoach.coachName) setCoachName(firstWithCoach.coachName);
-      if (firstWithCoach.coachLeaseNumber) setCoachLeaseNumber(firstWithCoach.coachLeaseNumber);
-      if (firstWithCoach.coachPhone) setCoachPhone(firstWithCoach.coachPhone);
+    // Only copy coach info from existing students when an admin/coordinator opens the modal;
+    // when a teacher registers a branch, credit the acting teacher performing the registration
+    if (!isTeacher) {
+      const firstWithCoach = matchingStudents.find(s => s.coachName);
+      if (firstWithCoach) {
+        if (firstWithCoach.coachName) setCoachName(firstWithCoach.coachName);
+        if (firstWithCoach.coachLeaseNumber) setCoachLeaseNumber(firstWithCoach.coachLeaseNumber);
+        if (firstWithCoach.coachPhone) setCoachPhone(firstWithCoach.coachPhone);
+      }
+    } else if (userProfile?.fullName) {
+      setCoachName(userProfile.fullName);
+      setCoachLeaseNumber(userProfile.leaseNumber || '');
+      setCoachPhone(userProfile.phone || '');
     }
-  }, [isOpen, selectedRaceId, selectedSchoolId, resolvedSchoolName, allExistingStudents, activeRaceDef, selectedAffiliation]);
+  }, [isOpen, isTeacher, userProfile, selectedRaceId, selectedSchoolId, resolvedSchoolName, allExistingStudents, activeRaceDef, selectedAffiliation]);
 
   // Update a single slot
   const handleUpdateSlot = (slotIndex: number, field: 'fullName' | 'massarNumber' | 'birthDate' | 'photoUrl', value: string | undefined) => {
@@ -937,9 +944,9 @@ export const CrossCountryBulkRegisterModal: React.FC<CrossCountryBulkRegisterMod
           sportId: 'cross_country',
           participationType: slot.participationType,
           distance: activeRaceDef.distance,
-          coachName: coachName.trim() || (isUserAtSchool ? userProfile?.fullName : undefined) || undefined,
-          coachLeaseNumber: coachLeaseNumber.trim() || (isUserAtSchool ? userProfile?.leaseNumber : undefined) || undefined,
-          coachPhone: coachPhone.trim() || (isUserAtSchool ? userProfile?.phone : undefined) || undefined,
+          coachName: (isTeacher && userProfile?.fullName ? userProfile.fullName : coachName.trim() || (isUserAtSchool ? userProfile?.fullName : undefined)) || undefined,
+          coachLeaseNumber: (isTeacher && userProfile?.fullName ? userProfile?.leaseNumber : coachLeaseNumber.trim() || (isUserAtSchool ? userProfile?.leaseNumber : undefined)) || undefined,
+          coachPhone: (isTeacher && userProfile?.fullName ? userProfile?.phone : coachPhone.trim() || (isUserAtSchool ? userProfile?.phone : undefined)) || undefined,
           photoUrl: slot.photoUrl
         };
 

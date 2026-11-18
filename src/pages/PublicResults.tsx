@@ -1,8 +1,8 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { DataService, SPORTS_MAP } from '../lib/dataService';
+import { DataService, SPORTS_MAP, normalizeTournamentAffiliation, resolveEffectiveAffiliationMode, isAffiliationAllowedByDisplayConfig } from '../lib/dataService';
 import { computeGroupStandings, formatTeamDisplayName, hasValidMatchTeams, extractMatchGroupLabel, isPlaceholderTeamId } from '../lib/drawTournamentUtils';
-import { resolveMatchRefereesInfo, getOrdinalRefLabel } from '../lib/programExportService';
-import { Match, School, Venue, CrossCountryCategoryResult, AthleticsCategoryResult, Student, Directorate, Sport, Tournament, Referee, User } from '../types';
+import { resolveMatchRefereesInfo, resolveMatchAffiliation, getOrdinalRefLabel } from '../lib/programExportService';
+import { Match, School, Venue, CrossCountryCategoryResult, AthleticsCategoryResult, Student, Directorate, Sport, Tournament, Referee, User, AffiliationDisplayConfig } from '../types';
 import { CROSS_COUNTRY_CATEGORIES } from '../lib/crossCountryConfig';
 import { AthleticsService } from '../lib/athleticsService';
 import { MapPin, Trophy, Goal, Users, Award, Calendar, ChevronDown, X, Medal, Sparkles, Filter, Activity, Building2, Search, CheckCircle2, Clock, ShieldCheck } from 'lucide-react';
@@ -23,6 +23,9 @@ export const PublicResults: React.FC = () => {
   const [referees, setReferees] = useState<Referee[]>([]);
   const [usersDirectory, setUsersDirectory] = useState<User[]>([]);
   const [selectedDirId, setSelectedDirId] = useState<string>(DataService.getActiveDirectorateId() || 'taourirt');
+  const [affiliationDisplayConfig, setAffiliationDisplayConfig] = useState<AffiliationDisplayConfig>(() =>
+    DataService.getAffiliationDisplayConfigSync(DataService.getActiveDirectorateId() || 'taourirt')
+  );
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'Completed' | 'Ongoing' | 'Scheduled'>('ALL');
@@ -69,6 +72,11 @@ export const PublicResults: React.FC = () => {
   useEffect(() => {
     loadData();
 
+    const unsubAffiliation = DataService.subscribeToAffiliationDisplayConfig(
+      (cfg) => setAffiliationDisplayConfig(cfg),
+      selectedDirId
+    );
+
     const handleResultsUpdate = () => {
       setResultsVersion(v => v + 1);
       loadData();
@@ -76,14 +84,17 @@ export const PublicResults: React.FC = () => {
 
     window.addEventListener('athleticsResultsUpdated', handleResultsUpdate);
     window.addEventListener('resultsChanged', handleResultsUpdate);
+    window.addEventListener('tournamentDataChanged', handleResultsUpdate);
     window.addEventListener('storage', handleResultsUpdate);
 
     return () => {
+      unsubAffiliation();
       window.removeEventListener('athleticsResultsUpdated', handleResultsUpdate);
       window.removeEventListener('resultsChanged', handleResultsUpdate);
+      window.removeEventListener('tournamentDataChanged', handleResultsUpdate);
       window.removeEventListener('storage', handleResultsUpdate);
     };
-  }, []);
+  }, [selectedDirId]);
 
   const handleDirectorateChange = async (newDirId: string) => {
     setSelectedDirId(newDirId);
@@ -118,32 +129,84 @@ export const PublicResults: React.FC = () => {
     return { id: 'football', name: 'كرة القدم', icon: '⚽' };
   };
 
+  const activeTournaments = useMemo(() => {
+    return tournaments.filter(
+      t => (t as any).isActive !== false && t.status !== 'Draft' && t.status !== 'Archived'
+    );
+  }, [tournaments]);
+
+  const effectiveCcAffMode = useMemo(() => {
+    return resolveEffectiveAffiliationMode(affiliationDisplayConfig, 'cross_country');
+  }, [affiliationDisplayConfig]);
+
+  useEffect(() => {
+    if (effectiveCcAffMode === 'non_club' && ccAffiliation !== 'NON_CLUB') {
+      setCcAffiliation('NON_CLUB');
+    } else if (effectiveCcAffMode === 'club_affiliated' && ccAffiliation !== 'CLUB') {
+      setCcAffiliation('CLUB');
+    }
+  }, [effectiveCcAffMode, ccAffiliation]);
+
+  const isMatchVisibleToPublic = (m: Match): boolean => {
+    if (!hasValidMatchTeams(m, schools)) return false;
+    if (activeTournaments.length === 0) return false;
+
+    const tourn = m.tournamentId ? activeTournaments.find(t => t.id === m.tournamentId) : undefined;
+    // Exclude matches belonging to deleted/archived/draft tournaments
+    if (m.tournamentId && !tourn) return false;
+
+    const matchSport = getMatchSport(m);
+    const sportConf = sportsConfig.find(s => s.id === matchSport.id);
+    if (sportConf?.isProgrammed === false) return false;
+    if (!tourn && !activeTournaments.some(t => t.sportId === matchSport.id)) return false;
+
+    const rawAff = m.affiliationType || tourn?.affiliationType;
+    const mAff = rawAff
+      ? normalizeTournamentAffiliation(rawAff, tourn?.name)
+      : resolveMatchAffiliation(m, activeTournaments);
+    if (!isAffiliationAllowedByDisplayConfig(mAff, affiliationDisplayConfig, matchSport.id)) {
+      return false;
+    }
+
+    return true;
+  };
+
   // Build the sports list for the horizontal filter bar
   const availableSportsList = useMemo(() => {
     const list: { id: string; name: string; icon: string }[] = [
-      { id: 'ALL', name: 'جميع الرياضات', icon: '🏆' },
-      { id: 'cross_country', name: 'العدو الريفي', icon: '🏃‍♂️' },
-      { id: 'athletics', name: 'ألعاب القوى', icon: '🥇' }
+      { id: 'ALL', name: 'جميع الرياضات', icon: '🏆' }
     ];
 
+    const ccConf = sportsConfig.find(s => s.id === 'cross_country');
+    if (ccConf?.isProgrammed !== false && activeTournaments.some(t => t.sportId === 'cross_country')) {
+      list.push({ id: 'cross_country', name: 'العدو الريفي', icon: '🏃‍♂️' });
+    }
+
+    const athConf = sportsConfig.find(s => s.id === 'athletics');
+    if (athConf?.isProgrammed !== false && activeTournaments.some(t => t.sportId === 'athletics')) {
+      list.push({ id: 'athletics', name: 'ألعاب القوى', icon: '🥇' });
+    }
+
     sportsConfig.forEach(sp => {
-      if (sp.id !== 'cross_country' && sp.id !== 'athletics') {
-        list.push({
-          id: sp.id,
-          name: sp.name,
-          icon: sp.icon || SPORTS_MAP[sp.id]?.icon || '⚽'
-        });
+      if (sp.id !== 'cross_country' && sp.id !== 'athletics' && sp.isProgrammed !== false) {
+        if (activeTournaments.some(t => t.sportId === sp.id)) {
+          list.push({
+            id: sp.id,
+            name: sp.name,
+            icon: sp.icon || SPORTS_MAP[sp.id]?.icon || '⚽'
+          });
+        }
       }
     });
 
     return list;
-  }, [sportsConfig]);
+  }, [sportsConfig, activeTournaments]);
 
-  // Matches sorting and filtering (only matches with valid team1 & team2 names or winner placeholders)
+  // Matches sorting and filtering (only matches with valid team1 & team2 names, active tournaments, & allowed affiliations)
   const filteredMatches = useMemo(() => {
     return matches
       .filter(m => {
-        if (!hasValidMatchTeams(m, schools)) return false;
+        if (!isMatchVisibleToPublic(m)) return false;
 
         // Sport filter
         if (selectedSportId !== 'ALL') {
@@ -179,13 +242,13 @@ export const PublicResults: React.FC = () => {
         if (numDiff !== 0) return numDiff;
         return parseDateToTimestampMs(b.date) - parseDateToTimestampMs(a.date);
       });
-  }, [matches, selectedSportId, statusFilter, searchQuery, sportsConfig, tournaments, schools, venues]);
+  }, [matches, selectedSportId, statusFilter, searchQuery, sportsConfig, activeTournaments, affiliationDisplayConfig, schools, venues]);
 
   const publicSportGroupStandings = useMemo(() => {
     if (selectedSportId === 'ALL' || selectedSportId === 'cross_country' || selectedSportId === 'athletics') {
       return [];
     }
-    const sportScoped = matches.filter(m => hasValidMatchTeams(m, schools) && getMatchSport(m).id === selectedSportId);
+    const sportScoped = matches.filter(m => isMatchVisibleToPublic(m) && getMatchSport(m).id === selectedSportId);
     const byBranch = new Map<string, { label: string; matches: Match[] }>();
     sportScoped.forEach(m => {
       const cat = m.ageCategory || 'عام';
@@ -204,21 +267,30 @@ export const PublicResults: React.FC = () => {
         standings: computeGroupStandings(b.matches, schools)
       }))
       .filter(b => b.standings.length > 0);
-  }, [matches, selectedSportId, sportsConfig, tournaments, schools]);
+  }, [matches, selectedSportId, sportsConfig, activeTournaments, affiliationDisplayConfig, schools]);
 
   // Match statistics
   const stats = useMemo(() => {
-    const validMatches = matches.filter(m => hasValidMatchTeams(m, schools));
+    const validMatches = matches.filter(m => isMatchVisibleToPublic(m));
     const completed = validMatches.filter(m => m.status?.toLowerCase() === 'completed' || m.status?.toLowerCase() === 'ongoing' || m.score1 !== undefined || m.score2 !== undefined || m.team1Score !== undefined || m.team2Score !== undefined);
     const totalGoals = completed.reduce((sum, m) => sum + (m.score1 ?? m.team1Score ?? 0) + (m.score2 ?? m.team2Score ?? 0), 0);
     const completedCount = validMatches.filter(m => m.status?.toLowerCase() === 'completed').length;
     const ongoingCount = validMatches.filter(m => m.status?.toLowerCase() === 'ongoing').length;
     const scheduledCount = validMatches.filter(m => m.status?.toLowerCase() === 'scheduled' || !m.status).length;
     return { totalGoals, completedCount, ongoingCount, scheduledCount, totalMatches: validMatches.length };
-  }, [matches, schools]);
+  }, [matches, schools, activeTournaments, sportsConfig, affiliationDisplayConfig]);
 
   // Cross Country List Processing
   const crossCountryList = useMemo(() => {
+    const ccConf = sportsConfig.find(s => s.id === 'cross_country');
+    if (ccConf?.isProgrammed === false) return [];
+    if (!activeTournaments.some(t => t.sportId === 'cross_country')) return [];
+
+    const requestedAffType = ccAffiliation === 'CLUB' ? 'club_affiliated' : 'non_club';
+    if (!isAffiliationAllowedByDisplayConfig(requestedAffType, affiliationDisplayConfig, 'cross_country')) {
+      return [];
+    }
+
     return CROSS_COUNTRY_CATEGORIES.map(cat => {
       const key = ccAffiliation === 'CLUB' ? `${cat.id}_club` : cat.id;
       const res = ccResults[key];
@@ -229,10 +301,14 @@ export const PublicResults: React.FC = () => {
         key
       };
     }).filter(Boolean) as (CrossCountryCategoryResult & { categoryName: string; key: string })[];
-  }, [ccResults, ccAffiliation]);
+  }, [ccResults, ccAffiliation, activeTournaments, sportsConfig, affiliationDisplayConfig]);
 
   // Athletics List Processing
   const athleticsList = useMemo(() => {
+    const athConf = sportsConfig.find(s => s.id === 'athletics');
+    if (athConf?.isProgrammed === false) return [];
+    if (!activeTournaments.some(t => t.sportId === 'athletics')) return [];
+
     const list: any[] = [];
     const seenIds = new Set<string>();
 
@@ -307,7 +383,7 @@ export const PublicResults: React.FC = () => {
     });
 
     return list;
-  }, [athResults, selectedDirId, resultsVersion]);
+  }, [athResults, activeTournaments, sportsConfig, selectedDirId, resultsVersion]);
 
   if (loading) {
     return (
@@ -489,18 +565,22 @@ export const PublicResults: React.FC = () => {
 
               {/* Affiliation Switcher */}
               <div className="flex items-center gap-1.5 bg-white p-1 rounded-2xl border border-amber-200 shadow-3xs">
-                <button 
-                  onClick={() => setCcAffiliation('NON_CLUB')}
-                  className={cn("px-3 py-1.5 rounded-xl text-[11px] font-black transition-all cursor-pointer", ccAffiliation === 'NON_CLUB' ? "bg-amber-600 text-white shadow-xs" : "text-slate-600 hover:bg-slate-50")}
-                >
-                  ⚪ مدرسي (غير منتمي)
-                </button>
-                <button 
-                  onClick={() => setCcAffiliation('CLUB')}
-                  className={cn("px-3 py-1.5 rounded-xl text-[11px] font-black transition-all cursor-pointer", ccAffiliation === 'CLUB' ? "bg-purple-600 text-white shadow-xs" : "text-slate-600 hover:bg-slate-50")}
-                >
-                  🟡 المنتمين للأندية
-                </button>
+                {(effectiveCcAffMode === 'both' || effectiveCcAffMode === 'non_club') && (
+                  <button 
+                    onClick={() => setCcAffiliation('NON_CLUB')}
+                    className={cn("px-3 py-1.5 rounded-xl text-[11px] font-black transition-all cursor-pointer", ccAffiliation === 'NON_CLUB' ? "bg-amber-600 text-white shadow-xs" : "text-slate-600 hover:bg-slate-50")}
+                  >
+                    ⚪ مدرسي (غير منتمي)
+                  </button>
+                )}
+                {(effectiveCcAffMode === 'both' || effectiveCcAffMode === 'club_affiliated') && (
+                  <button 
+                    onClick={() => setCcAffiliation('CLUB')}
+                    className={cn("px-3 py-1.5 rounded-xl text-[11px] font-black transition-all cursor-pointer", ccAffiliation === 'CLUB' ? "bg-purple-600 text-white shadow-xs" : "text-slate-600 hover:bg-slate-50")}
+                  >
+                    🟡 المنتمين للأندية
+                  </button>
+                )}
               </div>
             </div>
 
@@ -847,19 +927,19 @@ export const PublicResults: React.FC = () => {
                         <div className="bg-slate-50/90 border border-slate-200/80 rounded-xl px-3 py-2 space-y-1.5">
                           {hasCategorizedRefs ? (
                             <>
-                              {refInfo.tableRefs.length > 0 && (
-                                <div className="flex items-start gap-1.5 text-[10px] leading-relaxed">
-                                  <span className="px-1.5 py-0.5 rounded-md bg-sky-100 text-sky-800 font-black shrink-0">حكام الطاولة</span>
-                                  <span className="font-bold text-slate-700">
-                                    {refInfo.tableRefs.map((name, i) => `${getOrdinalRefLabel(i)}: ${name}`).join(' • ')}
-                                  </span>
-                                </div>
-                              )}
                               {refInfo.fieldRefs.length > 0 && (
                                 <div className="flex items-start gap-1.5 text-[10px] leading-relaxed">
                                   <span className="px-1.5 py-0.5 rounded-md bg-emerald-100 text-emerald-800 font-black shrink-0">حكام الساحة</span>
                                   <span className="font-bold text-slate-700">
                                     {refInfo.fieldRefs.map((name, i) => `${getOrdinalRefLabel(i)}: ${name}`).join(' • ')}
+                                  </span>
+                                </div>
+                              )}
+                              {refInfo.tableRefs.length > 0 && (
+                                <div className="flex items-start gap-1.5 text-[10px] leading-relaxed">
+                                  <span className="px-1.5 py-0.5 rounded-md bg-sky-100 text-sky-800 font-black shrink-0">حكام الطاولة</span>
+                                  <span className="font-bold text-slate-700">
+                                    {refInfo.tableRefs.map((name, i) => `${getOrdinalRefLabel(i)}: ${name}`).join(' • ')}
                                   </span>
                                 </div>
                               )}

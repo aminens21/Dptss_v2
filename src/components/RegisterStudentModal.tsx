@@ -69,12 +69,14 @@ export const RegisterStudentModal: React.FC<RegisterStudentModalProps> = ({
       setBirthDate('');
       setPhoto('');
       setAthleticsSpecialty('');
-      const targetSchoolForInit = preselectedSchoolName || '';
+      const targetSchoolForInit = preselectedSchoolName || (userProfile?.role === 'TEACHER' ? (userProfile?.workLocation || '') : '');
       const isUserForTarget = Boolean(
         userProfile &&
-        targetSchoolForInit &&
-        (schoolNamesMatch(userProfile.workLocation, targetSchoolForInit) ||
-          schoolNamesMatch((userProfile as any).schoolName, targetSchoolForInit))
+        (userProfile.role === 'TEACHER' || (
+          targetSchoolForInit &&
+          (schoolNamesMatch(userProfile.workLocation, targetSchoolForInit) ||
+            schoolNamesMatch((userProfile as any).schoolName, targetSchoolForInit))
+        ))
       );
       if (isUserForTarget) {
         setCoachName(userProfile?.fullName || '');
@@ -359,9 +361,9 @@ export const RegisterStudentModal: React.FC<RegisterStudentModalProps> = ({
         sportId: sport.id,
         photoUrl: photo || undefined,
         affiliationType,
-        coachName: (coachName.trim() || (isUserAtResolvedSchool ? userProfile?.fullName : '') || '').trim() || undefined,
-        coachLeaseNumber: (coachLeaseNumber.trim() || (isUserAtResolvedSchool ? userProfile?.leaseNumber : '') || '').trim() || undefined,
-        coachPhone: (coachPhone.trim() || (isUserAtResolvedSchool ? userProfile?.phone : '') || '').trim() || undefined,
+        coachName: ((userProfile?.role === 'TEACHER' && userProfile?.fullName ? userProfile.fullName : coachName.trim()) || (isUserAtResolvedSchool ? userProfile?.fullName : '') || '').trim() || undefined,
+        coachLeaseNumber: ((userProfile?.role === 'TEACHER' && userProfile?.fullName ? userProfile?.leaseNumber : coachLeaseNumber.trim()) || (isUserAtResolvedSchool ? userProfile?.leaseNumber : '') || '').trim() || undefined,
+        coachPhone: ((userProfile?.role === 'TEACHER' && userProfile?.fullName ? userProfile?.phone : coachPhone.trim()) || (isUserAtResolvedSchool ? userProfile?.phone : '') || '').trim() || undefined,
         ...(sport.id === 'cross_country' ? {
           participationType,
           distance: category === 'U12' ? '1500م' : category === 'U15' ? '2000م' : category === 'U18' ? '3000م' : '4000م'

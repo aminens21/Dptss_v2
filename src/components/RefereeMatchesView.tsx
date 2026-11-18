@@ -1,6 +1,6 @@
-import React, { useState, useMemo } from 'react';
-import { Match, School, Venue, Tournament, User } from '../types';
-import { SPORTS_MAP } from '../lib/dataService';
+import React, { useState, useMemo, useEffect } from 'react';
+import { Match, School, Venue, Tournament, User, Referee } from '../types';
+import { DataService, SPORTS_MAP, normalizeArabicMatchText } from '../lib/dataService';
 import { formatTeamDisplayName, hasValidMatchTeams } from '../lib/drawTournamentUtils';
 import { AthleticsService } from '../lib/athleticsService';
 import {
@@ -41,56 +41,107 @@ export const RefereeMatchesView: React.FC<RefereeMatchesViewProps> = ({
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
+  const [refereesList, setRefereesList] = useState<Referee[]>([]);
 
-  // Helper to robustly match referee names (fuzziness, substring, clean prefix/parentheses)
-  const isNameMatch = (nameInMatch: string, loggedInName: string) => {
-    if (!nameInMatch || !loggedInName) return false;
-    const n1 = nameInMatch.trim().toLowerCase();
-    const n2 = loggedInName.trim().toLowerCase();
-    
-    if (n1 === n2) return true;
-    
-    // Check if one contains the other (e.g. "الحكم المعتمد (محمد العلوي)" contains "محمد العلوي")
-    if (n2.includes(n1) || n1.includes(n2)) return true;
-    
-    // Clean up common prefixes/suffixes/parentheses
-    const clean = (s: string) => s.replace(/[()]/g, '').replace('الحكم المعتمد', '').trim();
-    const c1 = clean(n1);
-    const c2 = clean(n2);
-    
-    if (c1 === c2 || c2.includes(c1) || c1.includes(c2)) return true;
-    
-    return false;
+  useEffect(() => {
+    let mounted = true;
+    DataService.getReferees().then(list => {
+      if (mounted) setRefereesList(list || []);
+    }).catch(() => {});
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const cleanRefString = (raw: string): string => {
+    return normalizeArabicMatchText(
+      String(raw || '')
+        .replace(/الحكم المعتمد/gi, '')
+        .replace(/حكم الأول|الحكم الأول|حكم أول/gi, '')
+        .replace(/حكم الثاني|الحكم الثاني|حكم ثاني/gi, '')
+        .replace(/حكم الساحة|حكام الساحة|حكم الطاولة|حكام الطاولة/gi, '')
+        .replace(/\(?\s*أستاذ\s*\)?/gi, '')
+        .replace(/[():\-–—،,.]/g, ' ')
+        .trim()
+    );
   };
 
-  // Normalize name for matching
-  const targetName = refereeName.trim().toLowerCase();
+  // Build all possible IDs and normalized name tokens identifying this teacher/referee
+  const targetIdentity = useMemo(() => {
+    const ids = new Set<string>();
+    const names = new Set<string>();
 
-  // Filter matches assigned to this referee
-  const refereeMatches = useMemo(() => {
-    return matches.filter((m) => {
-      if (!targetName) return false;
-      if (!hasValidMatchTeams(m, schools)) return false;
-
-      // Match against referees array (names)
-      if (Array.isArray(m.referees)) {
-        const hasMatch = m.referees.some(
-          (ref) => ref && isNameMatch(ref, targetName)
-        );
-        if (hasMatch) return true;
+    const addName = (val?: string) => {
+      const cleaned = cleanRefString(val || '');
+      if (cleaned && cleaned.length >= 2) {
+        names.add(cleaned);
       }
+    };
 
-      // Match against referee1Id / referee2Id (which sometimes store names)
-      if (m.referee1Id && isNameMatch(m.referee1Id, targetName)) {
-        return true;
-      }
-      if (m.referee2Id && isNameMatch(m.referee2Id, targetName)) {
-        return true;
-      }
+    if (userProfile?.id) ids.add(userProfile.id.trim().toLowerCase());
+    addName(userProfile?.fullName);
+    addName(refereeName);
 
+    refereesList.forEach(r => {
+      const matchesUser =
+        (userProfile?.id && (r as any).userId === userProfile.id) ||
+        (userProfile?.email && r.email && r.email.trim().toLowerCase() === userProfile.email.trim().toLowerCase()) ||
+        (userProfile?.phone && r.phone && r.phone.replace(/\s+/g, '') === userProfile.phone.replace(/\s+/g, '')) ||
+        Array.from(names).some(n => {
+          const rNorm = cleanRefString(r.fullName || '');
+          return rNorm && (rNorm === n || (rNorm.length >= 4 && n.length >= 4 && (rNorm.includes(n) || n.includes(rNorm))));
+        });
+      if (matchesUser) {
+        if (r.id) ids.add(r.id.trim().toLowerCase());
+        addName(r.fullName);
+      }
+    });
+
+    return {
+      ids: Array.from(ids),
+      names: Array.from(names)
+    };
+  }, [userProfile, refereeName, refereesList]);
+
+  const isEntryMatchingTarget = (entry?: string): boolean => {
+    if (!entry) return false;
+    const trimmedLower = entry.trim().toLowerCase();
+    if (!trimmedLower) return false;
+
+    if (targetIdentity.ids.includes(trimmedLower)) return true;
+
+    const refRecord = refereesList.find(r => r.id && r.id.trim().toLowerCase() === trimmedLower);
+    const cleaned = cleanRefString(refRecord ? refRecord.fullName : entry);
+    if (!cleaned) return false;
+
+    return targetIdentity.names.some(target => {
+      if (cleaned === target) return true;
+      if (cleaned.length >= 4 && target.length >= 4) {
+        return cleaned.includes(target) || target.includes(cleaned);
+      }
       return false;
     });
-  }, [matches, schools, targetName]);
+  };
+
+  const targetName = refereeName.trim().toLowerCase();
+
+  // Filter matches assigned to this referee across tableReferees, fieldReferees, referees, referee1Id, referee2Id
+  const refereeMatches = useMemo(() => {
+    return matches.filter((m) => {
+      if (targetIdentity.names.length === 0 && targetIdentity.ids.length === 0) return false;
+      if (!hasValidMatchTeams(m, schools)) return false;
+
+      const allEntries: string[] = [
+        ...(Array.isArray(m.fieldReferees) ? m.fieldReferees : []),
+        ...(Array.isArray(m.tableReferees) ? m.tableReferees : []),
+        ...(Array.isArray(m.referees) ? m.referees : []),
+        ...(m.referee1Id ? [m.referee1Id] : []),
+        ...(m.referee2Id ? [m.referee2Id] : [])
+      ];
+
+      return allEntries.some(entry => isEntryMatchingTarget(entry));
+    });
+  }, [matches, schools, targetIdentity, refereesList]);
 
   // Apply search & status filters on the referee's matches
   const filteredMatches = useMemo(() => {
@@ -468,12 +519,36 @@ export const RefereeMatchesView: React.FC<RefereeMatchesViewProps> = ({
                     )}
                   </div>
 
-                  {Array.isArray(m.referees) && m.referees.filter(r => r && r.trim().toLowerCase() !== targetName).length > 0 && (
-                    <div className="flex items-center gap-1.5 pt-1 border-t border-slate-100/60">
-                      <UserCheck className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                      <span>الحكام المساعدون: <strong className="font-bold text-slate-700">{m.referees.filter(r => r && r.trim().toLowerCase() !== targetName).join(' ، ')}</strong></span>
-                    </div>
-                  )}
+                  {(() => {
+                    const fieldList = Array.isArray(m.fieldReferees) ? m.fieldReferees.filter(Boolean) : [];
+                    const tableList = Array.isArray(m.tableReferees) ? m.tableReferees.filter(Boolean) : [];
+                    const legacyList = Array.isArray(m.referees)
+                      ? m.referees.filter(r => r && !isEntryMatchingTarget(r))
+                      : [];
+                    if (fieldList.length === 0 && tableList.length === 0 && legacyList.length === 0) return null;
+                    return (
+                      <div className="space-y-1 pt-1.5 border-t border-slate-100/60">
+                        {fieldList.length > 0 && (
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 text-[10px] font-black">حكام الساحة</span>
+                            <strong className="font-bold text-slate-700">{fieldList.join(' • ')}</strong>
+                          </div>
+                        )}
+                        {tableList.length > 0 && (
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="px-1.5 py-0.5 rounded bg-sky-100 text-sky-800 text-[10px] font-black">حكام الطاولة</span>
+                            <strong className="font-bold text-slate-700">{tableList.join(' • ')}</strong>
+                          </div>
+                        )}
+                        {fieldList.length === 0 && tableList.length === 0 && legacyList.length > 0 && (
+                          <div className="flex items-center gap-1.5">
+                            <UserCheck className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                            <span>الحكام المساعدون: <strong className="font-bold text-slate-700">{legacyList.join(' ، ')}</strong></span>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
                 </div>
 
                 {/* Match Actions for Referee */}

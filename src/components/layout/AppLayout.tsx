@@ -1315,15 +1315,15 @@ export const AppLayout: React.FC = () => {
                             type="button"
                             onClick={() => setConfirmGlobalBellReset(true)}
                             className="w-full py-2 px-3 rounded-xl text-[11px] font-black bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 dark:bg-rose-950/40 dark:hover:bg-rose-900/50 dark:text-rose-300 dark:border-rose-800 transition-colors cursor-pointer flex items-center justify-center gap-1.5"
-                            title="تصفير ومسح جميع إشعارات الجرس لدى كافة المشرفين والأساتذة والحكام"
+                            title="حذف جميع إشعارات الجرس لدى كافة المشرفين والأساتذة والحكام"
                           >
                             <BellOff className="w-3.5 h-3.5 shrink-0" />
-                            <span>تصفير الجرس لكل المشرفين والأساتذة</span>
+                            <span>حذف إشعارات الجرس لكل المشرفين والأساتذة</span>
                           </button>
                         ) : (
                           <div className="p-2.5 rounded-xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800 space-y-2">
                             <p className="text-[10px] font-bold text-rose-900 dark:text-rose-200 leading-relaxed">
-                              تأكيد: سيتم مسح جميع تنبيهات الجرس لدى كافة الأساتذة والمشرفين والحكام (لن تحذف رسائل منصة تواصل).
+                              تأكيد: سيتم حذف جميع تنبيهات الجرس لدى كافة الأساتذة والمشرفين والحكام (لن تحذف رسائل منصة تواصل).
                             </p>
                             <div className="flex items-center justify-end gap-1.5">
                               <button
@@ -1344,18 +1344,18 @@ export const AppLayout: React.FC = () => {
                                     setConfirmGlobalBellReset(false);
                                     toast.success(
                                       res.deletedCount > 0
-                                        ? `تم تصفير الجرس لجميع المشرفين والأساتذة بنجاح (حذف ${res.deletedCount} إشعار)`
-                                        : 'تم تصفير الجرس لجميع المشرفين والأساتذة بنجاح'
+                                        ? `تم حذف إشعارات الجرس لجميع المشرفين والأساتذة بنجاح (حذف ${res.deletedCount} إشعار)`
+                                        : 'تم حذف إشعارات الجرس لجميع المشرفين والأساتذة بنجاح'
                                     );
                                   } catch {
-                                    toast.error('تعذر تصفير الأجراس، يرجى المحاولة مجدداً');
+                                    toast.error('تعذر حذف إشعارات الجرس، يرجى المحاولة مجدداً');
                                   } finally {
                                     setIsResettingGlobalBells(false);
                                   }
                                 }}
                                 className="px-3 py-1 rounded-lg text-[10px] font-black bg-rose-600 hover:bg-rose-700 text-white cursor-pointer disabled:opacity-50"
                               >
-                                {isResettingGlobalBells ? 'جاري التصفير...' : 'نعم، تصفير للجميع'}
+                                {isResettingGlobalBells ? 'جاري الحذف...' : 'نعم، حذف للجميع'}
                               </button>
                             </div>
                           </div>

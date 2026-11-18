@@ -41,33 +41,12 @@ export const ConfirmedParticipationBadge: React.FC<ConfirmedParticipationBadgePr
   const animationFrameRef = useRef<number | null>(null);
   const startTimeRef = useRef<number>(0);
   const didTriggerCancelRef = useRef<boolean>(false);
+  const isPressingRef = useRef<boolean>(false);
+  const isCancellingRef = useRef<boolean>(false);
+  const ignoreMouseUntilRef = useRef<number>(0);
+  const suppressNextClickRef = useRef<boolean>(false);
 
   const LONG_PRESS_DURATION = 3000; // 3 seconds
-
-  const executeCancel = useCallback(async () => {
-    if (isCancelling) return;
-    setIsCancelling(true);
-    const toastId = toast.loading(`جاري إلغاء مشاركة ${schoolName} في جميع فروع بطولة ${sportName}...`);
-    try {
-      await DataService.cancelSchoolConfirmation(sportId, schoolId || schoolName);
-      toast.dismiss(toastId);
-      toast.success(`تم إلغاء المشاركة في جميع فروع بطولة ${sportName} بنجاح ✓`, {
-        duration: 4500,
-        icon: '🗑️'
-      });
-      if (onCancelSuccess) {
-        onCancelSuccess();
-      }
-    } catch (err) {
-      console.error('Error cancelling confirmation on long press:', err);
-      toast.dismiss(toastId);
-      toast.error('حدث خطأ أثناء إلغاء المشاركة');
-    } finally {
-      setIsCancelling(false);
-      setProgress(0);
-      setIsPressing(false);
-    }
-  }, [sportId, sportName, schoolId, schoolName, onCancelSuccess, isCancelling]);
 
   const clearTimers = useCallback(() => {
     if (pressTimerRef.current) {
@@ -80,15 +59,53 @@ export const ConfirmedParticipationBadge: React.FC<ConfirmedParticipationBadgePr
     }
   }, []);
 
-  const handleStart = (e: React.SyntheticEvent) => {
-    // Avoid starting if already cancelling
-    if (isCancelling) return;
+  const executeCancel = useCallback(async () => {
+    if (isCancellingRef.current) return;
+    isCancellingRef.current = true;
+    isPressingRef.current = false;
+    setIsCancelling(true);
+    setIsPressing(false);
+    const toastId = toast.loading(`جاري سحب وإلغاء مشاركة ${schoolName} في جميع فروع بطولة ${sportName}...`);
+    try {
+      await DataService.cancelSchoolConfirmation(sportId, schoolId || schoolName, schoolName);
+      toast.dismiss(toastId);
+      toast.success(`تم سحب وإلغاء المشاركة في جميع فروع بطولة ${sportName} بنجاح ✓`, {
+        duration: 4500,
+        icon: '🗑️'
+      });
+      if (onCancelSuccess) {
+        onCancelSuccess();
+      }
+    } catch (err) {
+      console.error('Error cancelling confirmation on long press:', err);
+      toast.dismiss(toastId);
+      toast.error('حدث خطأ أثناء إلغاء المشاركة');
+    } finally {
+      isCancellingRef.current = false;
+      setIsCancelling(false);
+      setProgress(0);
+      setIsPressing(false);
+    }
+  }, [sportId, sportName, schoolId, schoolName, onCancelSuccess]);
+
+  const handleStart = (e: React.SyntheticEvent, isTouch = false) => {
+    e.stopPropagation();
+    if (!isTouch && Date.now() < ignoreMouseUntilRef.current) return;
+    if (isTouch) {
+      ignoreMouseUntilRef.current = Date.now() + 900;
+    }
+    if (isCancellingRef.current) return;
+
+    clearTimers();
     didTriggerCancelRef.current = false;
+    suppressNextClickRef.current = false;
+    isPressingRef.current = true;
     setIsPressing(true);
     startTimeRef.current = Date.now();
     setProgress(0);
 
     const updateProgress = () => {
+      if (!isPressingRef.current || isCancellingRef.current) return;
       const elapsed = Date.now() - startTimeRef.current;
       const pct = Math.min(100, Math.round((elapsed / LONG_PRESS_DURATION) * 100));
       setProgress(pct);
@@ -96,8 +113,8 @@ export const ConfirmedParticipationBadge: React.FC<ConfirmedParticipationBadgePr
       if (elapsed < LONG_PRESS_DURATION) {
         animationFrameRef.current = window.requestAnimationFrame(updateProgress);
       } else {
-        // Trigger cancel!
         didTriggerCancelRef.current = true;
+        suppressNextClickRef.current = true;
         clearTimers();
         executeCancel();
       }
@@ -106,23 +123,29 @@ export const ConfirmedParticipationBadge: React.FC<ConfirmedParticipationBadgePr
     animationFrameRef.current = window.requestAnimationFrame(updateProgress);
   };
 
-  const handleEnd = (e: React.SyntheticEvent) => {
+  const handleEnd = (e: React.SyntheticEvent, isTouch = false, isCancelOrLeave = false) => {
+    e.stopPropagation();
+    if (!isTouch && Date.now() < ignoreMouseUntilRef.current && !isCancelOrLeave) return;
+    if (isTouch) {
+      ignoreMouseUntilRef.current = Date.now() + 900;
+    }
+
+    const wasPressing = isPressingRef.current;
     clearTimers();
-    const wasPressing = isPressing;
+    isPressingRef.current = false;
     setIsPressing(false);
     setProgress(0);
 
-    // If long press triggered cancellation, stop propagation and do not trigger normal click
     if (didTriggerCancelRef.current) {
       e.preventDefault();
-      e.stopPropagation();
       didTriggerCancelRef.current = false;
+      suppressNextClickRef.current = true;
       return;
     }
 
-    // If user released quickly (regular click < 500ms)
     const elapsed = Date.now() - startTimeRef.current;
-    if (wasPressing && elapsed < 500 && onClick) {
+    if (wasPressing && !isCancelOrLeave && elapsed < 500 && onClick) {
+      suppressNextClickRef.current = true;
       onClick(e as any);
     }
   };
@@ -138,15 +161,29 @@ export const ConfirmedParticipationBadge: React.FC<ConfirmedParticipationBadgePr
   return (
     <button
       type="button"
-      onMouseDown={handleStart}
-      onMouseUp={handleEnd}
-      onMouseLeave={handleEnd}
-      onTouchStart={handleStart}
-      onTouchEnd={handleEnd}
-      onTouchCancel={handleEnd}
+      onMouseDown={(e) => handleStart(e, false)}
+      onMouseUp={(e) => handleEnd(e, false, false)}
+      onMouseLeave={(e) => handleEnd(e, false, true)}
+      onTouchStart={(e) => handleStart(e, true)}
+      onTouchEnd={(e) => handleEnd(e, true, false)}
+      onTouchCancel={(e) => handleEnd(e, true, true)}
+      onClick={(e) => {
+        e.stopPropagation();
+        if (suppressNextClickRef.current) {
+          suppressNextClickRef.current = false;
+          return;
+        }
+        if (onClick && !isCancellingRef.current) {
+          onClick(e);
+        }
+      }}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+      }}
       disabled={isCancelling}
       title="اضغط ضغطة عادية للتفاصيل، أو اضغط مطولاً لمدة 3 ثوانٍ لإلغاء المشاركة في جميع فروع البطولة"
-      className={`relative select-none overflow-hidden transition-all duration-150 cursor-pointer flex items-center justify-center gap-1.5 ${
+      className={`relative select-none touch-none overflow-hidden transition-all duration-150 cursor-pointer flex items-center justify-center gap-1.5 ${
         isDark
           ? isPressing
             ? 'bg-red-500/30 text-red-100 border-red-400 ring-2 ring-red-400/50 scale-[0.98]'

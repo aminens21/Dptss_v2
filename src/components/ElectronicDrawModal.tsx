@@ -34,7 +34,7 @@ import {
   Undo2
 } from 'lucide-react';
 import { Tournament, School, Team, Match, User, Venue, Sport, Referee, SchoolTournamentConfirmation, BlockedSchedulePeriod, DrawSystemType } from '../types';
-import { DataService, SPORTS_MAP, GENDER_MAP, deduplicateById, normalizeCategoryKey, getCustomCategoryName, doesConfirmationMatchBranch, EDUCATIONAL_CYCLE_LABELS, getMatchEducationalCycles, findBlockedPeriodForDate, normalizeArabicSearch, normalizeDateToYmd, schoolNamesMatch, normalizeTournamentAffiliation } from '../lib/dataService';
+import { DataService, SPORTS_MAP, GENDER_MAP, deduplicateById, normalizeCategoryKey, getCustomCategoryName, doesConfirmationMatchBranch, EDUCATIONAL_CYCLE_LABELS, getMatchEducationalCycles, findBlockedPeriodForDate, normalizeArabicSearch, normalizeDateToYmd, schoolNamesMatch, normalizeTournamentAffiliation, normalizeSchoolCycleType } from '../lib/dataService';
 import { generateRoundRobinDrawMatches, generateKnockoutGroupsDrawMatches, isPlaceholderTeamId, hasValidMatchTeams, extractMatchGroupLabel } from '../lib/drawTournamentUtils';
 import { isSuperAdminEmail } from '../contexts/AuthContext';
 import {
@@ -204,7 +204,9 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
 
   // Step 1 Filtering Options
   const [selectedSportFilter, setSelectedSportFilter] = useState<string>(initialSportId || 'ALL');
-  const [selectedAffiliationFilter, setSelectedAffiliationFilter] = useState<string>(initialAffiliation || 'ALL');
+  const [selectedAffiliationFilter, setSelectedAffiliationFilter] = useState<string>(
+    initialAffiliation && initialAffiliation !== 'open' ? initialAffiliation : 'ALL'
+  );
   const [selectedAgeCategoryFilter, setSelectedAgeCategoryFilter] = useState<string>(initialCategory || 'ALL');
   const [selectedGenderFilter, setSelectedGenderFilter] = useState<string>(initialGender || 'ALL');
   const [tournamentSearchQuery, setTournamentSearchQuery] = useState<string>('');
@@ -232,7 +234,9 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
   // Step 3 Search & Manual Match Builder state
   const [step3SchoolSearchQuery, setStep3SchoolSearchQuery] = useState<string>('');
   const [bulkHostSchoolSearch, setBulkHostSchoolSearch] = useState<string>('');
+  const [bulkHostSchoolCycleFilter, setBulkHostSchoolCycleFilter] = useState<'ALL' | 'ابتدائي' | 'إعدادي' | 'تأهيلي'>('ALL');
   const [hostSchoolSearchByMatchId, setHostSchoolSearchByMatchId] = useState<Record<string, string>>({});
+  const [hostSchoolCycleFilterByMatchId, setHostSchoolCycleFilterByMatchId] = useState<Record<string, 'ALL' | 'ابتدائي' | 'إعدادي' | 'تأهيلي'>>({});
   const [showManualBuilder, setShowManualBuilder] = useState<boolean>(false);
   const [manualIncludeAllSchools, setManualIncludeAllSchools] = useState<boolean>(false);
   const [manualTeam1Id, setManualTeam1Id] = useState<string>('');
@@ -246,6 +250,20 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
   const [manualHostSchoolId, setManualHostSchoolId] = useState<string>('');
   const [manualVenueName, setManualVenueName] = useState<string>('');
   const [manualHostSchoolSearch, setManualHostSchoolSearch] = useState<string>('');
+  const [manualHostSchoolCycleFilter, setManualHostSchoolCycleFilter] = useState<'ALL' | 'ابتدائي' | 'إعدادي' | 'تأهيلي'>('ALL');
+
+  const matchesHostSchoolCycle = (s: School, cycleFilter: 'ALL' | 'ابتدائي' | 'إعدادي' | 'تأهيلي'): boolean => {
+    if (cycleFilter === 'ALL') return true;
+    const sc = normalizeSchoolCycleType(s);
+    if (sc === cycleFilter) return true;
+    if (sc === 'خصوصي') {
+      const combined = normalizeArabicSearch(`${s.type || ''} ${s.name || ''}`);
+      if (cycleFilter === 'ابتدائي') return combined.includes('ابتدائ') || combined.includes('مدرسه');
+      if (cycleFilter === 'إعدادي') return combined.includes('اعداد');
+      if (cycleFilter === 'تأهيلي') return combined.includes('تاهيل');
+    }
+    return false;
+  };
 
   // Batch edit helpers
   const [bulkDate, setBulkDate] = useState<string>(new Date().toISOString().slice(0, 10));
@@ -385,7 +403,8 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
         if (preselectedTourn) {
           setSelectedTournamentId(preselectedTourn.id);
           setSelectedSportFilter(preselectedTourn.sportId);
-          setSelectedAffiliationFilter(normalizeTournamentAffiliation(preselectedTourn.affiliationType, preselectedTourn.name));
+          const resolvedAff = normalizeTournamentAffiliation(preselectedTourn.affiliationType, preselectedTourn.name);
+          setSelectedAffiliationFilter(resolvedAff === 'open' ? 'ALL' : resolvedAff);
           setSelectedAgeCategoryFilter(normalizeCategoryKey(preselectedTourn.ageCategory || ''));
           setSelectedGenderFilter(preselectedTourn.gender || 'ALL');
           setStep(2);
@@ -1885,7 +1904,6 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
                       <option value="ALL">-- جميع الأصناف --</option>
                       <option value="non_club">⚪ غير المنتمين للأندية</option>
                       <option value="club_affiliated">🟡 المنتمين للأندية</option>
-                      <option value="open">🌐 البطولات المفتوحة</option>
                     </select>
                   </div>
 
@@ -2788,6 +2806,22 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
                     </div>
                     {bulkVenueMode === 'school' ? (
                       <div className="space-y-1">
+                        <div className="flex flex-wrap items-center gap-1">
+                          {(['ALL', 'ابتدائي', 'إعدادي', 'تأهيلي'] as const).map(cyc => (
+                            <button
+                              key={`bulk-host-cyc-${cyc}`}
+                              type="button"
+                              onClick={() => setBulkHostSchoolCycleFilter(cyc)}
+                              className={`px-1.5 py-0.5 rounded-md text-[9px] font-bold border transition-colors cursor-pointer ${
+                                bulkHostSchoolCycleFilter === cyc
+                                  ? 'bg-emerald-600 text-white border-emerald-600'
+                                  : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
+                              }`}
+                            >
+                              {cyc === 'ALL' ? 'الكل' : cyc}
+                            </button>
+                          ))}
+                        </div>
                         <div className="relative">
                           <Search className="w-3 h-3 text-slate-400 absolute right-2 top-2" />
                           <input
@@ -2807,6 +2841,7 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
                           {schools
                             .filter(s => {
                               if (s.id === bulkHostSchoolId) return true;
+                              if (!matchesHostSchoolCycle(s, bulkHostSchoolCycleFilter)) return false;
                               if (!bulkHostSchoolSearch.trim()) return true;
                               const q = normalizeArabicSearch(bulkHostSchoolSearch);
                               return normalizeArabicSearch(s.name || '').includes(q) || normalizeArabicSearch(s.commune || '').includes(q);
@@ -3147,6 +3182,22 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
                         </div>
                         {manualVenueMode === 'school' ? (
                           <div className="space-y-1">
+                            <div className="flex flex-wrap items-center gap-1">
+                              {(['ALL', 'ابتدائي', 'إعدادي', 'تأهيلي'] as const).map(cyc => (
+                                <button
+                                  key={`manual-host-cyc-${cyc}`}
+                                  type="button"
+                                  onClick={() => setManualHostSchoolCycleFilter(cyc)}
+                                  className={`px-1.5 py-0.5 rounded-md text-[9px] font-bold border transition-colors cursor-pointer ${
+                                    manualHostSchoolCycleFilter === cyc
+                                      ? 'bg-indigo-600 text-white border-indigo-600'
+                                      : 'bg-white text-slate-600 border-indigo-200 hover:bg-indigo-50'
+                                  }`}
+                                >
+                                  {cyc === 'ALL' ? 'الكل' : cyc}
+                                </button>
+                              ))}
+                            </div>
                             <div className="relative">
                               <Search className="w-3 h-3 text-slate-400 absolute right-2 top-2" />
                               <input
@@ -3166,6 +3217,7 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
                               {schools
                                 .filter(s => {
                                   if (s.id === manualHostSchoolId) return true;
+                                  if (!matchesHostSchoolCycle(s, manualHostSchoolCycleFilter)) return false;
                                   if (!manualHostSchoolSearch.trim()) return true;
                                   const q = normalizeArabicSearch(manualHostSchoolSearch);
                                   return normalizeArabicSearch(s.name || '').includes(q) || normalizeArabicSearch(s.commune || '').includes(q);
@@ -3457,6 +3509,27 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
                             </div>
                             {(match.venueMode || 'school') === 'school' ? (
                               <div className="space-y-1">
+                                <div className="flex flex-wrap items-center gap-1">
+                                  {(['ALL', 'ابتدائي', 'إعدادي', 'تأهيلي'] as const).map(cyc => {
+                                    const activeCyc = hostSchoolCycleFilterByMatchId[match.id] || 'ALL';
+                                    return (
+                                      <button
+                                        key={`m-host-cyc-${match.id}-${cyc}`}
+                                        type="button"
+                                        onClick={() =>
+                                          setHostSchoolCycleFilterByMatchId(prev => ({ ...prev, [match.id]: cyc }))
+                                        }
+                                        className={`px-1.5 py-0.5 rounded-md text-[9px] font-bold border transition-colors cursor-pointer ${
+                                          activeCyc === cyc
+                                            ? 'bg-emerald-600 text-white border-emerald-600'
+                                            : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
+                                        }`}
+                                      >
+                                        {cyc === 'ALL' ? 'الكل' : cyc}
+                                      </button>
+                                    );
+                                  })}
+                                </div>
                                 <div className="relative">
                                   <Search className="w-3 h-3 text-slate-400 absolute right-2 top-2" />
                                   <input
@@ -3495,6 +3568,8 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
                                   {schools
                                     .filter(s => {
                                       if (s.id === match.hostSchoolId) return true;
+                                      const activeCyc = hostSchoolCycleFilterByMatchId[match.id] || 'ALL';
+                                      if (!matchesHostSchoolCycle(s, activeCyc)) return false;
                                       const rawQ = (hostSchoolSearchByMatchId[match.id] || '').trim();
                                       if (!rawQ) return true;
                                       const q = normalizeArabicSearch(rawQ);

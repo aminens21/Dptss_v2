@@ -1,9 +1,9 @@
 import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { DataService, SPORTS_MAP, AGE_CATEGORIES, getAgeCategoriesForSeason, getCategoryGenderLabel, isClubTournament, normalizeCategoryKey, validateBirthDateForCategory, isTeacherLevelAllowedForTournament, getEffectiveConfirmedBranches, formatBranchLabelAr, getGenderSpecificCategoryTitle, isSchoolSectorAllowedForTournament, schoolNamesMatch } from '../lib/dataService';
+import { DataService, SPORTS_MAP, AGE_CATEGORIES, getAgeCategoriesForSeason, getCategoryGenderLabel, isClubTournament, normalizeCategoryKey, validateBirthDateForCategory, isTeacherLevelAllowedForTournament, getEffectiveConfirmedBranches, formatBranchLabelAr, getGenderSpecificCategoryTitle, isSchoolSectorAllowedForTournament, schoolNamesMatch, isAffiliationAllowedByDisplayConfig } from '../lib/dataService';
 import { useSchoolConfirmations } from '../hooks/useSchoolConfirmations';
-import { Student, Sport, Tournament, School, Directorate } from '../types';
+import { Student, Sport, Tournament, School, Directorate, AffiliationDisplayConfig } from '../types';
 import { ParticipationFormPdfModal } from '../components/ParticipationFormPdfModal';
 import { CrossCountryBulkRegisterModal } from '../components/CrossCountryBulkRegisterModal';
 import { SportBulkRegisterModal } from '../components/SportBulkRegisterModal';
@@ -50,6 +50,9 @@ export const TeacherTeams: React.FC = () => {
   const [schools, setSchools] = useState<School[]>([]);
   const [loading, setLoading] = useState(true);
   const [currentSeason, setCurrentSeason] = useState('2026/2027');
+  const [affiliationDisplayConfig, setAffiliationDisplayConfig] = useState<AffiliationDisplayConfig>(() =>
+    DataService.getAffiliationDisplayConfigSync()
+  );
 
   // Selected Context & Categorization Filter
   const [selectedSportId, setSelectedSportId] = useState<string | null>(() => {
@@ -83,13 +86,17 @@ export const TeacherTeams: React.FC = () => {
   }, [schools, userProfile]);
 
   const teacherAllowedTournaments = useMemo(() => {
-    const activeTourns = tournaments.filter(t => t.status !== 'Draft' && (t as any).isActive !== false);
+    const activeTourns = tournaments.filter(t => {
+      if (t.status === 'Draft' || (t as any).isActive === false) return false;
+      const tAff = t.affiliationType || (isClubTournament(t) ? 'club_affiliated' : 'non_club');
+      return isAffiliationAllowedByDisplayConfig(tAff, affiliationDisplayConfig, t.sportId);
+    });
     if (!isTeacherRole || canManage) return activeTourns;
     return activeTourns.filter(t =>
       isTeacherLevelAllowedForTournament(teacherCadre, t.level) &&
       (!teacherSchoolObj || isSchoolSectorAllowedForTournament(teacherSchoolObj, t))
     );
-  }, [tournaments, isTeacherRole, canManage, teacherCadre, teacherSchoolObj]);
+  }, [tournaments, isTeacherRole, canManage, teacherCadre, teacherSchoolObj, affiliationDisplayConfig]);
 
   const isSportProgrammed = (s: Sport): boolean => {
     if (teacherAllowedTournaments.some(t => t.sportId === s.id)) return true;
@@ -106,14 +113,14 @@ export const TeacherTeams: React.FC = () => {
       isSportProgrammed(s) &&
       (impersonationScopedSportIds.length === 0 || impersonationScopedSportIds.includes(s.id))
     );
-  }, [sportsConfig, teacherAllowedTournaments, impersonationScopedSportIds]);
+  }, [sportsConfig, teacherAllowedTournaments, affiliationDisplayConfig, impersonationScopedSportIds]);
 
   const nonProgrammedSports = useMemo(() => {
     return sportsConfig.filter(s =>
       !isSportProgrammed(s) &&
       (impersonationScopedSportIds.length === 0 || impersonationScopedSportIds.includes(s.id))
     );
-  }, [sportsConfig, teacherAllowedTournaments, impersonationScopedSportIds]);
+  }, [sportsConfig, teacherAllowedTournaments, affiliationDisplayConfig, impersonationScopedSportIds]);
 
   // New Student Form State
   const [isFormOpen, setIsFormOpen] = useState(false);
@@ -174,7 +181,7 @@ export const TeacherTeams: React.FC = () => {
   const [showOnlyParticipatingCoaches, setShowOnlyParticipatingCoaches] = useState(true);
   const [rosterGenderFilter, setRosterGenderFilter] = useState<'ALL' | 'Male' | 'Female'>('ALL');
 
-  const { getConfirmation } = useSchoolConfirmations(activeDirectorateObj?.id);
+  const { getConfirmation, refreshConfirmations } = useSchoolConfirmations(activeDirectorateObj?.id);
 
   // Verification: Teacher profile completeness
   const isTeacher = userProfile?.role === 'TEACHER';
@@ -188,7 +195,13 @@ export const TeacherTeams: React.FC = () => {
     const handleDirChange = () => {
       loadInitialData();
     };
+    const handleConfSync = () => {
+      refreshConfirmations();
+      loadInitialData();
+    };
     window.addEventListener('directorateChanged', handleDirChange);
+    window.addEventListener('schoolConfirmationsUpdated', handleConfSync);
+    window.addEventListener('schoolWithdrawalsUpdated', handleConfSync);
 
     // Real-time live synchronization for students and schools across devices
     const unsubStudents = DataService.subscribeToStudents((allStudents) => {
@@ -231,12 +244,19 @@ export const TeacherTeams: React.FC = () => {
       setSportsConfig(sportsList);
     });
 
+    const unsubAffiliationCfg = DataService.subscribeToAffiliationDisplayConfig((cfg) => {
+      setAffiliationDisplayConfig(cfg);
+    });
+
     return () => {
       window.removeEventListener('directorateChanged', handleDirChange);
+      window.removeEventListener('schoolConfirmationsUpdated', handleConfSync);
+      window.removeEventListener('schoolWithdrawalsUpdated', handleConfSync);
       unsubStudents();
       unsubSchools();
       unsubTournaments();
       unsubSportsConfig();
+      unsubAffiliationCfg();
     };
   }, [userProfile, urlSchool]);
 
@@ -466,7 +486,7 @@ export const TeacherTeams: React.FC = () => {
     setPhoto('');
     setAthleticsSpecialty('');
 
-    const sportTourns = tournaments.filter(t => t.sportId === selectedSportId);
+    const sportTourns = teacherAllowedTournaments.filter(t => t.sportId === selectedSportId);
 
     // 1. Calculate & Lock Affiliation
     let targetAff: 'non_club' | 'club_affiliated' = 'non_club';
@@ -891,11 +911,31 @@ export const TeacherTeams: React.FC = () => {
       const normAff = affiliationType === 'club_affiliated' ? 'club_affiliated' : 'non_club';
       const coachAffKey = `${normalizedCat}_${gender}_${normAff}`;
       const coachBaseKey = `${normalizedCat}_${gender}`;
-      const coachInfo = effectiveCoaches[coachAffKey] || effectiveCoaches[coachBaseKey] || {
-        coachName: userProfile?.fullName || '',
-        coachLeaseNumber: userProfile?.leaseNumber || '',
-        coachPhone: userProfile?.phone || ''
-      };
+      const explicitPredefined = predefinedCoaches[coachAffKey] || predefinedCoaches[coachBaseKey];
+      // Attribute new registrations strictly to the acting user unless explicitly overridden in this session
+      const coachInfo = editingStudentId
+        ? (
+            coachName.trim()
+              ? {
+                  coachName: coachName.trim(),
+                  coachLeaseNumber: coachLeaseNumber.trim(),
+                  coachPhone: coachPhone.trim()
+                }
+              : effectiveCoaches[coachAffKey] || effectiveCoaches[coachBaseKey] || {
+                  coachName: userProfile?.fullName || '',
+                  coachLeaseNumber: userProfile?.leaseNumber || '',
+                  coachPhone: userProfile?.phone || ''
+                }
+          )
+        : (
+            explicitPredefined?.coachName
+              ? explicitPredefined
+              : {
+                  coachName: (coachName || userProfile?.fullName || '').trim(),
+                  coachLeaseNumber: (coachLeaseNumber || userProfile?.leaseNumber || '').trim(),
+                  coachPhone: (coachPhone || userProfile?.phone || '').trim()
+                }
+          );
 
       if (editingStudentId) {
         const studentData: Partial<Student> = {
@@ -1011,8 +1051,22 @@ export const TeacherTeams: React.FC = () => {
     return getCategoryGenderLabel(catId, gender, currentSeason, selectedSportId);
   };
 
-  // Filter students for the currently selected sport
-  const activeSportStudents = students.filter(s => s.sportId === selectedSportId);
+  // Filter active non-withdrawn students for the currently selected sport (respecting display config)
+  const activeSportStudents = useMemo(() => {
+    return students.filter(s => {
+      if (s.sportId !== selectedSportId) return false;
+      if (!isAffiliationAllowedByDisplayConfig(s.affiliationType, affiliationDisplayConfig, selectedSportId || undefined)) return false;
+      if (DataService.isSchoolWithdrawn({
+        sportId: s.sportId,
+        ageCategory: s.category,
+        gender: s.gender,
+        affiliationType: s.affiliationType
+      }, s.schoolId, s.schoolName || '')) {
+        return false;
+      }
+      return true;
+    });
+  }, [students, selectedSportId, affiliationDisplayConfig]);
 
   // Filter by selected category card drill-down (if selected) or gender
   const displayedSportStudents = useMemo(() => {
@@ -1033,14 +1087,19 @@ export const TeacherTeams: React.FC = () => {
 
   const effectiveCoaches = useMemo(() => {
     const coaches: Record<string, { coachName: string; coachLeaseNumber: string; coachPhone: string }> = {};
-    
-    // First, fill using the existing student data (from DB)
+
+    // Only attribute from historical student records when NOT a teacher (e.g. central admin viewing roster),
+    // or when the student was registered by the current acting teacher themselves.
+    const actingNameNorm = (userProfile?.fullName || '').trim().toLowerCase();
     activeSportStudents.forEach(s => {
+      if (isTeacher && actingNameNorm && (s.coachName || '').trim().toLowerCase() !== actingNameNorm) {
+        return;
+      }
       const normCat = normalizeCategoryKey(s.category);
       const sAff = s.affiliationType === 'club_affiliated' ? 'club_affiliated' : 'non_club';
       const baseKey = `${normCat}_${s.gender}`;
       const affKey = `${normCat}_${s.gender}_${sAff}`;
-        
+
       if (s.coachName) {
         const info = {
           coachName: s.coachName,
@@ -1052,7 +1111,7 @@ export const TeacherTeams: React.FC = () => {
       }
     });
 
-    // Second, merge with predefinedCoaches set by the user during this session
+    // Second, merge with predefinedCoaches explicitly set by the user during this session
     Object.keys(predefinedCoaches).forEach(key => {
       if (predefinedCoaches[key]?.coachName) {
         coaches[key] = predefinedCoaches[key];
@@ -1060,7 +1119,7 @@ export const TeacherTeams: React.FC = () => {
     });
 
     return coaches;
-  }, [activeSportStudents, predefinedCoaches, selectedSportId]);
+  }, [activeSportStudents, predefinedCoaches, selectedSportId, isTeacher, userProfile?.fullName]);
 
   // Cross Country Bulk Modal & Excel Export Handlers
   const handleOpenCrossCountryBulk = (catKey?: string | null, aff?: 'non_club' | 'club_affiliated') => {
@@ -1229,13 +1288,25 @@ export const TeacherTeams: React.FC = () => {
   // Render sports cards distinguishing white (non-club) vs yellow (club-affiliated)
   const renderSportCard = (sport: Sport) => {
     const mapped = SPORTS_MAP[sport.id] || { name: sport.name, icon: '🏆' };
-    const sportStudents = students.filter(s => s.sportId === sport.id);
+    const sportStudents = students.filter(s => {
+      if (s.sportId !== sport.id) return false;
+      if (!isAffiliationAllowedByDisplayConfig(s.affiliationType, affiliationDisplayConfig, sport.id)) return false;
+      return !DataService.isSchoolWithdrawn(
+        { sportId: sport.id, ageCategory: s.category, gender: s.gender, affiliationType: s.affiliationType },
+        s.schoolId,
+        s.schoolName || ''
+      );
+    });
     const count = sportStudents.length;
     const hasConfiguredCategories = sport.ageCategories && sport.ageCategories.length > 0;
     const isProgrammed = isSportProgrammed(sport);
 
-    const schoolConf = schoolName ? getConfirmation(sport.id, schoolName) : undefined;
-    const confirmedBranches = getEffectiveConfirmedBranches(schoolConf, true);
+    const canonicalSchoolName = teacherSchoolObj?.name || schoolName;
+    const canonicalSchoolId = teacherSchoolObj?.id || userProfile?.schoolId || schoolName;
+    const schoolConf = canonicalSchoolName ? getConfirmation(sport.id, canonicalSchoolName) : undefined;
+    const confirmedBranches = getEffectiveConfirmedBranches(schoolConf, true).filter(b =>
+      isAffiliationAllowedByDisplayConfig(b.affiliationType, affiliationDisplayConfig, sport.id)
+    );
 
     const schoolBranchesMap = new Map<string, { category: string; gender: 'Male' | 'Female'; affiliationType: string }>();
     sportStudents.forEach(s => {
@@ -1253,7 +1324,7 @@ export const TeacherTeams: React.FC = () => {
     const schoolBranches = Array.from(schoolBranchesMap.values());
     const hasSchoolParticipation = schoolBranches.length > 0;
 
-    const sportTourns = tournaments.filter(t => t.sportId === sport.id);
+    const sportTourns = teacherAllowedTournaments.filter(t => t.sportId === sport.id);
     const mainTourn = sportTourns.length > 0 ? sportTourns[0] : null;
     
     const hasClubTournaments = sportTourns.some(t => isClubTournament(t));
@@ -1307,8 +1378,8 @@ export const TeacherTeams: React.FC = () => {
                   <ConfirmedParticipationBadge
                     sportId={sport.id}
                     sportName={sport.name}
-                    schoolId={userProfile?.schoolId}
-                    schoolName={schoolName}
+                    schoolId={canonicalSchoolId}
+                    schoolName={canonicalSchoolName}
                     variant="light"
                     label="✓ مؤكدة"
                     count={confirmedBranches.length}
@@ -1318,6 +1389,7 @@ export const TeacherTeams: React.FC = () => {
                       handleSelectSport(sport.id);
                     }}
                     onCancelSuccess={() => {
+                      refreshConfirmations();
                       loadInitialData();
                     }}
                   />
@@ -2284,37 +2356,40 @@ export const TeacherTeams: React.FC = () => {
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {(() => {
-                  const sportTourns = tournaments.filter(t => t.sportId === selectedSportId);
-                  const activeSchoolConf = (selectedSportId && schoolName) ? getConfirmation(selectedSportId, schoolName) : undefined;
-                  const confirmedBranches = getEffectiveConfirmedBranches(activeSchoolConf, true);
+                  const sportTourns = teacherAllowedTournaments.filter(t => t.sportId === selectedSportId);
+                  const canonicalSchoolKey = teacherSchoolObj?.name || schoolName;
+                  const activeSchoolConf = (selectedSportId && canonicalSchoolKey) ? getConfirmation(selectedSportId, canonicalSchoolKey) : undefined;
+                  const confirmedBranches = getEffectiveConfirmedBranches(activeSchoolConf, true).filter(b =>
+                    isAffiliationAllowedByDisplayConfig(b.affiliationType, affiliationDisplayConfig, selectedSportId || undefined)
+                  );
 
                   const hasNonClubTourn = sportTourns.length === 0 || sportTourns.some(t => !isClubTournament(t) || t.affiliationType === 'non_club' || t.affiliationType === 'open');
                   const hasClubTourn = sportTourns.some(t => isClubTournament(t) || t.affiliationType === 'club_affiliated' || t.affiliationType === 'open');
                   const splitByAffiliation = selectedSportId === 'cross_country' || (hasNonClubTourn && hasClubTourn) || confirmedBranches.length > 0;
 
-                  const allItems: { catId: string; gender: 'Male' | 'Female'; affiliationType?: 'non_club' | 'club_affiliated'; label: string }[] = [];
+                  const allItemsRaw: { catId: string; gender: 'Male' | 'Female'; affiliationType?: 'non_club' | 'club_affiliated'; label: string }[] = [];
                   
                   activeSportCategories.forEach(catId => {
                     if (splitByAffiliation) {
-                      allItems.push({
+                      allItemsRaw.push({
                         catId,
                         gender: 'Male',
                         affiliationType: 'non_club',
                         label: formatBranchLabelAr({ category: catId, gender: 'Male', affiliationType: 'non_club' }, selectedSportId)
                       });
-                      allItems.push({
+                      allItemsRaw.push({
                         catId,
                         gender: 'Female',
                         affiliationType: 'non_club',
                         label: formatBranchLabelAr({ category: catId, gender: 'Female', affiliationType: 'non_club' }, selectedSportId)
                       });
-                      allItems.push({
+                      allItemsRaw.push({
                         catId,
                         gender: 'Male',
                         affiliationType: 'club_affiliated',
                         label: formatBranchLabelAr({ category: catId, gender: 'Male', affiliationType: 'club_affiliated' }, selectedSportId)
                       });
-                      allItems.push({
+                      allItemsRaw.push({
                         catId,
                         gender: 'Female',
                         affiliationType: 'club_affiliated',
@@ -2322,13 +2397,13 @@ export const TeacherTeams: React.FC = () => {
                       });
                     } else {
                       const singleAff: 'non_club' | 'club_affiliated' = hasClubTourn && !hasNonClubTourn ? 'club_affiliated' : 'non_club';
-                      allItems.push({
+                      allItemsRaw.push({
                         catId,
                         gender: 'Male',
                         affiliationType: singleAff,
                         label: formatBranchLabelAr({ category: catId, gender: 'Male', affiliationType: singleAff }, selectedSportId)
                       });
-                      allItems.push({
+                      allItemsRaw.push({
                         catId,
                         gender: 'Female',
                         affiliationType: singleAff,
@@ -2336,6 +2411,10 @@ export const TeacherTeams: React.FC = () => {
                       });
                     }
                   });
+
+                  const allItems = allItemsRaw.filter(item =>
+                    isAffiliationAllowedByDisplayConfig(item.affiliationType, affiliationDisplayConfig, selectedSportId || undefined)
+                  );
 
                   const filteredItems = allItems.filter(item => {
                     const { catId, gender: g, affiliationType: aff } = item;

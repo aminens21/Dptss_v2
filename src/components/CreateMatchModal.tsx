@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { Match, School, Venue, Tournament, Referee, Student, User, BlockedSchedulePeriod } from '../types';
 import { X, CalendarDays, Clock, MapPin, Trophy, AlertTriangle, AlertCircle, Calendar, ArrowRight, ShieldCheck, Lock, Users, Tag, UserCheck, Plus, Building, Info, Search, CheckCircle2, MessageCircle } from 'lucide-react';
-import { SPORTS_MAP, AGE_CATEGORIES, GENDER_MAP, DataService, getAgeCategoriesForSeason, normalizeCategoryKey, normalizeDateToYmd, EDUCATIONAL_CYCLE_LABELS, getMatchEducationalCycles, findBlockedPeriodForDate, normalizeArabicSearch, schoolNamesMatch, normalizeTournamentAffiliation } from '../lib/dataService';
+import { SPORTS_MAP, AGE_CATEGORIES, GENDER_MAP, DataService, getAgeCategoriesForSeason, normalizeCategoryKey, normalizeDateToYmd, EDUCATIONAL_CYCLE_LABELS, getMatchEducationalCycles, findBlockedPeriodForDate, normalizeArabicSearch, schoolNamesMatch, normalizeTournamentAffiliation, normalizeSchoolCycleType } from '../lib/dataService';
 import { useAuth, isSuperAdminEmail } from '../contexts/AuthContext';
 import { resolveHostSchoolForMatch, findRefereeContact, generateRefereeMatchNotificationMessage, getWhatsAppUrl } from '../lib/whatsappService';
 import { MatchBroadcastDiffusionModal, MatchBroadcastDiffusionTarget } from './MatchBroadcastDiffusionModal';
@@ -99,6 +99,7 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
   const [venueMode, setVenueMode] = useState<'school' | 'custom'>('school');
   const [hostSchoolId, setHostSchoolId] = useState<string>(schools[0]?.id || '');
   const [hostSchoolSearch, setHostSchoolSearch] = useState<string>('');
+  const [hostSchoolCycleFilter, setHostSchoolCycleFilter] = useState<'ALL' | 'ابتدائي' | 'إعدادي' | 'تأهيلي'>('ALL');
   const [venueId, setVenueId] = useState(venues[0]?.id || 'ven-1');
   const [customVenueName, setCustomVenueName] = useState<string>('');
   const [referees, setReferees] = useState<string[]>(['']);
@@ -126,6 +127,7 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
       setShowAllSchools(false);
       setSavedMatchSummary(null);
       setHostSchoolSearch('');
+      setHostSchoolCycleFilter('ALL');
       DataService.getActiveSeason()
         .then(season => setCurrentSeason(season))
         .catch(err => console.warn("Error loading season in match modal:", err));
@@ -300,14 +302,30 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
 
   const filteredHostSchools = useMemo(() => {
     const q = normalizeArabicSearch(hostSchoolSearch);
-    if (!q) return schools;
-    return schools.filter(
-      s =>
+    return schools.filter(s => {
+      if (hostSchoolCycleFilter !== 'ALL') {
+        const sc = normalizeSchoolCycleType(s);
+        if (sc !== hostSchoolCycleFilter) {
+          if (sc === 'خصوصي') {
+            const combined = normalizeArabicSearch(`${s.type || ''} ${s.name || ''}`);
+            const matchesHint =
+              (hostSchoolCycleFilter === 'ابتدائي' && (combined.includes('ابتدائ') || combined.includes('مدرسه'))) ||
+              (hostSchoolCycleFilter === 'إعدادي' && combined.includes('اعداد')) ||
+              (hostSchoolCycleFilter === 'تأهيلي' && combined.includes('تاهيل'));
+            if (!matchesHint) return false;
+          } else {
+            return false;
+          }
+        }
+      }
+      if (!q) return true;
+      return (
         normalizeArabicSearch(s.name).includes(q) ||
         normalizeArabicSearch(s.commune || '').includes(q) ||
         normalizeArabicSearch(s.principalName || '').includes(q)
-    );
-  }, [schools, hostSchoolSearch]);
+      );
+    });
+  }, [schools, hostSchoolSearch, hostSchoolCycleFilter]);
 
   const parseTimeToMinutes = (timeStr: string): number => {
     if (!timeStr) return 0;
@@ -1113,6 +1131,25 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
                       🏫 بمؤسسة الطرف 2 ({getSchoolName(team2Id)})
                     </button>
                   )}
+                </div>
+
+                {/* Educational Cycle Filter for Venue / Host School */}
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="text-[10px] font-bold text-slate-500">تصفية بالسلك:</span>
+                  {(['ALL', 'ابتدائي', 'إعدادي', 'تأهيلي'] as const).map(cyc => (
+                    <button
+                      key={`host-cyc-${cyc}`}
+                      type="button"
+                      onClick={() => setHostSchoolCycleFilter(cyc)}
+                      className={`px-2 py-0.5 rounded-md text-[10px] font-bold border transition-colors cursor-pointer ${
+                        hostSchoolCycleFilter === cyc
+                          ? 'bg-emerald-600 text-white border-emerald-600 shadow-2xs'
+                          : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
+                      }`}
+                    >
+                      {cyc === 'ALL' ? 'الكل' : cyc}
+                    </button>
+                  ))}
                 </div>
 
                 {/* Search + School Dropdown */}
