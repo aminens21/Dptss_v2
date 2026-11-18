@@ -53,6 +53,7 @@ import {
   updateProfile,
   signOut
 } from 'firebase/auth';
+import { CommunicationWidget } from '../components/CommunicationWidget';
 import { doc, setDoc, getDoc, serverTimestamp, query, collection, where, getDocs } from 'firebase/firestore';
 import { auth, db } from '../firebase/config';
 import { User, Role, Directorate, School, Tournament, Match, Student, CrossCountryCategoryResult, AthleticsCategoryResult, AthleticsWinner, Sport, Referee, AffiliationDisplayConfig } from '../types';
@@ -1667,33 +1668,51 @@ export const Login: React.FC = () => {
                     const grpLabel = extractMatchGroupLabel(m);
                     const matchNum = m.drawMatchNumber ?? (mIdx + 1);
                     const refInfo = resolveMatchRefereesInfo(m, referees, usersDirectory);
+                    const sportInfo = SPORTS_MAP[m.sportId];
+                    const genderLabel = m.gender === 'Female' ? 'إناث' : m.gender === 'Male' ? 'ذكور' : '';
+                    const categoryGenderText = [m.ageCategory || m.category, genderLabel].filter(Boolean).join(' • ') || 'عامة';
+
                     return (
-                      <div key={m.id} className="p-3 bg-slate-50 dark:bg-slate-800 rounded-2xl space-y-1.5 border border-slate-200/80 dark:border-slate-700/60 shadow-xs hover:border-emerald-400 transition-all">
-                        <div className="flex items-center justify-between gap-1 text-[10px] font-black">
+                      <div key={m.id} className="p-2.5 bg-slate-50 dark:bg-slate-800 rounded-2xl space-y-1.5 border border-slate-200/80 dark:border-slate-700/60 shadow-xs hover:border-emerald-400 transition-all">
+                        <div className="flex items-center justify-between gap-1 text-[9px] font-black border-b border-slate-200/60 dark:border-slate-700/60 pb-1">
+                          <span className="flex items-center gap-1 text-emerald-700 dark:text-emerald-400 truncate">
+                            <span>{sportInfo?.icon || '⚽'}</span>
+                            <span className="truncate">{m.sportName || sportInfo?.name || 'رياضة'}</span>
+                          </span>
+                          <span className={`px-2 py-0.5 rounded-full text-[9px] font-black shrink-0 ${
+                            m.gender === 'Female'
+                              ? 'bg-pink-100 text-pink-800 border border-pink-200 dark:bg-pink-950/80 dark:text-pink-300 dark:border-pink-800'
+                              : m.gender === 'Male'
+                              ? 'bg-blue-100 text-blue-800 border border-blue-200 dark:bg-blue-950/80 dark:text-blue-300 dark:border-blue-800'
+                              : 'bg-slate-200/80 dark:bg-slate-700 text-slate-700 dark:text-slate-300'
+                          }`}>
+                            {categoryGenderText}
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between gap-1 text-[9.5px] font-black">
                           <div className="flex items-center gap-1 flex-wrap">
                             <span className="px-1.5 py-0.5 bg-blue-100 dark:bg-blue-950 text-blue-800 dark:text-blue-200 rounded-md">
                               المباراة رقم {matchNum}
                             </span>
                             <span className="px-1.5 py-0.5 bg-slate-200/80 dark:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-md font-bold">
-                              الدور: {m.stage?.trim() || 'دور المجموعات'}
+                              {m.stage?.trim() || 'دور المجموعات'}
                             </span>
                             {grpLabel && (
-                              <span className="px-1.5 py-0.5 bg-purple-100 dark:bg-purple-950 text-purple-800 dark:text-purple-200 rounded-md truncate max-w-[140px]">
+                              <span className="px-1.5 py-0.5 bg-purple-100 dark:bg-purple-950 text-purple-800 dark:text-purple-200 rounded-md truncate max-w-[120px]">
                                 {grpLabel}
                               </span>
                             )}
                           </div>
-                          <span className="font-mono text-amber-600 dark:text-amber-400 shrink-0 font-black">{m.startTime || '10:00'}</span>
+                          <span className="font-mono text-amber-600 dark:text-amber-400 shrink-0 font-black text-[10px]">{m.startTime || '10:00'}</span>
                         </div>
-                        <div className="flex items-center justify-between text-xs font-black text-slate-900 dark:text-slate-100">
-                          <span className="flex items-center gap-1.5 text-emerald-700 dark:text-emerald-400 truncate">
-                            <span>{SPORTS_MAP[m.sportId]?.icon || '⚽'}</span>
+                        <div className="flex items-center justify-between text-[11px] font-black text-slate-900 dark:text-slate-100">
+                          <span className="flex items-center gap-1 text-slate-800 dark:text-slate-200 truncate">
                             <span className="truncate">{t1Display} VS {t2Display}</span>
                           </span>
                         </div>
 
                         {refInfo.hasReferees && (
-                          <div className="flex items-start gap-1 text-[10px] font-bold text-slate-600 dark:text-slate-300 pt-1 border-t border-slate-200/70 dark:border-slate-700/60">
+                          <div className="flex items-start gap-1 text-[9px] font-bold text-slate-600 dark:text-slate-300 pt-1 border-t border-slate-200/70 dark:border-slate-700/60">
                             <ShieldCheck className="w-3 h-3 text-indigo-500 shrink-0 mt-0.5" />
                             <span className="leading-snug">
                               <span className="font-black text-indigo-700 dark:text-indigo-300">الحكام: </span>
@@ -1702,9 +1721,9 @@ export const Login: React.FC = () => {
                           </div>
                         )}
 
-                        <div className="flex items-center justify-between text-[10px] text-slate-500 dark:text-slate-400 font-bold">
+                        <div className="flex items-center justify-between text-[9px] text-slate-500 dark:text-slate-400 font-bold">
                           <span className="flex items-center gap-1 truncate"><MapPin className="w-2.5 h-2.5" /> {m.venueName || 'الملعب الرياضي'}</span>
-                          <span className="px-1.5 py-0.5 bg-white dark:bg-slate-700 rounded-md font-black">{m.ageCategory || m.category || 'عامة'}</span>
+                          <span className="text-[9px] font-mono text-slate-400">{m.date}</span>
                         </div>
                       </div>
                     );
@@ -1977,33 +1996,51 @@ export const Login: React.FC = () => {
                 const grpLabel = extractMatchGroupLabel(m);
                 const matchNum = m.drawMatchNumber ?? (mIdx + 1);
                 const refInfo = resolveMatchRefereesInfo(m, referees, usersDirectory);
+                const sportInfo = SPORTS_MAP[m.sportId];
+                const genderLabel = m.gender === 'Female' ? 'إناث' : m.gender === 'Male' ? 'ذكور' : '';
+                const categoryGenderText = [m.ageCategory || m.category, genderLabel].filter(Boolean).join(' • ') || 'عامة';
+
                 return (
                   <div key={m.id} className="p-2.5 bg-slate-50 dark:bg-slate-800 rounded-2xl space-y-1.5 border border-slate-200/80 dark:border-slate-700/60 hover:border-emerald-300 transition-all">
-                    <div className="flex items-center justify-between gap-1 text-[10px] font-black">
+                    <div className="flex items-center justify-between gap-1 text-[9px] font-black border-b border-slate-200/60 dark:border-slate-700/60 pb-1">
+                      <span className="flex items-center gap-1 text-emerald-700 dark:text-emerald-400 truncate">
+                        <span>{sportInfo?.icon || '⚽'}</span>
+                        <span className="truncate">{m.sportName || sportInfo?.name || 'رياضة'}</span>
+                      </span>
+                      <span className={`px-2 py-0.5 rounded-full text-[9px] font-black shrink-0 ${
+                        m.gender === 'Female'
+                          ? 'bg-pink-100 text-pink-800 border border-pink-200 dark:bg-pink-950/80 dark:text-pink-300 dark:border-pink-800'
+                          : m.gender === 'Male'
+                          ? 'bg-blue-100 text-blue-800 border border-blue-200 dark:bg-blue-950/80 dark:text-blue-300 dark:border-blue-800'
+                          : 'bg-slate-200/80 dark:bg-slate-700 text-slate-700 dark:text-slate-300'
+                      }`}>
+                        {categoryGenderText}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between gap-1 text-[9.5px] font-black">
                       <div className="flex items-center gap-1 flex-wrap">
                         <span className="px-1.5 py-0.5 bg-blue-100 dark:bg-blue-950 text-blue-800 dark:text-blue-200 rounded-md">
                           المباراة رقم {matchNum}
                         </span>
                         <span className="px-1.5 py-0.5 bg-slate-200/80 dark:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-md font-bold">
-                          الدور: {m.stage?.trim() || 'دور المجموعات'}
+                          {m.stage?.trim() || 'دور المجموعات'}
                         </span>
                         {grpLabel && (
-                          <span className="px-1.5 py-0.5 bg-purple-100 dark:bg-purple-950 text-purple-800 dark:text-purple-200 rounded-md truncate max-w-[140px]">
+                          <span className="px-1.5 py-0.5 bg-purple-100 dark:bg-purple-950 text-purple-800 dark:text-purple-200 rounded-md truncate max-w-[120px]">
                             {grpLabel}
                           </span>
                         )}
                       </div>
-                      <span className="font-mono text-amber-600 dark:text-amber-400 shrink-0 font-black">{m.startTime || '10:00'}</span>
+                      <span className="font-mono text-amber-600 dark:text-amber-400 shrink-0 font-black text-[10px]">{m.startTime || '10:00'}</span>
                     </div>
                     <div className="flex items-center justify-between text-[11px] font-black text-slate-900 dark:text-slate-100">
-                      <span className="flex items-center gap-1.5 text-emerald-700 dark:text-emerald-400 truncate">
-                        <span>{SPORTS_MAP[m.sportId]?.icon || '⚽'}</span>
+                      <span className="flex items-center gap-1 text-slate-800 dark:text-slate-200 truncate">
                         <span className="truncate">{t1Display} VS {t2Display}</span>
                       </span>
                     </div>
 
                     {refInfo.hasReferees && (
-                      <div className="flex items-start gap-1 text-[10px] font-bold text-slate-600 dark:text-slate-300 pt-1 border-t border-slate-200/70 dark:border-slate-700/60">
+                      <div className="flex items-start gap-1 text-[9px] font-bold text-slate-600 dark:text-slate-300 pt-1 border-t border-slate-200/70 dark:border-slate-700/60">
                         <ShieldCheck className="w-3 h-3 text-indigo-500 shrink-0 mt-0.5" />
                         <span className="leading-snug">
                           <span className="font-black text-indigo-700 dark:text-indigo-300">الحكام: </span>
@@ -2012,9 +2049,9 @@ export const Login: React.FC = () => {
                       </div>
                     )}
 
-                    <div className="flex items-center justify-between text-[10px] text-slate-500 dark:text-slate-400">
+                    <div className="flex items-center justify-between text-[9px] text-slate-500 dark:text-slate-400">
                       <span className="flex items-center gap-1"><MapPin className="w-2.5 h-2.5" /> {m.venueName || 'الملعب'}</span>
-                      <span className="px-1.5 py-0.5 bg-white dark:bg-slate-700 rounded font-bold">{m.ageCategory || m.category || 'عامة'}</span>
+                      <span className="text-[9px] font-mono text-slate-400">{m.date}</span>
                     </div>
                   </div>
                 );
@@ -2223,6 +2260,9 @@ export const Login: React.FC = () => {
                   <Moon className="w-4 h-4 sm:w-4.5 sm:h-4.5 text-indigo-600 shrink-0" />
                 )}
               </button>
+
+              {/* Communication Widget Message Button */}
+              <CommunicationWidget />
 
               {/* Mobile Menu Dropdown Toggle */}
               <div className="relative lg:hidden">
@@ -3326,7 +3366,13 @@ export const Login: React.FC = () => {
                               <span>{sportInfo?.icon || '⚽'}</span>
                               <span>{m.sportName || sportInfo?.name || 'مباراة رياضية'}</span>
                             </span>
-                            <span className="px-2.5 py-0.5 bg-slate-100 dark:bg-slate-800 rounded-full text-[10px] font-bold text-slate-700 dark:text-slate-300 shrink-0">
+                            <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black shrink-0 ${
+                              m.gender === 'Female'
+                                ? 'bg-pink-100 text-pink-800 border border-pink-200 dark:bg-pink-950/80 dark:text-pink-300 dark:border-pink-800'
+                                : m.gender === 'Male'
+                                ? 'bg-blue-100 text-blue-800 border border-blue-200 dark:bg-blue-950/80 dark:text-blue-300 dark:border-blue-800'
+                                : 'bg-slate-100 text-slate-700 border border-slate-200 dark:bg-slate-800 dark:text-slate-300'
+                            }`}>
                               {categoryLabel}
                             </span>
                           </div>

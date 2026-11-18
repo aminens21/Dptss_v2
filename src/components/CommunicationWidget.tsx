@@ -858,13 +858,12 @@ export const CommunicationWidget: React.FC = () => {
           onClick={() => setIsOpen(true)}
           aria-label="تواصل"
           title="تواصل مع المسير المركزي، رئيس اللجنة التقنية، الأساتذة والحكام"
-          className="fixed bottom-4 left-4 z-40 pointer-events-auto min-h-[44px] px-3.5 py-2 rounded-2xl bg-yellow-400 hover:bg-yellow-500 active:scale-95 text-slate-950 border border-yellow-500/80 shadow-lg shadow-yellow-900/20 flex items-center gap-2 text-xs font-black transition-all cursor-pointer"
+          className="p-2 sm:px-2.5 sm:py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700 rounded-lg sm:rounded-full transition-all cursor-pointer flex items-center justify-center relative shrink-0 shadow-2xs"
           dir="rtl"
         >
-          <MessageSquare className="w-4 h-4 text-slate-900 shrink-0" />
-          <span>تواصل</span>
+          <MessageSquare className="w-4 h-4 text-slate-800 dark:text-slate-200 shrink-0" />
           {unreadInboxCount > 0 && (
-            <span className="px-1.5 py-0.5 rounded-lg bg-rose-600 text-white text-[10px] font-black tabular-nums leading-none">
+            <span className="absolute -top-1 -right-1 bg-rose-600 text-white text-[9px] font-black w-4 h-4 rounded-full flex items-center justify-center animate-pulse border border-white dark:border-slate-900">
               {unreadInboxCount}
             </span>
           )}

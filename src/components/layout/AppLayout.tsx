@@ -1169,6 +1169,9 @@ export const AppLayout: React.FC = () => {
               )}
             </button>
 
+            {/* Communication Widget Message Button */}
+            <CommunicationWidget />
+
             {/* Notifications Center Bell with Dropdown */}
             <div className="relative" ref={notificationsRef}>
               <button
@@ -1955,7 +1958,6 @@ export const AppLayout: React.FC = () => {
       )}
 
       <TeacherProfileModal />
-      <CommunicationWidget />
     </div>
   );
 };
