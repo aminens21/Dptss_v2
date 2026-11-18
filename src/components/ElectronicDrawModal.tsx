@@ -217,8 +217,8 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
   const [groupAssignments, setGroupAssignments] = useState<Record<string, number | 'AUTO'>>({});
   const [customTeamNames, setCustomTeamNames] = useState<string[]>([]);
   const [newTeamInput, setNewTeamInput] = useState<string>('');
-  const [drawSystem, setDrawSystem] = useState<DrawSystemType>('groups_home_away');
-  const [groupsCount, setGroupsCount] = useState<number>(2);
+  const [drawSystem, setDrawSystem] = useState<DrawSystemType>('knockout_groups');
+  const [groupsCount, setGroupsCount] = useState<number>(1);
   const [schoolSearchQuery, setSchoolSearchQuery] = useState<string>('');
 
   // Step 3: Draw Result & Scheduled Matches with Referees
@@ -894,7 +894,9 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
 
     participatingSchoolIds.forEach(sId => {
       const school = schools.find(s => s.id === sId);
-      const schoolName = school?.name || sId;
+      if (!school) return; // Skip if school was deleted from schools list
+
+      const schoolName = school.name;
 
       // Exclude any school that has withdrawn from this tournament
       if (selectedTournament && DataService.isSchoolWithdrawn({
@@ -907,19 +909,11 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
         return;
       }
 
-      if (school) {
-        list.push({
-          id: school.id,
-          name: school.name,
-          schoolName: school.name
-        });
-      } else {
-        list.push({
-          id: sId,
-          name: sId,
-          schoolName: sId
-        });
-      }
+      list.push({
+        id: school.id,
+        name: school.name,
+        schoolName: school.name
+      });
     });
 
     customTeamNames.forEach((cName, idx) => {
