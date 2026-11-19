@@ -2,7 +2,7 @@ import React, { useEffect, useState, useMemo } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import clsx from 'clsx';
 import { useAuth } from '../contexts/AuthContext';
-import { DataService, SPORTS_MAP, GENDER_MAP, deduplicateById, AGE_CATEGORIES, isClubTournament, getAgeCategoriesForSeason, normalizeCategoryKey, getCustomCategoryName, getCustomCategoryDetails, canUserApproveSportResult, normalizeCanonicalSportId, areSportIdsEquivalent, normalizeArabicMatchText, isAffiliationAllowedByDisplayConfig } from '../lib/dataService';
+import { DataService, SPORTS_MAP, GENDER_MAP, deduplicateById, AGE_CATEGORIES, isClubTournament, getAgeCategoriesForSeason, normalizeCategoryKey, getCustomCategoryName, getCustomCategoryDetails, canUserApproveSportResult, normalizeCanonicalSportId, areSportIdsEquivalent, normalizeArabicMatchText, isAffiliationAllowedByDisplayConfig, normalizeTournamentAffiliation } from '../lib/dataService';
 import { formatTeamDisplayName, hasValidMatchTeams } from '../lib/drawTournamentUtils';
 import { Match, School, Venue, Tournament, Sport, Student, User, Referee, AffiliationDisplayConfig } from '../types';
 import { CountdownTimer } from '../components/CountdownTimer';
@@ -55,6 +55,7 @@ import { AthleticsService } from '../lib/athleticsService';
 import { AthleticsEventResult } from '../lib/athleticsConfig';
 import { cn, formatMatchDate } from '../lib/utils';
 import { resolveHostSchoolForMatch } from '../lib/whatsappService';
+import { resolveMatchRefereesInfo, isOpaqueEntityId } from '../lib/programExportService';
 import { MatchBroadcastDiffusionModal, MatchBroadcastDiffusionTarget } from '../components/MatchBroadcastDiffusionModal';
 import toast from 'react-hot-toast';
 
@@ -66,6 +67,7 @@ export const Matches: React.FC = () => {
   const [tournaments, setTournaments] = useState<Tournament[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
   const [teachers, setTeachers] = useState<User[]>([]);
+  const [allUsers, setAllUsers] = useState<User[]>([]);
   const [referees, setReferees] = useState<Referee[]>([]);
   const [sportsConfig, setSportsConfig] = useState<Sport[]>([]);
   const [crossCountryResults, setCrossCountryResults] = useState<Record<string, CrossCountryCategoryResult>>(INITIAL_CROSS_COUNTRY_RESULTS);
@@ -82,6 +84,24 @@ export const Matches: React.FC = () => {
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
   const [affiliationFilter, setAffiliationFilter] = useState<string>('ALL'); // Default to 'ALL' to show all matches
   const [viewMode, setViewMode] = useState<'cards' | 'table'>('cards');
+
+  const isNonClubAllowedAnywhere = useMemo(() => {
+    if (sportsConfig.length === 0) return affiliationDisplayConfig.globalMode !== 'club_affiliated';
+    return sportsConfig.some(s => isAffiliationAllowedByDisplayConfig('non_club', affiliationDisplayConfig, s.id));
+  }, [sportsConfig, affiliationDisplayConfig]);
+
+  const isClubAllowedAnywhere = useMemo(() => {
+    if (sportsConfig.length === 0) return affiliationDisplayConfig.globalMode !== 'non_club';
+    return sportsConfig.some(s => isAffiliationAllowedByDisplayConfig('club_affiliated', affiliationDisplayConfig, s.id));
+  }, [sportsConfig, affiliationDisplayConfig]);
+
+  useEffect(() => {
+    if (affiliationFilter === 'non_club' && !isNonClubAllowedAnywhere) {
+      setAffiliationFilter('ALL');
+    } else if (affiliationFilter === 'club_affiliated' && !isClubAllowedAnywhere) {
+      setAffiliationFilter('ALL');
+    }
+  }, [affiliationFilter, isNonClubAllowedAnywhere, isClubAllowedAnywhere]);
 
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
@@ -204,7 +224,7 @@ export const Matches: React.FC = () => {
     if (matches.length === 0) setLoading(true);
     
     try {
-      const [m, s, v, t, curSeason, ccRes, stu, config, tch, refs, affCfg] = await Promise.all([
+      const [m, s, v, t, curSeason, ccRes, stu, config, tch, allUsr, refs, affCfg] = await Promise.all([
         DataService.getMatches(),
         DataService.getSchools(),
         DataService.getVenues(),
@@ -214,6 +234,7 @@ export const Matches: React.FC = () => {
         DataService.getStudents(),
         DataService.getSportsConfig(),
         DataService.getTeachers(),
+        DataService.getUsers().catch(() => [] as User[]),
         DataService.getReferees().catch(() => [] as Referee[]),
         DataService.getAffiliationDisplayConfig().catch(() => DataService.getAffiliationDisplayConfigSync())
       ]);
@@ -233,6 +254,7 @@ export const Matches: React.FC = () => {
       if (stu) setStudents(stu);
       if (config) setSportsConfig(config);
       if (tch) setTeachers(tch);
+      if (allUsr) setAllUsers(allUsr);
       if (refs) setReferees(refs);
       if (affCfg) setAffiliationDisplayConfig(affCfg);
     } catch (error) {
@@ -339,6 +361,9 @@ export const Matches: React.FC = () => {
     window.addEventListener('athleticsResultsUpdated', handleAthleticsUpdate);
     window.addEventListener('tournamentDataChanged', handleDataSync);
     window.addEventListener('matchesDataChanged', handleDataSync);
+    window.addEventListener('matchesUpdated', handleDataSync);
+    window.addEventListener('refereesUpdated', handleDataSync);
+    window.addEventListener('userDataChanged', handleDataSync);
     window.addEventListener('sportsConfigChanged', handleDataSync);
     window.addEventListener('resultsChanged', handleDataSync);
     window.addEventListener('directorateChanged', handleDirChange);
@@ -349,6 +374,9 @@ export const Matches: React.FC = () => {
       window.removeEventListener('seasonChanged', handleDirChange);
       window.removeEventListener('tournamentDataChanged', handleDataSync);
       window.removeEventListener('matchesDataChanged', handleDataSync);
+      window.removeEventListener('matchesUpdated', handleDataSync);
+      window.removeEventListener('refereesUpdated', handleDataSync);
+      window.removeEventListener('userDataChanged', handleDataSync);
       window.removeEventListener('sportsConfigChanged', handleDataSync);
       window.removeEventListener('resultsChanged', handleDataSync);
       window.removeEventListener('crossCountryResultsUpdated', handleCCUpdate);
@@ -417,13 +445,12 @@ export const Matches: React.FC = () => {
   const openMatchDiffusionModal = (m: Match, mode: 'schedule' | 'result') => {
     const t1Name = formatTeamDisplayName(m.team1Id, m.team1Name, schools);
     const t2Name = formatTeamDisplayName(m.team2Id, m.team2Name, schools);
-    const vName = venues.find(v => v.id === m.venueId)?.name || m.venueName || m.venueId || 'ملعب غير محدد';
     const hostSchoolObj = resolveHostSchoolForMatch(m, schools);
-    const rawRefs = [
-      ...(m.referees || []),
-      ...(m.referee1Id ? [m.referee1Id] : []),
-      ...(m.referee2Id ? [m.referee2Id] : [])
-    ].map(r => (r || '').trim()).filter(Boolean);
+    const vObj = venues.find(v => v.id === m.venueId);
+    const rawVenueFallback = m.venueId && !isOpaqueEntityId(m.venueId) ? m.venueId : '';
+    const vName = m.venueName?.trim() || hostSchoolObj?.name || vObj?.name || rawVenueFallback || 'ملعب غير محدد';
+    const userDirectory = allUsers.length > 0 ? allUsers : teachers;
+    const resolvedRefs = resolveMatchRefereesInfo(m, referees, userDirectory);
 
     if (referees.length === 0) {
       DataService.getReferees().then(setReferees).catch(() => {});
@@ -446,7 +473,9 @@ export const Matches: React.FC = () => {
       venueName: vName,
       dateStr: formatMatchDate(m.date),
       timeStr: m.startTime || '10:00',
-      referees: Array.from(new Set(rawRefs)),
+      referees: resolvedRefs.allRefs,
+      tableReferees: resolvedRefs.tableRefs,
+      fieldReferees: resolvedRefs.fieldRefs,
       notes: m.notes,
       score1: m.score1 ?? m.team1Score ?? 0,
       score2: m.score2 ?? m.team2Score ?? 0,
@@ -630,7 +659,7 @@ export const Matches: React.FC = () => {
           const tDir = t.directorateId || 'taourirt';
           if (tDir !== activeDirId) return false;
         }
-        const tAff = t.affiliationType || (isClubTournament(t) ? 'club_affiliated' : 'non_club');
+        const tAff = normalizeTournamentAffiliation(t.affiliationType, t.name);
         if (!isAffiliationAllowedByDisplayConfig(tAff, affiliationDisplayConfig, sport.id)) return false;
         return true;
       });
@@ -638,10 +667,8 @@ export const Matches: React.FC = () => {
       // Filter tournaments by affiliation if not ALL
       if (affiliationFilter !== 'ALL') {
         sportTournaments = sportTournaments.filter(t => {
-          if (affiliationFilter === 'open') return t.affiliationType === 'open' || (t.name && (t.name.includes('مفتوحة') || t.name.includes('المفتوحة')));
-          if (affiliationFilter === 'non_club') return t.affiliationType === 'non_club' || (!t.affiliationType && !isClubTournament(t));
-          if (affiliationFilter === 'club_affiliated') return t.affiliationType === 'club_affiliated' || isClubTournament(t);
-          return true;
+          const tAff = normalizeTournamentAffiliation(t.affiliationType, t.name);
+          return tAff === affiliationFilter;
         });
       }
 
@@ -657,53 +684,39 @@ export const Matches: React.FC = () => {
           if (matchDir !== activeDirId) return false;
         }
 
+        // Resolve match affiliation safely
+        let matchAffiliation: 'non_club' | 'club_affiliated' | 'open' = 'non_club';
+        if ((m as any).affiliationType === 'club_affiliated' || (m as any).affiliationType === 'open' || (m as any).affiliationType === 'non_club') {
+          matchAffiliation = (m as any).affiliationType;
+        } else if (m.tournamentId) {
+          const matchedTourn = tournaments.find(t => t.id === m.tournamentId);
+          if (matchedTourn) {
+            matchAffiliation = normalizeTournamentAffiliation(matchedTourn.affiliationType, matchedTourn.name);
+          }
+        }
+        if (!isAffiliationAllowedByDisplayConfig(matchAffiliation, affiliationDisplayConfig, sport.id)) {
+          return false;
+        }
+
         // Must belong to one of active sport tournaments (strictly matching affiliation when tournamentId is absent)
         if (m.tournamentId) {
           if (!sportTournaments.some(t => t.id === m.tournamentId)) return false;
         } else {
           if (m.sportId !== sport.id) return false;
-          const mAff = (m as any).affiliationType === 'club_affiliated'
-            ? 'club_affiliated'
-            : (m as any).affiliationType === 'open'
-            ? 'open'
-            : 'non_club';
-          if (!isAffiliationAllowedByDisplayConfig(mAff, affiliationDisplayConfig, sport.id)) return false;
           if (!sportTournaments.some(t => {
-            const tAff = t.affiliationType === 'open' ? 'open' : isClubTournament(t) ? 'club_affiliated' : 'non_club';
+            const tAff = normalizeTournamentAffiliation(t.affiliationType, t.name);
             const catMatch = normalizeCategoryKey(t.ageCategory) === normalizeCategoryKey(m.ageCategory);
             const genderMatch = t.gender === 'Mixed' || m.gender === 'Mixed' || t.gender === m.gender;
-            const affMatch = tAff === 'open' || mAff === tAff;
+            const affMatch = tAff === 'open' || matchAffiliation === tAff;
             return catMatch && genderMatch && affMatch;
           })) {
             return false;
           }
         }
 
-        let matchAffiliation = 'non_club';
-        if (m.tournamentId) {
-          const matchedTourn = tournaments.find(t => t.id === m.tournamentId);
-          if (matchedTourn) {
-            if (matchedTourn.affiliationType) {
-              matchAffiliation = matchedTourn.affiliationType;
-            } else if (isClubTournament(matchedTourn)) {
-              matchAffiliation = 'club_affiliated';
-            } else if (matchedTourn.name && (matchedTourn.name.includes('مفتوحة') || matchedTourn.name.includes('المفتوحة'))) {
-              matchAffiliation = 'open';
-            }
-          }
-        }
-        if ((m as any).affiliationType) {
-          matchAffiliation = (m as any).affiliationType;
-        }
-        if (!isAffiliationAllowedByDisplayConfig(matchAffiliation, affiliationDisplayConfig, sport.id)) {
-          return false;
-        }
-
         // Affiliation check if filtered
-        if (affiliationFilter !== 'ALL') {
-          if (affiliationFilter === 'open' && matchAffiliation !== 'open') return false;
-          if (affiliationFilter === 'non_club' && matchAffiliation === 'club_affiliated') return false;
-          if (affiliationFilter === 'club_affiliated' && matchAffiliation !== 'club_affiliated') return false;
+        if (affiliationFilter !== 'ALL' && matchAffiliation !== affiliationFilter) {
+          return false;
         }
 
         return true;
@@ -770,24 +783,27 @@ export const Matches: React.FC = () => {
         }
       }
 
-      const nonClubCount = sportMatches.filter(m => {
+      const allowNonClubCfg = isAffiliationAllowedByDisplayConfig('non_club', affiliationDisplayConfig, sport.id);
+      const allowClubCfg = isAffiliationAllowedByDisplayConfig('club_affiliated', affiliationDisplayConfig, sport.id);
+
+      const nonClubCount = allowNonClubCfg ? sportMatches.filter(m => {
         if ((m as any).affiliationType === 'club_affiliated') return false;
         if ((m as any).affiliationType === 'non_club' || (m as any).affiliationType === 'open') return true;
         if (m.tournamentId) {
           const pt = tournaments.find(t => t.id === m.tournamentId);
-          if (pt) return !isClubTournament(pt);
+          if (pt) return normalizeTournamentAffiliation(pt.affiliationType, pt.name) !== 'club_affiliated';
         }
         return true;
-      }).length;
+      }).length : 0;
 
-      const clubCount = sportMatches.filter(m => {
+      const clubCount = allowClubCfg ? sportMatches.filter(m => {
         if ((m as any).affiliationType === 'club_affiliated') return true;
         if (m.tournamentId) {
           const pt = tournaments.find(t => t.id === m.tournamentId);
-          if (pt) return isClubTournament(pt);
+          if (pt) return normalizeTournamentAffiliation(pt.affiliationType, pt.name) === 'club_affiliated';
         }
         return false;
-      }).length;
+      }).length : 0;
 
       // Technical head
       const techHead = teachers.find(tch =>
@@ -810,11 +826,11 @@ export const Matches: React.FC = () => {
 
       const registeredCount = students.filter(s => s.sportId === sport.id).length;
 
-      const hasClubTournaments = sportTournaments.some(t => isClubTournament(t));
-      const hasSchoolOnlyTournaments = sportTournaments.some(t => !isClubTournament(t));
+      const hasClubTournaments = allowClubCfg && sportTournaments.some(t => normalizeTournamentAffiliation(t.affiliationType, t.name) === 'club_affiliated');
+      const hasSchoolOnlyTournaments = allowNonClubCfg && sportTournaments.some(t => normalizeTournamentAffiliation(t.affiliationType, t.name) !== 'club_affiliated');
       const hasBothClasses = hasClubTournaments && hasSchoolOnlyTournaments;
       const mainTourn = sportTournaments.length > 0 ? sportTournaments[0] : null;
-      const isClub = isClubTournament(mainTourn) && !hasBothClasses;
+      const isClub = Boolean(allowClubCfg && mainTourn && normalizeTournamentAffiliation(mainTourn.affiliationType, mainTourn.name) === 'club_affiliated' && !hasBothClasses);
 
       return {
         sport,
@@ -1174,8 +1190,12 @@ export const Matches: React.FC = () => {
                 className="w-full sm:w-auto min-w-0 px-3 py-2 text-xs font-bold bg-slate-50 border border-slate-200 rounded-xl text-slate-700 focus:outline-none focus:ring-1 focus:ring-blue-400"
               >
                 <option value="ALL">جميع أنواع البطولات</option>
-                <option value="non_club">⚪ بطولات غير المنتمين للأندية</option>
-                <option value="club_affiliated">🟡 بطولات المنتمين للأندية</option>
+                {isNonClubAllowedAnywhere && (
+                  <option value="non_club">⚪ بطولات غير المنتمين للأندية</option>
+                )}
+                {isClubAllowedAnywhere && (
+                  <option value="club_affiliated">🟡 بطولات المنتمين للأندية</option>
+                )}
                 <option value="open">🟢 البطولات المفتوحة</option>
               </select>
 
@@ -1751,17 +1771,31 @@ export const Matches: React.FC = () => {
                           </div>
                         </div>
 
-                        {/* Branch summary */}
-                        <div className="grid grid-cols-2 gap-1 text-[10px] font-bold pt-1 border-t border-slate-200/60">
-                          <div className="bg-slate-100/70 text-slate-700 p-1 rounded-lg border border-slate-200 flex items-center justify-between px-1.5">
-                            <span>⚪ غير منتمين للأندية:</span>
-                            <span className="font-black text-blue-700">{item.nonClubCount}</span>
-                          </div>
-                          <div className="bg-amber-100/70 text-amber-900 p-1 rounded-lg border border-amber-200 flex items-center justify-between px-1.5">
-                            <span>🟡 المنتمين للأندية:</span>
-                            <span className="font-black text-amber-950">{item.clubCount}</span>
-                          </div>
-                        </div>
+                        {/* Branch summary (respecting affiliationDisplayConfig) */}
+                        {(() => {
+                          const allowNonClub = isAffiliationAllowedByDisplayConfig('non_club', affiliationDisplayConfig, sport.id);
+                          const allowClub = isAffiliationAllowedByDisplayConfig('club_affiliated', affiliationDisplayConfig, sport.id);
+                          if (!allowNonClub && !allowClub) return null;
+                          return (
+                            <div className={cn(
+                              "grid gap-1 text-[10px] font-bold pt-1 border-t border-slate-200/60",
+                              allowNonClub && allowClub ? "grid-cols-2" : "grid-cols-1"
+                            )}>
+                              {allowNonClub && (
+                                <div className="bg-slate-100/70 text-slate-700 p-1 rounded-lg border border-slate-200 flex items-center justify-between px-1.5">
+                                  <span>⚪ غير منتمين للأندية:</span>
+                                  <span className="font-black text-blue-700">{item.nonClubCount}</span>
+                                </div>
+                              )}
+                              {allowClub && (
+                                <div className="bg-amber-100/70 text-amber-900 p-1 rounded-lg border border-amber-200 flex items-center justify-between px-1.5">
+                                  <span>🟡 المنتمين للأندية:</span>
+                                  <span className="font-black text-amber-950">{item.clubCount}</span>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })()}
 
                         {/* Matches mini breakdown */}
                         <div className="grid grid-cols-3 gap-1 text-center text-[10px] font-bold pt-1">
@@ -1867,7 +1901,8 @@ export const Matches: React.FC = () => {
         schools={schools}
         venues={venues}
         students={students}
-        teachers={teachers}
+        teachers={allUsers.length > 0 ? allUsers : teachers}
+        referees={referees}
         crossCountryResults={crossCountryResults}
         onUpdateCrossCountryResult={handleSaveCrossCountryResult}
         userProfile={effectiveUserProfile}
@@ -1908,7 +1943,7 @@ export const Matches: React.FC = () => {
         schools={schools}
         venues={venues}
         students={students}
-        teachers={teachers}
+        teachers={allUsers.length > 0 ? allUsers : teachers}
         matches={matches}
         managerSportId={managerSportId}
         allowedSportIds={techCommitteeAllowedSports}
@@ -1943,7 +1978,7 @@ export const Matches: React.FC = () => {
         target={scoreDiffusionTarget}
         schools={schools}
         refereesList={referees}
-        teachersList={teachers}
+        teachersList={allUsers.length > 0 ? allUsers : teachers}
         studentsList={students}
       />
 

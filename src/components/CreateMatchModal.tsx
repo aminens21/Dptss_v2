@@ -5,6 +5,7 @@ import { X, CalendarDays, Clock, MapPin, Trophy, AlertTriangle, AlertCircle, Cal
 import { SPORTS_MAP, AGE_CATEGORIES, GENDER_MAP, DataService, getAgeCategoriesForSeason, normalizeCategoryKey, normalizeDateToYmd, EDUCATIONAL_CYCLE_LABELS, getMatchEducationalCycles, findBlockedPeriodForDate, normalizeArabicSearch, schoolNamesMatch, normalizeTournamentAffiliation, normalizeSchoolCycleType } from '../lib/dataService';
 import { useAuth, isSuperAdminEmail } from '../contexts/AuthContext';
 import { resolveHostSchoolForMatch, findRefereeContact, generateRefereeMatchNotificationMessage, getWhatsAppUrl } from '../lib/whatsappService';
+import { resolveMatchRefereesInfo, isOpaqueEntityId } from '../lib/programExportService';
 import { MatchBroadcastDiffusionModal, MatchBroadcastDiffusionTarget } from './MatchBroadcastDiffusionModal';
 import toast from 'react-hot-toast';
 
@@ -104,6 +105,7 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
   const [customVenueName, setCustomVenueName] = useState<string>('');
   const [referees, setReferees] = useState<string[]>(['']);
   const [allReferees, setAllReferees] = useState<Referee[]>([]);
+  const [allUsers, setAllUsers] = useState<User[]>([]);
   const [status, setStatus] = useState<Match['status']>('Scheduled');
   const [notes, setNotes] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -143,7 +145,7 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
     return () => unsub();
   }, [isOpen]);
 
-  // Load referees from DataService
+  // Load referees and users from DataService
   useEffect(() => {
     if (isOpen) {
       DataService.getReferees().then(data => {
@@ -151,6 +153,9 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
       }).catch(err => {
         console.warn("Failed to load referees:", err);
       });
+      DataService.getUsers().then(data => {
+        setAllUsers(data);
+      }).catch(() => {});
     }
   }, [isOpen]);
 
@@ -207,17 +212,17 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
         setHostSchoolId('');
         setVenueId(editingMatch.venueId || 'custom');
         const matchedVen = venues.find(v => v.id === editingMatch.venueId);
-        setCustomVenueName(editingMatch.venueName || matchedVen?.name || editingMatch.venueId || '');
+        const safeVenueId = editingMatch.venueId && !isOpaqueEntityId(editingMatch.venueId) ? editingMatch.venueId : '';
+        setCustomVenueName(editingMatch.venueName || matchedVen?.name || safeVenueId || '');
       }
       
-      // Load existing referees
-      if (editingMatch.referees && editingMatch.referees.length > 0) {
-        setReferees(editingMatch.referees);
+      // Resolve existing referees to readable names without exposing opaque entity IDs
+      const userDirectory = allUsers.length > 0 ? allUsers : teachers;
+      const resolvedRefs = resolveMatchRefereesInfo(editingMatch, allReferees, userDirectory);
+      if (resolvedRefs.allRefs.length > 0) {
+        setReferees(resolvedRefs.allRefs);
       } else {
-        const legacyReferees = [];
-        if (editingMatch.referee1Id) legacyReferees.push(editingMatch.referee1Id);
-        if (editingMatch.referee2Id) legacyReferees.push(editingMatch.referee2Id);
-        setReferees(legacyReferees.length > 0 ? legacyReferees : ['']);
+        setReferees(['']);
       }
       
       setStatus(editingMatch.status);
@@ -277,7 +282,7 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
         }
       }
     }
-  }, [managerSportId, singleLockedSportId, effectiveAllowedSportIds, availableTournaments, isOpen, editingMatch, initialTournamentId, initialSportId, initialCategory, initialGender, initialAffiliation, schools, venues]);
+  }, [managerSportId, singleLockedSportId, effectiveAllowedSportIds, availableTournaments, isOpen, editingMatch, initialTournamentId, initialSportId, initialCategory, initialGender, initialAffiliation, schools, venues, allReferees, allUsers, teachers]);
 
   // Effective venue ID & name based on venueMode ('school' vs 'custom')
   const selectedHostSchool = useMemo(
@@ -1346,12 +1351,14 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
             {/* Referee Slots Inputs with Dropdown, Manual Input & Direct WhatsApp Notification */}
             <div className="space-y-2">
               {referees.map((ref, idx) => {
+                const userDirectory = allUsers.length > 0 ? allUsers : teachers;
                 const contact = ref.trim()
-                  ? findRefereeContact(ref.trim(), allReferees, teachers)
+                  ? findRefereeContact(ref.trim(), allReferees, userDirectory)
                   : null;
-                const refWhatsappMsg = contact
+                const resolvedContactName = contact?.name || (!isOpaqueEntityId(ref.trim()) ? ref.trim() : '');
+                const refWhatsappMsg = contact && resolvedContactName
                   ? generateRefereeMatchNotificationMessage({
-                      refereeName: contact.name || ref.trim(),
+                      refereeName: resolvedContactName,
                       sportName: sportInfo.name,
                       ageCategory,
                       gender: GENDER_MAP[gender]?.name || gender,
@@ -1416,12 +1423,12 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
                     />
                   </div>
 
-                  {contact && (
+                  {contact && resolvedContactName && (
                     <a
                       href={getWhatsAppUrl(contact.phone, refWhatsappMsg)}
                       target="_blank"
                       rel="noopener noreferrer"
-                      title={contact.phone ? `إرسال إشعار واتساب للحكم ${contact.name} (${contact.phone})` : `إرسال إشعار واتساب للحكم ${contact.name} (تحديد الرقم في واتساب)`}
+                      title={contact.phone ? `إرسال إشعار واتساب للحكم ${resolvedContactName} (${contact.phone})` : `إرسال إشعار واتساب للحكم ${resolvedContactName} (تحديد الرقم في واتساب)`}
                       className="px-2 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[10px] font-bold flex items-center gap-1 shrink-0 transition-colors shadow-2xs"
                     >
                       <MessageCircle className="h-3.5 w-3.5" />

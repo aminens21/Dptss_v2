@@ -2,6 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { Match, School, Venue, Tournament, User, Referee } from '../types';
 import { DataService, SPORTS_MAP, normalizeArabicMatchText } from '../lib/dataService';
 import { formatTeamDisplayName, hasValidMatchTeams } from '../lib/drawTournamentUtils';
+import { resolveMatchRefereesInfo, isOpaqueEntityId } from '../lib/programExportService';
 import { AthleticsService } from '../lib/athleticsService';
 import {
   Trophy,
@@ -42,14 +43,27 @@ export const RefereeMatchesView: React.FC<RefereeMatchesViewProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
   const [refereesList, setRefereesList] = useState<Referee[]>([]);
+  const [usersDirectory, setUsersDirectory] = useState<User[]>([]);
 
   useEffect(() => {
     let mounted = true;
-    DataService.getReferees().then(list => {
-      if (mounted) setRefereesList(list || []);
-    }).catch(() => {});
+    const loadRefData = () => {
+      Promise.all([
+        DataService.getReferees().catch(() => [] as Referee[]),
+        DataService.getUsers().catch(() => [] as User[])
+      ]).then(([refs, users]) => {
+        if (!mounted) return;
+        setRefereesList(refs || []);
+        setUsersDirectory(users || []);
+      });
+    };
+    loadRefData();
+    window.addEventListener('refereesUpdated', loadRefData);
+    window.addEventListener('userDataChanged', loadRefData);
     return () => {
       mounted = false;
+      window.removeEventListener('refereesUpdated', loadRefData);
+      window.removeEventListener('userDataChanged', loadRefData);
     };
   }, []);
 
@@ -82,9 +96,20 @@ export const RefereeMatchesView: React.FC<RefereeMatchesViewProps> = ({
     addName(userProfile?.fullName);
     addName(refereeName);
 
+    usersDirectory.forEach(u => {
+      const matchesSameAccount =
+        (userProfile?.id && u.id === userProfile.id) ||
+        (userProfile?.email && u.email && u.email.trim().toLowerCase() === userProfile.email.trim().toLowerCase()) ||
+        (userProfile?.leaseNumber && u.leaseNumber && u.leaseNumber.trim() === userProfile.leaseNumber.trim());
+      if (matchesSameAccount) {
+        if (u.id) ids.add(u.id.trim().toLowerCase());
+        addName(u.fullName);
+      }
+    });
+
     refereesList.forEach(r => {
       const matchesUser =
-        (userProfile?.id && (r as any).userId === userProfile.id) ||
+        (userProfile?.id && (r.teacherId === userProfile.id || (r as any).userId === userProfile.id || r.id === userProfile.id)) ||
         (userProfile?.email && r.email && r.email.trim().toLowerCase() === userProfile.email.trim().toLowerCase()) ||
         (userProfile?.phone && r.phone && r.phone.replace(/\s+/g, '') === userProfile.phone.replace(/\s+/g, '')) ||
         Array.from(names).some(n => {
@@ -93,6 +118,7 @@ export const RefereeMatchesView: React.FC<RefereeMatchesViewProps> = ({
         });
       if (matchesUser) {
         if (r.id) ids.add(r.id.trim().toLowerCase());
+        if (r.teacherId) ids.add(r.teacherId.trim().toLowerCase());
         addName(r.fullName);
       }
     });
@@ -101,7 +127,7 @@ export const RefereeMatchesView: React.FC<RefereeMatchesViewProps> = ({
       ids: Array.from(ids),
       names: Array.from(names)
     };
-  }, [userProfile, refereeName, refereesList]);
+  }, [userProfile, refereeName, refereesList, usersDirectory]);
 
   const isEntryMatchingTarget = (entry?: string): boolean => {
     if (!entry) return false;
@@ -143,6 +169,17 @@ export const RefereeMatchesView: React.FC<RefereeMatchesViewProps> = ({
     });
   }, [matches, schools, targetIdentity, refereesList]);
 
+  const getVenueName = (m: Match) => {
+    const explicitName = (m.venueName || '').trim();
+    if (explicitName && !isOpaqueEntityId(explicitName)) return explicitName;
+    const v = venues.find((ven) => ven.id === m.venueId);
+    if (v?.name) return v.name;
+    const sch = schools.find((s) => s.id === (m.hostSchoolId || m.venueId) || s.id === m.venueId);
+    if (sch?.name) return sch.name;
+    if (m.venueId && !isOpaqueEntityId(m.venueId)) return m.venueId;
+    return 'ملعب غير محدد';
+  };
+
   // Apply search & status filters on the referee's matches
   const filteredMatches = useMemo(() => {
     return refereeMatches.filter((m) => {
@@ -152,9 +189,9 @@ export const RefereeMatchesView: React.FC<RefereeMatchesViewProps> = ({
       // Search query
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
-        const t1 = formatTeamDisplayName(m.team1Id, m.team1Name, schools);
-        const t2 = formatTeamDisplayName(m.team2Id, m.team2Name, schools);
-        const venueName = venues.find((v) => v.id === m.venueId)?.name || '';
+        const t1 = formatTeamDisplayName(m.team1Id, m.team1Name, schools, m.team1Placeholder, m.team1SourceMatchNumber);
+        const t2 = formatTeamDisplayName(m.team2Id, m.team2Name, schools, m.team2Placeholder, m.team2SourceMatchNumber);
+        const venueName = getVenueName(m);
         const sportName = SPORTS_MAP[m.sportId]?.name || '';
         const stage = m.stage || '';
         const composite = `${t1} ${t2} ${venueName} ${sportName} ${stage}`.toLowerCase();
@@ -170,17 +207,12 @@ export const RefereeMatchesView: React.FC<RefereeMatchesViewProps> = ({
   const ongoingCount = refereeMatches.filter((m) => m.status === 'Ongoing').length;
   const completedCount = refereeMatches.filter((m) => m.status === 'Completed').length;
 
-  const getSchoolName = (id: string, fallbackName?: string) => {
-    return formatTeamDisplayName(id, fallbackName, schools);
-  };
-
-  const getVenueName = (id: string) => {
-    const v = venues.find((ven) => ven.id === id);
-    return v ? v.name : id || 'ملعب غير محدد';
+  const getSchoolName = (id: string, fallbackName?: string, placeholder?: string, sourceNum?: number) => {
+    return formatTeamDisplayName(id, fallbackName, schools, placeholder, sourceNum);
   };
 
   const getSportDetails = (sportId: string) => {
-    return SPORTS_MAP[sportId] || { name: sportId || 'رياضة مدرسية', icon: '🏆' };
+    return SPORTS_MAP[sportId] || { name: 'رياضة مدرسية', icon: '🏆' };
   };
 
   const athleticsAssignments = useMemo(() => {
@@ -376,9 +408,9 @@ export const RefereeMatchesView: React.FC<RefereeMatchesViewProps> = ({
         <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
           {filteredMatches.map((m) => {
             const sport = getSportDetails(m.sportId);
-            const t1Name = getSchoolName(m.team1Id, m.team1Name);
-            const t2Name = getSchoolName(m.team2Id, m.team2Name);
-            const venueName = getVenueName(m.venueId);
+            const t1Name = getSchoolName(m.team1Id, m.team1Name, m.team1Placeholder, m.team1SourceMatchNumber);
+            const t2Name = getSchoolName(m.team2Id, m.team2Name, m.team2Placeholder, m.team2SourceMatchNumber);
+            const venueName = getVenueName(m);
 
             const isCompleted = m.status === 'Completed';
             const isOngoing = m.status === 'Ongoing';
@@ -520,30 +552,28 @@ export const RefereeMatchesView: React.FC<RefereeMatchesViewProps> = ({
                   </div>
 
                   {(() => {
-                    const fieldList = Array.isArray(m.fieldReferees) ? m.fieldReferees.filter(Boolean) : [];
-                    const tableList = Array.isArray(m.tableReferees) ? m.tableReferees.filter(Boolean) : [];
-                    const legacyList = Array.isArray(m.referees)
-                      ? m.referees.filter(r => r && !isEntryMatchingTarget(r))
-                      : [];
-                    if (fieldList.length === 0 && tableList.length === 0 && legacyList.length === 0) return null;
+                    const { fieldRefs, tableRefs, allRefs } = resolveMatchRefereesInfo(m, refereesList, usersDirectory);
+                    const categorizedSet = new Set([...fieldRefs, ...tableRefs]);
+                    const extraOtherRefs = allRefs.filter(name => !categorizedSet.has(name));
+                    if (fieldRefs.length === 0 && tableRefs.length === 0 && extraOtherRefs.length === 0) return null;
                     return (
                       <div className="space-y-1 pt-1.5 border-t border-slate-100/60">
-                        {fieldList.length > 0 && (
+                        {fieldRefs.length > 0 && (
                           <div className="flex items-center gap-1.5 flex-wrap">
                             <span className="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 text-[10px] font-black">حكام الساحة</span>
-                            <strong className="font-bold text-slate-700">{fieldList.join(' • ')}</strong>
+                            <strong className="font-bold text-slate-700">{fieldRefs.join(' • ')}</strong>
                           </div>
                         )}
-                        {tableList.length > 0 && (
+                        {tableRefs.length > 0 && (
                           <div className="flex items-center gap-1.5 flex-wrap">
                             <span className="px-1.5 py-0.5 rounded bg-sky-100 text-sky-800 text-[10px] font-black">حكام الطاولة</span>
-                            <strong className="font-bold text-slate-700">{tableList.join(' • ')}</strong>
+                            <strong className="font-bold text-slate-700">{tableRefs.join(' • ')}</strong>
                           </div>
                         )}
-                        {fieldList.length === 0 && tableList.length === 0 && legacyList.length > 0 && (
-                          <div className="flex items-center gap-1.5">
+                        {fieldRefs.length === 0 && tableRefs.length === 0 && extraOtherRefs.length > 0 && (
+                          <div className="flex items-center gap-1.5 flex-wrap">
                             <UserCheck className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                            <span>الحكام المساعدون: <strong className="font-bold text-slate-700">{legacyList.join(' ، ')}</strong></span>
+                            <span>طاقم التحكيم: <strong className="font-bold text-slate-700">{extraOtherRefs.join(' • ')}</strong></span>
                           </div>
                         )}
                       </div>

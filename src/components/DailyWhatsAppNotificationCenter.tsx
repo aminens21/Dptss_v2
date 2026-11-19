@@ -16,6 +16,7 @@ import {
   sanitizePhoneNumber,
   WhatsAppMessageParams
 } from '../lib/whatsappService';
+import { resolveMatchRefereesInfo, isOpaqueEntityId } from '../lib/programExportService';
 import {
   MatchBroadcastDiffusionModal,
   MatchBroadcastDiffusionTarget
@@ -289,8 +290,9 @@ export const DailyWhatsAppNotificationCenter: React.FC<DailyWhatsAppNotification
       const hostSchool = resolveHostSchoolForMatch(m, schools);
       const hostPrincipalContact = hostSchool ? getSchoolDirectorContact(hostSchool) : null;
       const matchedVenue = venues.find((v) => v.id === m.venueId);
+      const safeVenueFallback = m.venueId && !isOpaqueEntityId(m.venueId) ? m.venueId : '';
       const venue = {
-        name: m.venueName || matchedVenue?.name || hostSchool?.name || m.venueId || 'مركز التباري المحدد',
+        name: m.venueName || hostSchool?.name || matchedVenue?.name || safeVenueFallback || 'مركز التباري المحدد',
         address: matchedVenue?.address || ''
       };
 
@@ -298,44 +300,63 @@ export const DailyWhatsAppNotificationCenter: React.FC<DailyWhatsAppNotification
       const assignedReferees: { id: string; name: string; phone: string; role: string }[] = [];
 
       const resolveRefPhone = (refId: string) => {
-        const refObj = referees.find((r) => r.id === refId || r.fullName === refId || normalizeText(r.fullName) === normalizeText(refId));
-        const refTeacher = teachers.find((t) => t.id === refId || t.fullName === refId || normalizeText(t.fullName) === normalizeText(refId));
-        const name = refTeacher?.fullName || refObj?.fullName || refId;
+        const clean = (refId || '').trim();
+        if (!clean) return { name: '', phone: '' };
+        const refObj = referees.find(
+          (r) =>
+            r.id === clean ||
+            r.teacherId === clean ||
+            (r as any).userId === clean ||
+            r.fullName === clean ||
+            normalizeText(r.fullName) === normalizeText(clean)
+        );
+        const refTeacher = teachers.find(
+          (t) =>
+            t.id === clean ||
+            t.fullName === clean ||
+            normalizeText(t.fullName) === normalizeText(clean) ||
+            (refObj?.teacherId && t.id === refObj.teacherId) ||
+            (refObj?.fullName && normalizeText(t.fullName) === normalizeText(refObj.fullName))
+        );
+        const name = refTeacher?.fullName || refObj?.fullName || (!isOpaqueEntityId(clean) ? clean : '');
         const phone = refTeacher?.phone || refObj?.phone || '';
         return { name, phone };
       };
 
-      if (m.referee1Id) {
-        const { name, phone } = resolveRefPhone(m.referee1Id);
+      const seenRefKeys = new Set<string>();
+      const pushAssignedRef = (refEntry: string, roleLabel: string) => {
+        const { name, phone } = resolveRefPhone(refEntry);
+        if (!name) return;
+        const normKey = normalizeText(name) || refEntry;
+        if (seenRefKeys.has(normKey)) return;
+        seenRefKeys.add(normKey);
         assignedReferees.push({
-          id: m.referee1Id,
+          id: refEntry,
           name,
           phone,
-          role: 'الحكم الرئيسي'
+          role: roleLabel
         });
+      };
+
+      if (m.referee1Id) {
+        pushAssignedRef(m.referee1Id, 'الحكم الرئيسي');
       }
 
       if (m.referee2Id) {
-        const { name, phone } = resolveRefPhone(m.referee2Id);
-        assignedReferees.push({
-          id: m.referee2Id,
-          name,
-          phone,
-          role: 'حكم مساعد'
-        });
+        pushAssignedRef(m.referee2Id, 'حكم مساعد');
+      }
+
+      if (Array.isArray(m.fieldReferees) && m.fieldReferees.length > 0) {
+        m.fieldReferees.forEach((refId, idx) => pushAssignedRef(refId, `حكم الساحة (${idx + 1})`));
+      }
+
+      if (Array.isArray(m.tableReferees) && m.tableReferees.length > 0) {
+        m.tableReferees.forEach((refId, idx) => pushAssignedRef(refId, `حكم الطاولة (${idx + 1})`));
       }
 
       if (m.referees && m.referees.length > 0) {
         m.referees.forEach((refId, idx) => {
-          if (refId !== m.referee1Id && refId !== m.referee2Id) {
-            const { name, phone } = resolveRefPhone(refId);
-            assignedReferees.push({
-              id: refId,
-              name,
-              phone,
-              role: `حكم مساعد (${idx + 1})`
-            });
-          }
+          pushAssignedRef(refId, `حكم مساعد (${idx + 1})`);
         });
       }
 
@@ -1098,13 +1119,7 @@ export const DailyWhatsAppNotificationCenter: React.FC<DailyWhatsAppNotification
                       <button
                         type="button"
                         onClick={() => {
-                          const rawRefs = [
-                            ...(m.tableReferees || []),
-                            ...(m.fieldReferees || []),
-                            ...(m.referees || []),
-                            ...(m.referee1Id ? [m.referee1Id] : []),
-                            ...(m.referee2Id ? [m.referee2Id] : [])
-                          ].map(r => (r || '').trim()).filter(Boolean);
+                          const resolvedRefs = resolveMatchRefereesInfo(m, referees, teachers);
                           setDiffusionTarget({
                             matchId: m.id,
                             sportId: m.sportId,
@@ -1118,12 +1133,12 @@ export const DailyWhatsAppNotificationCenter: React.FC<DailyWhatsAppNotification
                             team2Name: item.team2Name,
                             hostSchoolId: m.hostSchoolId,
                             venueId: m.venueId,
-                            venueName: item.venueName,
+                            venueName: item.venue.name,
                             dateStr: item.dateString,
                             timeStr: m.startTime || '10:00',
-                            referees: Array.from(new Set(rawRefs)),
-                            tableReferees: Array.isArray(m.tableReferees) ? m.tableReferees : undefined,
-                            fieldReferees: Array.isArray(m.fieldReferees) ? m.fieldReferees : undefined,
+                            referees: resolvedRefs.allRefs,
+                            tableReferees: resolvedRefs.tableRefs,
+                            fieldReferees: resolvedRefs.fieldRefs,
                             notes: m.notes
                           });
                         }}

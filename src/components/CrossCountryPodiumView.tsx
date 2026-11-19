@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { CrossCountryCategoryResult, PodiumWinner, Student, School, User } from '../types';
+import { CrossCountryCategoryResult, PodiumWinner, Student, School, User, AffiliationDisplayConfig } from '../types';
 import {
   CROSS_COUNTRY_CATEGORIES,
   CrossCountryCategoryDef,
@@ -12,7 +12,7 @@ import {
   getCrossCountryCategoryResultKey,
   resolveRunnerParticipationType
 } from '../lib/crossCountryConfig';
-import { DataService, normalizeCategoryKey, canUserApproveSportResult } from '../lib/dataService';
+import { DataService, normalizeCategoryKey, canUserApproveSportResult, isAffiliationAllowedByDisplayConfig } from '../lib/dataService';
 import { useAuth } from '../contexts/AuthContext';
 import * as XLSX from 'xlsx';
 import {
@@ -342,6 +342,29 @@ export const CrossCountryPodiumView: React.FC<CrossCountryPodiumViewProps> = ({
 
   // Affiliation branch filter for Cross Country podium
   const [selectedAffiliation, setSelectedAffiliation] = useState<'non_club' | 'club_affiliated'>('non_club');
+  const [affiliationDisplayConfig, setAffiliationDisplayConfig] = useState<AffiliationDisplayConfig>(() =>
+    DataService.getAffiliationDisplayConfigSync()
+  );
+
+  useEffect(() => {
+    const unsub = DataService.subscribeToAffiliationDisplayConfig((cfg) => {
+      setAffiliationDisplayConfig(cfg);
+    });
+    return () => {
+      if (typeof unsub === 'function') unsub();
+    };
+  }, []);
+
+  const allowNonClubCC = isAffiliationAllowedByDisplayConfig('non_club', affiliationDisplayConfig, 'cross_country');
+  const allowClubCC = isAffiliationAllowedByDisplayConfig('club_affiliated', affiliationDisplayConfig, 'cross_country');
+
+  useEffect(() => {
+    if (selectedAffiliation === 'non_club' && !allowNonClubCC && allowClubCC) {
+      setSelectedAffiliation('club_affiliated');
+    } else if (selectedAffiliation === 'club_affiliated' && !allowClubCC && allowNonClubCC) {
+      setSelectedAffiliation('non_club');
+    }
+  }, [selectedAffiliation, allowNonClubCC, allowClubCC]);
 
   const selectedCategoryDef = useMemo(() => {
     return (
@@ -1038,54 +1061,60 @@ export const CrossCountryPodiumView: React.FC<CrossCountryPodiumViewProps> = ({
       )}
 
       {/* Affiliation Branch Selector Toggle */}
-      <div className="bg-white rounded-2xl p-3 border border-slate-200 shadow-xs">
-        <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
-            <Trophy className="w-4 h-4 text-amber-500" />
-            <span className="text-xs sm:text-sm font-black text-slate-900">
-              صنف البطولة والنتائج للعدو الريفي:
-            </span>
-          </div>
-
-          <div className="flex items-center gap-2 w-full sm:w-auto">
-            <button
-              type="button"
-              onClick={() => setSelectedAffiliation('non_club')}
-              className={`flex-1 sm:flex-none py-2 px-4 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-2 border cursor-pointer ${
-                selectedAffiliation === 'non_club'
-                  ? 'bg-blue-600 text-white border-blue-700 shadow-md ring-2 ring-blue-300'
-                  : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
-              }`}
-            >
-              <span>⚪</span>
-              <span>بطولة غير المنتمين للأندية</span>
-              <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${
-                selectedAffiliation === 'non_club' ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-700'
-              }`}>
-                {nonClubCompletedCount}/8 فئات
+      {(allowNonClubCC || allowClubCC) && (
+        <div className="bg-white rounded-2xl p-3 border border-slate-200 shadow-xs">
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <Trophy className="w-4 h-4 text-amber-500" />
+              <span className="text-xs sm:text-sm font-black text-slate-900">
+                صنف البطولة والنتائج للعدو الريفي:
               </span>
-            </button>
+            </div>
 
-            <button
-              type="button"
-              onClick={() => setSelectedAffiliation('club_affiliated')}
-              className={`flex-1 sm:flex-none py-2 px-4 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-2 border cursor-pointer ${
-                selectedAffiliation === 'club_affiliated'
-                  ? 'bg-amber-500 text-slate-950 border-amber-600 shadow-md ring-2 ring-amber-300'
-                  : 'bg-amber-50 text-amber-900 border-amber-200 hover:bg-amber-100'
-              }`}
-            >
-              <span>🟡</span>
-              <span>بطولة المنتمين للأندية والجمعيات</span>
-              <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${
-                selectedAffiliation === 'club_affiliated' ? 'bg-slate-950/20 text-slate-950' : 'bg-amber-200 text-amber-950'
-              }`}>
-                {clubCompletedCount}/8 فئات
-              </span>
-            </button>
+            <div className="flex items-center gap-2 w-full sm:w-auto">
+              {allowNonClubCC && (
+                <button
+                  type="button"
+                  onClick={() => setSelectedAffiliation('non_club')}
+                  className={`flex-1 sm:flex-none py-2 px-4 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-2 border cursor-pointer ${
+                    selectedAffiliation === 'non_club'
+                      ? 'bg-blue-600 text-white border-blue-700 shadow-md ring-2 ring-blue-300'
+                      : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                  }`}
+                >
+                  <span>⚪</span>
+                  <span>بطولة غير المنتمين للأندية</span>
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${
+                    selectedAffiliation === 'non_club' ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-700'
+                  }`}>
+                    {nonClubCompletedCount}/8 فئات
+                  </span>
+                </button>
+              )}
+
+              {allowClubCC && (
+                <button
+                  type="button"
+                  onClick={() => setSelectedAffiliation('club_affiliated')}
+                  className={`flex-1 sm:flex-none py-2 px-4 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-2 border cursor-pointer ${
+                    selectedAffiliation === 'club_affiliated'
+                      ? 'bg-amber-500 text-slate-950 border-amber-600 shadow-md ring-2 ring-amber-300'
+                      : 'bg-amber-50 text-amber-900 border-amber-200 hover:bg-amber-100'
+                  }`}
+                >
+                  <span>🟡</span>
+                  <span>بطولة المنتمين للأندية والجمعيات</span>
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${
+                    selectedAffiliation === 'club_affiliated' ? 'bg-slate-950/20 text-slate-950' : 'bg-amber-200 text-amber-950'
+                  }`}>
+                    {clubCompletedCount}/8 فئات
+                  </span>
+                </button>
+              )}
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
       {/* Category selector strip */}
       <div className="bg-white rounded-2xl p-3 border border-slate-200 shadow-xs">

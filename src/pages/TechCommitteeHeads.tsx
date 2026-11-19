@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { DataService, SPORTS_MAP } from '../lib/dataService';
 import { User, Sport } from '../types';
@@ -19,13 +20,15 @@ import {
   Edit2,
   Award,
   MessageCircle,
-  Eye
+  Eye,
+  LogIn
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { getWhatsAppUrl } from '../lib/whatsappService';
 
 export const TechCommitteeHeads: React.FC = () => {
-  const { userProfile } = useAuth();
+  const { userProfile, startTeacherImpersonation, isImpersonatingTeacher } = useAuth();
+  const navigate = useNavigate();
   const [teachers, setTeachers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -77,6 +80,15 @@ export const TechCommitteeHeads: React.FC = () => {
 
   const isCentralAdmin = userProfile?.role === 'CENTRAL_ADMIN' || userProfile?.isSuperAdmin || userProfile?.role === 'SPORT_MANAGER';
   const canManageTechCommittee = isCentralAdmin;
+  const canImpersonateTechHead = Boolean(
+    (userProfile?.role === 'CENTRAL_ADMIN' || userProfile?.isSuperAdmin) && !isImpersonatingTeacher
+  );
+
+  const handleEnterAsTechHead = (head: User) => {
+    startTeacherImpersonation(head, { preserveTechCommitteeRole: true });
+    toast.success(`تم الدخول بصفة رئيس اللجنة التقنية ${head.fullName} مع الحفاظ على صفتك الأصلية`);
+    navigate('/tournaments');
+  };
 
   useEffect(() => {
     loadData();
@@ -577,8 +589,8 @@ export const TechCommitteeHeads: React.FC = () => {
                     </div>
                   </div>
 
-                  {/* Interactive Committee Members Button on Card Footer */}
-                  <div className="px-4 py-3 bg-slate-50/90 border-t border-slate-100 flex items-center justify-between gap-2">
+                  {/* Interactive Committee Members & Impersonation Buttons on Card Footer */}
+                  <div className="px-4 py-3 bg-slate-50/90 border-t border-slate-100 flex flex-col gap-2">
                     <button
                       type="button"
                       onClick={() => setViewingMembersHead(head)}
@@ -598,6 +610,18 @@ export const TechCommitteeHeads: React.FC = () => {
                         <Eye className="w-3.5 h-3.5 text-slate-400" />
                       </span>
                     </button>
+
+                    {canImpersonateTechHead && (
+                      <button
+                        type="button"
+                        onClick={() => handleEnterAsTechHead(head)}
+                        className="w-full min-h-[36px] px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-black flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-xs"
+                        title="الدخول مؤقتاً بصفة رئيس اللجنة التقنية مع الاحتفاظ بصلاحيات المشرف المركزي"
+                      >
+                        <LogIn className="w-3.5 h-3.5" />
+                        <span>الدخول بصفة رئيس اللجنة</span>
+                      </button>
+                    )}
                   </div>
                 </div>
               );

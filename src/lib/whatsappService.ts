@@ -149,7 +149,7 @@ const normalizeArabicForLookup = (text?: string): string => {
  */
 export const findRefereeContact = (
   nameOrId: string,
-  refereesList: Array<{ id?: string; fullName?: string; phone?: string }> = [],
+  refereesList: Array<{ id?: string; teacherId?: string; userId?: string; fullName?: string; phone?: string }> = [],
   teachersList: Array<{ id?: string; fullName?: string; phone?: string }> = []
 ): { name: string; phone: string } => {
   const cleanInput = (nameOrId || '').trim();
@@ -158,10 +158,15 @@ export const findRefereeContact = (
   const normInput = normalizeArabicForLookup(cleanInput);
   const combined = [...refereesList, ...teachersList];
 
-  // 1. Exact ID match
-  const byId = combined.find(item => item.id && item.id === cleanInput);
+  // 1. Exact ID / linked teacherId / userId match
+  const byId = combined.find(
+    item =>
+      (item.id && item.id === cleanInput) ||
+      ((item as any).teacherId && (item as any).teacherId === cleanInput) ||
+      ((item as any).userId && (item as any).userId === cleanInput)
+  );
   if (byId) {
-    return { name: byId.fullName || cleanInput, phone: byId.phone || '' };
+    return { name: byId.fullName || '', phone: byId.phone || '' };
   }
 
   // 2. Exact normalized fullName match
@@ -183,7 +188,13 @@ export const findRefereeContact = (
     }
   }
 
-  return { name: cleanInput, phone: '' };
+  const looksLikeOpaqueId =
+    /^(ref[-_]|usr[-_]|mgr[-_]|teacher[-_]|sch[-_]|ven[-_]|mat[-_]|tourn[-_])/i.test(cleanInput) ||
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(cleanInput) ||
+    (/^[A-Za-z0-9_-]{16,}$/.test(cleanInput) && !/\s/.test(cleanInput)) ||
+    (/^[A-Za-z0-9_-]{12,}$/.test(cleanInput) && /[A-Za-z]/.test(cleanInput) && /\d/.test(cleanInput));
+
+  return { name: looksLikeOpaqueId ? '' : cleanInput, phone: '' };
 };
 
 /**
@@ -586,15 +597,21 @@ export const buildMatchDiffusionStakeholders = (input: {
 
   const addRefEntry = (refEntry: string, idx: number, roleLabel: string, keyPrefix: string) => {
     const contact = findRefereeContact(refEntry, refereesList, teachersList);
+    const resolvedName = cleanTag(contact.name);
+    if (!resolvedName) return;
     const refObj = refereesList.find(
-      r => r.id === refEntry || normalizeArabicForLookup(r.fullName) === normalizeArabicForLookup(contact.name || refEntry)
+      r =>
+        r.id === refEntry ||
+        (r as any).teacherId === refEntry ||
+        (r as any).userId === refEntry ||
+        normalizeArabicForLookup(r.fullName) === normalizeArabicForLookup(resolvedName)
     );
     const teacherObj = teachersList.find(
-      t => t.id === refEntry || normalizeArabicForLookup(t.fullName) === normalizeArabicForLookup(contact.name || refEntry)
+      t => t.id === refEntry || normalizeArabicForLookup(t.fullName) === normalizeArabicForLookup(resolvedName)
     );
     pushStakeholder({
       id: `${keyPrefix}-${idx}-${refEntry}`,
-      name: cleanTag(contact.name || refEntry),
+      name: resolvedName,
       roleLabel,
       roleCategory: 'referee',
       phone: contact.phone || '',

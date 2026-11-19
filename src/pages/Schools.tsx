@@ -248,11 +248,15 @@ export const Schools: React.FC = () => {
         setEditingSchool(null);
       } else {
         const created = await DataService.addSchool(fullSchoolData);
+        const createdCycle = normalizeSchoolCycleType(created);
         // Reset any active filters that would hide the newly added school
-        if (typeFilter !== 'ALL' && typeFilter !== created.type) {
+        if (search.trim()) {
+          setSearch('');
+        }
+        if (typeFilter !== 'ALL' && typeFilter !== createdCycle) {
           setTypeFilter('ALL');
         }
-        if (communeFilter !== 'ALL' && communeFilter !== created.commune) {
+        if (communeFilter !== 'ALL' && !(created.commune || '').includes(communeFilter)) {
           setCommuneFilter('ALL');
         }
         if (selectedSport !== 'ALL') {
@@ -345,13 +349,7 @@ export const Schools: React.FC = () => {
     }
   };
 
-  useEffect(() => {
-    if (!isPrivilegedAdmin || loading) return;
-    const activeDirId = DataService.getActiveDirectorateId() || 'taourirt';
-    if (autoPrunedDirsRef.current.has(activeDirId)) return;
-    autoPrunedDirsRef.current.add(activeDirId);
-    handlePruneExtraHighMiddleSchools(true);
-  }, [isPrivilegedAdmin, loading, activeDirObj?.id]);
+  // Manual prune only (auto-prune disabled so newly added/imported schools are never silently deleted)
 
   const handleDownloadExcelTemplate = () => {
     try {
@@ -558,6 +556,11 @@ export const Schools: React.FC = () => {
       }
 
       await DataService.addSchoolsBulk(parsedSchools);
+      setSearch('');
+      setTypeFilter('ALL');
+      setCommuneFilter('ALL');
+      setSelectedSport('ALL');
+      setSelectedSchoolFilter('ALL');
       await loadSchools();
       toast.success(`تم بنجاح استيراد وتحديث ${parsedSchools.length} مؤسسة تعليمية بمديرية تاوريرت!`, { id: toastId });
     } catch (err) {

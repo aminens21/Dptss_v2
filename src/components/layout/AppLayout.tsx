@@ -599,12 +599,22 @@ export const AppLayout: React.FC = () => {
     if (user.email && String(user.email).trim().toLowerCase() === 'sayhihassan@gmail.com') {
       return 'مشرف تربوي';
     }
+    if (
+      user.role === 'CENTRAL_ADMIN' ||
+      user.role === 'SUPER_ADMIN' ||
+      user.isSuperAdmin === true ||
+      isSuperAdminEmail(user.email)
+    ) {
+      const baseLabel =
+        user.isSuperAdmin || user.role === 'SUPER_ADMIN' || isSuperAdminEmail(user.email)
+          ? 'المسؤول المركزي'
+          : 'مسير إقليمي';
+      return user.isTechCommitteeHead ? `${baseLabel} • رئيس لجنة تقنية` : baseLabel;
+    }
     if (user.isTechCommitteeHead) {
       return 'رئيس لجنة تقنية إقليمية';
     }
     switch (user.role) {
-      case 'CENTRAL_ADMIN':
-        return user.isSuperAdmin ? 'المسؤول المركزي' : 'مسير إقليمي';
       case 'SPORT_MANAGER':
         return 'منسق مادة التربية البدنية بالمؤسسة';
       case 'TEACHER':
@@ -1677,49 +1687,60 @@ export const AppLayout: React.FC = () => {
 
         {/* Content Viewport */}
         <main className="flex-1 overflow-y-auto overflow-x-hidden bg-slate-50 dark:bg-[#0b0f1a] p-3 sm:p-4 md:p-6 transition-colors">
-          {isImpersonatingTeacher && userProfile && (
-            <div className="mb-4 rounded-2xl border-2 border-amber-400 bg-gradient-to-r from-amber-50 via-yellow-50 to-indigo-50 p-3 sm:p-4 shadow-md flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-in fade-in duration-150" dir="rtl">
-              <div className="flex items-start sm:items-center gap-3 min-w-0">
-                <div className="w-10 h-10 rounded-xl bg-amber-500 text-white flex items-center justify-center shrink-0 shadow-xs font-black">
-                  <UserCheck className="w-5 h-5" />
-                </div>
-                <div className="min-w-0 space-y-0.5">
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    <span className="text-[10px] font-black bg-amber-200 text-amber-950 px-2 py-0.5 rounded-full border border-amber-300">
-                      وضع الدخول بالنيابة ({originalUserProfile?.fullName || 'رئيس اللجنة التقنية'})
-                    </span>
-                    {impersonationScopedSportIds.length > 0 && (
-                      <span className="text-[10px] font-black bg-indigo-100 text-indigo-900 px-2 py-0.5 rounded-full border border-indigo-200">
-                        الرياضة المسموحة: {impersonationScopedSportIds.map(id => SPORTS_MAP[id]?.name || id).join('، ')}
-                      </span>
-                    )}
+          {isImpersonatingTeacher && userProfile && (() => {
+            const origIsCentral = Boolean(
+              originalUserProfile?.role === 'CENTRAL_ADMIN' ||
+              originalUserProfile?.isSuperAdmin ||
+              isSuperAdminEmail(originalUserProfile?.email)
+            );
+            const actingAsTechHead = Boolean(userProfile.isTechCommitteeHead);
+            return (
+              <div className="mb-4 rounded-2xl border-2 border-amber-400 bg-gradient-to-r from-amber-50 via-yellow-50 to-indigo-50 p-3 sm:p-4 shadow-md flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-in fade-in duration-150" dir="rtl">
+                <div className="flex items-start sm:items-center gap-3 min-w-0">
+                  <div className="w-10 h-10 rounded-xl bg-amber-500 text-white flex items-center justify-center shrink-0 shadow-xs font-black">
+                    <UserCheck className="w-5 h-5" />
                   </div>
-                  <p className="text-xs sm:text-sm font-black text-slate-900 leading-snug">
-                    أنت تعمل الآن بصفة الأستاذ: <span className="text-indigo-800">{userProfile.fullName}</span>
-                    {userProfile.workLocation ? (
-                      <span className="text-slate-600 font-bold text-xs"> — المؤسسة: ({userProfile.workLocation})</span>
-                    ) : null}
-                  </p>
-                  <p className="text-[11px] text-amber-900 font-medium">
-                    جميع التعديلات أو الإضافات التي تجريها الآن ستُسجل رسمياً باسم هذا الأستاذ ومؤسسته ضمن رياضتك المسندة فقط.
-                  </p>
+                  <div className="min-w-0 space-y-0.5">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="text-[10px] font-black bg-amber-200 text-amber-950 px-2 py-0.5 rounded-full border border-amber-300">
+                        وضع الدخول بالنيابة ({origIsCentral ? 'المشرف المركزي' : (originalUserProfile?.fullName || 'رئيس اللجنة التقنية')})
+                      </span>
+                      {impersonationScopedSportIds.length > 0 && (
+                        <span className="text-[10px] font-black bg-indigo-100 text-indigo-900 px-2 py-0.5 rounded-full border border-indigo-200">
+                          الرياضة المسموحة: {impersonationScopedSportIds.map(id => SPORTS_MAP[id]?.name || id).join('، ')}
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs sm:text-sm font-black text-slate-900 leading-snug">
+                      {actingAsTechHead ? 'أنت تعمل الآن بصفة رئيس اللجنة التقنية:' : 'أنت تعمل الآن بصفة الأستاذ:'}{' '}
+                      <span className="text-indigo-800">{userProfile.fullName}</span>
+                      {userProfile.workLocation ? (
+                        <span className="text-slate-600 font-bold text-xs"> — المؤسسة: ({userProfile.workLocation})</span>
+                      ) : null}
+                    </p>
+                    <p className="text-[11px] text-amber-900 font-medium">
+                      {actingAsTechHead
+                        ? 'صفتك كمشرف مركزي محفوظة بالكامل؛ ويمكنك العودة لحسابك الأصلي في أي لحظة عبر زر العودة.'
+                        : 'جميع التعديلات أو الإضافات التي تجريها الآن ستُسجل رسمياً باسم هذا الأستاذ ومؤسسته ضمن رياضتك المسندة فقط.'}
+                    </p>
+                  </div>
                 </div>
-              </div>
 
-              <button
-                type="button"
-                onClick={() => {
-                  stopTeacherImpersonation();
-                  toast.success('تمت العودة بنجاح إلى حسابك الأصلي');
-                  navigate('/teachers');
-                }}
-                className="shrink-0 px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-black text-xs rounded-xl shadow-xs flex items-center justify-center gap-2 transition-all cursor-pointer active:scale-98"
-              >
-                <RotateCw className="w-3.5 h-3.5 text-amber-300" />
-                <span>العودة لحساب رئيس اللجنة التقنية</span>
-              </button>
-            </div>
-          )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    stopTeacherImpersonation();
+                    toast.success('تمت العودة بنجاح إلى حسابك الأصلي');
+                    navigate(actingAsTechHead ? '/tech-committee' : '/teachers');
+                  }}
+                  className="shrink-0 px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-black text-xs rounded-xl shadow-xs flex items-center justify-center gap-2 transition-all cursor-pointer active:scale-98"
+                >
+                  <RotateCw className="w-3.5 h-3.5 text-amber-300" />
+                  <span>{origIsCentral ? 'العودة لحساب المشرف المركزي' : 'العودة لحساب رئيس اللجنة التقنية'}</span>
+                </button>
+              </div>
+            );
+          })()}
           <Outlet />
         </main>
       </div>

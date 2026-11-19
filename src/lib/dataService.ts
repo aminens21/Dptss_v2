@@ -18,7 +18,8 @@ import {
   writeBatch as fbWriteBatch,
   disableNetwork,
   enableNetwork,
-  arrayUnion
+  arrayUnion,
+  deleteField
 } from 'firebase/firestore';
 import { isFlexibleEmailMatch, fixTeacherFieldJumble, normalizeArabicName, normalizeArabicSearch, normalizeDateToYmd, formatMatchDate } from './utils';
 import { isPlaceholderTeamId, makePlaceholderTeamId } from './drawTournamentUtils';
@@ -1139,35 +1140,175 @@ export function isSchoolLevelAllowedForTournament(schoolType: string, tournament
   return allowedLevels.includes(schoolLevelKey);
 }
 
-export function isTeacherLevelAllowedForTournament(teachingCadre?: string, tournamentLevel?: string): boolean {
-  if (!tournamentLevel || tournamentLevel === 'جميع الأسلاك' || tournamentLevel.includes('جميع')) return true; 
-  if (!teachingCadre) return true; // Flexible: allow entry by default if cadre is not explicitly set yet on mobile
-  
-  let teacherLevelKey = '';
-  const cleanCadre = String(teachingCadre).trim().toUpperCase();
-  
-  // Support both English keys and Arabic values/synonyms
-  if (cleanCadre === 'PRIMARY' || cleanCadre.includes('ابتدائي')) {
-    teacherLevelKey = 'Primary';
-  } else if (cleanCadre === 'MIDDLE' || cleanCadre.includes('إعدادي') || cleanCadre.includes('اعدادي')) {
-    teacherLevelKey = 'Middle';
-  } else if (cleanCadre === 'HIGH' || cleanCadre.includes('تأهيلي') || cleanCadre.includes('تاهيلي') || cleanCadre.includes('ثانوي')) {
-    teacherLevelKey = 'High';
+export function normalizeTeachingCadreKey(rawCadre?: string): 'Primary' | 'Middle' | 'High' | '' {
+  const cleanCadre = String(rawCadre || '').trim().toUpperCase();
+  if (!cleanCadre) return '';
+  if (cleanCadre === 'PRIMARY' || cleanCadre.includes('ابتدائي') || cleanCadre.includes('ابتدائ')) {
+    return 'Primary';
   }
-  
+  if (cleanCadre === 'MIDDLE' || cleanCadre.includes('إعدادي') || cleanCadre.includes('اعدادي') || cleanCadre.includes('إعداد') || cleanCadre.includes('اعداد')) {
+    return 'Middle';
+  }
+  if (cleanCadre === 'HIGH' || cleanCadre.includes('SECONDARY') || cleanCadre.includes('تأهيلي') || cleanCadre.includes('تاهيلي') || cleanCadre.includes('تأهيل') || cleanCadre.includes('ثانوي')) {
+    return 'High';
+  }
+  return '';
+}
+
+export function resolveTeacherCadre(
+  userProfile?: { teachingCadre?: string; workLocation?: string; schoolName?: string } | null,
+  teacherProfile?: { teachingCadre?: string; workLocation?: string; schoolName?: string } | null,
+  schoolObj?: { type?: string; name?: string } | null
+): 'PRIMARY' | 'MIDDLE' | 'HIGH' | undefined {
+  const candidates = [
+    userProfile?.teachingCadre,
+    teacherProfile?.teachingCadre,
+    schoolObj?.type && !schoolObj.type.includes('خصوصي') ? schoolObj.type : undefined
+  ];
+
+  for (const cand of candidates) {
+    const k = normalizeTeachingCadreKey(cand);
+    if (k === 'Primary') return 'PRIMARY';
+    if (k === 'Middle') return 'MIDDLE';
+    if (k === 'High') return 'HIGH';
+  }
+
+  // Fallback: infer from school name / work location (useful for private schools or imported teacher records)
+  const schoolHints = [
+    schoolObj?.name,
+    userProfile?.workLocation,
+    userProfile?.schoolName,
+    teacherProfile?.workLocation,
+    teacherProfile?.schoolName
+  ]
+    .filter(Boolean)
+    .join(' ');
+
+  if (schoolHints) {
+    if (
+      schoolHints.includes('ابتدائ') ||
+      schoolHints.includes('مجموعة مدارس') ||
+      /(?:^|\s)م\.م(?:\s|$)/.test(schoolHints)
+    ) {
+      return 'PRIMARY';
+    }
+    if (schoolHints.includes('إعداد') || schoolHints.includes('اعداد')) {
+      return 'MIDDLE';
+    }
+    if (schoolHints.includes('تأهيل') || schoolHints.includes('تاهيل')) {
+      return 'HIGH';
+    }
+  }
+
+  return undefined;
+}
+
+export function detectSingleCategoryCycleLevel(
+  ageCategory?: string,
+  tournamentName?: string
+): 'Primary' | 'Middle' | 'High' | null {
+  const raw = String(ageCategory || '').trim();
+  const rawUpper = raw.toUpperCase();
+
+  const hasU12 = rawUpper.includes('U12') || raw.includes('براعم') || raw.includes('برعمات') || raw.includes('برعم');
+  const hasU15 = rawUpper.includes('U15') || raw.includes('صغار') || raw.includes('صغيرات') || raw.includes('صغير');
+  const hasU18 = rawUpper.includes('U18') || raw.includes('فتيان') || raw.includes('فتيات');
+  const hasU20 = rawUpper.includes('U20') || raw.includes('شبان') || raw.includes('شابات');
+  const hasHigh = hasU18 || hasU20;
+
+  const groupCount = (hasU12 ? 1 : 0) + (hasU15 ? 1 : 0) + (hasHigh ? 1 : 0);
+  if (groupCount === 1) {
+    if (hasU12) return 'Primary';
+    if (hasU15) return 'Middle';
+    if (hasHigh) return 'High';
+  }
+  if (groupCount > 1) return null; // Explicit multi-cycle category like 'جميع الفئات (U12 / U15 / U18 / U20)'
+
+  // Inspect tournament name if ageCategory did not specify a standard cycle
+  const tName = String(tournamentName || '').trim();
+  if (tName) {
+    const namePrimary = tName.includes('ابتدائي');
+    const nameMiddle = tName.includes('إعدادي') || tName.includes('اعدادي');
+    const nameHigh = tName.includes('تأهيلي') || tName.includes('تاهيلي');
+    const nameCount = (namePrimary ? 1 : 0) + (nameMiddle ? 1 : 0) + (nameHigh ? 1 : 0);
+    if (nameCount === 1) {
+      if (namePrimary) return 'Primary';
+      if (nameMiddle) return 'Middle';
+      if (nameHigh) return 'High';
+    }
+  }
+
+  return null;
+}
+
+export function isCategoryAllowedForTeacher(
+  teachingCadre: string | undefined,
+  categoryId: string
+): boolean {
+  const teacherKey = normalizeTeachingCadreKey(teachingCadre);
+  if (!teacherKey) return true;
+  const norm = normalizeCategoryKey(categoryId);
+  if (teacherKey === 'Primary') return norm === 'U12';
+  if (teacherKey === 'Middle') return norm === 'U15';
+  if (teacherKey === 'High') return norm === 'U18' || norm === 'U20';
+  return true;
+}
+
+export function isTeacherLevelAllowedForTournament(teachingCadre?: string, tournamentLevel?: string): boolean {
+  if (!tournamentLevel || tournamentLevel === 'جميع الأسلاك' || tournamentLevel.includes('جميع')) return true;
+  const teacherLevelKey = normalizeTeachingCadreKey(teachingCadre);
   if (!teacherLevelKey) return true; // Flexible fallback: allow entry if cadre format is unrecognized
-  
+
   const allowedLevels = tournamentLevel.split(',').map(l => l.trim());
-  
-  // Check mapping
   if (allowedLevels.includes(teacherLevelKey)) return true;
-  
-  // Arabic synonyms check in tournament level string
+
   if (teacherLevelKey === 'Primary' && (tournamentLevel.includes('ابتدائي') || allowedLevels.includes('Primary'))) return true;
   if (teacherLevelKey === 'Middle' && (tournamentLevel.includes('إعدادي') || tournamentLevel.includes('اعدادي') || allowedLevels.includes('Middle'))) return true;
   if (teacherLevelKey === 'High' && (tournamentLevel.includes('تأهيلي') || tournamentLevel.includes('تاهيلي') || tournamentLevel.includes('ثانوي') || allowedLevels.includes('High'))) return true;
 
   return false;
+}
+
+export function isTournamentAllowedForTeacher(
+  teachingCadre: string | undefined,
+  tournament: { level?: string; ageCategory?: string; category?: string; name?: string }
+): boolean {
+  const teacherKey = normalizeTeachingCadreKey(teachingCadre);
+  if (!teacherKey) return true;
+
+  // 1. Strict explicit level check when tournament.level is specified (not empty / 'جميع الأسلاك')
+  const rawLevel = String(tournament.level || '').trim();
+  const isWildcardLevel = !rawLevel || rawLevel === 'جميع الأسلاك' || rawLevel.includes('جميع');
+  if (!isWildcardLevel && !isTeacherLevelAllowedForTournament(teachingCadre, rawLevel)) {
+    return false;
+  }
+
+  // 2. Check the tournament's single age-category cycle (e.g. U12=Primary, U15=Middle, U18/U20=High)
+  const singleCatLevel = detectSingleCategoryCycleLevel(
+    tournament.ageCategory || tournament.category,
+    tournament.name
+  );
+
+  if (singleCatLevel) {
+    // Elementary teachers (PRIMARY / ابتدائي) strictly participate ONLY in U12 (Primary);
+    // never show U15 (Middle) or U18/U20 (High) tournaments as open even if level was defaulted/broadened
+    if (teacherKey === 'Primary' && singleCatLevel !== 'Primary') {
+      return false;
+    }
+
+    // Check if level explicitly includes all 3 cycles (from legacy/batch defaults) or is wildcard/unspecified
+    const coversAllThree =
+      isWildcardLevel ||
+      ((rawLevel.includes('Primary') || rawLevel.includes('ابتدائي')) &&
+        (rawLevel.includes('Middle') || rawLevel.includes('إعدادي') || rawLevel.includes('اعدادي')) &&
+        (rawLevel.includes('High') || rawLevel.includes('تأهيلي') || rawLevel.includes('تاهيلي')));
+
+    if (coversAllThree && teacherKey !== singleCatLevel) {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 export function getCategoryLevel(categoryId: string): 'Primary' | 'Middle' | 'High' | 'Other' {
@@ -3226,16 +3367,6 @@ export const DataService = {
   // SCHOOLS
   async getSchools(targetDirectorateId?: string, all?: boolean): Promise<School[]> {
     const activeDirId = targetDirectorateId || this.getActiveDirectorateId();
-    let usersForFilter: User[] =
-      (inMemoryCollectionCache['local_registered_users'] as User[]) ||
-      getLocal<User>('local_registered_users', []);
-    if (!hasSyncedUsersForSchoolFilter || usersForFilter.length === 0) {
-      try {
-        usersForFilter = await this.getUsers();
-      } catch {
-        // Fallback to cached users
-      }
-    }
 
     try {
       const snap = await getDocs(collection(db, 'schools'));
@@ -3290,11 +3421,10 @@ export const DataService = {
 
         const combinedList = deduplicateById<School>([...localPending, ...listWithCodes]);
         setLocal(STORAGE_KEYS.SCHOOLS, combinedList);
-        const restrictedList = filterSchoolsRestrictedByTeachers(combinedList, usersForFilter);
         if (all === true || !activeDirId || activeDirId === 'all') {
-          return restrictedList;
+          return combinedList;
         }
-        return restrictedList.filter(s => (s.directorateId || 'taourirt') === activeDirId);
+        return combinedList.filter(s => (s.directorateId || 'taourirt') === activeDirId);
       } else {
         // Firestore collection is empty: preserve only genuinely pending local creations
         const localList = getLocal<School>(STORAGE_KEYS.SCHOOLS, []);
@@ -3321,50 +3451,33 @@ export const DataService = {
           });
         }
         setLocal(STORAGE_KEYS.SCHOOLS, pendingOnly);
-        const restrictedPending = filterSchoolsRestrictedByTeachers(pendingOnly, usersForFilter);
         return (all === true || !activeDirId || activeDirId === 'all')
-          ? restrictedPending
-          : restrictedPending.filter(s => (s.directorateId || 'taourirt') === activeDirId);
+          ? pendingOnly
+          : pendingOnly.filter(s => (s.directorateId || 'taourirt') === activeDirId);
       }
     } catch (e) {
       console.warn("Firestore schools fetch error:", e);
-      const localList = getLocal<School>(STORAGE_KEYS.SCHOOLS, []);
-      const filtered = filterSchoolsRestrictedByTeachers(
-        localList.filter(s => s && s.name && !s.name.includes('غير محدد') && !isRecentlyDeleted('schools', s.id)),
-        usersForFilter
+      const localList = getLocal<School>(STORAGE_KEYS.SCHOOLS, []).filter(
+        s => s && s.name && !s.name.includes('غير محدد') && !isRecentlyDeleted('schools', s.id)
       );
       if (all === true || !activeDirId || activeDirId === 'all') {
-        return filtered;
+        return localList;
       }
-      return filtered.filter(s => (s.directorateId || 'taourirt') === activeDirId);
+      return localList.filter(s => (s.directorateId || 'taourirt') === activeDirId);
     }
   },
 
   subscribeToSchools(callback: (schools: School[]) => void): () => void {
-    let latestRawSchools: School[] = [];
-    let isUnsubscribed = false;
-
-    const getCachedUsers = (): User[] =>
-      (inMemoryCollectionCache['local_registered_users'] as User[]) ||
-      getLocal<User>('local_registered_users', []);
-
     const emitLocal = () => {
       const localList = getLocal<School>(STORAGE_KEYS.SCHOOLS, []).filter(
         s => s && s.name && !s.name.includes('غير محدد') && !isRecentlyDeleted('schools', s.id)
       );
-      latestRawSchools = localList;
-      callback(filterSchoolsRestrictedByTeachers(localList, getCachedUsers()));
+      callback(localList);
     };
     const handleLocalUpdate = () => {
-      if (isCloudSyncPaused()) emitLocal();
-    };
-    const handleUsersUpdated = () => {
-      if (!isUnsubscribed && latestRawSchools.length > 0) {
-        callback(filterSchoolsRestrictedByTeachers(latestRawSchools, getCachedUsers()));
-      }
+      emitLocal();
     };
     window.addEventListener('schoolsUpdated', handleLocalUpdate);
-    window.addEventListener('userDataChanged', handleUsersUpdated);
 
     try {
       if (isCloudSyncPaused()) emitLocal();
@@ -3399,35 +3512,18 @@ export const DataService = {
 
         const combined = deduplicateById<School>([...localPending, ...listWithCodes]);
         setLocal(STORAGE_KEYS.SCHOOLS, combined);
-        latestRawSchools = combined;
-
-        const cachedUsers = getCachedUsers();
-        if (!hasSyncedUsersForSchoolFilter) {
-          this.getUsers()
-            .then(freshUsers => {
-              if (!isUnsubscribed && latestRawSchools.length > 0) {
-                callback(filterSchoolsRestrictedByTeachers(latestRawSchools, freshUsers));
-              }
-            })
-            .catch(() => {});
-        }
-
-        callback(filterSchoolsRestrictedByTeachers(combined, cachedUsers));
+        callback(combined);
       }, (err) => {
         console.warn("Real-time schools listener error:", err);
       });
       return () => {
-        isUnsubscribed = true;
         window.removeEventListener('schoolsUpdated', handleLocalUpdate);
-        window.removeEventListener('userDataChanged', handleUsersUpdated);
         unsubscribe();
       };
     } catch (err) {
       console.warn("Failed to subscribe to schools:", err);
       return () => {
-        isUnsubscribed = true;
         window.removeEventListener('schoolsUpdated', handleLocalUpdate);
-        window.removeEventListener('userDataChanged', handleUsersUpdated);
       };
     }
   },
@@ -3936,100 +4032,131 @@ export const DataService = {
   async addSchoolsBulk(newSchools: Omit<School, 'id'>[]): Promise<School[]> {
     const activeDirId = this.getActiveDirectorateId() || 'taourirt';
     const effectiveDirId = activeDirId === 'all' ? 'taourirt' : activeDirId;
-    const existing = await this.getSchools();
+    const allExisting = await this.getSchools('all', true);
     const createdOrUpdatedList: School[] = [];
-    const updatedMap = new Map<string, School>();
-    
-    existing.forEach(s => {
-      if (s.name) {
-        updatedMap.set(s.name.trim().toLowerCase(), s);
-      }
+    const updatedByIdMap = new Map<string, School>();
+    const existingByDirAndName = new Map<string, School>();
+
+    allExisting.forEach(s => {
+      if (!s || !s.id || !s.name) return;
+      updatedByIdMap.set(s.id, s);
+      const dir = s.directorateId || 'taourirt';
+      existingByDirAndName.set(`${dir}__${s.name.trim().toLowerCase()}`, s);
     });
 
-    let batch = writeBatch(db);
-    let batchCount = 0;
+    const batchItems: { id: string; docRef: any; payload: Record<string, any> }[] = [];
 
     for (const item of newSchools) {
       const cleanName = item.name?.trim();
       if (!cleanName) continue;
-      const key = cleanName.toLowerCase();
-      
+      const itemDirId = item.directorateId || effectiveDirId;
+      const lookupKey = `${itemDirId}__${cleanName.toLowerCase()}`;
+
       const cleanItem: any = {};
       Object.entries(item).forEach(([k, v]) => {
-        cleanItem[k] = v !== undefined ? v : "";
+        if (v !== undefined) cleanItem[k] = v;
       });
 
-      const resolvedSector = getSchoolEducationSector({ name: cleanName, type: item.type, educationSector: item.educationSector, isPrivate: item.isPrivate });
+      const resolvedSector = getSchoolEducationSector({
+        name: cleanName,
+        type: item.type,
+        educationSector: item.educationSector,
+        isPrivate: item.isPrivate
+      });
       const normalizedCycle = normalizeSchoolPureCycleLabel({ name: cleanName, type: item.type });
-      const itemWithDir = {
-        ...cleanItem,
-        type: item.type?.trim() ? (item.type.trim() === 'خصوصي' ? 'خصوصي' : normalizedCycle) : (resolvedSector === 'private' ? 'خصوصي' : normalizedCycle),
-        educationSector: resolvedSector,
-        isPrivate: resolvedSector === 'private',
-        directorateId: item.directorateId || effectiveDirId,
-        updatedAt: serverTimestamp()
-      };
+      const resolvedType = item.type?.trim()
+        ? (item.type.trim() === 'خصوصي' ? 'خصوصي' : normalizedCycle)
+        : (resolvedSector === 'private' ? 'خصوصي' : normalizedCycle);
 
-      const existingSchool = updatedMap.get(key);
-      const accessCode = existingSchool?.accessCode || itemWithDir.accessCode || generateSecureAccessCode();
-
-      const itemWithDirAndCode = {
-        ...itemWithDir,
-        accessCode
-      };
+      const existingSchool = existingByDirAndName.get(lookupKey);
+      const accessCode = existingSchool?.accessCode || cleanItem.accessCode || generateSecureAccessCode();
+      const nowIso = new Date().toISOString();
 
       if (existingSchool) {
         const updatedItem: School = {
           ...existingSchool,
-          ...itemWithDirAndCode,
-          name: cleanName,
+          ...cleanItem,
           id: existingSchool.id,
-          coordinatorName: itemWithDirAndCode.coordinatorName || itemWithDirAndCode.teacherName || existingSchool.coordinatorName || '',
-          teacherName: itemWithDirAndCode.coordinatorName || itemWithDirAndCode.teacherName || existingSchool.teacherName || ''
-        } as any;
-        
-        updatedMap.set(key, updatedItem);
+          name: cleanName,
+          type: resolvedType,
+          educationSector: resolvedSector,
+          isPrivate: resolvedSector === 'private',
+          commune: cleanItem.commune || existingSchool.commune || 'تاوريرت المركز',
+          directorateId: itemDirId,
+          accessCode,
+          coordinatorName: cleanItem.coordinatorName || cleanItem.teacherName || existingSchool.coordinatorName || '',
+          teacherName: cleanItem.coordinatorName || cleanItem.teacherName || existingSchool.teacherName || '',
+          updatedAt: nowIso as any
+        };
+
+        updatedByIdMap.set(existingSchool.id, updatedItem);
+        existingByDirAndName.set(lookupKey, updatedItem);
         createdOrUpdatedList.push(updatedItem);
-        
+        markPendingWrite('schools', existingSchool.id);
+
         const docRef = doc(db, 'schools', existingSchool.id);
-        batch.set(docRef, { ...itemWithDirAndCode, id: existingSchool.id }, { merge: true });
-        batchCount++;
+        batchItems.push({
+          id: existingSchool.id,
+          docRef,
+          payload: stripUndefinedDeep({
+            ...updatedItem,
+            updatedAt: serverTimestamp()
+          })
+        });
       } else {
         const docRef = doc(collection(db, 'schools'));
         const newSchool: School = {
-          ...itemWithDirAndCode,
+          ...cleanItem,
           id: docRef.id,
           name: cleanName,
-          coordinatorName: itemWithDirAndCode.coordinatorName || itemWithDirAndCode.teacherName || '',
-          teacherName: itemWithDirAndCode.coordinatorName || itemWithDirAndCode.teacherName || '',
-          createdAt: serverTimestamp()
-        } as any;
-        
-        batch.set(docRef, { ...itemWithDirAndCode, id: docRef.id, createdAt: serverTimestamp() }, { merge: true });
-        updatedMap.set(key, newSchool);
+          type: resolvedType,
+          educationSector: resolvedSector,
+          isPrivate: resolvedSector === 'private',
+          commune: cleanItem.commune || 'تاوريرت المركز',
+          directorateId: itemDirId,
+          accessCode,
+          coordinatorName: cleanItem.coordinatorName || cleanItem.teacherName || '',
+          teacherName: cleanItem.coordinatorName || cleanItem.teacherName || '',
+          createdAt: nowIso as any,
+          updatedAt: nowIso as any
+        };
+
+        updatedByIdMap.set(docRef.id, newSchool);
+        existingByDirAndName.set(lookupKey, newSchool);
         createdOrUpdatedList.push(newSchool);
-        batchCount++;
-      }
+        markPendingWrite('schools', docRef.id);
 
-      if (batchCount >= 450) {
-        await batch.commit();
-        batch = writeBatch(db);
-        batchCount = 0;
-      }
-    }
-
-    if (batchCount > 0) {
-      try {
-        await batch.commit();
-      } catch (e) {
-        console.error("Firestore batch commit error:", e);
+        batchItems.push({
+          id: docRef.id,
+          docRef,
+          payload: stripUndefinedDeep({
+            ...newSchool,
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp()
+          })
+        });
       }
     }
 
-    const finalList = Array.from(updatedMap.values());
+    const finalList = Array.from(updatedByIdMap.values());
     setLocal(STORAGE_KEYS.SCHOOLS, finalList);
     window.dispatchEvent(new CustomEvent('schoolsUpdated'));
-    
+
+    for (let i = 0; i < batchItems.length; i += 450) {
+      const chunk = batchItems.slice(i, i + 450);
+      const batch = writeBatch(db);
+      chunk.forEach(entry => {
+        batch.set(entry.docRef, entry.payload, { merge: true });
+      });
+      try {
+        await batch.commit();
+        chunk.forEach(entry => clearPendingWrite('schools', entry.id));
+      } catch (e) {
+        console.warn("Firestore batch commit error (kept in pending queue):", e);
+      }
+    }
+
+    window.dispatchEvent(new CustomEvent('schoolsUpdated'));
     return createdOrUpdatedList;
   },
 
@@ -4327,6 +4454,189 @@ export const DataService = {
     return newRef;
   },
 
+  async removeRefereeFromScheduledMatches(params: {
+    userId?: string;
+    refereeIds?: string[];
+    fullNames?: string[];
+    removedSports?: string[];
+    removeAll?: boolean;
+  }): Promise<number> {
+    const cleanRefToken = (raw?: string): string =>
+      normalizeArabicMatchText(
+        String(raw || '')
+          .replace(/الحكم المعتمد/gi, '')
+          .replace(/حكم الأول|الحكم الأول|حكم أول/gi, '')
+          .replace(/حكم الثاني|الحكم الثاني|حكم ثاني/gi, '')
+          .replace(/حكم الساحة|حكام الساحة|حكم الطاولة|حكام الطاولة/gi, '')
+          .replace(/\(?\s*أستاذ\s*\)?/gi, '')
+          .replace(/[():\-–—،,.]/g, ' ')
+          .trim()
+      );
+
+    const targetIds = new Set<string>();
+    const targetNames = new Set<string>();
+    if (params.userId) targetIds.add(params.userId.trim().toLowerCase());
+    (params.refereeIds || []).forEach(id => {
+      if (id && id.trim()) targetIds.add(id.trim().toLowerCase());
+    });
+    (params.fullNames || []).forEach(name => {
+      const cleaned = cleanRefToken(name);
+      if (cleaned && cleaned.length >= 2) targetNames.add(cleaned);
+    });
+
+    // Also resolve linked explicit referee doc IDs / names from local & cloud referees
+    const localRefs = deduplicateById([
+      ...getLocal<Referee>('taourirt_referees_data', []),
+      ...getLocal<Referee>('referees', [])
+    ]);
+    localRefs.forEach(r => {
+      if (!r) return;
+      const rIdLower = (r.id || '').trim().toLowerCase();
+      const rTeacherIdLower = (r.teacherId || (r as any).userId || '').trim().toLowerCase();
+      const rNameNorm = cleanRefToken(r.fullName);
+      const matches =
+        (rIdLower && targetIds.has(rIdLower)) ||
+        (rTeacherIdLower && targetIds.has(rTeacherIdLower)) ||
+        (rNameNorm && targetNames.has(rNameNorm));
+      if (matches) {
+        if (rIdLower) targetIds.add(rIdLower);
+        if (rTeacherIdLower) targetIds.add(rTeacherIdLower);
+        if (rNameNorm && rNameNorm.length >= 2) targetNames.add(rNameNorm);
+      }
+    });
+
+    if (targetIds.size === 0 && targetNames.size === 0) return 0;
+
+    const removedSports = (params.removedSports || []).filter(Boolean);
+    if (!params.removeAll && removedSports.length === 0) return 0;
+
+    const isTargetEntry = (entry?: string): boolean => {
+      if (!entry) return false;
+      const lower = entry.trim().toLowerCase();
+      if (!lower) return false;
+      if (targetIds.has(lower)) return true;
+
+      const refRec = localRefs.find(r => r.id && r.id.trim().toLowerCase() === lower);
+      if (refRec) {
+        const refTeacherId = (refRec.teacherId || (refRec as any).userId || '').trim().toLowerCase();
+        if (refTeacherId && targetIds.has(refTeacherId)) return true;
+      }
+
+      const cleaned = cleanRefToken(refRec ? refRec.fullName : entry);
+      if (!cleaned) return false;
+      return Array.from(targetNames).some(target => {
+        if (cleaned === target) return true;
+        if (cleaned.length >= 4 && target.length >= 4) {
+          return cleaned.includes(target) || target.includes(cleaned);
+        }
+        return false;
+      });
+    };
+
+    const allMatches = await this.getMatches().catch(() =>
+      getLocal<Match>(STORAGE_KEYS.MATCHES, []).map(normalizeMatchRecord)
+    );
+    const localMatchesMap = new Map<string, Match>();
+    getLocal<Match>(STORAGE_KEYS.MATCHES, []).forEach(lm => {
+      if (lm && lm.id) localMatchesMap.set(lm.id, normalizeMatchRecord(lm));
+    });
+    allMatches.forEach(m => {
+      if (m && m.id) localMatchesMap.set(m.id, normalizeMatchRecord(m));
+    });
+
+    let updatedCount = 0;
+    const matchesToPersist: {
+      matchId: string;
+      fieldReferees: string[];
+      tableReferees: string[];
+      referees: string[];
+      referee1Id?: string;
+      referee2Id?: string;
+    }[] = [];
+
+    for (const [mId, m] of localMatchesMap.entries()) {
+      // Only remove from programmed/scheduled/postponed matches (preserve completed/live match history)
+      if (m.status === 'Completed' || m.status === 'Ongoing') continue;
+
+      if (!params.removeAll) {
+        const sportMatches = removedSports.some(sp => areSportIdsEquivalent(m.sportId, sp));
+        if (!sportMatches) continue;
+      }
+
+      const origField = Array.isArray(m.fieldReferees) ? m.fieldReferees.filter(Boolean) : [];
+      const origTable = Array.isArray(m.tableReferees) ? m.tableReferees.filter(Boolean) : [];
+      const origRefs = Array.isArray(m.referees) ? m.referees.filter(Boolean) : [];
+
+      const hadMatch =
+        origField.some(isTargetEntry) ||
+        origTable.some(isTargetEntry) ||
+        origRefs.some(isTargetEntry) ||
+        isTargetEntry(m.referee1Id) ||
+        isTargetEntry(m.referee2Id);
+
+      if (!hadMatch) continue;
+
+      const nextField = origField.filter(e => !isTargetEntry(e));
+      const nextTable = origTable.filter(e => !isTargetEntry(e));
+      const remainingExtraRefs = origRefs.filter(e => !isTargetEntry(e));
+      const nextCombined = Array.from(new Set([...nextField, ...nextTable, ...remainingExtraRefs].filter(Boolean)));
+      const nextRef1 = nextCombined[0] || undefined;
+      const nextRef2 = nextCombined[1] || undefined;
+
+      const cleanedMatch: Match = normalizeMatchRecord({
+        ...m,
+        fieldReferees: nextField,
+        tableReferees: nextTable,
+        referees: nextCombined,
+        referee1Id: nextRef1,
+        referee2Id: nextRef2,
+        updatedAt: new Date()
+      });
+
+      localMatchesMap.set(mId, cleanedMatch);
+      markPendingWrite('matches', mId);
+      matchesToPersist.push({
+        matchId: mId,
+        fieldReferees: nextField,
+        tableReferees: nextTable,
+        referees: nextCombined,
+        referee1Id: nextRef1,
+        referee2Id: nextRef2
+      });
+      updatedCount++;
+    }
+
+    if (updatedCount > 0) {
+      setLocal(STORAGE_KEYS.MATCHES, Array.from(localMatchesMap.values()));
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('matchesDataChanged'));
+        window.dispatchEvent(new CustomEvent('matchesUpdated'));
+      }
+
+      for (const item of matchesToPersist) {
+        try {
+          await setDoc(
+            doc(db, 'matches', item.matchId),
+            {
+              fieldReferees: item.fieldReferees,
+              tableReferees: item.tableReferees,
+              referees: item.referees,
+              referee1Id: item.referee1Id ? item.referee1Id : deleteField(),
+              referee2Id: item.referee2Id ? item.referee2Id : deleteField(),
+              updatedAt: serverTimestamp()
+            },
+            { merge: true }
+          );
+          clearPendingWrite('matches', item.matchId);
+        } catch (err) {
+          console.warn(`Scheduled match referee cleanup sync pending for ${item.matchId}:`, err);
+        }
+      }
+    }
+
+    return updatedCount;
+  },
+
   async updateReferee(id: string, updates: Partial<Referee>): Promise<void> {
     const list = deduplicateById([...getLocal<Referee>('taourirt_referees_data', []), ...getLocal<Referee>('referees', [])]);
     const norm = (s?: string) => (s || '').replace(/[\s\-\_\.]/g, '').replace(/[أإآ]/g, 'ا').replace(/ة/g, 'ه').replace(/ى/g, 'ي').toLowerCase();
@@ -4345,6 +4655,7 @@ export const DataService = {
       const refName = (updates.fullName || targetRef?.fullName || '').replace(/\s*\(أستاذ\)\s*/g, '');
       matchedTeacherUser = users.find(u => 
         u.id === id || 
+        (targetRef?.teacherId && u.id === targetRef.teacherId) ||
         (refName && u.fullName && (norm(u.fullName) === norm(refName) || norm(u.fullName).includes(norm(refName)) || norm(refName).includes(norm(u.fullName))))
       );
     } catch (err) {
@@ -4382,6 +4693,22 @@ export const DataService = {
       } catch (err) {
         console.warn("Error syncing referee update to user profile:", err);
       }
+    } else if (updates.specialty !== undefined) {
+      const prevSpecs = Array.isArray(targetRef?.specialty)
+        ? targetRef.specialty
+        : (targetRef?.specialty ? [targetRef.specialty] : []);
+      const nextSpecs = Array.isArray(updates.specialty)
+        ? updates.specialty
+        : (updates.specialty ? [updates.specialty] : []);
+      const removedSports = prevSpecs.filter(sp => !nextSpecs.some(ns => areSportIdsEquivalent(ns, sp)));
+      if (removedSports.length > 0 || nextSpecs.length === 0) {
+        await this.removeRefereeFromScheduledMatches({
+          refereeIds: [id],
+          fullNames: [targetRef?.fullName || '', updates.fullName || ''].filter(Boolean),
+          removedSports,
+          removeAll: nextSpecs.length === 0
+        }).catch(() => 0);
+      }
     }
     window.dispatchEvent(new CustomEvent('refereesUpdated'));
   },
@@ -4389,6 +4716,7 @@ export const DataService = {
   async deleteReferee(id: string): Promise<void> {
     markRecentlyDeleted('referees', id);
     const list = deduplicateById([...getLocal<Referee>('taourirt_referees_data', []), ...getLocal<Referee>('referees', [])]);
+    const targetRef = list.find(r => r.id === id);
     const filtered = list.filter(r => r.id !== id);
     setLocal('taourirt_referees_data', filtered);
     setLocal('referees', filtered);
@@ -4399,18 +4727,28 @@ export const DataService = {
     }
 
     // If this referee was auto-derived from a teacher's refereeSpecialty, clear refereeSpecialty so they don't reappear
+    let clearedViaProfile = false;
     try {
       const users = await this.getUsers();
-      const matchedTeacher = users.find(u => u.id === id);
+      const matchedTeacher = users.find(u => u.id === id || (targetRef?.teacherId && u.id === targetRef.teacherId));
       if (matchedTeacher && matchedTeacher.refereeSpecialty) {
         await this.updateUserProfile(matchedTeacher.id, {
           refereeSpecialty: [],
           refereeDiploma: '',
           refereeDiplomas: {}
         });
+        clearedViaProfile = true;
       }
     } catch (e) {
       console.warn("Could not clear teacher refereeSpecialty on referee delete:", e);
+    }
+    if (!clearedViaProfile) {
+      await this.removeRefereeFromScheduledMatches({
+        userId: targetRef?.teacherId || id,
+        refereeIds: [id],
+        fullNames: targetRef?.fullName ? [targetRef.fullName] : [],
+        removeAll: true
+      }).catch(() => 0);
     }
     window.dispatchEvent(new CustomEvent('refereesUpdated'));
   },
@@ -4626,10 +4964,22 @@ export const DataService = {
       const idsToDelete: string[] = [];
 
       duplicates.forEach(dup => {
-        // Merge missing fields from duplicate into primary user
+        // Merge missing fields from duplicate into primary user while preserving elevated admin/committee roles
+        const mergedIsSuper = Boolean(primaryUser.isSuperAdmin || dup.isSuperAdmin);
+        const mergedRole =
+          primaryUser.role === 'CENTRAL_ADMIN' || dup.role === 'CENTRAL_ADMIN' || mergedIsSuper
+            ? 'CENTRAL_ADMIN'
+            : (primaryUser.role || dup.role || 'TEACHER');
         mergedPrimary = {
           ...dup,
           ...mergedPrimary,
+          role: mergedRole,
+          isSuperAdmin: mergedIsSuper,
+          isTechCommitteeHead: Boolean(primaryUser.isTechCommitteeHead ?? dup.isTechCommitteeHead),
+          techCommitteeSports:
+            (primaryUser.techCommitteeSports && primaryUser.techCommitteeSports.length > 0)
+              ? primaryUser.techCommitteeSports
+              : (dup.techCommitteeSports || []),
           workLocation: primaryUser.workLocation || dup.workLocation || '',
           schoolId: primaryUser.schoolId || dup.schoolId || '',
           leaseNumber: primaryUser.leaseNumber || dup.leaseNumber || '',
@@ -4678,6 +5028,9 @@ export const DataService = {
       const localUsersRaw = localStorage.getItem('local_registered_users');
       users = localUsersRaw ? JSON.parse(localUsersRaw) : [];
     } catch {}
+    if (users.length === 0 && Array.isArray(inMemoryCollectionCache['local_registered_users'])) {
+      users = [...(inMemoryCollectionCache['local_registered_users'] as User[])];
+    }
 
     const idx = users.findIndex((u: any) => 
       (userId && u.id === userId) || 
@@ -4685,24 +5038,59 @@ export const DataService = {
       (profileData.leaseNumber && u.leaseNumber === profileData.leaseNumber)
     );
 
+    let prevUserSnapshot: Partial<User> | null = idx >= 0 ? { ...users[idx] } : null;
+    if (!prevUserSnapshot) {
+      try {
+        const demoRaw = localStorage.getItem('demo_user_profile');
+        if (demoRaw) {
+          const parsedDemo = JSON.parse(demoRaw) as User;
+          if (parsedDemo && (parsedDemo.id === userId || (profileData.email && parsedDemo.email?.toLowerCase() === profileData.email?.toLowerCase()))) {
+            prevUserSnapshot = parsedDemo;
+          }
+        }
+      } catch {}
+    }
+    if (!prevUserSnapshot && profileData.refereeSpecialty !== undefined && userId) {
+      try {
+        const snap = await getDoc(doc(db, 'users', userId));
+        if (snap.exists()) {
+          prevUserSnapshot = { id: snap.id, ...(snap.data() as any) };
+        }
+      } catch {}
+    }
+
+    const prevRefereeSpecialties: string[] = Array.isArray(prevUserSnapshot?.refereeSpecialty)
+      ? prevUserSnapshot!.refereeSpecialty.filter(Boolean)
+      : prevUserSnapshot?.refereeSpecialty
+      ? [String(prevUserSnapshot.refereeSpecialty)]
+      : [];
+
+    const targetEmailNorm = String(cleanProfileData.email || prevUserSnapshot?.email || '').trim().toLowerCase();
+    const isProtectedSuperEmail = Boolean(targetEmailNorm && SUPER_ADMIN_EMAILS.includes(targetEmailNorm));
+
     let fullUserRecord: User;
     if (idx >= 0) {
+      const existingRole = users[idx].role;
+      const mergedRole = isProtectedSuperEmail
+        ? 'CENTRAL_ADMIN'
+        : (cleanProfileData.role || existingRole || 'TEACHER');
       fullUserRecord = {
         ...users[idx],
         ...cleanProfileData,
         id: users[idx].id || userId,
-        role: cleanProfileData.role || users[idx].role || 'TEACHER',
+        role: mergedRole,
+        isSuperAdmin: isProtectedSuperEmail ? true : Boolean(cleanProfileData.isSuperAdmin ?? users[idx].isSuperAdmin),
         directorateId: cleanProfileData.directorateId || users[idx].directorateId || activeDirId,
         isActive: users[idx].isActive !== undefined ? users[idx].isActive : true,
         updatedAt: new Date()
       };
       users[idx] = fullUserRecord;
     } else {
+      const resolvedRole = isProtectedSuperEmail ? 'CENTRAL_ADMIN' : (cleanProfileData.role || 'TEACHER');
       fullUserRecord = {
         id: userId,
         fullName: cleanProfileData.fullName || (cleanProfileData as any).name || 'أستاذ',
         email: cleanProfileData.email || '',
-        role: cleanProfileData.role || 'TEACHER',
         directorateId: cleanProfileData.directorateId || activeDirId,
         workLocation: cleanProfileData.workLocation || '',
         leaseNumber: cleanProfileData.leaseNumber || '',
@@ -4713,6 +5101,8 @@ export const DataService = {
         isTechCommitteeMember: !!cleanProfileData.isTechCommitteeMember,
         techCommitteeSportsMemberOf: cleanProfileData.techCommitteeSportsMemberOf || [],
         ...cleanProfileData,
+        role: resolvedRole,
+        isSuperAdmin: isProtectedSuperEmail ? true : Boolean(cleanProfileData.isSuperAdmin),
         createdAt: new Date(),
         updatedAt: new Date()
       };
@@ -4721,12 +5111,17 @@ export const DataService = {
     inMemoryCollectionCache['local_registered_users'] = users;
     safeSetLocalJson('local_registered_users', users);
 
-    // 2. Also sync demo user profile if matching
+    // 2. Also sync demo user profile strictly if matching the exact demo account ID or email
     try {
       const savedDemo = localStorage.getItem('demo_user_profile');
       if (savedDemo) {
         const parsed = JSON.parse(savedDemo) as User;
-        if (parsed.id === userId || (profileData.email && parsed.email?.toLowerCase() === profileData.email?.toLowerCase()) || parsed.role === 'TEACHER') {
+        const emailMatches = Boolean(
+          profileData.email &&
+          parsed.email &&
+          parsed.email.trim().toLowerCase() === profileData.email.trim().toLowerCase()
+        );
+        if (parsed.id === userId || emailMatches) {
           const updatedDemo = { ...parsed, ...fullUserRecord, updatedAt: new Date() };
           localStorage.setItem('demo_user_profile', JSON.stringify(updatedDemo));
         }
@@ -4802,27 +5197,41 @@ export const DataService = {
       }
 
       // Synchronize changes to Referees list
-      if (profileData.phone || profileData.fullName || profileData.refereeSpecialty || profileData.refereeDiplomas !== undefined || profileData.refereeDiploma !== undefined) {
+      const linkedRefIds: string[] = [];
+      if (
+        profileData.phone ||
+        profileData.fullName ||
+        profileData.refereeSpecialty !== undefined ||
+        profileData.refereeDiplomas !== undefined ||
+        profileData.refereeDiploma !== undefined
+      ) {
         const norm = (s?: string) => (s || '').replace(/[\s\-\_\.]/g, '').replace(/[أإآ]/g, 'ا').replace(/ة/g, 'ه').replace(/ى/g, 'ي').toLowerCase();
         const refList = deduplicateById([...getLocal<Referee>('taourirt_referees_data', []), ...getLocal<Referee>('referees', [])]);
         let refChanged = false;
-        const targetName = profileData.fullName;
-        
-        const updatedRefList = refList.map(r => {
-          const matchId = r.id === userId || r.teacherId === userId;
-          const matchName = targetName && r.fullName && (
-            norm(r.fullName.replace(/\s*\(أستاذ\)\s*/g, '')) === norm(targetName) ||
-            norm(r.fullName.replace(/\s*\(أستاذ\)\s*/g, '')).includes(norm(targetName)) ||
-            norm(targetName).includes(norm(r.fullName.replace(/\s*\(أستاذ\)\s*/g, '')))
-          );
+        const candidateNames = Array.from(new Set([profileData.fullName, prevUserSnapshot?.fullName].filter(Boolean) as string[]));
+        const normalizedSpecs = profileData.refereeSpecialty !== undefined
+          ? (Array.isArray(profileData.refereeSpecialty) ? profileData.refereeSpecialty : (profileData.refereeSpecialty ? [profileData.refereeSpecialty] : []))
+          : undefined;
 
-          if (matchId || matchName) {
+        const isMatchingRef = (r: Referee) => {
+          const matchId = r.id === userId || r.id === targetDocId || r.teacherId === userId || r.teacherId === targetDocId;
+          const rClean = norm((r.fullName || '').replace(/\s*\(أستاذ\)\s*/g, ''));
+          const matchName = candidateNames.some(tn => {
+            const tClean = norm(tn);
+            return tClean && rClean && (rClean === tClean || rClean.includes(tClean) || tClean.includes(rClean));
+          });
+          return matchId || matchName;
+        };
+
+        const updatedRefList = refList.map(r => {
+          if (isMatchingRef(r)) {
+            if (r.id) linkedRefIds.push(r.id);
             refChanged = true;
             return {
               ...r,
               ...(profileData.phone ? { phone: profileData.phone } : {}),
               ...(profileData.fullName ? { fullName: profileData.fullName } : {}),
-              ...(profileData.refereeSpecialty ? { specialty: Array.isArray(profileData.refereeSpecialty) ? profileData.refereeSpecialty : [profileData.refereeSpecialty] } : {}),
+              ...(normalizedSpecs !== undefined ? { specialty: normalizedSpecs } : {}),
               ...(profileData.refereeDiploma !== undefined ? { diploma: profileData.refereeDiploma } : {}),
               ...(profileData.refereeDiplomas !== undefined ? { specialtyDiplomas: profileData.refereeDiplomas } : {})
             };
@@ -4834,23 +5243,48 @@ export const DataService = {
           setLocal('taourirt_referees_data', updatedRefList);
           setLocal('referees', updatedRefList);
           try {
-            const matched = updatedRefList.filter(r => {
-              const matchId = r.id === userId || r.teacherId === userId;
-              const matchName = targetName && r.fullName && (norm(r.fullName.replace(/\s*\(أستاذ\)\s*/g, '')) === norm(targetName) || norm(r.fullName.replace(/\s*\(أستاذ\)\s*/g, '')).includes(norm(targetName)));
-              return matchId || matchName;
-            });
+            const matched = updatedRefList.filter(isMatchingRef);
             for (const mr of matched) {
               await setDoc(doc(db, 'referees', mr.id), stripUndefinedDeep({
                 ...(profileData.phone ? { phone: profileData.phone } : {}),
                 ...(profileData.fullName ? { fullName: profileData.fullName } : {}),
+                ...(normalizedSpecs !== undefined ? { specialty: normalizedSpecs } : {}),
                 ...(profileData.refereeDiploma !== undefined ? { diploma: profileData.refereeDiploma } : {}),
                 ...(profileData.refereeDiplomas !== undefined ? { specialtyDiplomas: profileData.refereeDiplomas } : {}),
                 updatedAt: Timestamp.now()
               }), { merge: true }).catch(() => {});
             }
           } catch (e) {
-            console.warn("Error syncing referee phone to Firestore:", e);
+            console.warn("Error syncing referee updates to Firestore:", e);
           }
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('refereesUpdated'));
+          }
+        }
+      }
+
+      // Remove this teacher cleanly from scheduled matches whenever they withdraw from refereeing a sport
+      if (profileData.refereeSpecialty !== undefined) {
+        const nextSpecs: string[] = Array.isArray(profileData.refereeSpecialty)
+          ? profileData.refereeSpecialty.filter(Boolean)
+          : profileData.refereeSpecialty
+          ? [String(profileData.refereeSpecialty)]
+          : [];
+        const removedSports = prevRefereeSpecialties.filter(
+          prevSp => !nextSpecs.some(nextSp => areSportIdsEquivalent(nextSp, prevSp))
+        );
+        if (removedSports.length > 0 || nextSpecs.length === 0) {
+          await this.removeRefereeFromScheduledMatches({
+            userId: targetDocId || userId,
+            refereeIds: Array.from(new Set([userId, targetDocId, ...linkedRefIds].filter(Boolean))),
+            fullNames: Array.from(new Set([
+              prevUserSnapshot?.fullName || '',
+              fullUserRecord.fullName || '',
+              profileData.fullName || ''
+            ].filter(Boolean))),
+            removedSports,
+            removeAll: nextSpecs.length === 0
+          });
         }
       }
     } catch (err) {

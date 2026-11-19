@@ -273,6 +273,27 @@ export function getOrdinalRefLabel(idx: number): string {
   return `الحكم ${idx + 1}`;
 }
 
+export function isOpaqueEntityId(value?: string): boolean {
+  const clean = (value || '').trim();
+  if (!clean) return false;
+  if (/^(ref[-_]|usr[-_]|mgr[-_]|teacher[-_]|sch[-_]|ven[-_]|mat[-_]|tourn[-_])/i.test(clean)) {
+    return true;
+  }
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(clean)) {
+    return true;
+  }
+  if (clean === 'custom' || clean === 'default-venue') {
+    return true;
+  }
+  if (/^[A-Za-z0-9_-]{16,}$/.test(clean) && !/\s/.test(clean)) {
+    return true;
+  }
+  if (/^[A-Za-z0-9_-]{12,}$/.test(clean) && /[A-Za-z]/.test(clean) && /\d/.test(clean)) {
+    return true;
+  }
+  return false;
+}
+
 export function resolveMatchRefereesInfo(
   m: Match,
   referees: Referee[] = [],
@@ -284,14 +305,17 @@ export function resolveMatchRefereesInfo(
   const resolveSingle = (rawEntry?: string): string => {
     const clean = stripTeacherTag(rawEntry || '');
     if (!clean) return '';
-    const refMatch = referees.find(r => r.id === clean || stripTeacherTag(r.fullName || '') === clean);
+    const refMatch = referees.find(
+      r =>
+        r.id === clean ||
+        r.teacherId === clean ||
+        (r as any).userId === clean ||
+        stripTeacherTag(r.fullName || '') === clean
+    );
     if (refMatch?.fullName) return stripTeacherTag(refMatch.fullName);
     const userMatch = users.find(u => u.id === clean || stripTeacherTag(u.fullName || '') === clean);
     if (userMatch?.fullName) return stripTeacherTag(userMatch.fullName);
-    const isOpaqueId =
-      /^(ref[-_]|usr[-_]|mgr[-_]|teacher[-_])[A-Za-z0-9_-]*$/i.test(clean) ||
-      (/^[A-Za-z0-9_-]{16,}$/.test(clean) && !/\s/.test(clean));
-    return isOpaqueId ? '' : clean;
+    return isOpaqueEntityId(clean) ? '' : clean;
   };
 
   const dedupePreserveOrder = (arr: string[]) => Array.from(new Set(arr.filter(Boolean)));

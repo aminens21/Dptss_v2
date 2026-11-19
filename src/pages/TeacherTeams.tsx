@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { DataService, SPORTS_MAP, AGE_CATEGORIES, getAgeCategoriesForSeason, getCategoryGenderLabel, isClubTournament, normalizeCategoryKey, validateBirthDateForCategory, isTeacherLevelAllowedForTournament, getEffectiveConfirmedBranches, formatBranchLabelAr, getGenderSpecificCategoryTitle, isSchoolSectorAllowedForTournament, schoolNamesMatch, isAffiliationAllowedByDisplayConfig } from '../lib/dataService';
+import { DataService, SPORTS_MAP, AGE_CATEGORIES, getAgeCategoriesForSeason, getCategoryGenderLabel, isClubTournament, normalizeCategoryKey, validateBirthDateForCategory, isTeacherLevelAllowedForTournament, isTournamentAllowedForTeacher, resolveTeacherCadre, getEffectiveConfirmedBranches, formatBranchLabelAr, getGenderSpecificCategoryTitle, isSchoolSectorAllowedForTournament, schoolNamesMatch, isAffiliationAllowedByDisplayConfig } from '../lib/dataService';
 import { useSchoolConfirmations } from '../hooks/useSchoolConfirmations';
 import { Student, Sport, Tournament, School, Directorate, AffiliationDisplayConfig } from '../types';
 import { ParticipationFormPdfModal } from '../components/ParticipationFormPdfModal';
@@ -65,18 +65,6 @@ export const TeacherTeams: React.FC = () => {
   const isTeacherRole = userProfile?.role === 'TEACHER';
   const canManage = userProfile?.role === 'CENTRAL_ADMIN' || userProfile?.role === 'REGIONAL_ADMIN' || userProfile?.role === 'PROVINCIAL_ADMIN' || userProfile?.isTechCommitteeHead;
 
-  const teacherCadre = useMemo(() => {
-    if (userProfile?.teachingCadre) return userProfile.teachingCadre;
-    if (userProfile?.schoolId || userProfile?.schoolName) {
-      const userSchool = (schools || []).find(s => 
-        (userProfile.schoolId && s.id === userProfile.schoolId) || 
-        (userProfile.schoolName && s.name === userProfile.schoolName)
-      );
-      if (userSchool?.type) return userSchool.type;
-    }
-    return undefined;
-  }, [userProfile, schools]);
-
   const teacherSchoolObj = useMemo(() => {
     const schoolLookup = userProfile?.workLocation || userProfile?.schoolName;
     return (schools || []).find(s =>
@@ -84,6 +72,10 @@ export const TeacherTeams: React.FC = () => {
       (schoolLookup && schoolNamesMatch(s.name, schoolLookup))
     );
   }, [schools, userProfile]);
+
+  const teacherCadre = useMemo(() => {
+    return resolveTeacherCadre(userProfile, undefined, teacherSchoolObj);
+  }, [userProfile, teacherSchoolObj]);
 
   const teacherAllowedTournaments = useMemo(() => {
     const activeTourns = tournaments.filter(t => {
@@ -93,7 +85,7 @@ export const TeacherTeams: React.FC = () => {
     });
     if (!isTeacherRole || canManage) return activeTourns;
     return activeTourns.filter(t =>
-      isTeacherLevelAllowedForTournament(teacherCadre, t.level) &&
+      isTournamentAllowedForTeacher(teacherCadre, t) &&
       (!teacherSchoolObj || isSchoolSectorAllowedForTournament(teacherSchoolObj, t))
     );
   }, [tournaments, isTeacherRole, canManage, teacherCadre, teacherSchoolObj, affiliationDisplayConfig]);
@@ -348,8 +340,8 @@ export const TeacherTeams: React.FC = () => {
     setSelectedSportId(sportId);
     setSelectedCategoryKey(null);
     
-    // Automatically pre-select first active category of this sport if any
-    const sportTourns = tournaments.filter(t => t.sportId === sportId);
+    // Automatically pre-select first active category of this sport allowed for teacher if any
+    const sportTourns = teacherAllowedTournaments.filter(t => t.sportId === sportId);
     const tournCats = Array.from(new Set(sportTourns.map(t => normalizeCategoryKey(t.ageCategory)).filter(Boolean)));
     if (tournCats.length > 0) {
       setCategory(tournCats[0]);
@@ -450,11 +442,11 @@ export const TeacherTeams: React.FC = () => {
 
   // Helpers for checking regional tournament existence
   const hasActiveTournament = (sportId: string): boolean => {
-    return tournaments.some(t => t.sportId === sportId);
+    return teacherAllowedTournaments.some(t => t.sportId === sportId);
   };
 
   const getSportTournament = (sportId: string): Tournament | undefined => {
-    return tournaments.find(t => t.sportId === sportId);
+    return teacherAllowedTournaments.find(t => t.sportId === sportId);
   };
 
   const handleOpenNewStudentForm = (initialCat?: string, initialGender?: 'Male' | 'Female', initialAffiliation?: 'non_club' | 'club_affiliated') => {
@@ -3363,7 +3355,7 @@ export const TeacherTeams: React.FC = () => {
           schools={schools}
           initialCategoryDefId={crossCountryInitialRaceId}
           affiliationType={crossCountryInitialAffiliation}
-          tournaments={tournaments}
+          tournaments={teacherAllowedTournaments}
           preselectedSchoolName={schoolName}
           allExistingStudents={students}
           currentSeason={currentSeason}
@@ -3388,12 +3380,12 @@ export const TeacherTeams: React.FC = () => {
             preselectedSchoolName={schoolName}
             tournaments={
               parsed.affiliationType
-                ? tournaments.filter(t => {
+                ? teacherAllowedTournaments.filter(t => {
                     if (t.sportId !== selectedSportId) return false;
                     const tAff = t.affiliationType || (isClubTournament(t) ? 'club_affiliated' : 'non_club');
                     return tAff === parsed.affiliationType || tAff === 'open';
                   })
-                : tournaments.filter(t => t.sportId === selectedSportId)
+                : teacherAllowedTournaments.filter(t => t.sportId === selectedSportId)
             }
             allExistingStudents={students}
             currentSeason={currentSeason}

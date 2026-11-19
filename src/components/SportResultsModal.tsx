@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { Sport, Tournament, Match, School, Venue, Student, User, Referee } from '../types';
-import { DataService, isClubTournament, GENDER_MAP, SPORTS_MAP, getAgeCategoriesForSeason, normalizeCategoryKey, canUserApproveSportResult, areSportIdsEquivalent, normalizeCanonicalSportId } from '../lib/dataService';
+import { Sport, Tournament, Match, School, Venue, Student, User, Referee, AffiliationDisplayConfig } from '../types';
+import { DataService, isClubTournament, GENDER_MAP, SPORTS_MAP, getAgeCategoriesForSeason, normalizeCategoryKey, canUserApproveSportResult, areSportIdsEquivalent, normalizeCanonicalSportId, normalizeTournamentAffiliation, isAffiliationAllowedByDisplayConfig } from '../lib/dataService';
 import { computeGroupStandings, formatTeamDisplayName, isPlaceholderTeamId, isKnockoutBracketMatch, ComputedGroupStandings, hasValidMatchTeams, extractMatchGroupLabel } from '../lib/drawTournamentUtils';
 import { CrossCountryPodiumView } from './CrossCountryPodiumView';
 import { AthleticsResultsView } from './AthleticsResultsView';
@@ -36,6 +36,7 @@ import {
   findRefereeContact,
   resolveHostSchoolForMatch
 } from '../lib/whatsappService';
+import { resolveMatchRefereesInfo, isOpaqueEntityId } from '../lib/programExportService';
 import {
   MatchBroadcastDiffusionModal,
   MatchBroadcastDiffusionTarget
@@ -95,10 +96,40 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
   const [isFullScreen, setIsFullScreen] = useState(false);
   const [loadedReferees, setLoadedReferees] = useState<Referee[]>([]);
   const [loadedTeachers, setLoadedTeachers] = useState<User[]>([]);
+  const [loadedUsers, setLoadedUsers] = useState<User[]>([]);
   const [editingNoteMatchId, setEditingNoteMatchId] = useState<string | null>(null);
   const [noteDraft, setNoteDraft] = useState<string>('');
   const [savingNoteMatchId, setSavingNoteMatchId] = useState<string | null>(null);
   const [diffusionTarget, setDiffusionTarget] = useState<MatchBroadcastDiffusionTarget | null>(null);
+  const [togglingLiveMatchId, setTogglingLiveMatchId] = useState<string | null>(null);
+  const [affiliationDisplayConfig, setAffiliationDisplayConfig] = useState<AffiliationDisplayConfig>(() =>
+    DataService.getAffiliationDisplayConfigSync()
+  );
+
+  useEffect(() => {
+    const unsub = DataService.subscribeToAffiliationDisplayConfig((cfg) => {
+      setAffiliationDisplayConfig(cfg);
+    });
+    return () => {
+      if (typeof unsub === 'function') unsub();
+    };
+  }, []);
+
+  const handleToggleLiveMatchStatus = async (match: Match, nextStatus: 'Ongoing' | 'Scheduled') => {
+    setTogglingLiveMatchId(match.id);
+    try {
+      await DataService.updateMatch(match.id, {
+        status: nextStatus,
+        updatedAt: new Date()
+      });
+      toast.success(nextStatus === 'Ongoing' ? 'تم تفعيل حالة المباراة: 🔴 جارية الآن' : 'تمت إعادة المباراة إلى حالة مبرمجة');
+    } catch (err) {
+      console.error('Failed to update live status:', err);
+      toast.error('تعذر تحديث حالة المباراة');
+    } finally {
+      setTogglingLiveMatchId(null);
+    }
+  };
 
   const handleSaveInlineNote = async (match: Match) => {
     setSavingNoteMatchId(match.id);
@@ -121,16 +152,33 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
 
   useEffect(() => {
     if (!isOpen) return;
-    if (!refereesProp) {
-      DataService.getReferees().then(setLoadedReferees).catch(() => {});
-    }
-    if (!teachersProp) {
-      DataService.getTeachers().then(setLoadedTeachers).catch(() => {});
-    }
+    const syncDirectories = () => {
+      if (!refereesProp) {
+        DataService.getReferees().then(setLoadedReferees).catch(() => {});
+      }
+      if (!teachersProp) {
+        DataService.getTeachers().then(setLoadedTeachers).catch(() => {});
+      }
+      DataService.getUsers().then(setLoadedUsers).catch(() => {});
+    };
+    syncDirectories();
+    window.addEventListener('refereesUpdated', syncDirectories);
+    window.addEventListener('userDataChanged', syncDirectories);
+    return () => {
+      window.removeEventListener('refereesUpdated', syncDirectories);
+      window.removeEventListener('userDataChanged', syncDirectories);
+    };
   }, [isOpen, refereesProp, teachersProp]);
 
   const effectiveReferees = refereesProp || loadedReferees;
   const effectiveTeachers = teachersProp || loadedTeachers;
+  const effectiveUsers = useMemo(() => {
+    const map = new Map<string, User>();
+    [...effectiveTeachers, ...loadedUsers].forEach(u => {
+      if (u?.id) map.set(u.id, u);
+    });
+    return Array.from(map.values());
+  }, [effectiveTeachers, loadedUsers]);
 
   const { canDo } = useRolePermissions();
 
@@ -188,16 +236,34 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
 
   const isUserAssignedReferee = (m: Match): boolean => {
     if (!userProfile) return false;
+    const myId = (userProfile.id || '').trim().toLowerCase();
     const myName = (userProfile.fullName || '').trim().toLowerCase();
-    if (!myName) return false;
-    const refs = [
+    const myLinkedRefIds = new Set(
+      effectiveReferees
+        .filter(
+          r =>
+            (userProfile.id && (r.teacherId === userProfile.id || (r as any).userId === userProfile.id)) ||
+            (userProfile.email && r.email && r.email.trim().toLowerCase() === userProfile.email.trim().toLowerCase()) ||
+            (myName && (r.fullName || '').trim().toLowerCase() === myName)
+        )
+        .map(r => (r.id || '').trim().toLowerCase())
+        .filter(Boolean)
+    );
+    if (myId) myLinkedRefIds.add(myId);
+
+    const rawEntries = [
+      ...(Array.isArray(m.fieldReferees) ? m.fieldReferees : []),
+      ...(Array.isArray(m.tableReferees) ? m.tableReferees : []),
       ...(Array.isArray(m.referees) ? m.referees : []),
       ...(m.referee1Id ? [m.referee1Id] : []),
-      ...(m.referee2Id ? [m.referee2Id] : [])
+      ...(m.referee2Id ? [m.referee2Id] : []),
+      ...resolveMatchRefereesInfo(m, effectiveReferees, effectiveUsers).allRefs
     ];
-    return refs.some(r => {
+    return rawEntries.some(r => {
+      const rawLower = (r || '').trim().toLowerCase();
+      if (rawLower && myLinkedRefIds.has(rawLower)) return true;
       const clean = (r || '').replace(/[()]/g, '').replace('الحكم المعتمد', '').trim().toLowerCase();
-      return clean && (clean === myName || clean.includes(myName) || myName.includes(clean));
+      return Boolean(myName && clean && (clean === myName || clean.includes(myName) || myName.includes(clean)));
     });
   };
 
@@ -212,14 +278,11 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
         const t2Obj = schools.find(s => s.id === m.team2Id);
         const t1Name = t1Obj?.name || m.team1Name || m.team1Id || 'المؤسسة 1';
         const t2Name = t2Obj?.name || m.team2Name || m.team2Id || 'المؤسسة 2';
-        const vObj = venues.find(v => v.id === m.venueId);
-        const vName = vObj?.name || m.venueName || m.venueId || 'ملعب غير محدد';
         const hostSchoolObj = resolveHostSchoolForMatch(m, schools);
-        const rawRefs = [
-          ...(m.referees || []),
-          ...(m.referee1Id ? [m.referee1Id] : []),
-          ...(m.referee2Id ? [m.referee2Id] : [])
-        ].map(r => (r || '').trim()).filter(Boolean);
+        const vObj = venues.find(v => v.id === m.venueId);
+        const rawVenueFallback = m.venueId && !isOpaqueEntityId(m.venueId) ? m.venueId : '';
+        const vName = m.venueName?.trim() || hostSchoolObj?.name || vObj?.name || rawVenueFallback || 'ملعب غير محدد';
+        const resolvedRefs = resolveMatchRefereesInfo(m, effectiveReferees, effectiveUsers);
         setDiffusionTarget({
           matchId: m.id,
           mode: 'result',
@@ -237,7 +300,9 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
           venueName: vName,
           dateStr: formatMatchDate(m.date),
           timeStr: m.startTime || '10:00',
-          referees: Array.from(new Set(rawRefs)),
+          referees: resolvedRefs.allRefs,
+          tableReferees: resolvedRefs.tableRefs,
+          fieldReferees: resolvedRefs.fieldRefs,
           notes: m.notes,
           score1: m.score1 ?? m.team1Score ?? 0,
           score2: m.score2 ?? m.team2Score ?? 0,
@@ -266,49 +331,34 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
     return seasonalCategories.map(c => c.id);
   }, [sport, tournaments, seasonalCategories]);
 
-  // Tournaments for this sport
+  // Tournaments for this sport (excluding Draft/inactive/other directorates & hidden affiliations)
   const sportTournaments = useMemo(() => {
     if (!sport) return [];
-    return tournaments.filter(t => t.sportId === sport.id);
-  }, [tournaments, sport]);
+    const activeDirId = DataService.getActiveDirectorateId() || 'taourirt';
+    return tournaments.filter(t => {
+      if (t.sportId !== sport.id) return false;
+      if (t.status === 'Draft' || (t as any).isActive === false) return false;
+      if (activeDirId && activeDirId !== 'all') {
+        const tDir = t.directorateId || 'taourirt';
+        if (tDir !== activeDirId) return false;
+      }
+      const tAff = normalizeTournamentAffiliation(t.affiliationType, t.name);
+      return isAffiliationAllowedByDisplayConfig(tAff, affiliationDisplayConfig, sport.id);
+    });
+  }, [tournaments, sport, affiliationDisplayConfig]);
 
   // Non-club tournaments vs Club-affiliated tournaments
   const nonClubTournaments = useMemo(() => {
-    return sportTournaments.filter(t => !isClubTournament(t));
+    return sportTournaments.filter(t => normalizeTournamentAffiliation(t.affiliationType, t.name) === 'non_club');
   }, [sportTournaments]);
 
   const clubTournaments = useMemo(() => {
-    return sportTournaments.filter(t => isClubTournament(t));
+    return sportTournaments.filter(t => normalizeTournamentAffiliation(t.affiliationType, t.name) === 'club_affiliated');
   }, [sportTournaments]);
 
   const openTournaments = useMemo(() => {
-    return sportTournaments.filter(t => !isClubTournament(t) && (t.affiliationType === 'open' || (t.name && (t.name.includes('مفتوحة') || t.name.includes('المفتوحة')))));
+    return sportTournaments.filter(t => normalizeTournamentAffiliation(t.affiliationType, t.name) === 'open');
   }, [sportTournaments]);
-
-  // Matches for this sport (strictly limited to active programmed tournaments & matching affiliation)
-  const sportMatches = useMemo(() => {
-    if (!sport || sportTournaments.length === 0) return [];
-    return matches.filter(m => {
-      if (m.tournamentId) {
-        return sportTournaments.some(t => t.id === m.tournamentId);
-      }
-      if (m.sportId === sport.id) {
-        const mAff = (m as any).affiliationType === 'club_affiliated'
-          ? 'club_affiliated'
-          : (m as any).affiliationType === 'open'
-          ? 'open'
-          : 'non_club';
-        return sportTournaments.some(t => {
-          const tAff = t.affiliationType === 'open' ? 'open' : isClubTournament(t) ? 'club_affiliated' : 'non_club';
-          const catMatch = normalizeCategoryKey(t.ageCategory) === normalizeCategoryKey(m.ageCategory);
-          const genderMatch = t.gender === 'Mixed' || m.gender === 'Mixed' || t.gender === m.gender;
-          const affMatch = tAff === 'open' || mAff === tAff;
-          return catMatch && genderMatch && affMatch;
-        });
-      }
-      return false;
-    });
-  }, [matches, sport, sportTournaments]);
 
   // Helper: check match affiliation
   const getMatchAffiliation = (match: Match): 'non_club' | 'club_affiliated' | 'open' => {
@@ -322,10 +372,7 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
     if (match.tournamentId) {
       const parentT = tournaments.find(t => t.id === match.tournamentId);
       if (parentT) {
-        if (parentT.affiliationType === 'open') return 'open';
-        if (parentT.name && (parentT.name.includes('مفتوحة') || parentT.name.includes('المفتوحة'))) return 'open';
-        if (isClubTournament(parentT)) return 'club_affiliated';
-        return 'non_club';
+        return normalizeTournamentAffiliation(parentT.affiliationType, parentT.name);
       }
     }
     // Fallback: check match notes or title
@@ -336,58 +383,118 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
     return 'non_club';
   };
 
+  // Matches for this sport (strictly limited to active programmed tournaments, active directorate & allowed affiliation)
+  const sportMatches = useMemo(() => {
+    if (!sport || sportTournaments.length === 0) return [];
+    const activeDirId = DataService.getActiveDirectorateId() || 'taourirt';
+    return matches.filter(m => {
+      if (activeDirId && activeDirId !== 'all') {
+        const mDir = m.directorateId || 'taourirt';
+        if (mDir !== activeDirId) return false;
+      }
+      const mAff = getMatchAffiliation(m);
+      if (!isAffiliationAllowedByDisplayConfig(mAff, affiliationDisplayConfig, sport.id)) return false;
+
+      if (m.tournamentId) {
+        return sportTournaments.some(t => t.id === m.tournamentId);
+      }
+      if (m.sportId === sport.id) {
+        return sportTournaments.some(t => {
+          const tAff = normalizeTournamentAffiliation(t.affiliationType, t.name);
+          const catMatch = normalizeCategoryKey(t.ageCategory) === normalizeCategoryKey(m.ageCategory);
+          const genderMatch = t.gender === 'Mixed' || m.gender === 'Mixed' || t.gender === m.gender;
+          const affMatch = tAff === 'open' || mAff === tAff;
+          return catMatch && genderMatch && affMatch;
+        });
+      }
+      return false;
+    });
+  }, [matches, sport, sportTournaments, affiliationDisplayConfig, tournaments]);
+
   const isMatchClubAffiliated = (match: Match): boolean => {
     return getMatchAffiliation(match) === 'club_affiliated';
   };
 
-  // Filtered matches for active branch (selectedAffiliation) and active filters
+  const currentBranch = activeBranchModal || selectedAffiliation;
+
+  const matchesScopedToBranchAndFiltersExceptStatus = useMemo(() => {
+    return sportMatches.filter(m => {
+      if (!hasValidMatchTeams(m, schools)) return false;
+
+      const mAff = getMatchAffiliation(m);
+      if (currentBranch !== mAff) return false;
+
+      // Category filter
+      if (selectedCategory !== 'ALL') {
+        const normM = normalizeCategoryKey(m.ageCategory || '');
+        const normSel = normalizeCategoryKey(selectedCategory);
+        const mCat = (m.ageCategory || '').toLowerCase();
+        const selCat = selectedCategory.toLowerCase();
+        if (normM !== normSel && mCat !== selCat && !mCat.includes(selCat) && !selCat.includes(mCat)) return false;
+      }
+
+      // Gender filter
+      if (selectedGender !== 'ALL' && m.gender !== selectedGender) return false;
+
+      // Search query
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase();
+        const t1 = formatTeamDisplayName(m.team1Id, m.team1Name, schools, m.team1Placeholder, m.team1SourceMatchNumber);
+        const t2 = formatTeamDisplayName(m.team2Id, m.team2Name, schools, m.team2Placeholder, m.team2SourceMatchNumber);
+        const v = venues.find(v => v.id === m.venueId)?.name || m.venueName || '';
+        const stage = m.stage || '';
+        const group = extractMatchGroupLabel(m);
+        const matchStr = `${t1} ${t2} ${v} ${stage} ${group} ${m.drawMatchNumber || ''}`.toLowerCase();
+        if (!matchStr.includes(q)) return false;
+      }
+
+      return true;
+    });
+  }, [sportMatches, currentBranch, selectedCategory, selectedGender, searchQuery, schools, venues, tournaments]);
+
+  const branchStatusCounts = useMemo(() => {
+    let ongoing = 0;
+    let scheduled = 0;
+    let completed = 0;
+    matchesScopedToBranchAndFiltersExceptStatus.forEach(m => {
+      const s = String(m.status || 'Scheduled').trim().toLowerCase();
+      if (s === 'ongoing') ongoing++;
+      else if (s === 'completed') completed++;
+      else scheduled++;
+    });
+    return {
+      all: matchesScopedToBranchAndFiltersExceptStatus.length,
+      ongoing,
+      scheduled,
+      completed
+    };
+  }, [matchesScopedToBranchAndFiltersExceptStatus]);
+
+  // Filtered matches for active branch (currentBranch) and active filters including statusFilter
   const activeBranchMatches = useMemo(() => {
-    return sportMatches
+    return matchesScopedToBranchAndFiltersExceptStatus
       .filter(m => {
-        if (!hasValidMatchTeams(m, schools)) return false;
-
-        const mAff = getMatchAffiliation(m);
-        if (selectedAffiliation !== mAff) return false;
-
-        // Category filter
-        if (selectedCategory !== 'ALL') {
-          const mCat = (m.ageCategory || '').toLowerCase();
-          const selCat = selectedCategory.toLowerCase();
-          if (mCat !== selCat && !mCat.includes(selCat) && !selCat.includes(mCat)) return false;
+        if (statusFilter !== 'ALL') {
+          const s = String(m.status || 'Scheduled').trim().toLowerCase();
+          const target = statusFilter.trim().toLowerCase();
+          if (s !== target) return false;
         }
-
-        // Gender filter
-        if (selectedGender !== 'ALL' && m.gender !== selectedGender) return false;
-
-        // Status filter
-        if (statusFilter !== 'ALL' && m.status !== statusFilter) return false;
-
-        // Search query
-        if (searchQuery.trim()) {
-          const q = searchQuery.toLowerCase();
-          const t1 = formatTeamDisplayName(m.team1Id, m.team1Name, schools, m.team1Placeholder, m.team1SourceMatchNumber);
-          const t2 = formatTeamDisplayName(m.team2Id, m.team2Name, schools, m.team2Placeholder, m.team2SourceMatchNumber);
-          const v = venues.find(v => v.id === m.venueId)?.name || m.venueName || '';
-          const stage = m.stage || '';
-          const group = extractMatchGroupLabel(m);
-          const matchStr = `${t1} ${t2} ${v} ${stage} ${group} ${m.drawMatchNumber || ''}`.toLowerCase();
-          if (!matchStr.includes(q)) return false;
-        }
-
         return true;
       })
       .sort((a, b) => (a.drawMatchNumber ?? 9999) - (b.drawMatchNumber ?? 9999));
-  }, [sportMatches, selectedAffiliation, selectedCategory, selectedGender, statusFilter, searchQuery, schools, venues, tournaments]);
+  }, [matchesScopedToBranchAndFiltersExceptStatus, statusFilter]);
 
-  // Matches for standings & knockout bracket in current branch + category + gender (ignores statusFilter)
+  // Matches for standings & knockout bracket in current branch + category + gender (shown on statusFilter === 'ALL')
   const branchStandingsBuckets = useMemo(() => {
     const scoped = sportMatches.filter(m => {
       if (!hasValidMatchTeams(m, schools)) return false;
-      if (getMatchAffiliation(m) !== selectedAffiliation) return false;
+      if (getMatchAffiliation(m) !== currentBranch) return false;
       if (selectedCategory !== 'ALL') {
+        const normM = normalizeCategoryKey(m.ageCategory || '');
+        const normSel = normalizeCategoryKey(selectedCategory);
         const mCat = (m.ageCategory || '').toLowerCase();
         const selCat = selectedCategory.toLowerCase();
-        if (mCat !== selCat && !mCat.includes(selCat) && !selCat.includes(mCat)) return false;
+        if (normM !== normSel && mCat !== selCat && !mCat.includes(selCat) && !selCat.includes(mCat)) return false;
       }
       if (selectedGender !== 'ALL' && m.gender !== selectedGender) return false;
       return true;
@@ -418,33 +525,59 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
         knockoutMatches
       };
     }).filter(b => b.standings.length > 0 || b.knockoutMatches.length > 0);
-  }, [sportMatches, selectedAffiliation, selectedCategory, selectedGender, schools, seasonalCategories, tournaments]);
+  }, [sportMatches, currentBranch, selectedCategory, selectedGender, schools, seasonalCategories, tournaments]);
 
-  // Determine branch card visibility based on existing matches or tournaments
+  // Determine branch card visibility based on display config AND existing matches or tournaments
   const hasNonClub = useMemo(() => {
-    return sportMatches.some(m => getMatchAffiliation(m) === 'non_club') || sportTournaments.some(t => (t.affiliationType || 'non_club') === 'non_club' && t.affiliationType !== 'open');
-  }, [sportMatches, sportTournaments]);
+    if (!sport || !isAffiliationAllowedByDisplayConfig('non_club', affiliationDisplayConfig, sport.id)) return false;
+    return sportMatches.some(m => getMatchAffiliation(m) === 'non_club') || nonClubTournaments.length > 0;
+  }, [sport, affiliationDisplayConfig, sportMatches, nonClubTournaments]);
 
   const hasClub = useMemo(() => {
-    return sportMatches.some(m => getMatchAffiliation(m) === 'club_affiliated') || sportTournaments.some(t => t.affiliationType === 'club_affiliated');
-  }, [sportMatches, sportTournaments]);
+    if (!sport || !isAffiliationAllowedByDisplayConfig('club_affiliated', affiliationDisplayConfig, sport.id)) return false;
+    return sportMatches.some(m => getMatchAffiliation(m) === 'club_affiliated') || clubTournaments.length > 0;
+  }, [sport, affiliationDisplayConfig, sportMatches, clubTournaments]);
 
   const hasOpen = useMemo(() => {
+    if (!sport || !isAffiliationAllowedByDisplayConfig('open', affiliationDisplayConfig, sport.id)) return false;
     return sportMatches.some(m => getMatchAffiliation(m) === 'open') || openTournaments.length > 0;
-  }, [sportMatches, openTournaments]);
+  }, [sport, affiliationDisplayConfig, sportMatches, openTournaments]);
 
-  // Set default branch on open or prioritization
+  // Reset filters & sub-modal when opening/changing sport
   React.useEffect(() => {
     if (isOpen) {
-      if (hasOpen) setSelectedAffiliation('open');
-      else if (hasNonClub) setSelectedAffiliation('non_club');
-      else if (hasClub) setSelectedAffiliation('club_affiliated');
+      setActiveBranchModal(null);
+      setSelectedCategory('ALL');
+      setSelectedGender('ALL');
+      setStatusFilter('ALL');
+      setSearchQuery('');
     }
-  }, [isOpen, hasOpen, hasNonClub, hasClub]);
+  }, [isOpen, sport?.id]);
+
+  // Keep selectedAffiliation / activeBranchModal valid against allowed branches
+  React.useEffect(() => {
+    if (!isOpen) return;
+    if (activeBranchModal === 'non_club' && !hasNonClub) setActiveBranchModal(null);
+    else if (activeBranchModal === 'club_affiliated' && !hasClub) setActiveBranchModal(null);
+    else if (activeBranchModal === 'open' && !hasOpen) setActiveBranchModal(null);
+
+    if (!activeBranchModal) {
+      if (selectedAffiliation === 'non_club' && !hasNonClub) {
+        if (hasOpen) setSelectedAffiliation('open');
+        else if (hasClub) setSelectedAffiliation('club_affiliated');
+      } else if (selectedAffiliation === 'club_affiliated' && !hasClub) {
+        if (hasOpen) setSelectedAffiliation('open');
+        else if (hasNonClub) setSelectedAffiliation('non_club');
+      } else if (selectedAffiliation === 'open' && !hasOpen) {
+        if (hasNonClub) setSelectedAffiliation('non_club');
+        else if (hasClub) setSelectedAffiliation('club_affiliated');
+      }
+    }
+  }, [isOpen, hasOpen, hasNonClub, hasClub, activeBranchModal, selectedAffiliation]);
 
   // Non-club vs Club match counters
   const nonClubMatchesCount = useMemo(() => {
-    return sportMatches.filter(m => !isMatchClubAffiliated(m)).length;
+    return sportMatches.filter(m => getMatchAffiliation(m) === 'non_club').length;
   }, [sportMatches]);
 
   const clubMatchesCount = useMemo(() => {
@@ -462,7 +595,7 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
   };
 
   const getVenueName = (id: string, fallbackName?: string, hostSchoolId?: string) => {
-    if (fallbackName && fallbackName.trim()) return fallbackName.trim();
+    if (fallbackName && fallbackName.trim() && !isOpaqueEntityId(fallbackName)) return fallbackName.trim();
     if (hostSchoolId) {
       const hs = schools.find(s => s.id === hostSchoolId);
       if (hs) return hs.name;
@@ -471,7 +604,8 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
     if (v) return v.name;
     const sch = schools.find(s => s.id === id || s.id === (id || '').replace(/^school:/, ''));
     if (sch) return sch.name;
-    return id || 'ملعب غير محدد';
+    if (id && !isOpaqueEntityId(id)) return id;
+    return 'ملعب غير محدد';
   };
 
   const getCategoryName = (catId: string) => {
@@ -878,7 +1012,7 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
                                 onClick={() => setSelectedCategory('ALL')}
                                 className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
                                   selectedCategory === 'ALL'
-                                    ? 'bg-slate-900 text-white shadow-xs'
+                                    ? 'bg-slate-900 dark:bg-blue-600 text-white shadow-xs'
                                     : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
                                 }`}
                               >
@@ -917,8 +1051,8 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
                               <button
                                 type="button"
                                 onClick={() => setSelectedGender('ALL')}
-                                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${
-                                  selectedGender === 'ALL' ? 'bg-white text-slate-900 shadow-2xs' : 'text-slate-600'
+                                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                                  selectedGender === 'ALL' ? 'bg-white text-slate-900 shadow-2xs ring-1 ring-slate-300 dark:ring-blue-500/60' : 'text-slate-600 hover:text-slate-900'
                                 }`}
                               >
                                 الكل
@@ -926,8 +1060,8 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
                               <button
                                 type="button"
                                 onClick={() => setSelectedGender('Male')}
-                                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${
-                                  selectedGender === 'Male' ? 'bg-white text-blue-700 shadow-2xs' : 'text-slate-600'
+                                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                                  selectedGender === 'Male' ? 'bg-white text-blue-700 shadow-2xs ring-1 ring-blue-300 dark:ring-blue-500/60' : 'text-slate-600 hover:text-slate-900'
                                 }`}
                               >
                                 👦 ذكور
@@ -935,8 +1069,8 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
                               <button
                                 type="button"
                                 onClick={() => setSelectedGender('Female')}
-                                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${
-                                  selectedGender === 'Female' ? 'bg-white text-pink-700 shadow-2xs' : 'text-slate-600'
+                                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                                  selectedGender === 'Female' ? 'bg-white text-pink-700 shadow-2xs ring-1 ring-pink-300 dark:ring-pink-500/60' : 'text-slate-600 hover:text-slate-900'
                                 }`}
                               >
                                 👧 إناث
@@ -946,12 +1080,22 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
                             <select
                               value={statusFilter}
                               onChange={(e) => setStatusFilter(e.target.value)}
-                              className="px-3 py-1.5 bg-slate-100 text-slate-700 text-xs font-bold rounded-xl border border-slate-200 focus:outline-none"
+                              aria-label="تصفية حسب حالة المباراة"
+                              className={cn(
+                                "px-3 py-1.5 text-xs font-bold rounded-xl border focus:outline-none focus:ring-2 cursor-pointer transition-colors",
+                                statusFilter === 'Ongoing'
+                                  ? 'bg-red-50 text-red-700 border-red-300 focus:ring-red-400'
+                                  : statusFilter === 'Scheduled'
+                                  ? 'bg-blue-50 text-blue-800 border-blue-300 focus:ring-blue-400'
+                                  : statusFilter === 'Completed'
+                                  ? 'bg-emerald-50 text-emerald-800 border-emerald-300 focus:ring-emerald-400'
+                                  : 'bg-slate-100 text-slate-700 border-slate-200 focus:ring-blue-400'
+                              )}
                             >
-                              <option value="ALL">جميع الحالات</option>
-                              <option value="Ongoing">🔴 جارية الآن</option>
-                              <option value="Scheduled">📅 مبرمجة</option>
-                              <option value="Completed">🏆 مكتملة</option>
+                              <option value="ALL">جميع الحالات ({branchStatusCounts.all})</option>
+                              <option value="Ongoing">🔴 جارية الآن ({branchStatusCounts.ongoing})</option>
+                              <option value="Scheduled">📅 مبرمجة ({branchStatusCounts.scheduled})</option>
+                              <option value="Completed">🏆 مكتملة ({branchStatusCounts.completed})</option>
                             </select>
                           </div>
                         </div>
@@ -969,8 +1113,8 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
                         </div>
                       </div>
 
-                      {/* GROUP STANDINGS (3/1/0) & KNOCKOUT BRACKET TREE */}
-                      {branchStandingsBuckets.length > 0 && (
+                      {/* GROUP STANDINGS (3/1/0) & KNOCKOUT BRACKET TREE (only shown in full 'ALL' view so status filters immediately show filtered matches) */}
+                      {statusFilter === 'ALL' && branchStandingsBuckets.length > 0 && (
                         <div className="space-y-4">
                           {branchStandingsBuckets.map(bucket => (
                             <div key={bucket.key} className="space-y-4">
@@ -1159,21 +1303,49 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
                         {activeBranchMatches.length === 0 ? (
                           <div className="p-8 text-center bg-white rounded-2xl border border-dashed border-slate-300 space-y-3">
                             <Trophy className="w-10 h-10 text-slate-300 mx-auto" />
-                            <div>
-                              <p className="text-sm font-bold text-slate-700">لا توجد مباريات مبرمجة في هذا التصنيف بعد</p>
-                              <p className="text-xs text-slate-500 mt-1">
-                                يمكنك إضافة مباراة جديدة لهذا الصنف بالضغط على زر "برمجة مباراة لهذا الصنف".
-                              </p>
-                            </div>
-                            {canManage && (
-                              <button
-                                type="button"
-                                onClick={() => onCreateMatch(sport.id, activeBranchModal)}
-                                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl transition-all inline-flex items-center gap-1.5"
-                              >
-                                <Plus className="w-4 h-4" />
-                                <span>برمجة مباراة الآن</span>
-                              </button>
+                            {statusFilter !== 'ALL' ? (
+                              <>
+                                <div>
+                                  <p className="text-sm font-bold text-slate-700">
+                                    {statusFilter === 'Ongoing'
+                                      ? 'لا توجد مباريات جارية الآن (مباشر) في هذا التصنيف حالياً'
+                                      : statusFilter === 'Completed'
+                                      ? 'لا توجد مباريات مكتملة النتائج في هذا التصنيف بعد'
+                                      : 'لا توجد مباريات مبرمجة قادمة في هذا التصنيف'}
+                                  </p>
+                                  <p className="text-xs text-slate-500 mt-1">
+                                    {statusFilter === 'Ongoing'
+                                      ? 'تظهر هنا المقابلات التي يتم تشغيل وضعها المباشر («جارية الآن») أثناء اللعب من طرف الحكم أو اللجنة التقنية.'
+                                      : 'يمكنك العودة لعرض جميع الحالات للاطلاع على باقي المقابلات المبرمجة في هذا الصنف.'}
+                                  </p>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => setStatusFilter('ALL')}
+                                  className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold rounded-xl transition-all inline-flex items-center gap-1.5 cursor-pointer"
+                                >
+                                  <span>عرض جميع الحالات ({branchStatusCounts.all})</span>
+                                </button>
+                              </>
+                            ) : (
+                              <>
+                                <div>
+                                  <p className="text-sm font-bold text-slate-700">لا توجد مباريات مبرمجة في هذا التصنيف بعد</p>
+                                  <p className="text-xs text-slate-500 mt-1">
+                                    يمكنك إضافة مباراة جديدة لهذا الصنف بالضغط على زر "برمجة مباراة لهذا الصنف".
+                                  </p>
+                                </div>
+                                {canManage && (
+                                  <button
+                                    type="button"
+                                    onClick={() => onCreateMatch(sport.id, activeBranchModal)}
+                                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl transition-all inline-flex items-center gap-1.5 cursor-pointer"
+                                  >
+                                    <Plus className="w-4 h-4" />
+                                    <span>برمجة مباراة الآن</span>
+                                  </button>
+                                )}
+                              </>
                             )}
                           </div>
                         ) : (
@@ -1186,15 +1358,12 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
                               const hasPendingSlot = isPlaceholderTeamId(m.team1Id) || isPlaceholderTeamId(m.team2Id);
                               const vName = getVenueName(m.venueId, m.venueName, m.hostSchoolId);
                               const hostSchoolObj = resolveHostSchoolForMatch(m, schools);
-                              const rawRefs = [
-                                ...(m.referees || []),
-                                ...(m.referee1Id ? [m.referee1Id] : []),
-                                ...(m.referee2Id ? [m.referee2Id] : [])
-                              ].map(r => (r || '').trim()).filter(Boolean);
-                              const matchReferees = Array.from(new Set(rawRefs));
+                              const resolvedRefs = resolveMatchRefereesInfo(m, effectiveReferees, effectiveUsers);
+                              const matchReferees = resolvedRefs.allRefs;
 
-                              const isCompleted = m.status === 'Completed';
-                              const isOngoing = m.status === 'Ongoing';
+                              const normalizedMatchStatus = String(m.status || 'Scheduled').trim().toLowerCase();
+                              const isCompleted = normalizedMatchStatus === 'completed';
+                              const isOngoing = normalizedMatchStatus === 'ongoing';
 
                               const s1 = m.score1 ?? 0;
                               const s2 = m.score2 ?? 0;
@@ -1425,8 +1594,9 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
                                         <span>الحكام:</span>
                                       </span>
                                       {matchReferees.map((refEntry, rIdx) => {
-                                        const contact = findRefereeContact(refEntry, effectiveReferees, effectiveTeachers);
-                                        const displayName = contact.name || refEntry;
+                                        const contact = findRefereeContact(refEntry, effectiveReferees, effectiveUsers);
+                                        const displayName = contact.name || (!isOpaqueEntityId(refEntry) ? refEntry : '');
+                                        if (!displayName) return null;
                                         return (
                                           <span
                                             key={`${m.id}-ref-${rIdx}`}
@@ -1493,59 +1663,63 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
                                             venueName: vName,
                                             dateStr: formatMatchDate(m.date),
                                             timeStr: m.startTime || '10:00',
-                                            referees: matchReferees,
-                                            notes: m.notes,
-                                            score1: m.score1 ?? m.team1Score,
-                                            score2: m.score2 ?? m.team2Score,
-                                            penalty1: m.penalty1,
-                                            penalty2: m.penalty2,
-                                            scorers: m.scorers,
-                                            approvedByName: m.approvedByName || userProfile?.fullName
-                                          });
-                                        }}
-                                        className="w-full py-2 px-3 rounded-xl bg-gradient-to-l from-emerald-600 via-teal-600 to-emerald-700 hover:from-emerald-700 hover:to-teal-800 text-white shadow-2xs transition-all cursor-pointer flex items-center justify-between gap-2 active:scale-[0.99]"
-                                      >
-                                        <span className="flex items-center gap-1.5 text-[11px] font-black min-w-0">
-                                          <MessageCircle className="w-3.5 h-3.5 shrink-0" />
-                                          <span className="truncate">إشعار المعنيين ببرمجة المقابلة</span>
-                                        </span>
-                                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-white/15 border border-white/25 text-[9px] font-extrabold shrink-0" dir="ltr">
-                                          <Share2 className="w-2.5 h-2.5" />
-                                          <span>Nouvelle diffusion</span>
-                                        </span>
-                                      </button>
-
-                                      {isCompleted && m.approvalStatus !== 'provisional' && canApproveThisSport && (
-                                        <button
-                                          type="button"
-                                          onClick={() => {
-                                            const sportName = sport.name || SPORTS_MAP[m.sportId]?.name || '';
-                                            setDiffusionTarget({
-                                              matchId: m.id,
-                                              mode: 'result',
-                                              sportId: m.sportId || sport.id,
-                                              sportName,
-                                              ageCategory: m.ageCategory,
-                                              gender: m.gender && GENDER_MAP[m.gender] ? GENDER_MAP[m.gender].name : m.gender,
-                                              stageName: m.stage,
-                                              team1Id: m.team1Id,
-                                              team2Id: m.team2Id,
-                                              team1Name: t1Name,
-                                              team2Name: t2Name,
-                                              hostSchoolId: m.hostSchoolId || hostSchoolObj?.id,
-                                              venueId: m.venueId,
-                                              venueName: vName,
-                                              dateStr: formatMatchDate(m.date),
-                                              timeStr: m.startTime || '10:00',
                                               referees: matchReferees,
+                                              tableReferees: resolvedRefs.tableRefs,
+                                              fieldReferees: resolvedRefs.fieldRefs,
                                               notes: m.notes,
-                                              score1: m.score1 ?? m.team1Score ?? 0,
-                                              score2: m.score2 ?? m.team2Score ?? 0,
+                                              score1: m.score1 ?? m.team1Score,
+                                              score2: m.score2 ?? m.team2Score,
                                               penalty1: m.penalty1,
                                               penalty2: m.penalty2,
                                               scorers: m.scorers,
-                                              approvedByName: m.approvedByName || userProfile?.fullName || 'رئيس اللجنة التقنية'
+                                              approvedByName: m.approvedByName || userProfile?.fullName
                                             });
+                                          }}
+                                          className="w-full py-2 px-3 rounded-xl bg-gradient-to-l from-emerald-600 via-teal-600 to-emerald-700 hover:from-emerald-700 hover:to-teal-800 text-white shadow-2xs transition-all cursor-pointer flex items-center justify-between gap-2 active:scale-[0.99]"
+                                        >
+                                          <span className="flex items-center gap-1.5 text-[11px] font-black min-w-0">
+                                            <MessageCircle className="w-3.5 h-3.5 shrink-0" />
+                                            <span className="truncate">إشعار المعنيين ببرمجة المقابلة</span>
+                                          </span>
+                                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-white/15 border border-white/25 text-[9px] font-extrabold shrink-0" dir="ltr">
+                                            <Share2 className="w-2.5 h-2.5" />
+                                            <span>Nouvelle diffusion</span>
+                                          </span>
+                                        </button>
+
+                                        {isCompleted && m.approvalStatus !== 'provisional' && canApproveThisSport && (
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              const sportName = sport.name || SPORTS_MAP[m.sportId]?.name || '';
+                                              setDiffusionTarget({
+                                                matchId: m.id,
+                                                mode: 'result',
+                                                sportId: m.sportId || sport.id,
+                                                sportName,
+                                                ageCategory: m.ageCategory,
+                                                gender: m.gender && GENDER_MAP[m.gender] ? GENDER_MAP[m.gender].name : m.gender,
+                                                stageName: m.stage,
+                                                team1Id: m.team1Id,
+                                                team2Id: m.team2Id,
+                                                team1Name: t1Name,
+                                                team2Name: t2Name,
+                                                hostSchoolId: m.hostSchoolId || hostSchoolObj?.id,
+                                                venueId: m.venueId,
+                                                venueName: vName,
+                                                dateStr: formatMatchDate(m.date),
+                                                timeStr: m.startTime || '10:00',
+                                                referees: matchReferees,
+                                                tableReferees: resolvedRefs.tableRefs,
+                                                fieldReferees: resolvedRefs.fieldRefs,
+                                                notes: m.notes,
+                                                score1: m.score1 ?? m.team1Score ?? 0,
+                                                score2: m.score2 ?? m.team2Score ?? 0,
+                                                penalty1: m.penalty1,
+                                                penalty2: m.penalty2,
+                                                scorers: m.scorers,
+                                                approvedByName: m.approvedByName || userProfile?.fullName || 'رئيس اللجنة التقنية'
+                                              });
                                           }}
                                           className="w-full py-2 px-3 rounded-xl bg-gradient-to-l from-blue-600 via-indigo-600 to-blue-700 hover:from-blue-700 hover:to-indigo-800 text-white shadow-2xs transition-all cursor-pointer flex items-center justify-between gap-2 active:scale-[0.99]"
                                         >
@@ -1644,7 +1818,24 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
 
                                     {/* Inline Actions */}
                                     {canManage || canApproveThisSport ? (
-                                      <div className="flex items-center gap-1 shrink-0 self-end sm:self-center">
+                                      <div className="flex items-center gap-1 shrink-0 self-end sm:self-center flex-wrap justify-end">
+                                        {!hasPendingSlot && !isCompleted && (
+                                          <button
+                                            type="button"
+                                            disabled={togglingLiveMatchId === m.id}
+                                            onClick={() => handleToggleLiveMatchStatus(m, isOngoing ? 'Scheduled' : 'Ongoing')}
+                                            title={isOngoing ? 'إعادة الحالة إلى مبرمجة' : 'تشغيل وضع المباراة الجارية الآن (مباشر)'}
+                                            className={cn(
+                                              "px-2 py-1 rounded-lg text-[9px] font-black transition-all flex items-center gap-1 shadow-3xs cursor-pointer disabled:opacity-50",
+                                              isOngoing
+                                                ? "bg-red-100 hover:bg-red-200 text-red-700 border border-red-300"
+                                                : "bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200"
+                                            )}
+                                          >
+                                            <span>{isOngoing ? '⏸️ إيقاف المباشر' : '🔴 مباشر الآن'}</span>
+                                          </button>
+                                        )}
+
                                         <button
                                           type="button"
                                           disabled={hasPendingSlot}
@@ -1690,14 +1881,31 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
                                         )}
                                       </div>
                                     ) : isUserAssignedReferee(m) && (!isCompleted || m.approvalStatus === 'provisional') ? (
-                                      <button
-                                        type="button"
-                                        onClick={() => onEditScore(m)}
-                                        className="px-2.5 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-[9px] font-black transition-all cursor-pointer flex items-center gap-1 shadow-3xs self-end sm:self-center"
-                                      >
-                                        <Edit3 className="w-2.5 h-2.5" />
-                                        <span>{isCompleted ? 'تعديل النتيجة الأولية' : 'تدوين النتيجة الأولية'}</span>
-                                      </button>
+                                      <div className="flex items-center gap-1 shrink-0 self-end sm:self-center">
+                                        {!hasPendingSlot && !isCompleted && (
+                                          <button
+                                            type="button"
+                                            disabled={togglingLiveMatchId === m.id}
+                                            onClick={() => handleToggleLiveMatchStatus(m, isOngoing ? 'Scheduled' : 'Ongoing')}
+                                            className={cn(
+                                              "px-2 py-1 rounded-lg text-[9px] font-black transition-all cursor-pointer disabled:opacity-50",
+                                              isOngoing
+                                                ? "bg-red-100 text-red-700 border border-red-300"
+                                                : "bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200"
+                                            )}
+                                          >
+                                            <span>{isOngoing ? '⏸️ إيقاف المباشر' : '🔴 مباشر الآن'}</span>
+                                          </button>
+                                        )}
+                                        <button
+                                          type="button"
+                                          onClick={() => onEditScore(m)}
+                                          className="px-2.5 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-[9px] font-black transition-all cursor-pointer flex items-center gap-1 shadow-3xs"
+                                        >
+                                          <Edit3 className="w-2.5 h-2.5" />
+                                          <span>{isCompleted ? 'تعديل النتيجة الأولية' : 'تدوين النتيجة الأولية'}</span>
+                                        </button>
+                                      </div>
                                     ) : (
                                       <span className="text-[9px] text-slate-400 font-normal">عرض فقط</span>
                                     )}
@@ -1723,7 +1931,7 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
         target={diffusionTarget}
         schools={schools}
         refereesList={effectiveReferees}
-        teachersList={effectiveTeachers}
+        teachersList={effectiveUsers}
         studentsList={students}
       />
     </div>
