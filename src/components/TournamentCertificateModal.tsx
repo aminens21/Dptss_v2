@@ -1617,7 +1617,7 @@ export const TournamentCertificateModal: React.FC<TournamentCertificateModalProp
               <div
                 ref={certificateRef}
                 id="tournament-certificate-canvas"
-                className={`light-surface-always w-full max-w-[285px] xs:max-w-[335px] sm:max-w-[540px] md:max-w-[640px] lg:max-w-[700px] aspect-[1.414/1] rounded-2xl sm:rounded-3xl shadow-2xl border-2 sm:border-4 ${currentTheme.borderOuter} ${currentTheme.bg} p-2.5 xs:p-3 sm:p-5 md:p-6 flex flex-col justify-between relative overflow-hidden select-none transition-all duration-150`}
+                className={`w-full max-w-[285px] xs:max-w-[335px] sm:max-w-[540px] md:max-w-[640px] lg:max-w-[700px] aspect-[1.414/1] rounded-2xl sm:rounded-3xl shadow-2xl border-2 sm:border-4 ${currentTheme.borderOuter} ${currentTheme.bg} p-2.5 xs:p-3 sm:p-5 md:p-6 flex flex-col justify-between relative overflow-hidden select-none transition-all duration-150`}
                 style={{
                   fontFamily: (CERTIFICATE_FONTS.find(f => f.id === selectedFont)?.css || "'Amiri', serif"),
                   backgroundImage: customBgImage ? `url(${customBgImage})` : undefined,

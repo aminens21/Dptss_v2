@@ -2,9 +2,8 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { formatMatchDate, parseDateToTimestampMs } from '../lib/utils';
-import { DataService, SPORTS_MAP, deduplicateById, normalizeCategoryKey, isTeacherLevelAllowedForTournament, isTournamentAllowedForTeacher, resolveTeacherCadre, isSchoolSectorAllowedForTournament, schoolNamesMatch, getCategoryShortName, getCustomCategoryDetails } from '../lib/dataService';
-import { extractMatchGroupLabel } from '../lib/drawTournamentUtils';
-import { Match, Tournament, School, Venue, Referee, User, Sport } from '../types';
+import { DataService, deduplicateById, normalizeCategoryKey, isTeacherLevelAllowedForTournament, isSchoolSectorAllowedForTournament, schoolNamesMatch } from '../lib/dataService';
+import { Match, Tournament, School, Venue, Referee, User } from '../types';
 import {
   Trophy,
   CalendarDays,
@@ -47,7 +46,6 @@ export const Dashboard: React.FC = () => {
   const [venues, setVenues] = useState<Venue[]>([]);
   const [referees, setReferees] = useState<Referee[]>([]);
   const [teachers, setTeachers] = useState<User[]>([]);
-  const [sportsConfig, setSportsConfig] = useState<Sport[]>([]);
   const [recentMatches, setRecentMatches] = useState<Match[]>([]);
   const [teacherMatches, setTeacherMatches] = useState<Match[]>([]);
   const [loading, setLoading] = useState(true);
@@ -124,14 +122,13 @@ export const Dashboard: React.FC = () => {
   const loadDashboardData = async () => {
     try {
       const activeDirId = DataService.getActiveDirectorateId();
-      const [tList, mList, sList, vList, rList, uList, sportsList] = await Promise.all([
+      const [tList, mList, sList, vList, rList, uList] = await Promise.all([
         DataService.getTournaments(),
         DataService.getMatches(),
         DataService.getSchools(),
         DataService.getVenues(),
         DataService.getReferees(),
-        DataService.getUsers(),
-        DataService.getSportsConfig()
+        DataService.getUsers()
       ]);
 
       const dirMatches = mList.filter(m => !activeDirId || activeDirId === 'all' || (m.directorateId || 'taourirt') === activeDirId || (!m.directorateId && activeDirId === 'taourirt'));
@@ -150,23 +147,22 @@ export const Dashboard: React.FC = () => {
       setVenues(dirVenues);
       setReferees(dirReferees);
       setTeachers(dirTeachers);
-      setSportsConfig(sportsList);
 
       let displayTournamentsCount = dirTournaments.length;
       let displaySchoolsCount = dirSchools.length;
 
       if (userProfile?.role === 'TEACHER') {
         displaySchoolsCount = 1;
+        const teacherCadre = userProfile.teachingCadre;
         const teacherSchoolObj = dirSchools.find(s =>
           (userProfile.schoolId && s.id === userProfile.schoolId) ||
           (userProfile.workLocation && schoolNamesMatch(s.name, userProfile.workLocation)) ||
           ((userProfile as any).schoolName && schoolNamesMatch(s.name, (userProfile as any).schoolName))
         );
-        const teacherCadre = resolveTeacherCadre(userProfile, undefined, teacherSchoolObj);
         const activeTeacherTourns = dirTournaments.filter(t => 
           t.status !== 'Draft' && 
           (t as any).isActive !== false &&
-          isTournamentAllowedForTeacher(teacherCadre, t) &&
+          (!teacherCadre || isTeacherLevelAllowedForTournament(teacherCadre, t.level)) &&
           (!teacherSchoolObj || isSchoolSectorAllowedForTournament(teacherSchoolObj, t))
         );
         displayTournamentsCount = activeTeacherTourns.length;
@@ -326,96 +322,6 @@ export const Dashboard: React.FC = () => {
       console.error(e);
       toast.error('حدث خطأ أثناء حفظ إعدادات البطولة');
     }
-  };
-
-  const formatRecentMatchDetails = (m: Match) => {
-    const tourn = tournaments.find(t => t.id === m.tournamentId);
-    const sportId = m.sportId || tourn?.sportId || '';
-    const sportCfg = sportsConfig.find(s => s.id === sportId);
-    const sportIcon = (sportCfg?.icon || SPORTS_MAP[sportId]?.icon || '🏆').trim();
-
-    const rawStage = (m.stage || '').trim();
-    const rawGroup = extractMatchGroupLabel(m)
-      .replace(/\(\s*(?:Groupe|Group)\s+[^)]+\)/gi, '')
-      .replace(/\s+/g, ' ')
-      .trim();
-
-    let matchNum = m.drawMatchNumber && Number(m.drawMatchNumber) > 0 ? String(m.drawMatchNumber) : '';
-    if (!matchNum && rawStage) {
-      const numMatch = rawStage.match(/(?:المباراة|مباراة)\s*(?:رقم\s*)?(\d+)/);
-      if (numMatch?.[1]) matchNum = numMatch[1];
-    }
-    const matchNumberLabel = matchNum ? `المباراة ${matchNum}` : '';
-
-    const stageLabel =
-      rawStage
-        .replace(/المجموعة\s+[^\s-–(]+(?:\s*\([^)]+\))?/g, '')
-        .replace(/\(\s*(?:Groupe|Group)\s+[^)]+\)/gi, '')
-        .replace(/\(\s*(?:المباراة|مباراة)\s*(?:رقم\s*)?\d+\s*\)/g, '')
-        .replace(/(?:المباراة|مباراة)\s*(?:رقم\s*)?\d+/g, '')
-        .replace(/^[\s\-–]+|[\s\-–]+$/g, '')
-        .replace(/\s*[\-–]\s*[\-–]\s*/g, ' - ')
-        .replace(/\s+/g, ' ')
-        .trim() || 'مباراة إقليمية';
-
-    const rawCat = (m.ageCategory || m.category || tourn?.ageCategory || tourn?.category || '').trim();
-    let rawGender: string = m.gender || tourn?.gender || '';
-    if (!rawGender || rawGender === 'Mixed') {
-      const genderHint = `${rawCat} ${tourn?.name || ''} ${rawStage}`;
-      if (/صغيرات|فتيات|برعمات|شابات|إناث/.test(genderHint) && !/صغار|فتيان|براعم|شبان|ذكور/.test(genderHint)) {
-        rawGender = 'Female';
-      } else if (/صغار|فتيان|براعم|شبان|ذكور/.test(genderHint) && !/صغيرات|فتيات|برعمات|شابات|إناث/.test(genderHint)) {
-        rawGender = 'Male';
-      }
-    }
-
-    let categoryLabel = '';
-    if (rawCat) {
-      if (/^CAT_/i.test(rawCat)) {
-        const customCat = getCustomCategoryDetails(rawCat, sportId, sportsConfig);
-        categoryLabel = customCat?.name || getCategoryShortName(rawCat, rawGender);
-      } else {
-        categoryLabel = getCategoryShortName(rawCat, rawGender);
-      }
-    } else if (rawGender === 'Female') {
-      categoryLabel = 'إناث';
-    } else if (rawGender === 'Male') {
-      categoryLabel = 'ذكور';
-    }
-
-    const shortCategoryMap: Record<string, string> = {
-      'البراعم': 'براعم',
-      'البرعمات': 'برعمات',
-      'الصغار': 'صغار',
-      'الصغيرات': 'صغيرات',
-      'الفتيان': 'فتيان',
-      'الفتيات': 'فتيات',
-      'الشبان': 'شبان',
-      'الشابات': 'شابات',
-      'البراعم والبرعمات': 'براعم وبرعمات',
-      'الصغار والصغيرات': 'صغار وصغيرات',
-      'الفتيان والفتيات': 'فتيان وفتيات',
-      'الشبان والشابات': 'شبان وشابات'
-    };
-    if (categoryLabel && shortCategoryMap[categoryLabel]) {
-      categoryLabel = shortCategoryMap[categoryLabel];
-    }
-
-    const coreParts = [matchNumberLabel, rawGroup, stageLabel, categoryLabel].filter(Boolean);
-    const lineText = sportIcon ? `${sportIcon} ${coreParts.join(' - ')}` : coreParts.join(' - ');
-
-    const resultOrStatus =
-      m.status === 'Completed'
-        ? `${m.score1 ?? m.team1Score ?? m.scoreA ?? 0} - ${m.score2 ?? m.team2Score ?? m.scoreB ?? 0}`
-        : m.status === 'Ongoing'
-        ? 'جارية الآن'
-        : m.status === 'Postponed'
-        ? 'مؤجلة'
-        : m.status === 'Cancelled'
-        ? 'ملغاة'
-        : 'مقابلة مبرمجة';
-
-    return { lineText, resultOrStatus };
   };
 
   return (
@@ -657,46 +563,30 @@ export const Dashboard: React.FC = () => {
               </button>
             </div>
 
-            <div className="flex-1 p-2.5 sm:p-4 space-y-2 sm:space-y-2.5">
-              {recentMatches.map((m) => {
-                const { lineText, resultOrStatus } = formatRecentMatchDetails(m);
-                const statusBadgeStyle =
-                  m.status === 'Completed'
-                    ? 'bg-emerald-50 dark:bg-emerald-950/50 text-emerald-800 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800'
-                    : m.status === 'Ongoing'
-                    ? 'bg-rose-50 dark:bg-rose-950/50 text-rose-700 dark:text-rose-300 border-rose-200 dark:border-rose-800'
-                    : m.status === 'Postponed' || m.status === 'Cancelled'
-                    ? 'bg-amber-50 dark:bg-amber-950/50 text-amber-800 dark:text-amber-300 border-amber-200 dark:border-amber-800'
-                    : 'bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 border-slate-200 dark:border-slate-700';
-
-                return (
-                  <div
-                    key={m.id}
-                    onClick={() => navigate('/matches')}
-                    className="flex items-center justify-between gap-2 sm:gap-3 p-2 sm:p-3 border border-slate-100 dark:border-slate-800 rounded-xl hover:border-emerald-200 dark:hover:border-emerald-800 hover:bg-emerald-50/20 dark:hover:bg-emerald-950/20 transition-all cursor-pointer"
-                  >
-                    <div className="w-[54px] sm:w-20 text-center border-l border-slate-100 dark:border-slate-800 pl-1.5 sm:pl-2 shrink-0">
-                      <p className="text-[9px] sm:text-[10px] font-bold text-slate-500 dark:text-slate-400 leading-tight mb-0.5 tabular-nums">
-                        {formatMatchDate(m.date)}
-                      </p>
-                      <p className="text-[11px] sm:text-xs font-bold text-emerald-600 dark:text-emerald-400 leading-tight tabular-nums">
-                        {m.startTime || '10:00'}
-                      </p>
-                      <p className="text-[9px] sm:text-[10px] text-slate-400 font-medium leading-tight mt-0.5">
-                        {m.status === 'Completed' ? 'انتهت' : m.status === 'Ongoing' ? 'مباشر' : m.status === 'Postponed' ? 'مؤجلة' : m.status === 'Cancelled' ? 'ملغاة' : 'مبرمجة'}
-                      </p>
-                    </div>
-                    <div className="flex-1 min-w-0 flex items-center justify-between gap-1.5 sm:gap-2 px-0.5 sm:px-1.5">
-                      <span className="font-bold text-[10px] sm:text-xs text-slate-800 dark:text-slate-200 leading-snug break-words min-w-0">
-                        {lineText}
-                      </span>
-                      <span className={`shrink-0 whitespace-nowrap font-black text-[9px] sm:text-[11px] px-1.5 sm:px-2.5 py-0.5 sm:py-1 rounded-md border tabular-nums ${statusBadgeStyle}`}>
-                        {resultOrStatus}
-                      </span>
+            <div className="flex-1 p-4 space-y-3">
+              {recentMatches.map((m) => (
+                <div
+                  key={m.id}
+                  onClick={() => navigate('/matches')}
+                  className="flex items-center gap-3 p-3 border border-slate-100 dark:border-slate-800 rounded-xl hover:border-emerald-200 dark:hover:border-emerald-800 hover:bg-emerald-50/20 dark:hover:bg-emerald-950/20 transition-all cursor-pointer"
+                >
+                  <div className="w-20 text-center border-l border-slate-100 dark:border-slate-800 pl-2 shrink-0">
+                    <p className="text-[10px] font-bold text-slate-500 dark:text-slate-400 mb-0.5">{formatMatchDate(m.date)}</p>
+                    <p className="text-xs font-bold text-emerald-600 dark:text-emerald-400">{m.startTime || '10:00'}</p>
+                    <p className="text-[10px] text-slate-400 font-medium">
+                      {m.status === 'Completed' ? 'انتهت' : m.status === 'Ongoing' ? 'مباشر' : 'مبرمجة'}
+                    </p>
+                  </div>
+                  <div className="flex-1 flex items-center justify-between px-2">
+                    <span className="font-bold text-xs text-slate-800 dark:text-slate-200">
+                      {m.stage || 'مباراة إقليمية'}
+                    </span>
+                    <div className="font-black text-xs px-2.5 py-1 bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 rounded-md border border-slate-200 dark:border-slate-700">
+                      {m.status === 'Completed' ? `${m.score1 || 0} - ${m.score2 || 0}` : 'مقابلة مبرمجة'}
                     </div>
                   </div>
-                );
-              })}
+                </div>
+              ))}
             </div>
           </div>
         </div>

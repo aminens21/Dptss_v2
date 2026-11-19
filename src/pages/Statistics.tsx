@@ -1460,7 +1460,7 @@ export const Statistics: React.FC = () => {
                     onClick={() => setRankingViewMode('cards')}
                     className={`px-2.5 py-1 rounded-lg text-[11px] font-black flex items-center gap-1 transition-all cursor-pointer ${
                       rankingViewMode === 'cards'
-                        ? 'bg-slate-900 dark:bg-blue-600 text-white shadow-2xs'
+                        ? 'bg-slate-900 text-white shadow-2xs'
                         : 'text-slate-600 hover:text-slate-900'
                     }`}
                     title="عرض على شكل بطائق"
@@ -1473,7 +1473,7 @@ export const Statistics: React.FC = () => {
                     onClick={() => setRankingViewMode('table')}
                     className={`px-2.5 py-1 rounded-lg text-[11px] font-black flex items-center gap-1 transition-all cursor-pointer ${
                       rankingViewMode === 'table'
-                        ? 'bg-slate-900 dark:bg-blue-600 text-white shadow-2xs'
+                        ? 'bg-slate-900 text-white shadow-2xs'
                         : 'text-slate-600 hover:text-slate-900'
                     }`}
                     title="عرض على شكل جدول"
@@ -1542,7 +1542,7 @@ export const Statistics: React.FC = () => {
                 onClick={() => setRankingViewMode('table')}
                 className={`px-3 py-1.5 rounded-lg text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer ${
                   rankingViewMode === 'table'
-                    ? 'bg-slate-900 dark:bg-blue-600 text-white shadow-2xs'
+                    ? 'bg-slate-900 text-white shadow-2xs'
                     : 'text-slate-600 hover:text-slate-900'
                 }`}
                 title="عرض على شكل جدول"
@@ -1555,7 +1555,7 @@ export const Statistics: React.FC = () => {
                 onClick={() => setRankingViewMode('cards')}
                 className={`px-3 py-1.5 rounded-lg text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer ${
                   rankingViewMode === 'cards'
-                    ? 'bg-slate-900 dark:bg-blue-600 text-white shadow-2xs'
+                    ? 'bg-slate-900 text-white shadow-2xs'
                     : 'text-slate-600 hover:text-slate-900'
                 }`}
                 title="عرض على شكل بطائق"

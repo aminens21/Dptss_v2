@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { Tournament, Student, School, User, Sport, AffiliationDisplayConfig } from '../types';
-import { DataService, SPORTS_MAP, getAgeCategoriesForSeason, validateBirthDateForCategory, resolveSchoolCoach, schoolNamesMatch, resolveEffectiveAffiliationMode, isAffiliationAllowedByDisplayConfig, normalizeCategoryKey, resolveTeacherCadre, isCategoryAllowedForTeacher } from '../lib/dataService';
+import { DataService, SPORTS_MAP, getAgeCategoriesForSeason, validateBirthDateForCategory, resolveSchoolCoach, schoolNamesMatch, resolveEffectiveAffiliationMode, isAffiliationAllowedByDisplayConfig, normalizeCategoryKey } from '../lib/dataService';
 import { canUserDownloadTournamentTablePdf, buildParticipationTableRows, downloadTournamentParticipationTablePdf, formatTournamentRedBannerTitle } from '../lib/tournamentTablePdfService';
 import { useAuth } from '../contexts/AuthContext';
 import { useRolePermissions } from '../hooks/useRolePermissions';
@@ -88,37 +88,10 @@ export const CrossCountryChampionshipModal: React.FC<CrossCountryChampionshipMod
   const [loadedTeachers, setLoadedTeachers] = useState<User[]>([]);
   const effectiveTeachers = propTeachers.length > 0 ? propTeachers : loadedTeachers;
 
-  const effectiveSchoolNameForCadre = propTeacherSchoolName || userProfile?.schoolName || userProfile?.workLocation || '';
-  const teacherSchoolObjForCadre = useMemo(() => {
-    return schools.find(s =>
-      (userProfile?.schoolId && s.id === userProfile.schoolId) ||
-      (effectiveSchoolNameForCadre && schoolNamesMatch(s.name, effectiveSchoolNameForCadre))
-    ) || null;
-  }, [schools, userProfile?.schoolId, effectiveSchoolNameForCadre]);
-
-  const teacherCadre = useMemo(
-    () => resolveTeacherCadre(userProfile, undefined, teacherSchoolObjForCadre),
-    [userProfile, teacherSchoolObjForCadre]
-  );
-
-  const visibleCategories = useMemo(() => {
-    if (isTeacherRole && !canManage && teacherCadre) {
-      const filtered = CROSS_COUNTRY_CATEGORIES.filter(c => isCategoryAllowedForTeacher(teacherCadre, c.category));
-      if (filtered.length > 0) return filtered;
-    }
-    return CROSS_COUNTRY_CATEGORIES;
-  }, [isTeacherRole, canManage, teacherCadre]);
-
   const [selectedCatId, setSelectedCatId] = useState<string>('u15_male');
-  useEffect(() => {
-    if (visibleCategories.length > 0 && !visibleCategories.some(c => c.id === selectedCatId)) {
-      setSelectedCatId(visibleCategories[0].id);
-    }
-  }, [visibleCategories, selectedCatId]);
-
   const activeCategory = useMemo(() => {
-    return visibleCategories.find(c => c.id === selectedCatId) || visibleCategories[0] || CROSS_COUNTRY_CATEGORIES[0];
-  }, [selectedCatId, visibleCategories]);
+    return CROSS_COUNTRY_CATEGORIES.find(c => c.id === selectedCatId) || CROSS_COUNTRY_CATEGORIES[0];
+  }, [selectedCatId]);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterType, setFilterType] = useState<'ALL' | 'school_team' | 'individual'>('ALL');
   const [filterSchool, setFilterSchool] = useState<string>('ALL');
@@ -755,25 +728,15 @@ export const CrossCountryChampionshipModal: React.FC<CrossCountryChampionshipMod
             <div className="flex items-center justify-between gap-2 mb-2 px-1">
               <span className="text-xs font-black text-slate-800 flex items-center gap-1.5">
                 <Layers className="h-3.5 w-3.5 text-blue-600" />
-                <span>
-                  {visibleCategories.length === CROSS_COUNTRY_CATEGORIES.length
-                    ? 'الفئات المشاركة الثمانية المعتمدة (8 Categories):'
-                    : 'الفئات المشاركة المخصصة لسلكك التعليمي:'}
-                </span>
+                <span>الفئات المشاركة الثمانية المعتمدة (8 Categories):</span>
               </span>
               <span className="text-[11px] text-slate-500 font-medium hidden sm:inline">
                 انقر على الفئة لاستعراض تفاصيلها ولوائح التلاميذ المسجلين بها
               </span>
             </div>
 
-            <div className={`grid gap-1.5 ${
-              visibleCategories.length <= 2
-                ? 'grid-cols-2'
-                : visibleCategories.length <= 4
-                ? 'grid-cols-2 sm:grid-cols-4'
-                : 'grid-cols-2 sm:grid-cols-4 lg:grid-cols-8'
-            }`}>
-              {visibleCategories.map((cat) => {
+            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-1.5">
+              {CROSS_COUNTRY_CATEGORIES.map((cat) => {
                 const isSelected = selectedCatId === cat.id;
                 const catCategory = cat.category.toLowerCase().trim();
                 const catGender = cat.gender.toLowerCase().trim();
@@ -1752,16 +1715,10 @@ export const CrossCountryChampionshipModal: React.FC<CrossCountryChampionshipMod
                     onChange={(e) => setEditCategory(e.target.value)}
                     className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-900 focus:bg-white focus:border-blue-600 focus:outline-hidden transition-all"
                   >
-                    {[
-                      { id: 'U12', label: 'U12 - البراعم' },
-                      { id: 'U15', label: 'U15 - الصغار' },
-                      { id: 'U18', label: 'U18 - الفتيان' },
-                      { id: 'U20', label: 'U20 - الشبان' }
-                    ]
-                      .filter(opt => !(isTeacherRole && !canManage && teacherCadre) || isCategoryAllowedForTeacher(teacherCadre, opt.id))
-                      .map(opt => (
-                        <option key={opt.id} value={opt.id}>{opt.label}</option>
-                      ))}
+                    <option value="U12">U12 - البراعم</option>
+                    <option value="U15">U15 - الصغار</option>
+                    <option value="U18">U18 - الفتيان</option>
+                    <option value="U20">U20 - الشبان</option>
                   </select>
                 </div>
               </div>
@@ -1907,7 +1864,6 @@ export const CrossCountryChampionshipModal: React.FC<CrossCountryChampionshipMod
           teacherLeaseNumber={userProfile?.leaseNumber}
           registrationDeadline={currentDeadline}
           confirmedRecord={currentConfirmationRecord}
-          teacherCadre={teacherCadre}
           onConfirmSuccess={() => {
             refreshConfirmations();
             if (onRefreshData) onRefreshData();

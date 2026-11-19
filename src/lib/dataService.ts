@@ -1140,175 +1140,35 @@ export function isSchoolLevelAllowedForTournament(schoolType: string, tournament
   return allowedLevels.includes(schoolLevelKey);
 }
 
-export function normalizeTeachingCadreKey(rawCadre?: string): 'Primary' | 'Middle' | 'High' | '' {
-  const cleanCadre = String(rawCadre || '').trim().toUpperCase();
-  if (!cleanCadre) return '';
-  if (cleanCadre === 'PRIMARY' || cleanCadre.includes('ابتدائي') || cleanCadre.includes('ابتدائ')) {
-    return 'Primary';
-  }
-  if (cleanCadre === 'MIDDLE' || cleanCadre.includes('إعدادي') || cleanCadre.includes('اعدادي') || cleanCadre.includes('إعداد') || cleanCadre.includes('اعداد')) {
-    return 'Middle';
-  }
-  if (cleanCadre === 'HIGH' || cleanCadre.includes('SECONDARY') || cleanCadre.includes('تأهيلي') || cleanCadre.includes('تاهيلي') || cleanCadre.includes('تأهيل') || cleanCadre.includes('ثانوي')) {
-    return 'High';
-  }
-  return '';
-}
-
-export function resolveTeacherCadre(
-  userProfile?: { teachingCadre?: string; workLocation?: string; schoolName?: string } | null,
-  teacherProfile?: { teachingCadre?: string; workLocation?: string; schoolName?: string } | null,
-  schoolObj?: { type?: string; name?: string } | null
-): 'PRIMARY' | 'MIDDLE' | 'HIGH' | undefined {
-  const candidates = [
-    userProfile?.teachingCadre,
-    teacherProfile?.teachingCadre,
-    schoolObj?.type && !schoolObj.type.includes('خصوصي') ? schoolObj.type : undefined
-  ];
-
-  for (const cand of candidates) {
-    const k = normalizeTeachingCadreKey(cand);
-    if (k === 'Primary') return 'PRIMARY';
-    if (k === 'Middle') return 'MIDDLE';
-    if (k === 'High') return 'HIGH';
-  }
-
-  // Fallback: infer from school name / work location (useful for private schools or imported teacher records)
-  const schoolHints = [
-    schoolObj?.name,
-    userProfile?.workLocation,
-    userProfile?.schoolName,
-    teacherProfile?.workLocation,
-    teacherProfile?.schoolName
-  ]
-    .filter(Boolean)
-    .join(' ');
-
-  if (schoolHints) {
-    if (
-      schoolHints.includes('ابتدائ') ||
-      schoolHints.includes('مجموعة مدارس') ||
-      /(?:^|\s)م\.م(?:\s|$)/.test(schoolHints)
-    ) {
-      return 'PRIMARY';
-    }
-    if (schoolHints.includes('إعداد') || schoolHints.includes('اعداد')) {
-      return 'MIDDLE';
-    }
-    if (schoolHints.includes('تأهيل') || schoolHints.includes('تاهيل')) {
-      return 'HIGH';
-    }
-  }
-
-  return undefined;
-}
-
-export function detectSingleCategoryCycleLevel(
-  ageCategory?: string,
-  tournamentName?: string
-): 'Primary' | 'Middle' | 'High' | null {
-  const raw = String(ageCategory || '').trim();
-  const rawUpper = raw.toUpperCase();
-
-  const hasU12 = rawUpper.includes('U12') || raw.includes('براعم') || raw.includes('برعمات') || raw.includes('برعم');
-  const hasU15 = rawUpper.includes('U15') || raw.includes('صغار') || raw.includes('صغيرات') || raw.includes('صغير');
-  const hasU18 = rawUpper.includes('U18') || raw.includes('فتيان') || raw.includes('فتيات');
-  const hasU20 = rawUpper.includes('U20') || raw.includes('شبان') || raw.includes('شابات');
-  const hasHigh = hasU18 || hasU20;
-
-  const groupCount = (hasU12 ? 1 : 0) + (hasU15 ? 1 : 0) + (hasHigh ? 1 : 0);
-  if (groupCount === 1) {
-    if (hasU12) return 'Primary';
-    if (hasU15) return 'Middle';
-    if (hasHigh) return 'High';
-  }
-  if (groupCount > 1) return null; // Explicit multi-cycle category like 'جميع الفئات (U12 / U15 / U18 / U20)'
-
-  // Inspect tournament name if ageCategory did not specify a standard cycle
-  const tName = String(tournamentName || '').trim();
-  if (tName) {
-    const namePrimary = tName.includes('ابتدائي');
-    const nameMiddle = tName.includes('إعدادي') || tName.includes('اعدادي');
-    const nameHigh = tName.includes('تأهيلي') || tName.includes('تاهيلي');
-    const nameCount = (namePrimary ? 1 : 0) + (nameMiddle ? 1 : 0) + (nameHigh ? 1 : 0);
-    if (nameCount === 1) {
-      if (namePrimary) return 'Primary';
-      if (nameMiddle) return 'Middle';
-      if (nameHigh) return 'High';
-    }
-  }
-
-  return null;
-}
-
-export function isCategoryAllowedForTeacher(
-  teachingCadre: string | undefined,
-  categoryId: string
-): boolean {
-  const teacherKey = normalizeTeachingCadreKey(teachingCadre);
-  if (!teacherKey) return true;
-  const norm = normalizeCategoryKey(categoryId);
-  if (teacherKey === 'Primary') return norm === 'U12';
-  if (teacherKey === 'Middle') return norm === 'U15';
-  if (teacherKey === 'High') return norm === 'U18' || norm === 'U20';
-  return true;
-}
-
 export function isTeacherLevelAllowedForTournament(teachingCadre?: string, tournamentLevel?: string): boolean {
-  if (!tournamentLevel || tournamentLevel === 'جميع الأسلاك' || tournamentLevel.includes('جميع')) return true;
-  const teacherLevelKey = normalizeTeachingCadreKey(teachingCadre);
+  if (!tournamentLevel || tournamentLevel === 'جميع الأسلاك' || tournamentLevel.includes('جميع')) return true; 
+  if (!teachingCadre) return true; // Flexible: allow entry by default if cadre is not explicitly set yet on mobile
+  
+  let teacherLevelKey = '';
+  const cleanCadre = String(teachingCadre).trim().toUpperCase();
+  
+  // Support both English keys and Arabic values/synonyms
+  if (cleanCadre === 'PRIMARY' || cleanCadre.includes('ابتدائي')) {
+    teacherLevelKey = 'Primary';
+  } else if (cleanCadre === 'MIDDLE' || cleanCadre.includes('إعدادي') || cleanCadre.includes('اعدادي')) {
+    teacherLevelKey = 'Middle';
+  } else if (cleanCadre === 'HIGH' || cleanCadre.includes('تأهيلي') || cleanCadre.includes('تاهيلي') || cleanCadre.includes('ثانوي')) {
+    teacherLevelKey = 'High';
+  }
+  
   if (!teacherLevelKey) return true; // Flexible fallback: allow entry if cadre format is unrecognized
-
+  
   const allowedLevels = tournamentLevel.split(',').map(l => l.trim());
+  
+  // Check mapping
   if (allowedLevels.includes(teacherLevelKey)) return true;
-
+  
+  // Arabic synonyms check in tournament level string
   if (teacherLevelKey === 'Primary' && (tournamentLevel.includes('ابتدائي') || allowedLevels.includes('Primary'))) return true;
   if (teacherLevelKey === 'Middle' && (tournamentLevel.includes('إعدادي') || tournamentLevel.includes('اعدادي') || allowedLevels.includes('Middle'))) return true;
   if (teacherLevelKey === 'High' && (tournamentLevel.includes('تأهيلي') || tournamentLevel.includes('تاهيلي') || tournamentLevel.includes('ثانوي') || allowedLevels.includes('High'))) return true;
 
   return false;
-}
-
-export function isTournamentAllowedForTeacher(
-  teachingCadre: string | undefined,
-  tournament: { level?: string; ageCategory?: string; category?: string; name?: string }
-): boolean {
-  const teacherKey = normalizeTeachingCadreKey(teachingCadre);
-  if (!teacherKey) return true;
-
-  // 1. Strict explicit level check when tournament.level is specified (not empty / 'جميع الأسلاك')
-  const rawLevel = String(tournament.level || '').trim();
-  const isWildcardLevel = !rawLevel || rawLevel === 'جميع الأسلاك' || rawLevel.includes('جميع');
-  if (!isWildcardLevel && !isTeacherLevelAllowedForTournament(teachingCadre, rawLevel)) {
-    return false;
-  }
-
-  // 2. Check the tournament's single age-category cycle (e.g. U12=Primary, U15=Middle, U18/U20=High)
-  const singleCatLevel = detectSingleCategoryCycleLevel(
-    tournament.ageCategory || tournament.category,
-    tournament.name
-  );
-
-  if (singleCatLevel) {
-    // Elementary teachers (PRIMARY / ابتدائي) strictly participate ONLY in U12 (Primary);
-    // never show U15 (Middle) or U18/U20 (High) tournaments as open even if level was defaulted/broadened
-    if (teacherKey === 'Primary' && singleCatLevel !== 'Primary') {
-      return false;
-    }
-
-    // Check if level explicitly includes all 3 cycles (from legacy/batch defaults) or is wildcard/unspecified
-    const coversAllThree =
-      isWildcardLevel ||
-      ((rawLevel.includes('Primary') || rawLevel.includes('ابتدائي')) &&
-        (rawLevel.includes('Middle') || rawLevel.includes('إعدادي') || rawLevel.includes('اعدادي')) &&
-        (rawLevel.includes('High') || rawLevel.includes('تأهيلي') || rawLevel.includes('تاهيلي')));
-
-    if (coversAllThree && teacherKey !== singleCatLevel) {
-      return false;
-    }
-  }
-
-  return true;
 }
 
 export function getCategoryLevel(categoryId: string): 'Primary' | 'Middle' | 'High' | 'Other' {
@@ -4964,22 +4824,10 @@ export const DataService = {
       const idsToDelete: string[] = [];
 
       duplicates.forEach(dup => {
-        // Merge missing fields from duplicate into primary user while preserving elevated admin/committee roles
-        const mergedIsSuper = Boolean(primaryUser.isSuperAdmin || dup.isSuperAdmin);
-        const mergedRole =
-          primaryUser.role === 'CENTRAL_ADMIN' || dup.role === 'CENTRAL_ADMIN' || mergedIsSuper
-            ? 'CENTRAL_ADMIN'
-            : (primaryUser.role || dup.role || 'TEACHER');
+        // Merge missing fields from duplicate into primary user
         mergedPrimary = {
           ...dup,
           ...mergedPrimary,
-          role: mergedRole,
-          isSuperAdmin: mergedIsSuper,
-          isTechCommitteeHead: Boolean(primaryUser.isTechCommitteeHead ?? dup.isTechCommitteeHead),
-          techCommitteeSports:
-            (primaryUser.techCommitteeSports && primaryUser.techCommitteeSports.length > 0)
-              ? primaryUser.techCommitteeSports
-              : (dup.techCommitteeSports || []),
           workLocation: primaryUser.workLocation || dup.workLocation || '',
           schoolId: primaryUser.schoolId || dup.schoolId || '',
           leaseNumber: primaryUser.leaseNumber || dup.leaseNumber || '',
@@ -5065,32 +4913,24 @@ export const DataService = {
       ? [String(prevUserSnapshot.refereeSpecialty)]
       : [];
 
-    const targetEmailNorm = String(cleanProfileData.email || prevUserSnapshot?.email || '').trim().toLowerCase();
-    const isProtectedSuperEmail = Boolean(targetEmailNorm && SUPER_ADMIN_EMAILS.includes(targetEmailNorm));
-
     let fullUserRecord: User;
     if (idx >= 0) {
-      const existingRole = users[idx].role;
-      const mergedRole = isProtectedSuperEmail
-        ? 'CENTRAL_ADMIN'
-        : (cleanProfileData.role || existingRole || 'TEACHER');
       fullUserRecord = {
         ...users[idx],
         ...cleanProfileData,
         id: users[idx].id || userId,
-        role: mergedRole,
-        isSuperAdmin: isProtectedSuperEmail ? true : Boolean(cleanProfileData.isSuperAdmin ?? users[idx].isSuperAdmin),
+        role: cleanProfileData.role || users[idx].role || 'TEACHER',
         directorateId: cleanProfileData.directorateId || users[idx].directorateId || activeDirId,
         isActive: users[idx].isActive !== undefined ? users[idx].isActive : true,
         updatedAt: new Date()
       };
       users[idx] = fullUserRecord;
     } else {
-      const resolvedRole = isProtectedSuperEmail ? 'CENTRAL_ADMIN' : (cleanProfileData.role || 'TEACHER');
       fullUserRecord = {
         id: userId,
         fullName: cleanProfileData.fullName || (cleanProfileData as any).name || 'أستاذ',
         email: cleanProfileData.email || '',
+        role: cleanProfileData.role || 'TEACHER',
         directorateId: cleanProfileData.directorateId || activeDirId,
         workLocation: cleanProfileData.workLocation || '',
         leaseNumber: cleanProfileData.leaseNumber || '',
@@ -5101,8 +4941,6 @@ export const DataService = {
         isTechCommitteeMember: !!cleanProfileData.isTechCommitteeMember,
         techCommitteeSportsMemberOf: cleanProfileData.techCommitteeSportsMemberOf || [],
         ...cleanProfileData,
-        role: resolvedRole,
-        isSuperAdmin: isProtectedSuperEmail ? true : Boolean(cleanProfileData.isSuperAdmin),
         createdAt: new Date(),
         updatedAt: new Date()
       };
@@ -5111,17 +4949,12 @@ export const DataService = {
     inMemoryCollectionCache['local_registered_users'] = users;
     safeSetLocalJson('local_registered_users', users);
 
-    // 2. Also sync demo user profile strictly if matching the exact demo account ID or email
+    // 2. Also sync demo user profile if matching
     try {
       const savedDemo = localStorage.getItem('demo_user_profile');
       if (savedDemo) {
         const parsed = JSON.parse(savedDemo) as User;
-        const emailMatches = Boolean(
-          profileData.email &&
-          parsed.email &&
-          parsed.email.trim().toLowerCase() === profileData.email.trim().toLowerCase()
-        );
-        if (parsed.id === userId || emailMatches) {
+        if (parsed.id === userId || (profileData.email && parsed.email?.toLowerCase() === profileData.email?.toLowerCase()) || parsed.role === 'TEACHER') {
           const updatedDemo = { ...parsed, ...fullUserRecord, updatedAt: new Date() };
           localStorage.setItem('demo_user_profile', JSON.stringify(updatedDemo));
         }

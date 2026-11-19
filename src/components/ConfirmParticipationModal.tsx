@@ -13,12 +13,8 @@ import {
   getSchoolEducationSector,
   getTournamentEducationSectorsAr,
   schoolNamesMatch,
-  isAffiliationAllowedByDisplayConfig,
-  resolveTeacherCadre,
-  isTournamentAllowedForTeacher,
-  isCategoryAllowedForTeacher
+  isAffiliationAllowedByDisplayConfig
 } from '../lib/dataService';
-import { useAuth } from '../contexts/AuthContext';
 import { CountdownTimer } from './CountdownTimer';
 import { ConfirmedParticipationBadge } from './ConfirmedParticipationBadge';
 import {
@@ -55,7 +51,6 @@ interface ConfirmParticipationModalProps {
   onConfirmSuccess?: () => void;
   onCancelSuccess?: () => void;
   onProceedToRegister?: () => void;
-  teacherCadre?: string;
 }
 
 interface BranchOptionItem {
@@ -82,10 +77,8 @@ export const ConfirmParticipationModal: React.FC<ConfirmParticipationModalProps>
   confirmedRecord,
   onConfirmSuccess,
   onCancelSuccess,
-  onProceedToRegister,
-  teacherCadre: propTeacherCadre
+  onProceedToRegister
 }) => {
-  const { userProfile } = useAuth();
   const isConfirmed = !!confirmedRecord && confirmedRecord.status === 'confirmed';
   const [isEditingExisting, setIsEditingExisting] = useState(false);
   const [confirmCancelStep, setConfirmCancelStep] = useState(false);
@@ -131,35 +124,17 @@ export const ConfirmParticipationModal: React.FC<ConfirmParticipationModalProps>
     };
   }, [isOpen, propTournaments, sport.id]);
 
+  const activeSportTournaments = useMemo(() => {
+    const source = propTournaments && propTournaments.length > 0 ? propTournaments : loadedTournaments;
+    return source.filter(t => t.sportId === sport.id && t.status !== 'Archived' && t.status !== 'Draft');
+  }, [propTournaments, loadedTournaments, sport.id]);
+
   const matchedSchool = useMemo(() => {
     if (!loadedSchools.length) return undefined;
     return loadedSchools.find(
       s => (schoolId && s.id === schoolId) || (schoolName && schoolNamesMatch(s.name, schoolName))
     );
   }, [loadedSchools, schoolId, schoolName]);
-
-  const effectiveTeacherCadre = useMemo(() => {
-    if (propTeacherCadre) return propTeacherCadre;
-    if (userProfile?.role === 'TEACHER' && !userProfile?.isTechCommitteeHead) {
-      return resolveTeacherCadre(userProfile, undefined, matchedSchool);
-    }
-    return undefined;
-  }, [propTeacherCadre, userProfile, matchedSchool]);
-
-  const isTeacherFiltered = Boolean(
-    effectiveTeacherCadre &&
-    userProfile?.role === 'TEACHER' &&
-    !userProfile?.isSuperAdmin
-  );
-
-  const activeSportTournaments = useMemo(() => {
-    const source = propTournaments && propTournaments.length > 0 ? propTournaments : loadedTournaments;
-    const base = source.filter(t => t.sportId === sport.id && t.status !== 'Archived' && t.status !== 'Draft');
-    if (isTeacherFiltered) {
-      return base.filter(t => isTournamentAllowedForTeacher(effectiveTeacherCadre, t));
-    }
-    return base;
-  }, [propTournaments, loadedTournaments, sport.id, isTeacherFiltered, effectiveTeacherCadre]);
 
   const isSectorAllowed = useMemo(() => {
     if (!matchedSchool || activeSportTournaments.length === 0) return true;
@@ -182,46 +157,38 @@ export const ConfirmParticipationModal: React.FC<ConfirmParticipationModalProps>
 
   // Available categories for this sport
   const availableCategories = useMemo(() => {
-    let baseCats: { id: string; name: string; years: string }[] = [];
     const customCats = (sport as any)?.customAgeCategories;
     if (Array.isArray(customCats) && customCats.length > 0) {
-      baseCats = customCats.map((c: any) => ({
+      return customCats.map((c: any) => ({
         id: normalizeCategoryKey(c.id),
         name: c.name,
         years: c.yearsExpression || ''
       }));
-    } else {
-      const ageCats = (sport as any)?.ageCategories;
-      if (Array.isArray(ageCats) && ageCats.length > 0) {
-        baseCats = ageCats.map((cat: string) => {
-          const norm = normalizeCategoryKey(cat);
-          return {
-            id: norm,
-            name: getCustomCategoryName(norm, sport.id) || getCategoryShortName(norm) || norm,
-            years: ''
-          };
-        });
-      } else if (sport.id === 'cross_country' || sport.id === 'athletics') {
-        baseCats = [
-          { id: 'U12', name: 'البراعم والبرعمات (U12)', years: '' },
-          { id: 'U15', name: 'الصغار والصغيرات (U15)', years: '' },
-          { id: 'U18', name: 'الفتيان والفتيات (U18)', years: '' },
-          { id: 'U20', name: 'الشبان والشابات (U20)', years: '' }
-        ];
-      } else {
-        baseCats = [
-          { id: 'U15', name: 'الصغار والصغيرات (U15)', years: '' },
-          { id: 'U18', name: 'الفتيان والفتيات (U18)', years: '' }
-        ];
-      }
     }
-
-    if (isTeacherFiltered && effectiveTeacherCadre) {
-      const levelFiltered = baseCats.filter(c => isCategoryAllowedForTeacher(effectiveTeacherCadre, c.id));
-      if (levelFiltered.length > 0) return levelFiltered;
+    const ageCats = (sport as any)?.ageCategories;
+    if (Array.isArray(ageCats) && ageCats.length > 0) {
+      return ageCats.map((cat: string) => {
+        const norm = normalizeCategoryKey(cat);
+        return {
+          id: norm,
+          name: getCustomCategoryName(norm, sport.id) || getCategoryShortName(norm) || norm,
+          years: ''
+        };
+      });
     }
-    return baseCats;
-  }, [sport, isTeacherFiltered, effectiveTeacherCadre]);
+    if (sport.id === 'cross_country' || sport.id === 'athletics') {
+      return [
+        { id: 'U12', name: 'البراعم والبرعمات (U12)', years: '' },
+        { id: 'U15', name: 'الصغار والصغيرات (U15)', years: '' },
+        { id: 'U18', name: 'الفتيان والفتيات (U18)', years: '' },
+        { id: 'U20', name: 'الشبان والشابات (U20)', years: '' }
+      ];
+    }
+    return [
+      { id: 'U15', name: 'الصغار والصغيرات (U15)', years: '' },
+      { id: 'U18', name: 'الفتيان والفتيات (U18)', years: '' }
+    ];
+  }, [sport]);
 
   // Build exact programmable branches grouped by affiliation
   const affiliationGroups = useMemo(() => {

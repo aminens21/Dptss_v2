@@ -21,7 +21,7 @@ interface AuthContextType {
   openProfileModal: () => void;
   closeProfileModal: () => void;
   loginAsDemo: (role: Role, name?: string, email?: string, sportId?: string, assignedTournamentId?: string, extraFields?: Partial<User>) => void;
-  startTeacherImpersonation: (teacher: User, options?: { preserveTechCommitteeRole?: boolean }) => void;
+  startTeacherImpersonation: (teacher: User) => void;
   stopTeacherImpersonation: () => void;
   logout: () => Promise<void>;
   updateProfileState: (updatedFields: Partial<User>) => void;
@@ -438,6 +438,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       id: `demo-${role.toLowerCase()}`,
       fullName: customName || defaultInfo.name,
       email: targetEmail,
+      role: isSuper ? 'CENTRAL_ADMIN' : role,
+      isSuperAdmin: isSuper,
       sportId: sportId || defaultInfo.sportId,
       assignedTournamentId: assignedTournamentId,
       directorateId: extraFields?.directorateId || defaultInfo.directorateId || 'taourirt',
@@ -447,9 +449,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       isActive: true,
       createdAt: new Date(),
       updatedAt: new Date(),
-      ...extraFields,
-      role: isSuper ? 'CENTRAL_ADMIN' : role,
-      isSuperAdmin: isSuper || Boolean(extraFields?.isSuperAdmin && role === 'CENTRAL_ADMIN')
+      ...extraFields
     };
 
     localStorage.setItem('demo_user_profile', JSON.stringify(demoProfile));
@@ -469,22 +469,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     } as any);
   };
 
-  const startTeacherImpersonation = (teacher: User, options?: { preserveTechCommitteeRole?: boolean }) => {
+  const startTeacherImpersonation = (teacher: User) => {
     if (!userProfile) return;
     if (!userProfile.isTechCommitteeHead && userProfile.role !== 'CENTRAL_ADMIN' && !userProfile.isSuperAdmin) {
       return;
     }
-    const preserveTechCommitteeRole = Boolean(options?.preserveTechCommitteeRole);
-    const keepTechHead = Boolean(preserveTechCommitteeRole && teacher.isTechCommitteeHead);
-    const keepTechMember = Boolean(preserveTechCommitteeRole && teacher.isTechCommitteeMember);
-
     const impersonatedProfile: User = {
       ...teacher,
       role: 'TEACHER',
-      isTechCommitteeHead: keepTechHead,
-      techCommitteeSports: keepTechHead ? (teacher.techCommitteeSports || []) : [],
-      isTechCommitteeMember: keepTechMember,
-      techCommitteeSportsMemberOf: keepTechMember ? (teacher.techCommitteeSportsMemberOf || []) : [],
+      isTechCommitteeHead: false,
+      isTechCommitteeMember: false,
       isSuperAdmin: false,
       schoolAccessVerified: true,
       directorateId: teacher.directorateId || userProfile.directorateId || 'taourirt',

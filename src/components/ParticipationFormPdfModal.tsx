@@ -693,7 +693,7 @@ export const ParticipationFormPdfModal: React.FC<ParticipationFormPdfModalProps>
         <div className="p-2 sm:p-6 bg-slate-100/60 dark:bg-slate-950 w-full overflow-x-auto flex justify-center">
           <div
             ref={printAreaRef}
-            className="light-surface-always bg-white min-w-[700px] max-w-[780px] p-6 sm:p-8 rounded-xl shadow-md border border-slate-200/90 text-slate-900 select-text origin-top"
+            className="bg-white min-w-[700px] max-w-[780px] p-6 sm:p-8 rounded-xl shadow-md border border-slate-200/90 text-slate-900 select-text origin-top"
             style={{ 
               fontFamily: "'Cairo', 'Segoe UI', Tahoma, sans-serif",
               transform: `scale(${zoomLevel})`,

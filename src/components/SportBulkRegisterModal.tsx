@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { School, Student, Sport, User, Tournament } from '../types';
-import { DataService, validateBirthDateForCategory, normalizeCategoryKey, getCategoryGenderLabel, getCategoryYearsLabel, isSchoolLevelAllowedForTournament, getTournamentLevelAr, isTeacherLevelAllowedForTournament, isSchoolSectorAllowedForTournament, getTournamentEducationSectorsAr, getSchoolEducationSector, schoolNamesMatch, resolveTeacherCadre, isCategoryAllowedForTeacher, isTournamentAllowedForTeacher } from '../lib/dataService';
+import { DataService, validateBirthDateForCategory, normalizeCategoryKey, getCategoryGenderLabel, getCategoryYearsLabel, isSchoolLevelAllowedForTournament, getTournamentLevelAr, isTeacherLevelAllowedForTournament, isSchoolSectorAllowedForTournament, getTournamentEducationSectorsAr, getSchoolEducationSector, schoolNamesMatch } from '../lib/dataService';
 import { AthleticsService } from '../lib/athleticsService';
 import { useAuth } from '../contexts/AuthContext';
 import * as XLSX from 'xlsx';
@@ -67,30 +67,23 @@ export const SportBulkRegisterModal: React.FC<SportBulkRegisterModalProps> = ({
   const isTeacher = userProfile?.role === 'TEACHER';
   const [currentSeason, setCurrentSeason] = useState(initialSeason);
 
-  const effectiveSchoolHint = preselectedSchoolName || userProfile?.workLocation || userProfile?.schoolName || '';
-  const teacherSchoolObj = useMemo(() => {
-    return schools.find(s =>
-      (userProfile?.schoolId && s.id === userProfile.schoolId) ||
-      (effectiveSchoolHint && schoolNamesMatch(s.name, effectiveSchoolHint))
-    ) || null;
-  }, [schools, userProfile?.schoolId, effectiveSchoolHint]);
-
-  const resolvedCadre = useMemo(
-    () => resolveTeacherCadre(userProfile, undefined, teacherSchoolObj),
-    [userProfile, teacherSchoolObj]
-  );
-
   // Available categories for selection
   const availableCategories = useMemo(() => {
     const baseCats = (sport?.ageCategories && sport.ageCategories.length > 0)
       ? sport.ageCategories.map(normalizeCategoryKey)
       : ['U12', 'U15', 'U18', 'U20'];
 
-    if (!isTeacher || userProfile?.isTechCommitteeHead || !resolvedCadre) return baseCats;
+    if (!isTeacher || !userProfile?.teachingCadre) return baseCats;
 
-    const filtered = baseCats.filter(catId => isCategoryAllowedForTeacher(resolvedCadre, catId));
-    return filtered.length > 0 ? filtered : baseCats;
-  }, [sport, isTeacher, userProfile?.isTechCommitteeHead, resolvedCadre]);
+    const cadre = userProfile.teachingCadre.toUpperCase();
+    return baseCats.filter(catId => {
+      const norm = normalizeCategoryKey(catId);
+      if (cadre.includes('PRIMARY')) return norm === 'U12';
+      if (cadre.includes('MIDDLE')) return norm === 'U15';
+      if (cadre.includes('HIGH') || cadre.includes('SECONDARY')) return norm === 'U18' || norm === 'U20';
+      return true;
+    });
+  }, [sport, isTeacher, userProfile]);
 
   // Selected age category
   const [selectedCategory, setSelectedCategory] = useState<string>('U15');
@@ -680,9 +673,9 @@ export const SportBulkRegisterModal: React.FC<SportBulkRegisterModalProps> = ({
               return;
             }
 
-            // Check teacher cadre (extra safety using resolved cadre)
-            if (isTeacher && !userProfile?.isTechCommitteeHead && resolvedCadre && (!isTeacherLevelAllowedForTournament(resolvedCadre, relevantTournament.level) || !isTournamentAllowedForTeacher(resolvedCadre, relevantTournament))) {
-              const cadreAr = resolvedCadre === 'PRIMARY' ? 'ابتدائي' : resolvedCadre === 'MIDDLE' ? 'إعدادي' : 'تأهيلي';
+            // Check teacher cadre (extra safety)
+            if (userProfile?.teachingCadre && !isTeacherLevelAllowedForTournament(userProfile.teachingCadre, relevantTournament.level)) {
+              const cadreAr = userProfile.teachingCadre.includes('PRIMARY') ? 'ابتدائي' : userProfile.teachingCadre.includes('MIDDLE') ? 'إعدادي' : 'تأهيلي';
               toast.error(`عذراً، بصفتك أستاذ سلك (${cadreAr})، لا يمكنك التسجيل في بطولة مخصصة لـ (${getTournamentLevelAr(relevantTournament.level)})`);
               setIsSubmitting(false);
               return;

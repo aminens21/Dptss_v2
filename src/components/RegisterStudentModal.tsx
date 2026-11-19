@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Sport, Student, School, Tournament } from '../types';
-import { DataService, getAgeCategoriesForSeason, SPORTS_MAP, getCategoryGenderLabel, validateBirthDateForCategory, normalizeCategoryKey, isSchoolLevelAllowedForTournament, getTournamentLevelAr, isTeacherLevelAllowedForTournament, isSchoolSectorAllowedForTournament, getTournamentEducationSectorsAr, getSchoolEducationSector, schoolNamesMatch, resolveTeacherCadre, isCategoryAllowedForTeacher, isTournamentAllowedForTeacher } from '../lib/dataService';
+import { DataService, getAgeCategoriesForSeason, SPORTS_MAP, getCategoryGenderLabel, validateBirthDateForCategory, normalizeCategoryKey, isSchoolLevelAllowedForTournament, getTournamentLevelAr, isTeacherLevelAllowedForTournament, isSchoolSectorAllowedForTournament, getTournamentEducationSectorsAr, getSchoolEducationSector, schoolNamesMatch } from '../lib/dataService';
 import { AthleticsService } from '../lib/athleticsService';
 import { useAuth } from '../contexts/AuthContext';
 import { X, GraduationCap, User, Calendar, Upload, AlertCircle, Lock, ShieldCheck, CheckCircle2, Camera } from 'lucide-react';
@@ -148,33 +148,20 @@ export const RegisterStudentModal: React.FC<RegisterStudentModalProps> = ({
     ? sport.ageCategories.map(normalizeCategoryKey)
     : seasonalCategories.map(c => c.id);
 
-  const effectiveSchoolHint = preselectedSchoolName || userProfile?.workLocation || userProfile?.schoolName || '';
-  const teacherSchoolObj = useMemo(() => {
-    return schools.find(s =>
-      (userProfile?.schoolId && s.id === userProfile.schoolId) ||
-      (effectiveSchoolHint && schoolNamesMatch(s.name, effectiveSchoolHint))
-    ) || null;
-  }, [schools, userProfile?.schoolId, effectiveSchoolHint]);
-
-  const resolvedCadre = useMemo(
-    () => resolveTeacherCadre(userProfile, undefined, teacherSchoolObj),
-    [userProfile, teacherSchoolObj]
-  );
-
   const availableCategories = useMemo(() => {
-    if (userProfile?.role !== 'TEACHER' || userProfile?.isTechCommitteeHead || !resolvedCadre) {
-      return baseCategories;
-    }
+    // If not a teacher, show everything
+    if (userProfile?.role !== 'TEACHER' || !userProfile?.teachingCadre) return baseCategories;
 
-    const filtered = baseCategories.filter(catId => isCategoryAllowedForTeacher(resolvedCadre, catId));
-    return filtered.length > 0 ? filtered : baseCategories;
-  }, [baseCategories, userProfile?.role, userProfile?.isTechCommitteeHead, resolvedCadre]);
-
-  useEffect(() => {
-    if (isOpen && availableCategories.length > 0 && !availableCategories.includes(normalizeCategoryKey(category))) {
-      setCategory(availableCategories[0]);
-    }
-  }, [isOpen, availableCategories, category]);
+    // Filter categories based on teacher cadre
+    const cadre = userProfile.teachingCadre.toUpperCase();
+    return baseCategories.filter(catId => {
+      const norm = normalizeCategoryKey(catId);
+      if (cadre.includes('PRIMARY')) return norm === 'U12';
+      if (cadre.includes('MIDDLE')) return norm === 'U15';
+      if (cadre.includes('HIGH') || cadre.includes('SECONDARY')) return norm === 'U18' || norm === 'U20';
+      return true;
+    });
+  }, [baseCategories, userProfile]);
 
   const availableAthleticsDisciplines = useMemo(() => {
     if (sport?.id !== 'athletics') return [];
@@ -338,9 +325,9 @@ export const RegisterStudentModal: React.FC<RegisterStudentModalProps> = ({
               return;
             }
 
-            // Check teacher cadre (extra safety using resolved cadre)
-            if (userProfile?.role === 'TEACHER' && !userProfile?.isTechCommitteeHead && resolvedCadre && (!isTeacherLevelAllowedForTournament(resolvedCadre, relevantTournament.level) || !isTournamentAllowedForTeacher(resolvedCadre, relevantTournament))) {
-              const cadreAr = resolvedCadre === 'PRIMARY' ? 'ابتدائي' : resolvedCadre === 'MIDDLE' ? 'إعدادي' : 'تأهيلي';
+            // Check teacher cadre (extra safety)
+            if (userProfile?.teachingCadre && !isTeacherLevelAllowedForTournament(userProfile.teachingCadre, relevantTournament.level)) {
+              const cadreAr = userProfile.teachingCadre.includes('PRIMARY') ? 'ابتدائي' : userProfile.teachingCadre.includes('MIDDLE') ? 'إعدادي' : 'تأهيلي';
               toast.error(`عذراً، بصفتك أستاذ سلك (${cadreAr})، لا يمكنك التسجيل في بطولة مخصصة لـ (${getTournamentLevelAr(relevantTournament.level)})`);
               setIsSubmitting(false);
               return;

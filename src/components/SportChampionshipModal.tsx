@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { Tournament, Student, School, User, Sport, Match, AffiliationDisplayConfig } from '../types';
-import { SPORTS_MAP, getAgeCategoriesForSeason, normalizeCategoryKey, DataService, getCategoryYearsLabel, isTeacherLevelAllowedForTournament, isTournamentAllowedForTeacher, isCategoryAllowedForTeacher, resolveTeacherCadre, getTournamentLevelAr, doesConfirmationMatchBranch, getEffectiveConfirmedBranches, formatBranchLabelAr, isSchoolSectorAllowedForTournament, getTournamentEducationSectorsAr, getSchoolEducationSector, resolveSchoolCoach, schoolNamesMatch, normalizeArabicSearch, normalizeArabicMatchText, normalizeTournamentAffiliation, isAffiliationAllowedByDisplayConfig } from '../lib/dataService';
+import { SPORTS_MAP, getAgeCategoriesForSeason, normalizeCategoryKey, DataService, getCategoryYearsLabel, isTeacherLevelAllowedForTournament, getTournamentLevelAr, doesConfirmationMatchBranch, getEffectiveConfirmedBranches, formatBranchLabelAr, isSchoolSectorAllowedForTournament, getTournamentEducationSectorsAr, getSchoolEducationSector, resolveSchoolCoach, schoolNamesMatch, normalizeArabicSearch, normalizeArabicMatchText, normalizeTournamentAffiliation, isAffiliationAllowedByDisplayConfig } from '../lib/dataService';
 import { canUserDownloadTournamentTablePdf, buildParticipationTableRows, downloadTournamentParticipationTablePdf, formatTournamentRedBannerTitle } from '../lib/tournamentTablePdfService';
 import { useAuth, isSuperAdminEmail } from '../contexts/AuthContext';
 import { AppLogo } from './AppLogo';
@@ -585,46 +585,31 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
     );
   }, [teachers, sport]);
 
-  const teacherSchoolObj = useMemo(() => {
-    if (!effectiveSchoolName) return undefined;
-    return (schools || []).find(s =>
-      (userProfile?.schoolId && s.id === userProfile.schoolId) ||
-      schoolNamesMatch(s.name, effectiveSchoolName)
-    );
-  }, [schools, userProfile?.schoolId, effectiveSchoolName]);
-
   const teacherCadre = useMemo(() => {
-    return resolveTeacherCadre(userProfile, undefined, teacherSchoolObj);
-  }, [userProfile, teacherSchoolObj]);
+    if (userProfile?.teachingCadre) return userProfile.teachingCadre;
+    if (userProfile?.schoolId || userProfile?.schoolName) {
+      const userSchool = (schools || []).find(s => 
+        (userProfile.schoolId && s.id === userProfile.schoolId) || 
+        (userProfile.schoolName && s.name === userProfile.schoolName)
+      );
+      if (userSchool?.type) return userSchool.type;
+    }
+    return undefined;
+  }, [userProfile, schools]);
 
-  // Determine which branch cards to show based on programmed tournaments for this sport (filtered by teacher educational level when applicable)
-  const rawSportTournaments = useMemo(() => {
+  // Determine which branch cards to show based on programmed tournaments for this sport
+  const sportTournaments = useMemo(() => {
     if (!sport) return [];
     return tournaments.filter(t => t.sportId === sport.id);
   }, [tournaments, sport]);
 
-  const sportTournaments = useMemo(() => {
-    if ((isTeacherRole || userProfile?.role === 'TEACHER') && !canManage) {
-      return rawSportTournaments.filter(t =>
-        isTournamentAllowedForTeacher(teacherCadre, t) &&
-        (!teacherSchoolObj || isSchoolSectorAllowedForTournament(teacherSchoolObj, t))
-      );
-    }
-    return rawSportTournaments;
-  }, [rawSportTournaments, isTeacherRole, userProfile?.role, canManage, teacherCadre, teacherSchoolObj]);
-
   // Categories list configured for this sport
   const seasonalCategories = getAgeCategoriesForSeason(activeSeason, undefined, sport?.id);
   const sportCategories = useMemo(() => {
-    const base = (sport?.ageCategories && sport.ageCategories.length > 0)
+    return (sport?.ageCategories && sport.ageCategories.length > 0)
       ? sport.ageCategories.map(normalizeCategoryKey)
       : seasonalCategories.map(c => c.id);
-    if ((isTeacherRole || userProfile?.role === 'TEACHER') && !canManage && teacherCadre) {
-      const filtered = base.filter(catId => isCategoryAllowedForTeacher(teacherCadre, catId));
-      return filtered.length > 0 ? filtered : base;
-    }
-    return base;
-  }, [sport, seasonalCategories, isTeacherRole, userProfile?.role, canManage, teacherCadre]);
+  }, [sport, seasonalCategories]);
 
   // Tournaments strictly belonging to the active classification branch (semantically deduplicated so no duplicate branch appears for same gender & category)
   const displayBranchTournaments = useMemo(() => {
@@ -661,25 +646,32 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
     return `البطولة الإقليمية المدرسية لـ ${sport?.name || ''}`;
   }, [sport?.name]);
 
+  const teacherSchoolObj = useMemo(() => {
+    if (!effectiveSchoolName) return undefined;
+    return (schools || []).find(s =>
+      (userProfile?.schoolId && s.id === userProfile.schoolId) ||
+      schoolNamesMatch(s.name, effectiveSchoolName)
+    );
+  }, [schools, userProfile?.schoolId, effectiveSchoolName]);
+
   // Check if teacher level & school education sector are allowed for this sport
   const isTeacherAllowedForSport = useMemo(() => {
-    if (!isTeacherRole || !userProfile || !rawSportTournaments.length) return true;
+    if (!isTeacherRole || !userProfile || !sportTournaments.length) return true;
     if (canManage) return true; // Admins/Managers always allowed
 
-    return rawSportTournaments.some(t =>
-      isTournamentAllowedForTeacher(teacherCadre, t) &&
+    return sportTournaments.some(t =>
+      isTeacherLevelAllowedForTournament(userProfile.teachingCadre, t.level) &&
       isSchoolSectorAllowedForTournament(teacherSchoolObj, t)
     );
-  }, [isTeacherRole, userProfile, rawSportTournaments, canManage, teacherSchoolObj, teacherCadre]);
+  }, [isTeacherRole, userProfile, sportTournaments, canManage, teacherSchoolObj]);
 
   const teacherCadreAr = useMemo(() => {
-    const resolved = teacherCadre || userProfile?.teachingCadre;
-    if (!resolved) return '';
-    if (resolved === 'PRIMARY') return 'ابتدائي';
-    if (resolved === 'MIDDLE') return 'إعدادي';
-    if (resolved === 'HIGH') return 'تأهيلي';
-    return resolved;
-  }, [teacherCadre, userProfile?.teachingCadre]);
+    if (!userProfile?.teachingCadre) return '';
+    if (userProfile.teachingCadre === 'PRIMARY') return 'ابتدائي';
+    if (userProfile.teachingCadre === 'MIDDLE') return 'إعدادي';
+    if (userProfile.teachingCadre === 'HIGH') return 'تأهيلي';
+    return userProfile.teachingCadre;
+  }, [userProfile?.teachingCadre]);
 
   const allowedSportLevelsAr = useMemo(() => {
     const levels = new Set<string>();

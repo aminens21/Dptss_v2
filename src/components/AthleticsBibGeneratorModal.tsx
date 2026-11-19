@@ -2175,7 +2175,7 @@ export const AthleticsBibGeneratorModal: React.FC<AthleticsBibGeneratorModalProp
             {bibRunners.length > 0 && (
               <div 
                 ref={printContainerRef}
-                className="light-surface-always grid grid-cols-1 md:grid-cols-2 gap-5 flex-1 items-start"
+                className="grid grid-cols-1 md:grid-cols-2 gap-5 flex-1 items-start"
               >
                 {currentPreviewRunners.map((runner, idx) => {
                   const activeQrUrl = qrCache[`${runner.id}-${qrContentMode}`] || runner.qrDataUrl || qrCache[runner.id];

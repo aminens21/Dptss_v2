@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { DataService, SPORTS_MAP, getAgeCategoriesForSeason, deduplicateById, getCategoryGenderLabel, isClubTournament, normalizeCategoryKey, getTournamentLevelAr, isTeacherLevelAllowedForTournament, isTournamentAllowedForTeacher, isCategoryAllowedForTeacher, resolveTeacherCadre, getCustomCategoryName, getCustomCategoryDetails, isSchoolSectorAllowedForTournament, getTournamentEducationSectorsAr, normalizeTournamentEducationSectors, getSchoolEducationSector, schoolNamesMatch, normalizeCanonicalSportId, areSportIdsEquivalent, isAffiliationAllowedByDisplayConfig, resolveEffectiveAffiliationMode, getEffectiveConfirmedBranches } from '../lib/dataService';
+import { DataService, SPORTS_MAP, getAgeCategoriesForSeason, deduplicateById, getCategoryGenderLabel, isClubTournament, normalizeCategoryKey, getTournamentLevelAr, isTeacherLevelAllowedForTournament, getCustomCategoryName, getCustomCategoryDetails, isSchoolSectorAllowedForTournament, getTournamentEducationSectorsAr, normalizeTournamentEducationSectors, getSchoolEducationSector, schoolNamesMatch, normalizeCanonicalSportId, areSportIdsEquivalent, isAffiliationAllowedByDisplayConfig, resolveEffectiveAffiliationMode, getEffectiveConfirmedBranches } from '../lib/dataService';
 import { Tournament, User, Student, School, Sport, Match, Directorate, AffiliationDisplayConfig } from '../types';
 import { CountdownTimer } from '../components/CountdownTimer';
 import * as XLSX from 'xlsx';
@@ -166,7 +166,6 @@ export const Tournaments: React.FC = () => {
     effectiveRole === 'TECH_HEAD' ||
     (effectiveRole as string) === 'TECH_COMMITTEE_HEAD';
   const isTeacherRole = effectiveRole === 'TEACHER' && !isTechCommitteeHead && !isCentralAdmin && !isSportManager;
-  const isTeacherUser = effectiveRole === 'TEACHER' && !isCentralAdmin && !isSportManager;
 
   const canManageAllLevels = isCentralAdmin || userProfile?.isSuperAdmin || isSportManager || isTechCommitteeHead;
   const userSchoolId = userProfile?.schoolId || currentTeacherProfile?.schoolId;
@@ -944,7 +943,10 @@ export const Tournaments: React.FC = () => {
   const sportsWithTournamentData = useMemo(() => {
     const seasonalCats = getAgeCategoriesForSeason(activeSeason);
 
-    const teacherCadre = resolveTeacherCadre(userProfile, currentTeacherProfile, teacherSchoolObj);
+    let teacherCadre = userProfile?.teachingCadre || currentTeacherProfile?.teachingCadre;
+    if (isTeacherRole && !teacherCadre && teacherSchoolObj?.type) {
+      teacherCadre = teacherSchoolObj.type;
+    }
 
     return sportsConfig
       .filter(sport => impersonationScopedSportIds.length === 0 || impersonationScopedSportIds.includes(sport.id))
@@ -955,12 +957,11 @@ export const Tournaments: React.FC = () => {
         return isAffiliationAllowedByDisplayConfig(tAff, affiliationDisplayConfig, sport.id);
       });
       const isManagerOfSport = canManageSport(sport.id);
-      const isTeacherScopedForSport = isTeacherUser && !isManagerOfSport;
 
-      // For teachers (non-admins on unmanaged sports), filter tournaments strictly to ONLY those allowed for their teaching cadre and school education sector
-      if (isTeacherScopedForSport) {
+      // For teachers (non-admins), filter tournaments to ONLY those allowed for their teaching cadre and school education sector
+      if (isTeacherRole && !isManagerOfSport) {
         sportTournaments = sportTournaments.filter(t => 
-          isTournamentAllowedForTeacher(teacherCadre, t) &&
+          isTeacherLevelAllowedForTournament(teacherCadre, t.level) &&
           (!teacherSchoolObj || isSchoolSectorAllowedForTournament(teacherSchoolObj, t))
         );
       }
@@ -974,31 +975,20 @@ export const Tournaments: React.FC = () => {
         (tch.techCommitteeSports?.includes(sport.id) || tch.sportId === sport.id)
       );
 
-      // Categories list configured: prefer custom age categories from settings if configured, scoped to allowed categories for teachers
+      // Categories list configured: prefer custom age categories from settings if configured
       let categoriesList: string[] = [];
-      const tournCats = Array.from(new Set(
-        sportTournaments
-          .map(t => t.ageCategory)
-          .filter(Boolean)
-      ));
       if (sport.customAgeCategories && sport.customAgeCategories.length > 0) {
-        const customIds = sport.customAgeCategories.filter(c => c && c.name).map(c => c.id || c.name);
-        if (isTeacherScopedForSport && teacherCadre) {
-          const matchingCustom = customIds.filter(cid =>
-            tournCats.some(tc => normalizeCategoryKey(tc) === normalizeCategoryKey(cid)) ||
-            isCategoryAllowedForTeacher(teacherCadre, cid)
-          );
-          categoriesList = matchingCustom.length > 0 ? matchingCustom : tournCats;
-        } else {
-          categoriesList = customIds;
-        }
+        categoriesList = sport.customAgeCategories.filter(c => c && c.name).map(c => c.id || c.name);
       } else {
+        const tournCats = Array.from(new Set(
+          sportTournaments
+            .map(t => t.ageCategory)
+            .filter(Boolean)
+        ));
         categoriesList = (sportTournaments.length > 0 && tournCats.length > 0)
           ? tournCats
           : ((sport.ageCategories && sport.ageCategories.length > 0)
-            ? (isTeacherScopedForSport && teacherCadre
-                ? sport.ageCategories.filter(cid => isCategoryAllowedForTeacher(teacherCadre, cid))
-                : sport.ageCategories)
+            ? sport.ageCategories
             : seasonalCats.map(c => c.id));
       }
 
@@ -1062,8 +1052,8 @@ export const Tournaments: React.FC = () => {
       .filter(item => {
         const { sport, isProgrammed, techHead, hasParticipations } = item;
 
-        // In teacher account: strictly show ONLY tournaments that have been activated / programmed for their educational cycle
-        if ((isTeacherRole || (isTeacherUser && !canManageSport(sport.id))) && !isProgrammed) return false;
+        // In teacher account: strictly show ONLY tournaments that have been activated / programmed
+        if (isTeacherRole && !isProgrammed) return false;
 
         // Filter by Sport
         if (filterSport !== 'ALL' && sport.id !== filterSport) return false;
@@ -2174,15 +2164,7 @@ export const Tournaments: React.FC = () => {
       <CrossCountryChampionshipModal
         isOpen={isCcModalOpen}
         onClose={() => setIsCcModalOpen(false)}
-        tournaments={
-          isTeacherUser && !canManageSport('cross_country')
-            ? tournaments.filter(t =>
-                t.sportId !== 'cross_country' ||
-                (isTournamentAllowedForTeacher(resolveTeacherCadre(userProfile, currentTeacherProfile, teacherSchoolObj), t) &&
-                 (!teacherSchoolObj || isSchoolSectorAllowedForTournament(teacherSchoolObj, t)))
-              )
-            : tournaments
-        }
+        tournaments={tournaments}
         allStudents={allStudents}
         schools={schools}
         teachers={teachers}
@@ -2204,15 +2186,7 @@ export const Tournaments: React.FC = () => {
           isOpen={isSportModalOpen && selectedSportForModal.id !== 'athletics'}
           onClose={() => setIsSportModalOpen(false)}
           sport={selectedSportForModal}
-          tournaments={
-            isTeacherUser && !canManageSport(selectedSportForModal.id)
-              ? tournaments.filter(t =>
-                  t.sportId !== selectedSportForModal.id ||
-                  (isTournamentAllowedForTeacher(resolveTeacherCadre(userProfile, currentTeacherProfile, teacherSchoolObj), t) &&
-                   (!teacherSchoolObj || isSchoolSectorAllowedForTournament(teacherSchoolObj, t)))
-                )
-              : tournaments
-          }
+          tournaments={tournaments}
           allStudents={allStudents}
           schools={schools}
           matches={matches}
@@ -2313,16 +2287,7 @@ export const Tournaments: React.FC = () => {
           isOpen={true}
           onClose={() => setConfirmParticipationSport(null)}
           sport={confirmParticipationSport}
-          tournaments={
-            isTeacherUser && !canManageSport(confirmParticipationSport.id)
-              ? tournaments.filter(t =>
-                  t.sportId === confirmParticipationSport.id &&
-                  isTournamentAllowedForTeacher(resolveTeacherCadre(userProfile, currentTeacherProfile, teacherSchoolObj), t) &&
-                  (!teacherSchoolObj || isSchoolSectorAllowedForTournament(teacherSchoolObj, t))
-                )
-              : tournaments.filter(t => t.sportId === confirmParticipationSport.id)
-          }
-          teacherCadre={resolveTeacherCadre(userProfile, currentTeacherProfile, teacherSchoolObj)}
+          tournaments={tournaments.filter(t => t.sportId === confirmParticipationSport.id)}
           schoolName={resolvedTeacherSchoolName || teacherSchoolName}
           schoolId={canonicalTeacherSchoolId}
           teacherId={userProfile?.id}

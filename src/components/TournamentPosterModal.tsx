@@ -1781,7 +1781,7 @@ export const TournamentPosterModal: React.FC<TournamentPosterModalProps> = ({
               <div
                 ref={posterRef}
                 id="tournament-poster-canvas"
-                className={`${!currentTheme.isDark ? 'light-surface-always ' : ''}w-full max-w-[285px] xs:max-w-[330px] sm:max-w-[420px] md:max-w-[480px] aspect-[1/1.414] rounded-2xl sm:rounded-3xl shadow-2xl border-2 sm:border-4 ${currentTheme.accentBorder} ${currentTheme.bg} p-1.5 xs:p-2.5 sm:p-5 md:p-6 flex flex-col justify-between relative overflow-hidden select-none transition-all duration-150`}
+                className={`w-full max-w-[285px] xs:max-w-[330px] sm:max-w-[420px] md:max-w-[480px] aspect-[1/1.414] rounded-2xl sm:rounded-3xl shadow-2xl border-2 sm:border-4 ${currentTheme.accentBorder} ${currentTheme.bg} p-1.5 xs:p-2.5 sm:p-5 md:p-6 flex flex-col justify-between relative overflow-hidden select-none transition-all duration-150`}
                 style={{
                   fontFamily: (POSTER_FONTS.find(f => f.id === selectedFont)?.css || "'Cairo', sans-serif"),
                   backgroundImage: customBgImage ? `url(${customBgImage})` : undefined,

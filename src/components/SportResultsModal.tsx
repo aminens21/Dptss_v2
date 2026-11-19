@@ -1012,7 +1012,7 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
                                 onClick={() => setSelectedCategory('ALL')}
                                 className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
                                   selectedCategory === 'ALL'
-                                    ? 'bg-slate-900 dark:bg-blue-600 text-white shadow-xs'
+                                    ? 'bg-slate-900 text-white shadow-xs'
                                     : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
                                 }`}
                               >
@@ -1051,8 +1051,8 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
                               <button
                                 type="button"
                                 onClick={() => setSelectedGender('ALL')}
-                                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                                  selectedGender === 'ALL' ? 'bg-white text-slate-900 shadow-2xs ring-1 ring-slate-300 dark:ring-blue-500/60' : 'text-slate-600 hover:text-slate-900'
+                                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${
+                                  selectedGender === 'ALL' ? 'bg-white text-slate-900 shadow-2xs' : 'text-slate-600'
                                 }`}
                               >
                                 الكل
@@ -1060,8 +1060,8 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
                               <button
                                 type="button"
                                 onClick={() => setSelectedGender('Male')}
-                                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                                  selectedGender === 'Male' ? 'bg-white text-blue-700 shadow-2xs ring-1 ring-blue-300 dark:ring-blue-500/60' : 'text-slate-600 hover:text-slate-900'
+                                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${
+                                  selectedGender === 'Male' ? 'bg-white text-blue-700 shadow-2xs' : 'text-slate-600'
                                 }`}
                               >
                                 👦 ذكور
@@ -1069,8 +1069,8 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
                               <button
                                 type="button"
                                 onClick={() => setSelectedGender('Female')}
-                                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                                  selectedGender === 'Female' ? 'bg-white text-pink-700 shadow-2xs ring-1 ring-pink-300 dark:ring-pink-500/60' : 'text-slate-600 hover:text-slate-900'
+                                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${
+                                  selectedGender === 'Female' ? 'bg-white text-pink-700 shadow-2xs' : 'text-slate-600'
                                 }`}
                               >
                                 👧 إناث

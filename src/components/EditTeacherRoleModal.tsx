@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { User, School, Sport } from '../types';
 import { DataService, SPORTS_MAP } from '../lib/dataService';
-import { useAuth, isSuperAdminEmail } from '../contexts/AuthContext';
+import { useAuth } from '../contexts/AuthContext';
 import {
   X,
   UserCheck,
@@ -39,15 +39,11 @@ export const EditTeacherRoleModal: React.FC<EditTeacherRoleModalProps> = ({
   onDelete
 }) => {
   const navigate = useNavigate();
-  const { userProfile, updateProfileState, isDemo, loginAsDemo, startTeacherImpersonation } = useAuth();
+  const { userProfile, updateProfileState, isDemo, loginAsDemo } = useAuth();
 
   const [cadre, setCadre] = useState<'PRIMARY' | 'MIDDLE' | 'HIGH' | string>(teacher?.teachingCadre || 'HIGH');
   const [role, setRole] = useState<'TEACHER' | 'SPORT_MANAGER' | 'CENTRAL_ADMIN'>(
-    (teacher?.role === 'CENTRAL_ADMIN' || teacher?.role === 'SUPER_ADMIN' || teacher?.isSuperAdmin || isSuperAdminEmail(teacher?.email))
-      ? 'CENTRAL_ADMIN'
-      : teacher?.role === 'SPORT_MANAGER'
-      ? 'SPORT_MANAGER'
-      : 'TEACHER'
+    teacher?.role === 'CENTRAL_ADMIN' ? 'CENTRAL_ADMIN' : teacher?.role === 'SPORT_MANAGER' ? 'SPORT_MANAGER' : 'TEACHER'
   );
   const [fullName, setFullName] = useState<string>(teacher?.fullName || '');
   const [email, setEmail] = useState<string>(teacher?.email || '');
@@ -97,13 +93,7 @@ export const EditTeacherRoleModal: React.FC<EditTeacherRoleModalProps> = ({
   useEffect(() => {
     if (teacher) {
       setCadre(teacher.teachingCadre || 'HIGH');
-      setRole(
-        (teacher.role === 'CENTRAL_ADMIN' || teacher.role === 'SUPER_ADMIN' || teacher.isSuperAdmin || isSuperAdminEmail(teacher.email))
-          ? 'CENTRAL_ADMIN'
-          : teacher.role === 'SPORT_MANAGER'
-          ? 'SPORT_MANAGER'
-          : 'TEACHER'
-      );
+      setRole(teacher.role === 'CENTRAL_ADMIN' ? 'CENTRAL_ADMIN' : teacher.role === 'SPORT_MANAGER' ? 'SPORT_MANAGER' : 'TEACHER');
       setFullName(teacher.fullName || '');
       setEmail(teacher.email || '');
       setPhone(teacher.phone || '');
@@ -193,17 +183,11 @@ export const EditTeacherRoleModal: React.FC<EditTeacherRoleModalProps> = ({
     });
     const summaryDiploma = Object.values(cleanedDiplomas).filter(Boolean).join(' • ');
 
-    const isCentralOrSuperAdmin = Boolean(
-      userProfile?.role === 'CENTRAL_ADMIN' ||
-      userProfile?.isSuperAdmin ||
-      isSuperAdminEmail(userProfile?.email)
-    );
-    const targetIsSuperAdmin = Boolean(teacher?.isSuperAdmin || isSuperAdminEmail(cleanEmail));
-    const safeRole: 'TEACHER' | 'SPORT_MANAGER' | 'CENTRAL_ADMIN' = targetIsSuperAdmin
-      ? 'CENTRAL_ADMIN'
-      : role === 'CENTRAL_ADMIN' && !isCentralOrSuperAdmin
-      ? (teacher?.role === 'CENTRAL_ADMIN' ? 'CENTRAL_ADMIN' : 'TEACHER')
-      : role;
+    const isCentralOrSuperAdmin = Boolean(userProfile?.role === 'CENTRAL_ADMIN' || userProfile?.isSuperAdmin);
+    const safeRole: 'TEACHER' | 'SPORT_MANAGER' | 'CENTRAL_ADMIN' =
+      role === 'CENTRAL_ADMIN' && !isCentralOrSuperAdmin
+        ? (teacher?.role === 'CENTRAL_ADMIN' ? 'CENTRAL_ADMIN' : 'TEACHER')
+        : role;
 
     const updateData: Partial<User> = {
       fullName: cleanName,
@@ -211,7 +195,6 @@ export const EditTeacherRoleModal: React.FC<EditTeacherRoleModalProps> = ({
       phone: phone.trim(),
       teachingCadre: cadre,
       role: safeRole,
-      isSuperAdmin: targetIsSuperAdmin,
       isTechCommitteeHead: isTechCommitteeHead,
       techCommitteeSports: isTechCommitteeHead ? techCommitteeSports : [],
       sportId: primarySport,
@@ -231,9 +214,9 @@ export const EditTeacherRoleModal: React.FC<EditTeacherRoleModalProps> = ({
       id: teacherId,
       fullName: cleanName,
       email: cleanEmail,
+      role: role,
       ...teacher,
-      ...updateData,
-      role: safeRole
+      ...updateData
     };
 
     // Reactively update current AuthContext profile if this teacher is currently active
@@ -287,33 +270,22 @@ export const EditTeacherRoleModal: React.FC<EditTeacherRoleModalProps> = ({
       const updatedUser = await saveTeacherData();
       if (!updatedUser) return;
 
-      toast.success(`تم حفظ صفة الأستاذ ${updatedUser.fullName} وتفعيل الحساب للتجربة مع الحفاظ على صفتك الأصلية!`);
+      toast.success(`تم حفظ صفة الأستاذ ${updatedUser.fullName} وتفعيل الحساب للتجربة!`);
       if (onSuccess) {
         onSuccess(updatedUser);
       }
       onClose();
 
-      const isCurrentCentralAdmin = Boolean(
-        userProfile &&
-        (userProfile.role === 'CENTRAL_ADMIN' || userProfile.isSuperAdmin || isSuperAdminEmail(userProfile.email))
+      // Switch active demo login to this teacher
+      const assignedSport = isTechCommitteeHead && techCommitteeSports.length > 0 ? techCommitteeSports[0] : (updatedUser.sportId || undefined);
+      loginAsDemo(
+        role,
+        updatedUser.fullName,
+        updatedUser.email || `prof.${updatedUser.id}@taourirt-sports.ma`,
+        assignedSport,
+        undefined,
+        updatedUser
       );
-
-      if (isCurrentCentralAdmin) {
-        // Use reversible impersonation so Central Admin NEVER loses their Central Admin role/session
-        startTeacherImpersonation(updatedUser, {
-          preserveTechCommitteeRole: Boolean(updatedUser.isTechCommitteeHead)
-        });
-      } else {
-        const assignedSport = isTechCommitteeHead && techCommitteeSports.length > 0 ? techCommitteeSports[0] : (updatedUser.sportId || undefined);
-        loginAsDemo(
-          updatedUser.role,
-          updatedUser.fullName,
-          updatedUser.email || `prof.${updatedUser.id}@taourirt-sports.ma`,
-          assignedSport,
-          undefined,
-          updatedUser
-        );
-      }
 
       // Navigate to Tournaments so the user can immediately test permissions!
       navigate('/tournaments');
