@@ -2,7 +2,7 @@ import React, { useEffect, useState, useMemo } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import clsx from 'clsx';
 import { useAuth } from '../contexts/AuthContext';
-import { DataService, SPORTS_MAP, GENDER_MAP, deduplicateById, AGE_CATEGORIES, isClubTournament, getAgeCategoriesForSeason, normalizeCategoryKey, getCustomCategoryName, getCustomCategoryDetails, canUserApproveSportResult, normalizeCanonicalSportId, areSportIdsEquivalent, normalizeArabicMatchText, isAffiliationAllowedByDisplayConfig, normalizeTournamentAffiliation } from '../lib/dataService';
+import { DataService, SPORTS_MAP, GENDER_MAP, deduplicateById, AGE_CATEGORIES, isClubTournament, getAgeCategoriesForSeason, normalizeCategoryKey, getCustomCategoryName, getCustomCategoryDetails, canUserApproveSportResult, normalizeCanonicalSportId, areSportIdsEquivalent, normalizeArabicMatchText, isAffiliationAllowedByDisplayConfig, normalizeTournamentAffiliation, resolveEffectiveTeacherCadre, isTeacherLevelAllowedForTournament, isSchoolSectorAllowedForTournament, schoolNamesMatch } from '../lib/dataService';
 import { formatTeamDisplayName, hasValidMatchTeams } from '../lib/drawTournamentUtils';
 import { Match, School, Venue, Tournament, Sport, Student, User, Referee, AffiliationDisplayConfig } from '../types';
 import { CountdownTimer } from '../components/CountdownTimer';
@@ -217,6 +217,23 @@ export const Matches: React.FC = () => {
     }
     return false;
   };
+
+  const teacherSchoolObj = useMemo(() => {
+    const lookupName =
+      effectiveUserProfile?.workLocation ||
+      effectiveUserProfile?.schoolName ||
+      userProfile?.workLocation ||
+      userProfile?.schoolName;
+    const lookupId = effectiveUserProfile?.schoolId || userProfile?.schoolId;
+    return schools.find(s =>
+      (lookupId && s.id === lookupId) ||
+      (lookupName && schoolNamesMatch(s.name, lookupName))
+    );
+  }, [schools, effectiveUserProfile, userProfile]);
+
+  const effectiveTeacherCadre = useMemo(() => {
+    return resolveEffectiveTeacherCadre(effectiveUserProfile || userProfile, teacherSchoolObj);
+  }, [effectiveUserProfile, userProfile, teacherSchoolObj]);
 
   // Load initial data
   const loadData = async () => {
@@ -664,6 +681,14 @@ export const Matches: React.FC = () => {
         return true;
       });
       
+      // For regular teachers, scope tournaments to their educational cycle & school sector
+      if (isTeacher && !canManageSport(sport.id)) {
+        sportTournaments = sportTournaments.filter(t =>
+          isTeacherLevelAllowedForTournament(effectiveTeacherCadre, t.level) &&
+          (!teacherSchoolObj || isSchoolSectorAllowedForTournament(teacherSchoolObj, t))
+        );
+      }
+
       // Filter tournaments by affiliation if not ALL
       if (affiliationFilter !== 'ALL') {
         sportTournaments = sportTournaments.filter(t => {
@@ -852,13 +877,16 @@ export const Matches: React.FC = () => {
         isClub
       };
     });
-  }, [sportsConfig, tournaments, matches, schools, affiliationFilter, activeSeason, teachers, students, crossCountryResults, athleticsResults, affiliationDisplayConfig]);
+  }, [sportsConfig, tournaments, matches, schools, affiliationFilter, activeSeason, teachers, students, crossCountryResults, athleticsResults, affiliationDisplayConfig, isTeacher, effectiveTeacherCadre, teacherSchoolObj]);
 
   // Filtered sports list for Level 1 (Open / Programmed tournaments ALWAYS on top)
   const filteredSports = useMemo(() => {
     return sportsData
       .filter(item => {
         const { sport, totalMatches, ongoingCount, completedCount, scheduledCount, isProgrammed } = item;
+
+        // Teachers strictly see ONLY tournaments allowed/programmed for their cycle
+        if (isTeacher && !isProgrammed) return false;
 
         // Filter by Sport
         if (selectedSportFilter !== 'ALL' && sport.id !== selectedSportFilter) return false;
@@ -908,7 +936,7 @@ export const Matches: React.FC = () => {
 
         return 0;
       });
-  }, [sportsData, selectedSportFilter, statusFilter, searchQuery, affiliationFilter]);
+  }, [sportsData, selectedSportFilter, statusFilter, searchQuery, affiliationFilter, isTeacher]);
 
   // Overall Match Stats (Respecting filters)
   const filteredMatches = useMemo(() => {
@@ -1206,7 +1234,9 @@ export const Matches: React.FC = () => {
                 className="w-full sm:w-auto min-w-0 px-3 py-2 text-xs font-bold bg-slate-50 border border-slate-200 rounded-xl text-slate-700 focus:outline-none"
               >
                 <option value="ALL">🏆 جميع الرياضات الإقليمية</option>
-                {sportsConfig.map(s => (
+                {sportsData
+                  .filter(item => !isTeacher || item.isProgrammed)
+                  .map(({ sport: s }) => (
                   <option key={s.id} value={s.id}>
                     {s.icon || '🏆'} {s.name}
                   </option>

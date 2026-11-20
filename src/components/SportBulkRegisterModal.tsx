@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { School, Student, Sport, User, Tournament } from '../types';
-import { DataService, validateBirthDateForCategory, normalizeCategoryKey, getCategoryGenderLabel, getCategoryYearsLabel, isSchoolLevelAllowedForTournament, getTournamentLevelAr, isTeacherLevelAllowedForTournament, isSchoolSectorAllowedForTournament, getTournamentEducationSectorsAr, getSchoolEducationSector, schoolNamesMatch } from '../lib/dataService';
+import { DataService, validateBirthDateForCategory, normalizeCategoryKey, getCategoryGenderLabel, getCategoryYearsLabel, isSchoolLevelAllowedForTournament, getTournamentLevelAr, isTeacherLevelAllowedForTournament, isSchoolSectorAllowedForTournament, getTournamentEducationSectorsAr, getSchoolEducationSector, schoolNamesMatch, resolveEffectiveTeacherCadre, isCategoryAllowedForTeacherLevel } from '../lib/dataService';
 import { AthleticsService } from '../lib/athleticsService';
 import { useAuth } from '../contexts/AuthContext';
 import * as XLSX from 'xlsx';
@@ -67,23 +67,28 @@ export const SportBulkRegisterModal: React.FC<SportBulkRegisterModalProps> = ({
   const isTeacher = userProfile?.role === 'TEACHER';
   const [currentSeason, setCurrentSeason] = useState(initialSeason);
 
+  const matchedTeacherSchool = useMemo(() => {
+    const lookupName = preselectedSchoolName || userProfile?.workLocation || (userProfile as any)?.schoolName;
+    return schools.find(s =>
+      (userProfile?.schoolId && s.id === userProfile.schoolId) ||
+      (lookupName && schoolNamesMatch(s.name, lookupName))
+    );
+  }, [schools, userProfile, preselectedSchoolName]);
+
+  const effectiveTeacherCadre = useMemo(() => {
+    return resolveEffectiveTeacherCadre(userProfile, matchedTeacherSchool);
+  }, [userProfile, matchedTeacherSchool]);
+
   // Available categories for selection
   const availableCategories = useMemo(() => {
     const baseCats = (sport?.ageCategories && sport.ageCategories.length > 0)
       ? sport.ageCategories.map(normalizeCategoryKey)
       : ['U12', 'U15', 'U18', 'U20'];
 
-    if (!isTeacher || !userProfile?.teachingCadre) return baseCats;
+    if (!isTeacher || !effectiveTeacherCadre) return baseCats;
 
-    const cadre = userProfile.teachingCadre.toUpperCase();
-    return baseCats.filter(catId => {
-      const norm = normalizeCategoryKey(catId);
-      if (cadre.includes('PRIMARY')) return norm === 'U12';
-      if (cadre.includes('MIDDLE')) return norm === 'U15';
-      if (cadre.includes('HIGH') || cadre.includes('SECONDARY')) return norm === 'U18' || norm === 'U20';
-      return true;
-    });
-  }, [sport, isTeacher, userProfile]);
+    return baseCats.filter(catId => isCategoryAllowedForTeacherLevel(effectiveTeacherCadre, catId));
+  }, [sport, isTeacher, effectiveTeacherCadre]);
 
   // Selected age category
   const [selectedCategory, setSelectedCategory] = useState<string>('U15');
@@ -95,24 +100,32 @@ export const SportBulkRegisterModal: React.FC<SportBulkRegisterModalProps> = ({
   );
   const isAffiliationLocked = preselectedAffiliation === 'non_club' || preselectedAffiliation === 'club_affiliated';
 
-  // Sync category, gender & affiliation from props on open
+  const wasOpenForSelectionRef = useRef(false);
+  const wasOpenForSchoolRef = useRef(false);
+  const lastPopulatedContextKeyRef = useRef<string>('');
+
+  // Sync category, gender & affiliation from props ONLY when modal opens
   useEffect(() => {
-    if (isOpen) {
-      if (preselectedCategory) {
-        setSelectedCategory(normalizeCategoryKey(preselectedCategory));
-      } else if (availableCategories.length > 0) {
-        // If U15 is not available for this teacher, pick the first available one
-        if (!availableCategories.includes('U15')) {
-          setSelectedCategory(availableCategories[0]);
-        } else {
-          setSelectedCategory('U15');
-        }
+    if (!isOpen) {
+      wasOpenForSelectionRef.current = false;
+      return;
+    }
+    if (wasOpenForSelectionRef.current) return;
+    wasOpenForSelectionRef.current = true;
+
+    if (preselectedCategory) {
+      setSelectedCategory(normalizeCategoryKey(preselectedCategory));
+    } else if (availableCategories.length > 0) {
+      if (!availableCategories.includes('U15')) {
+        setSelectedCategory(availableCategories[0]);
       } else {
         setSelectedCategory('U15');
       }
-      setSelectedGender(preselectedGender);
-      setSelectedAffiliation(preselectedAffiliation === 'club_affiliated' ? 'club_affiliated' : 'non_club');
+    } else {
+      setSelectedCategory('U15');
     }
+    setSelectedGender(preselectedGender);
+    setSelectedAffiliation(preselectedAffiliation === 'club_affiliated' ? 'club_affiliated' : 'non_club');
   }, [isOpen, preselectedCategory, preselectedGender, preselectedAffiliation, availableCategories]);
 
   // Selected school
@@ -152,19 +165,6 @@ export const SportBulkRegisterModal: React.FC<SportBulkRegisterModalProps> = ({
   // Pre-initialize empty slots
   const [slots, setSlots] = useState<SportParticipantSlot[]>([]);
 
-  useEffect(() => {
-    if (isOpen) {
-      const initialSlots: SportParticipantSlot[] = Array.from({ length: slotCount }, (_, idx) => ({
-        slotIndex: idx,
-        fullName: '',
-        massarNumber: '',
-        birthDate: '',
-        athleticsSpecialty: sport?.athleticsSpecialties?.[0] || 'القفز الطولي'
-      }));
-      setSlots(initialSlots);
-    }
-  }, [isOpen, slotCount, sport]);
-
   // Fetch active season
   useEffect(() => {
     DataService.getActiveSeason().then(s => {
@@ -172,9 +172,14 @@ export const SportBulkRegisterModal: React.FC<SportBulkRegisterModalProps> = ({
     });
   }, []);
 
-  // Sync selected school on open
+  // Sync selected school on open ONLY once per modal session
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen) {
+      wasOpenForSchoolRef.current = false;
+      return;
+    }
+    if (wasOpenForSchoolRef.current) return;
+    wasOpenForSchoolRef.current = true;
 
     if (isTeacher) {
       if (userProfile?.workLocation) {
@@ -229,9 +234,19 @@ export const SportBulkRegisterModal: React.FC<SportBulkRegisterModalProps> = ({
     return resolvedSchool?.name || preselectedSchoolName || userProfile?.workLocation || 'المؤسسة التعليمية';
   }, [isTeacher, userProfile, resolvedSchool, preselectedSchoolName]);
 
-  // Auto-populate slots from existing students matching this school, category, and gender
+  // Auto-populate slots ONLY on modal open or explicit context switch (category/gender/affiliation/school)
+  // Never overwrite unsaved user typing when allExistingStudents / schools / sport re-render!
   useEffect(() => {
-    if (!isOpen || !sport) return;
+    if (!isOpen || !sport) {
+      lastPopulatedContextKeyRef.current = '';
+      return;
+    }
+
+    const contextKey = `${sport.id}__${normalizeCategoryKey(selectedCategory)}__${selectedGender}__${selectedAffiliation}__${selectedSchoolId}__${slotCount}`;
+    if (lastPopulatedContextKeyRef.current === contextKey) {
+      return;
+    }
+    lastPopulatedContextKeyRef.current = contextKey;
 
     // Filter existing students of this school in this category/gender AND affiliation for this sport
     const matchingStudents = allExistingStudents.filter(s => {
@@ -253,33 +268,33 @@ export const SportBulkRegisterModal: React.FC<SportBulkRegisterModalProps> = ({
       return false;
     });
 
-    setSlots(prev => {
-      return prev.map((slot, index) => {
-        const student = matchingStudents[index];
-        if (student) {
-          return {
-            ...slot,
-            existingStudentId: student.id,
-            fullName: student.fullName || '',
-            massarNumber: student.massarNumber || '',
-            birthDate: student.birthDate || '',
-            photoUrl: student.photoUrl,
-            athleticsSpecialty: student.athleticsSpecialty || slot.athleticsSpecialty
-          };
-        }
+    const defaultSpec = sport?.athleticsSpecialties?.[0] || 'القفز الطولي';
+    const populatedSlots: SportParticipantSlot[] = Array.from({ length: slotCount }, (_, index) => {
+      const student = matchingStudents[index];
+      if (student) {
         return {
-          ...slot,
-          existingStudentId: undefined,
-          fullName: '',
-          massarNumber: '',
-          birthDate: '',
-          photoUrl: undefined
+          slotIndex: index,
+          existingStudentId: student.id,
+          fullName: student.fullName || '',
+          massarNumber: student.massarNumber || '',
+          birthDate: student.birthDate || '',
+          photoUrl: student.photoUrl,
+          athleticsSpecialty: student.athleticsSpecialty || defaultSpec
         };
-      });
+      }
+      return {
+        slotIndex: index,
+        existingStudentId: undefined,
+        fullName: '',
+        massarNumber: '',
+        birthDate: '',
+        photoUrl: undefined,
+        athleticsSpecialty: defaultSpec
+      };
     });
 
-    // Only copy coach info from existing students when an admin/coordinator opens the modal
-    // When a teacher logs in to register a branch, credit the acting teacher themselves
+    setSlots(populatedSlots);
+
     if (!isTeacher) {
       const firstWithCoach = matchingStudents.find(s => s.coachName);
       if (firstWithCoach) {
@@ -292,7 +307,7 @@ export const SportBulkRegisterModal: React.FC<SportBulkRegisterModalProps> = ({
       setCoachLeaseNumber(userProfile.leaseNumber || '');
       setCoachPhone(userProfile.phone || '');
     }
-  }, [isOpen, isTeacher, userProfile, selectedCategory, selectedGender, selectedAffiliation, selectedSchoolId, resolvedSchoolName, allExistingStudents, sport]);
+  }, [isOpen, isTeacher, userProfile, selectedCategory, selectedGender, selectedAffiliation, selectedSchoolId, resolvedSchoolName, allExistingStudents, sport, slotCount]);
 
   // Update a single slot
   const handleUpdateSlot = (slotIndex: number, field: keyof SportParticipantSlot, value: any) => {

@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { Tournament, Student, School, User, Sport, Match, AffiliationDisplayConfig } from '../types';
-import { SPORTS_MAP, getAgeCategoriesForSeason, normalizeCategoryKey, DataService, getCategoryYearsLabel, isTeacherLevelAllowedForTournament, getTournamentLevelAr, doesConfirmationMatchBranch, getEffectiveConfirmedBranches, formatBranchLabelAr, isSchoolSectorAllowedForTournament, getTournamentEducationSectorsAr, getSchoolEducationSector, resolveSchoolCoach, schoolNamesMatch, normalizeArabicSearch, normalizeArabicMatchText, normalizeTournamentAffiliation, isAffiliationAllowedByDisplayConfig } from '../lib/dataService';
+import { SPORTS_MAP, getAgeCategoriesForSeason, normalizeCategoryKey, DataService, getCategoryYearsLabel, isTeacherLevelAllowedForTournament, getTournamentLevelAr, doesConfirmationMatchBranch, getEffectiveConfirmedBranches, formatBranchLabelAr, isSchoolSectorAllowedForTournament, getTournamentEducationSectorsAr, getSchoolEducationSector, resolveSchoolCoach, schoolNamesMatch, normalizeArabicSearch, normalizeArabicMatchText, normalizeTournamentAffiliation, isAffiliationAllowedByDisplayConfig, resolveEffectiveTeacherCadre, isCategoryAllowedForTeacherLevel } from '../lib/dataService';
 import { canUserDownloadTournamentTablePdf, buildParticipationTableRows, downloadTournamentParticipationTablePdf, formatTournamentRedBannerTitle } from '../lib/tournamentTablePdfService';
 import { useAuth, isSuperAdminEmail } from '../contexts/AuthContext';
 import { AppLogo } from './AppLogo';
@@ -585,17 +585,18 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
     );
   }, [teachers, sport]);
 
+  const teacherSchoolObj = useMemo(() => {
+    const lookup = effectiveSchoolName || userProfile?.workLocation || userProfile?.schoolName;
+    if (!lookup && !userProfile?.schoolId) return undefined;
+    return (schools || []).find(s =>
+      (userProfile?.schoolId && s.id === userProfile.schoolId) ||
+      (lookup && schoolNamesMatch(s.name, lookup))
+    );
+  }, [schools, userProfile?.schoolId, userProfile?.workLocation, userProfile?.schoolName, effectiveSchoolName]);
+
   const teacherCadre = useMemo(() => {
-    if (userProfile?.teachingCadre) return userProfile.teachingCadre;
-    if (userProfile?.schoolId || userProfile?.schoolName) {
-      const userSchool = (schools || []).find(s => 
-        (userProfile.schoolId && s.id === userProfile.schoolId) || 
-        (userProfile.schoolName && s.name === userProfile.schoolName)
-      );
-      if (userSchool?.type) return userSchool.type;
-    }
-    return undefined;
-  }, [userProfile, schools]);
+    return resolveEffectiveTeacherCadre(userProfile, teacherSchoolObj);
+  }, [userProfile, teacherSchoolObj]);
 
   // Determine which branch cards to show based on programmed tournaments for this sport
   const sportTournaments = useMemo(() => {
@@ -618,6 +619,11 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
     sportTournaments.forEach(t => {
       const aff = normalizeTournamentAffiliation(t.affiliationType, t.name);
       if (aff !== activeBranchModal) return;
+      if (isTeacherRole && !canManage) {
+        if (!isTeacherLevelAllowedForTournament(teacherCadre, t.level)) return;
+        if (teacherSchoolObj && !isSchoolSectorAllowedForTournament(teacherSchoolObj, t)) return;
+        if (teacherCadre && t.ageCategory && !isCategoryAllowedForTeacherLevel(teacherCadre, t.ageCategory)) return;
+      }
       const key = `${normalizeCategoryKey(t.ageCategory)}__${t.gender || 'Mixed'}__${aff}`;
       const existing = seenKeys.get(key);
       if (!existing) {
@@ -630,7 +636,7 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
       }
     });
     return Array.from(seenKeys.values());
-  }, [sportTournaments, activeBranchModal, sport]);
+  }, [sportTournaments, activeBranchModal, sport, isTeacherRole, canManage, teacherCadre, teacherSchoolObj]);
 
   // If all tournaments inside the open branch were deleted, exit the branch view cleanly
   useEffect(() => {
@@ -646,32 +652,23 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
     return `البطولة الإقليمية المدرسية لـ ${sport?.name || ''}`;
   }, [sport?.name]);
 
-  const teacherSchoolObj = useMemo(() => {
-    if (!effectiveSchoolName) return undefined;
-    return (schools || []).find(s =>
-      (userProfile?.schoolId && s.id === userProfile.schoolId) ||
-      schoolNamesMatch(s.name, effectiveSchoolName)
-    );
-  }, [schools, userProfile?.schoolId, effectiveSchoolName]);
-
   // Check if teacher level & school education sector are allowed for this sport
   const isTeacherAllowedForSport = useMemo(() => {
     if (!isTeacherRole || !userProfile || !sportTournaments.length) return true;
     if (canManage) return true; // Admins/Managers always allowed
 
     return sportTournaments.some(t =>
-      isTeacherLevelAllowedForTournament(userProfile.teachingCadre, t.level) &&
-      isSchoolSectorAllowedForTournament(teacherSchoolObj, t)
+      isTeacherLevelAllowedForTournament(teacherCadre, t.level) &&
+      (!teacherSchoolObj || isSchoolSectorAllowedForTournament(teacherSchoolObj, t))
     );
-  }, [isTeacherRole, userProfile, sportTournaments, canManage, teacherSchoolObj]);
+  }, [isTeacherRole, userProfile, sportTournaments, canManage, teacherSchoolObj, teacherCadre]);
 
   const teacherCadreAr = useMemo(() => {
-    if (!userProfile?.teachingCadre) return '';
-    if (userProfile.teachingCadre === 'PRIMARY') return 'ابتدائي';
-    if (userProfile.teachingCadre === 'MIDDLE') return 'إعدادي';
-    if (userProfile.teachingCadre === 'HIGH') return 'تأهيلي';
-    return userProfile.teachingCadre;
-  }, [userProfile?.teachingCadre]);
+    if (teacherCadre === 'Primary') return 'ابتدائي';
+    if (teacherCadre === 'Middle') return 'إعدادي';
+    if (teacherCadre === 'High') return 'تأهيلي';
+    return teacherCadre || '';
+  }, [teacherCadre]);
 
   const allowedSportLevelsAr = useMemo(() => {
     const levels = new Set<string>();
@@ -687,10 +684,10 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
   const allowedTournamentsForTeacher = useMemo(() => {
     if (!isTeacherRole || canManage) return tournaments;
     return tournaments.filter(t =>
-      isTeacherLevelAllowedForTournament(userProfile?.teachingCadre, t.level) &&
-      isSchoolSectorAllowedForTournament(teacherSchoolObj, t)
+      isTeacherLevelAllowedForTournament(teacherCadre, t.level) &&
+      (!teacherSchoolObj || isSchoolSectorAllowedForTournament(teacherSchoolObj, t))
     );
-  }, [tournaments, isTeacherRole, canManage, userProfile?.teachingCadre, teacherSchoolObj]);
+  }, [tournaments, isTeacherRole, canManage, teacherCadre, teacherSchoolObj]);
 
   const hasNonClubTournaments = useMemo(() => {
     if (!sport || !isAffiliationAllowedByDisplayConfig('non_club', affiliationDisplayConfig, sport.id)) return false;
@@ -756,7 +753,7 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
     if (isOpen) {
       if (isTeacherRole && !canManage && !isTeacherAllowedForSport) {
         const levelMatchExists = sportTournaments.some(t =>
-          isTeacherLevelAllowedForTournament(userProfile?.teachingCadre, t.level)
+          isTeacherLevelAllowedForTournament(teacherCadre, t.level)
         );
         if (levelMatchExists && teacherSchoolObj) {
           const allowedSecs = Array.from(

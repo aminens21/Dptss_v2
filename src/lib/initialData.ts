@@ -7,7 +7,7 @@ export const INITIAL_DIRECTORATES: Directorate[] = [
     shortName: 'تاوريرت',
     region: 'جهة الشرق',
     code: '123456',
-    adminEmails: ['omrhaman.figuig@gmail.com', 'aminens21@gmail.com', 'sayhihassan@gmail.com'],
+    adminEmails: ['omrhaman.figuig@gmail.com', 'aminens21@gmail.com', 'sayhihassan@gmail.com', 'meqnou@gmail.com'],
     phone: '0536680000',
     email: 'dp.taourirt@men.gov.ma',
     address: 'شارع محمد الخامس، تاوريرت',

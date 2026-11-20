@@ -62,6 +62,7 @@ import { AppLogo } from '../AppLogo';
 import { doc, updateDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../../firebase/config';
 
+
 export const AppLayout: React.FC = () => {
   const {
     currentUser,

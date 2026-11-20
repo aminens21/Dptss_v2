@@ -2,7 +2,8 @@ export type Role = 'CENTRAL_ADMIN' | 'SPORT_MANAGER' | 'TEACHER' | 'REFEREE' | '
 
 export const SUPER_ADMIN_EMAILS = [
   'aminens21@gmail.com',
-  'omrhaman.figuig@gmail.com'
+  'omrhaman.figuig@gmail.com',
+  'meqnou@gmail.com'
 ];
 
 export interface Directorate {

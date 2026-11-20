@@ -1609,7 +1609,7 @@ export const BibGeneratorModal: React.FC<BibGeneratorModalProps> = ({
             {/* A4 Sheet Container */}
             <div 
               ref={printContainerRef}
-              className="bg-slate-200/90 p-4 sm:p-6 rounded-2xl flex flex-col items-center justify-center overflow-x-auto shadow-inner"
+              className="light-surface-always bg-slate-200/90 p-4 sm:p-6 rounded-2xl flex flex-col items-center justify-center overflow-x-auto shadow-inner"
             >
               <div 
                 className={`w-full bg-white shadow-2xl p-4 sm:p-5 select-none border border-slate-300 transition-all ${

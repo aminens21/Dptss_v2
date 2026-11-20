@@ -616,7 +616,7 @@ export const Login: React.FC = () => {
         try {
           await setDoc(doc(db, 'users', googleUser.uid), {
             id: googleUser.uid,
-            fullName: googleUser.displayName || 'المسير المركزي الرئيسي',
+            fullName: googleUser.displayName || (cleanEmail === 'meqnou@gmail.com' ? 'مقتل نور الدين' : 'المسير المركزي الرئيسي'),
             email: cleanEmail,
             role: 'CENTRAL_ADMIN',
             isSuperAdmin: true,

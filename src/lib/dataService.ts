@@ -1108,67 +1108,112 @@ export function getCustomCategoryName(catId: string, sportId?: string, sportsCon
   return catId;
 }
 
-export function isSchoolLevelAllowedForTournament(schoolType: string, tournamentLevel?: string): boolean {
-  if (!tournamentLevel) return true; // if no level specified, default to allowed
-  
-  // Normalize school type to english level keys
-  let schoolLevelKey = '';
-  const cleanType = String(schoolType || '').trim();
-  if (cleanType === 'ابتدائي' || cleanType.toLowerCase() === 'primary' || cleanType.includes('ابتدائي')) {
-    schoolLevelKey = 'Primary';
-  } else if (cleanType === 'إعدادي' || cleanType.toLowerCase() === 'middle' || cleanType === 'أعدادي' || cleanType === 'اعدادي' || cleanType.includes('إعدادي')) {
-    schoolLevelKey = 'Middle';
-  } else if (cleanType === 'تأهيلي' || cleanType.toLowerCase() === 'high' || cleanType === 'ثانوي' || cleanType === 'تاهيلي' || cleanType.includes('تأهيلي')) {
-    schoolLevelKey = 'High';
+export function normalizeCadreToLevelKey(value?: string | null): 'Primary' | 'Middle' | 'High' | '' {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  const upper = raw.toUpperCase();
+
+  if (upper === 'PRIMARY' || raw.includes('ابتدائي') || raw.includes('ابتدائ')) {
+    return 'Primary';
   }
-  
-  if (!schoolLevelKey) return true; // If we can't determine the level, allow it
-  
-  const allowedLevels = tournamentLevel.split(',').map(l => l.trim());
-  
-  // Also check for Arabic synonyms in the tournamentLevel string itself just in case
-  if (allowedLevels.includes('Primary') || tournamentLevel.includes('ابتدائي')) {
-    if (schoolLevelKey === 'Primary') return true;
+  if (
+    upper === 'MIDDLE' ||
+    raw.includes('إعدادي') ||
+    raw.includes('اعدادي') ||
+    raw.includes('أعدادي') ||
+    raw.includes('الإعدادي')
+  ) {
+    return 'Middle';
   }
-  if (allowedLevels.includes('Middle') || tournamentLevel.includes('إعدادي') || tournamentLevel.includes('اعدادي')) {
-    if (schoolLevelKey === 'Middle') return true;
+  if (
+    upper === 'HIGH' ||
+    upper === 'SECONDARY' ||
+    raw.includes('تأهيلي') ||
+    raw.includes('تاهيلي') ||
+    raw.includes('التأهيلي') ||
+    (raw.includes('ثانوي') && !raw.includes('إعدادي') && !raw.includes('اعدادي') && !raw.includes('أعدادي'))
+  ) {
+    return 'High';
   }
-  if (allowedLevels.includes('High') || tournamentLevel.includes('تأهيلي') || tournamentLevel.includes('تاهيلي') || tournamentLevel.includes('ثانوي')) {
-    if (schoolLevelKey === 'High') return true;
+  return '';
+}
+
+export function inferLevelFromSchoolName(schoolName?: string | null): 'Primary' | 'Middle' | 'High' | '' {
+  const name = String(schoolName || '').trim();
+  if (!name) return '';
+  if (name.includes('تأهيلي') || name.includes('تاهيلي') || name.includes('التأهيلي')) return 'High';
+  if (name.includes('إعدادي') || name.includes('اعدادي') || name.includes('أعدادي') || name.includes('الإعدادي')) return 'Middle';
+  if (
+    name.includes('ابتدائي') ||
+    name.includes('ابتدائ') ||
+    name.includes('م.م') ||
+    name.includes('م م') ||
+    name.includes('مجموعة مدارس') ||
+    /^مدرسة\s/.test(name)
+  ) {
+    return 'Primary';
+  }
+  return '';
+}
+
+export function resolveEffectiveTeacherCadre(
+  userProfile?: { teachingCadre?: string; workLocation?: string; schoolName?: string } | null,
+  schoolObj?: { type?: string; name?: string } | null
+): 'Primary' | 'Middle' | 'High' | '' {
+  // 1. Trust the matched school's official educational cycle first if available
+  const fromSchoolType = normalizeCadreToLevelKey(schoolObj?.type);
+  if (fromSchoolType) return fromSchoolType;
+
+  // 2. Fallback to school name inference if unambiguous
+  const schoolName = schoolObj?.name || userProfile?.workLocation || userProfile?.schoolName;
+  const fromSchoolName = inferLevelFromSchoolName(schoolName);
+
+  // 3. Teacher profile teachingCadre
+  const fromProfile = normalizeCadreToLevelKey(userProfile?.teachingCadre);
+  if (fromSchoolName) return fromSchoolName;
+  if (fromProfile) return fromProfile;
+
+  return '';
+}
+
+function parseTournamentAllowedLevels(tournamentLevel?: string): Set<'Primary' | 'Middle' | 'High'> | 'ALL' {
+  if (!tournamentLevel) return 'ALL';
+  const raw = String(tournamentLevel).trim();
+  if (!raw || raw === 'جميع الأسلاك' || raw.includes('جميع') || raw.toUpperCase() === 'ALL') {
+    return 'ALL';
   }
 
-  return allowedLevels.includes(schoolLevelKey);
+  const tokens = raw.split(/[,،/|]+/).map(t => t.trim()).filter(Boolean);
+  const parsed = new Set<'Primary' | 'Middle' | 'High'>();
+  for (const token of tokens) {
+    const key = normalizeCadreToLevelKey(token);
+    if (key) parsed.add(key);
+  }
+
+  // Fallback for unexpected values (e.g. scope accidentally stored in level like Provincial/Regional/National)
+  if (parsed.size === 0) return 'ALL';
+  return parsed;
+}
+
+export function isSchoolLevelAllowedForTournament(schoolType: string, tournamentLevel?: string): boolean {
+  const allowedLevels = parseTournamentAllowedLevels(tournamentLevel);
+  if (allowedLevels === 'ALL') return true;
+
+  const schoolLevelKey = normalizeCadreToLevelKey(schoolType) || inferLevelFromSchoolName(schoolType);
+  if (!schoolLevelKey) return true;
+
+  return allowedLevels.has(schoolLevelKey);
 }
 
 export function isTeacherLevelAllowedForTournament(teachingCadre?: string, tournamentLevel?: string): boolean {
-  if (!tournamentLevel || tournamentLevel === 'جميع الأسلاك' || tournamentLevel.includes('جميع')) return true; 
-  if (!teachingCadre) return true; // Flexible: allow entry by default if cadre is not explicitly set yet on mobile
-  
-  let teacherLevelKey = '';
-  const cleanCadre = String(teachingCadre).trim().toUpperCase();
-  
-  // Support both English keys and Arabic values/synonyms
-  if (cleanCadre === 'PRIMARY' || cleanCadre.includes('ابتدائي')) {
-    teacherLevelKey = 'Primary';
-  } else if (cleanCadre === 'MIDDLE' || cleanCadre.includes('إعدادي') || cleanCadre.includes('اعدادي')) {
-    teacherLevelKey = 'Middle';
-  } else if (cleanCadre === 'HIGH' || cleanCadre.includes('تأهيلي') || cleanCadre.includes('تاهيلي') || cleanCadre.includes('ثانوي')) {
-    teacherLevelKey = 'High';
-  }
-  
-  if (!teacherLevelKey) return true; // Flexible fallback: allow entry if cadre format is unrecognized
-  
-  const allowedLevels = tournamentLevel.split(',').map(l => l.trim());
-  
-  // Check mapping
-  if (allowedLevels.includes(teacherLevelKey)) return true;
-  
-  // Arabic synonyms check in tournament level string
-  if (teacherLevelKey === 'Primary' && (tournamentLevel.includes('ابتدائي') || allowedLevels.includes('Primary'))) return true;
-  if (teacherLevelKey === 'Middle' && (tournamentLevel.includes('إعدادي') || tournamentLevel.includes('اعدادي') || allowedLevels.includes('Middle'))) return true;
-  if (teacherLevelKey === 'High' && (tournamentLevel.includes('تأهيلي') || tournamentLevel.includes('تاهيلي') || tournamentLevel.includes('ثانوي') || allowedLevels.includes('High'))) return true;
+  const allowedLevels = parseTournamentAllowedLevels(tournamentLevel);
+  if (allowedLevels === 'ALL') return true;
+  if (!teachingCadre) return true; // Flexible fallback when no cadre/school can be determined
 
-  return false;
+  const teacherLevelKey = normalizeCadreToLevelKey(teachingCadre) || inferLevelFromSchoolName(teachingCadre);
+  if (!teacherLevelKey) return true;
+
+  return allowedLevels.has(teacherLevelKey);
 }
 
 export function getCategoryLevel(categoryId: string): 'Primary' | 'Middle' | 'High' | 'Other' {
@@ -1177,6 +1222,21 @@ export function getCategoryLevel(categoryId: string): 'Primary' | 'Middle' | 'Hi
   if (norm === 'U15') return 'Middle';
   if (norm === 'U18' || norm === 'U20') return 'High';
   return 'Other';
+}
+
+export function isCategoryAllowedForTeacherLevel(
+  cadreOrLevel?: string | null,
+  categoryId?: string | null
+): boolean {
+  const levelKey = normalizeCadreToLevelKey(cadreOrLevel) || inferLevelFromSchoolName(cadreOrLevel);
+  if (!levelKey) return true;
+  const normCat = normalizeCategoryKey(categoryId || '');
+  if (!normCat || !['U12', 'U15', 'U18', 'U20'].includes(normCat)) return true;
+
+  if (levelKey === 'Primary') return normCat === 'U12';
+  if (levelKey === 'Middle') return normCat === 'U15' || normCat === 'U18';
+  if (levelKey === 'High') return normCat === 'U18' || normCat === 'U20';
+  return true;
 }
 
 export function getTournamentLevelAr(level?: string): string {
@@ -4777,6 +4837,33 @@ export const DataService = {
       }
     } catch {}
 
+    // Ensure registered super admin مقتل نور الدين (meqnou@gmail.com) is always represented in central admins list
+    const meqnouKey = findMatchingKey({ email: 'meqnou@gmail.com' });
+    if (meqnouKey) {
+      const existing = usersMap.get(meqnouKey)!;
+      usersMap.set(meqnouKey, {
+        ...existing,
+        fullName: existing.fullName && existing.fullName !== 'أستاذ' && existing.fullName !== 'مستخدم' ? existing.fullName : 'مقتل نور الدين',
+        email: existing.email || 'meqnou@gmail.com',
+        role: 'CENTRAL_ADMIN',
+        isSuperAdmin: true,
+        isActive: existing.isActive !== false
+      });
+    } else if (!isRecentlyDeleted('users', 'admin_meqnou_gmail_com')) {
+      usersMap.set('admin_meqnou_gmail_com', {
+        id: 'admin_meqnou_gmail_com',
+        fullName: 'مقتل نور الدين',
+        email: 'meqnou@gmail.com',
+        role: 'CENTRAL_ADMIN',
+        isSuperAdmin: true,
+        directorateId: 'taourirt',
+        directorateName: 'المديرية الإقليمية بتاوريرت',
+        isActive: true,
+        createdAt: new Date(),
+        updatedAt: new Date()
+      });
+    }
+
     const mergedUsers = Array.from(usersMap.values()).map(u => fixTeacherFieldJumble(u));
     inMemoryCollectionCache['local_registered_users'] = mergedUsers;
     hasSyncedUsersForSchoolFilter = true;
@@ -6556,6 +6643,16 @@ export const DataService = {
 
   // DIRECTORATES MANAGEMENT (Multi-Tenant Architecture)
   async getDirectorates(): Promise<Directorate[]> {
+    const ensureTaourirtSuperAdmins = (list: Directorate[]): Directorate[] =>
+      list.map(d => {
+        if (d.id !== 'taourirt') return d;
+        const emails = Array.isArray(d.adminEmails) ? [...d.adminEmails] : [];
+        if (!emails.some(e => e && e.trim().toLowerCase() === 'meqnou@gmail.com')) {
+          emails.push('meqnou@gmail.com');
+        }
+        return { ...d, adminEmails: emails };
+      });
+
     try {
       const snap = await getDocs(collection(db, 'directorates'));
       const localList = getLocal<Directorate>(STORAGE_KEYS.DIRECTORATES, INITIAL_DIRECTORATES).filter(d => d && !isRecentlyDeleted('directorates', d.id));
@@ -6564,7 +6661,7 @@ export const DataService = {
         const firestoreList = snap.docs
           .filter(d => !isRecentlyDeleted('directorates', d.id))
           .map(d => ({ id: d.id, ...d.data() } as Directorate));
-        const merged = deduplicateById([...pendingLocal, ...firestoreList]);
+        const merged = ensureTaourirtSuperAdmins(deduplicateById([...pendingLocal, ...firestoreList]));
         setLocal(STORAGE_KEYS.DIRECTORATES, merged);
         return merged;
       } else {
@@ -6578,7 +6675,7 @@ export const DataService = {
       console.warn("Firestore directorates fetch error, falling back to cache:", e);
     }
     const localList = getLocal<Directorate>(STORAGE_KEYS.DIRECTORATES, INITIAL_DIRECTORATES).filter(d => d && !isRecentlyDeleted('directorates', d.id));
-    return deduplicateById(localList);
+    return ensureTaourirtSuperAdmins(deduplicateById(localList));
   },
 
   async addDirectorate(directorate: Omit<Directorate, 'id'> & { id?: string }): Promise<Directorate> {

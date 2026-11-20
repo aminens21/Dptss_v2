@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { Student, School, User, Sport, Directorate, SchoolTournamentConfirmation } from '../types';
-import { SPORTS_MAP, getAgeCategoriesForSeason, getCategoryGenderLabel, DataService, OfficialLogos, resolveSchoolCoach, schoolNamesMatch, coachNamesMatch } from '../lib/dataService';
+import { SPORTS_MAP, getAgeCategoriesForSeason, getCategoryGenderLabel, DataService, OfficialLogos, resolveSchoolCoach, schoolNamesMatch, coachNamesMatch, normalizeCategoryKey } from '../lib/dataService';
 import { isFlexibleEmailMatch } from '../lib/utils';
 import { downloadParticipationFormPdf, ParticipationPdfOptions } from '../lib/participationPdfService';
 import { useAuth } from '../contexts/AuthContext';
@@ -85,9 +85,13 @@ export const ParticipationFormPdfModal: React.FC<ParticipationFormPdfModalProps>
   const filteredStudents = useMemo(() => {
     return students.filter(st => {
       if (!st) return false;
-      const matchCat = selectedCategory === 'ALL' || (st.category && st.category.toUpperCase() === selectedCategory.toUpperCase());
+      const stCatNorm = normalizeCategoryKey(st.category || '');
+      const selCatNorm = selectedCategory === 'ALL' ? 'ALL' : normalizeCategoryKey(selectedCategory);
+      const matchCat = selCatNorm === 'ALL' || stCatNorm === selCatNorm;
       const matchGen = selectedGender === 'ALL' || st.gender === selectedGender;
-      const matchAff = selectedAffiliation === 'ALL' || st.affiliationType === selectedAffiliation;
+      const stAff = (st.affiliationType || 'non_club').trim();
+      const selAff = (selectedAffiliation === 'ALL' ? 'ALL' : selectedAffiliation).trim();
+      const matchAff = selAff === 'ALL' || stAff === selAff;
       const matchCoach = selectedCoachFilter === 'ALL' || st.coachName === selectedCoachFilter;
       return matchCat && matchGen && matchAff && matchCoach;
     });
@@ -693,7 +697,7 @@ export const ParticipationFormPdfModal: React.FC<ParticipationFormPdfModalProps>
         <div className="p-2 sm:p-6 bg-slate-100/60 dark:bg-slate-950 w-full overflow-x-auto flex justify-center">
           <div
             ref={printAreaRef}
-            className="bg-white min-w-[700px] max-w-[780px] p-6 sm:p-8 rounded-xl shadow-md border border-slate-200/90 text-slate-900 select-text origin-top"
+            className="light-surface-always bg-white min-w-[700px] max-w-[780px] p-6 sm:p-8 rounded-xl shadow-md border border-slate-200/90 text-slate-900 select-text origin-top"
             style={{ 
               fontFamily: "'Cairo', 'Segoe UI', Tahoma, sans-serif",
               transform: `scale(${zoomLevel})`,

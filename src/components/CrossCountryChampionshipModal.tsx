@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { Tournament, Student, School, User, Sport, AffiliationDisplayConfig } from '../types';
-import { DataService, SPORTS_MAP, getAgeCategoriesForSeason, validateBirthDateForCategory, resolveSchoolCoach, schoolNamesMatch, resolveEffectiveAffiliationMode, isAffiliationAllowedByDisplayConfig, normalizeCategoryKey } from '../lib/dataService';
+import { DataService, SPORTS_MAP, getAgeCategoriesForSeason, validateBirthDateForCategory, resolveSchoolCoach, schoolNamesMatch, resolveEffectiveAffiliationMode, isAffiliationAllowedByDisplayConfig, normalizeCategoryKey, resolveEffectiveTeacherCadre, isTeacherLevelAllowedForTournament, isCategoryAllowedForTeacherLevel, isSchoolSectorAllowedForTournament } from '../lib/dataService';
 import { canUserDownloadTournamentTablePdf, buildParticipationTableRows, downloadTournamentParticipationTablePdf, formatTournamentRedBannerTitle } from '../lib/tournamentTablePdfService';
 import { useAuth } from '../contexts/AuthContext';
 import { useRolePermissions } from '../hooks/useRolePermissions';
@@ -40,7 +40,8 @@ import {
   Edit,
   Upload,
   Printer,
-  Image as ImageIcon
+  Image as ImageIcon,
+  UserPlus
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { downloadIndividualCardPdf } from '../lib/participationPdfService';
@@ -88,10 +89,58 @@ export const CrossCountryChampionshipModal: React.FC<CrossCountryChampionshipMod
   const [loadedTeachers, setLoadedTeachers] = useState<User[]>([]);
   const effectiveTeachers = propTeachers.length > 0 ? propTeachers : loadedTeachers;
 
+  const effectiveSchoolNameForCadre = teacherSchoolName || userProfile?.schoolName || userProfile?.workLocation || '';
+  const teacherSchoolObj = useMemo(() => {
+    return schools.find(s =>
+      (userProfile?.schoolId && s.id === userProfile.schoolId) ||
+      (effectiveSchoolNameForCadre && schoolNamesMatch(s.name, effectiveSchoolNameForCadre))
+    );
+  }, [schools, effectiveSchoolNameForCadre, userProfile?.schoolId]);
+
+  const effectiveTeacherCadre = useMemo(() => {
+    return resolveEffectiveTeacherCadre(userProfile, teacherSchoolObj);
+  }, [userProfile, teacherSchoolObj]);
+
+  // Compute deadline and affiliation for cross country (strictly scoped by teacher level if non-manager teacher)
+  const ccTournaments = useMemo(() => {
+    const base = tournaments.filter(t => t.sportId === 'cross_country' && t.status !== 'Draft' && (t as any).isActive !== false);
+    if (isTeacherRole && !canManage) {
+      return base.filter(t =>
+        isTeacherLevelAllowedForTournament(effectiveTeacherCadre, t.level) &&
+        (!teacherSchoolObj || isSchoolSectorAllowedForTournament(teacherSchoolObj, t))
+      );
+    }
+    return base;
+  }, [tournaments, isTeacherRole, canManage, effectiveTeacherCadre, teacherSchoolObj]);
+
+  const visibleCategories = useMemo(() => {
+    let list = CROSS_COUNTRY_CATEGORIES;
+    if (isTeacherRole && !canManage && effectiveTeacherCadre) {
+      const levelFiltered = list.filter(cat => isCategoryAllowedForTeacherLevel(effectiveTeacherCadre, cat.category));
+      if (levelFiltered.length > 0) list = levelFiltered;
+    }
+    if (ccTournaments.length > 0) {
+      const tourFiltered = list.filter(cat =>
+        ccTournaments.some(t =>
+          normalizeCategoryKey(t.ageCategory) === normalizeCategoryKey(cat.category) &&
+          (t.gender === 'Mixed' || (t.gender as string) === 'Both' || t.gender === cat.gender)
+        )
+      );
+      if (tourFiltered.length > 0) list = tourFiltered;
+    }
+    return list;
+  }, [isTeacherRole, canManage, effectiveTeacherCadre, ccTournaments]);
+
   const [selectedCatId, setSelectedCatId] = useState<string>('u15_male');
+  useEffect(() => {
+    if (visibleCategories.length > 0 && !visibleCategories.some(c => c.id === selectedCatId)) {
+      setSelectedCatId(visibleCategories[0].id);
+    }
+  }, [visibleCategories, selectedCatId]);
+
   const activeCategory = useMemo(() => {
-    return CROSS_COUNTRY_CATEGORIES.find(c => c.id === selectedCatId) || CROSS_COUNTRY_CATEGORIES[0];
-  }, [selectedCatId]);
+    return visibleCategories.find(c => c.id === selectedCatId) || visibleCategories[0] || CROSS_COUNTRY_CATEGORIES[0];
+  }, [selectedCatId, visibleCategories]);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterType, setFilterType] = useState<'ALL' | 'school_team' | 'individual'>('ALL');
   const [filterSchool, setFilterSchool] = useState<string>('ALL');
@@ -157,11 +206,6 @@ export const CrossCountryChampionshipModal: React.FC<CrossCountryChampionshipMod
       });
     }
   };
-
-  // Compute deadline and affiliation for cross country
-  const ccTournaments = useMemo(() => {
-    return tournaments.filter(t => t.sportId === 'cross_country');
-  }, [tournaments]);
 
   const hasClubTournament = useMemo(() => {
     return ccTournaments.some(t => t.affiliationType === 'club_affiliated' || t.affiliationType === 'open');
@@ -736,7 +780,7 @@ export const CrossCountryChampionshipModal: React.FC<CrossCountryChampionshipMod
             </div>
 
             <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-1.5">
-              {CROSS_COUNTRY_CATEGORIES.map((cat) => {
+              {visibleCategories.map((cat) => {
                 const isSelected = selectedCatId === cat.id;
                 const catCategory = cat.category.toLowerCase().trim();
                 const catGender = cat.gender.toLowerCase().trim();
@@ -822,6 +866,16 @@ export const CrossCountryChampionshipModal: React.FC<CrossCountryChampionshipMod
                     </button>
                   )
                 )}
+
+                <button
+                  type="button"
+                  onClick={() => setIsRegisterModalOpen(true)}
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black shadow-xs transition-all cursor-pointer flex items-center gap-1.5 hover:scale-102 active:scale-98"
+                  title="تسجيل مشارك واحد تلو الآخر في الفئة المحددة"
+                >
+                  <UserPlus className="w-4 h-4" />
+                  <span>تسجيل واحد تلو الآخر</span>
+                </button>
 
                 <button
                   type="button"

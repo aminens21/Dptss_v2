@@ -1,8 +1,9 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { formatMatchDate, parseDateToTimestampMs } from '../lib/utils';
-import { DataService, deduplicateById, normalizeCategoryKey, isTeacherLevelAllowedForTournament, isSchoolSectorAllowedForTournament, schoolNamesMatch } from '../lib/dataService';
+import { DataService, SPORTS_MAP, deduplicateById, normalizeCategoryKey, getCategoryShortName, getCustomCategoryName, isTeacherLevelAllowedForTournament, isSchoolSectorAllowedForTournament, schoolNamesMatch, resolveEffectiveTeacherCadre } from '../lib/dataService';
+import { extractMatchGroupLabel } from '../lib/drawTournamentUtils';
 import { Match, Tournament, School, Venue, Referee, User } from '../types';
 import {
   Trophy,
@@ -46,8 +47,8 @@ export const Dashboard: React.FC = () => {
   const [venues, setVenues] = useState<Venue[]>([]);
   const [referees, setReferees] = useState<Referee[]>([]);
   const [teachers, setTeachers] = useState<User[]>([]);
-  const [recentMatches, setRecentMatches] = useState<Match[]>([]);
   const [teacherMatches, setTeacherMatches] = useState<Match[]>([]);
+  const [selectedMatchSportFilter, setSelectedMatchSportFilter] = useState<string>('ALL');
   const [loading, setLoading] = useState(true);
   const [isTournamentModalOpen, setIsTournamentModalOpen] = useState(false);
   const [isFinishLineScannerOpen, setIsFinishLineScannerOpen] = useState(false);
@@ -148,33 +149,12 @@ export const Dashboard: React.FC = () => {
       setReferees(dirReferees);
       setTeachers(dirTeachers);
 
-      let displayTournamentsCount = dirTournaments.length;
-      let displaySchoolsCount = dirSchools.length;
-
-      if (userProfile?.role === 'TEACHER') {
-        displaySchoolsCount = 1;
-        const teacherCadre = userProfile.teachingCadre;
-        const teacherSchoolObj = dirSchools.find(s =>
-          (userProfile.schoolId && s.id === userProfile.schoolId) ||
-          (userProfile.workLocation && schoolNamesMatch(s.name, userProfile.workLocation)) ||
-          ((userProfile as any).schoolName && schoolNamesMatch(s.name, (userProfile as any).schoolName))
-        );
-        const activeTeacherTourns = dirTournaments.filter(t => 
-          t.status !== 'Draft' && 
-          (t as any).isActive !== false &&
-          (!teacherCadre || isTeacherLevelAllowedForTournament(teacherCadre, t.level)) &&
-          (!teacherSchoolObj || isSchoolSectorAllowedForTournament(teacherSchoolObj, t))
-        );
-        displayTournamentsCount = activeTeacherTourns.length;
-      }
-
       setStats({
-        tournaments: displayTournamentsCount,
+        tournaments: dirTournaments.length,
         matches: dirMatches.length,
-        schools: displaySchoolsCount,
+        schools: dirSchools.length,
         completedMatches: completed
       });
-      setRecentMatches(dirMatches.slice(0, 5));
 
       if (userProfile?.role === 'TEACHER' || userProfile?.role === 'REFEREE') {
         const myId = (userProfile.id || '').trim().toLowerCase();
@@ -324,6 +304,120 @@ export const Dashboard: React.FC = () => {
     }
   };
 
+  const teacherSchoolObj = useMemo(() => {
+    if (!userProfile) return undefined;
+    const lookupName = userProfile.workLocation || (userProfile as any).schoolName;
+    return schools.find(s =>
+      (userProfile.schoolId && s.id === userProfile.schoolId) ||
+      (lookupName && schoolNamesMatch(s.name, lookupName))
+    );
+  }, [schools, userProfile]);
+
+  const effectiveTeacherCadre = useMemo(() => {
+    return resolveEffectiveTeacherCadre(userProfile, teacherSchoolObj);
+  }, [userProfile, teacherSchoolObj]);
+
+  const isPureTeacher = isTeacher && !isCentralAdmin && !isSportManager && !isTechCommitteeHead;
+
+  const allowedTeacherTournaments = useMemo(() => {
+    const active = tournaments.filter(t => t.status !== 'Draft' && (t as any).isActive !== false);
+    if (!isPureTeacher) return active;
+    return active.filter(t =>
+      isTeacherLevelAllowedForTournament(effectiveTeacherCadre, t.level) &&
+      (!teacherSchoolObj || isSchoolSectorAllowedForTournament(teacherSchoolObj, t))
+    );
+  }, [tournaments, isPureTeacher, effectiveTeacherCadre, teacherSchoolObj]);
+
+  const filteredDashboardMatches = useMemo(() => {
+    if (!isPureTeacher) return matches;
+    return matches.filter(m => {
+      if (m.tournamentId) {
+        const explicitTourn = tournaments.find(t => t.id === m.tournamentId);
+        if (explicitTourn) {
+          return (
+            isTeacherLevelAllowedForTournament(effectiveTeacherCadre, explicitTourn.level) &&
+            (!teacherSchoolObj || isSchoolSectorAllowedForTournament(teacherSchoolObj, explicitTourn))
+          );
+        }
+      }
+      const sportActiveTourns = tournaments.filter(
+        t => t.sportId === m.sportId && t.status !== 'Draft' && (t as any).isActive !== false
+      );
+      if (sportActiveTourns.length > 0) {
+        return allowedTeacherTournaments.some(t => t.sportId === m.sportId);
+      }
+      return true;
+    });
+  }, [matches, tournaments, allowedTeacherTournaments, isPureTeacher, effectiveTeacherCadre, teacherSchoolObj]);
+
+  const effectiveStats = useMemo(() => {
+    if (!isPureTeacher) return stats;
+    return {
+      tournaments: allowedTeacherTournaments.length,
+      matches: filteredDashboardMatches.length,
+      schools: 1,
+      completedMatches: filteredDashboardMatches.filter(m => m.status === 'Completed').length
+    };
+  }, [stats, isPureTeacher, allowedTeacherTournaments.length, filteredDashboardMatches]);
+
+  const availableMatchSports = useMemo(() => {
+    const seen = new Set<string>();
+    const list: string[] = [];
+    filteredDashboardMatches.forEach(m => {
+      if (m.sportId && !seen.has(m.sportId)) {
+        seen.add(m.sportId);
+        list.push(m.sportId);
+      }
+    });
+    return list;
+  }, [filteredDashboardMatches]);
+
+  const visibleRecentMatches = useMemo(() => {
+    const base = selectedMatchSportFilter === 'ALL'
+      ? filteredDashboardMatches
+      : filteredDashboardMatches.filter(m => m.sportId === selectedMatchSportFilter);
+    return base.slice(0, 8);
+  }, [filteredDashboardMatches, selectedMatchSportFilter]);
+
+  useEffect(() => {
+    if (selectedMatchSportFilter !== 'ALL' && !availableMatchSports.includes(selectedMatchSportFilter)) {
+      setSelectedMatchSportFilter('ALL');
+    }
+  }, [availableMatchSports, selectedMatchSportFilter]);
+
+  const formatDashboardMatchTitle = (m: Match, idx: number): string => {
+    const sportIcon = SPORTS_MAP[m.sportId]?.icon || '🏆';
+    const matchedTourn = m.tournamentId ? tournaments.find(t => t.id === m.tournamentId) : undefined;
+
+    const rawStage = (m.stage || '').trim();
+    const matchNumberFromStage = rawStage.match(/المباراة\s*(\d+)/)?.[1];
+    const matchNum = m.drawMatchNumber || (matchNumberFromStage ? Number(matchNumberFromStage) : idx + 1);
+    const matchNumLabel = `المباراة ${matchNum}`;
+
+    const extractedGroup = extractMatchGroupLabel(m);
+    const groupOrPath = extractedGroup || 'مسار الإقصاء المباشر';
+
+    let stageClean = rawStage
+      .replace(/(?:-\s*)?المجموعة\s+[^\s-–(]+(?:\s*\([^)]+\))?/g, '')
+      .replace(/المباراة\s*(?:رقم\s*)?\d+/g, '')
+      .replace(/\s*[-–—]+\s*/g, ' ')
+      .trim();
+    if (!stageClean) {
+      stageClean = extractedGroup ? 'دور المجموعات' : 'مباراة إقليمية';
+    }
+
+    const catKey = m.ageCategory || m.category || matchedTourn?.ageCategory || '';
+    const genderKey = m.gender || matchedTourn?.gender;
+    const rawCatLabel = getCustomCategoryName(catKey, m.sportId) || getCategoryShortName(catKey, genderKey);
+    const shortCatLabel = (rawCatLabel || '').replace(
+      /^ال(?=صغار|صغيرات|فتيان|فتيات|براعم|برعمات|شبان|شابات)/,
+      ''
+    );
+
+    const parts = [matchNumLabel, groupOrPath, stageClean, shortCatLabel].filter(Boolean);
+    return `${sportIcon} ${parts.join(' - ')}`;
+  };
+
   return (
     <div className="space-y-6" dir="rtl">
       {/* Welcome Banner - Coordinated with Homepage Day Mode */}
@@ -445,7 +539,7 @@ export const Dashboard: React.FC = () => {
           </p>
           <div className="flex items-end justify-between">
             <h3 className="text-2xl font-black text-slate-800 dark:text-white tracking-tight">
-              {stats.tournaments}
+              {effectiveStats.tournaments}
             </h3>
             <span className="text-emerald-700 dark:text-emerald-400 text-[10px] font-bold bg-emerald-50 dark:bg-emerald-950/50 px-2 py-0.5 rounded border border-emerald-200 dark:border-emerald-800">
               عرض البطولات ←
@@ -461,7 +555,7 @@ export const Dashboard: React.FC = () => {
           <p className="text-[10px] text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider mb-1">المباريات المبرمجة</p>
           <div className="flex items-end justify-between">
             <h3 className="text-2xl font-black text-slate-800 dark:text-white tracking-tight">
-              {stats.matches}
+              {effectiveStats.matches}
             </h3>
             <span className="text-emerald-700 dark:text-emerald-400 text-[10px] font-bold bg-emerald-50 dark:bg-emerald-950/50 px-2 py-0.5 rounded border border-emerald-200 dark:border-emerald-800">
               برنامج المباريات ←
@@ -479,7 +573,7 @@ export const Dashboard: React.FC = () => {
           </p>
           <div className="flex items-end justify-between">
             <h3 className="text-2xl font-black text-slate-800 dark:text-white tracking-tight">
-              {stats.schools}
+              {effectiveStats.schools}
             </h3>
             <span className="text-slate-700 dark:text-slate-300 text-[10px] font-bold bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded border border-slate-200 dark:border-slate-700">
               {userProfile?.role === 'TEACHER' ? 'مؤسستي' : 'دليل المؤسسات'}
@@ -495,7 +589,7 @@ export const Dashboard: React.FC = () => {
           <p className="text-[10px] text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider mb-1">المباريات المنجزة والإحصائيات</p>
           <div className="flex items-end justify-between">
             <h3 className="text-2xl font-black text-slate-800 dark:text-white tracking-tight">
-              {stats.completedMatches}
+              {effectiveStats.completedMatches}
             </h3>
             <span className="text-amber-800 dark:text-amber-300 text-[10px] font-bold bg-amber-50 dark:bg-amber-950/50 px-2 py-0.5 rounded border border-amber-200 dark:border-amber-800">
               النتائج والترتيب 🏆
@@ -549,44 +643,107 @@ export const Dashboard: React.FC = () => {
           )}
 
           <div className="flex flex-col bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs overflow-hidden">
-            <div className="p-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-slate-50/60 dark:bg-slate-800/40">
-              <h4 className="text-xs md:text-sm font-black text-slate-800 dark:text-white flex items-center gap-2">
-                <CalendarDays className="h-4 w-4 text-emerald-600" />
-                <span>أحدث المباريات والبرمجة الإقليمية</span>
-              </h4>
-              <button
-                onClick={() => navigate('/matches')}
-                className="text-emerald-600 hover:text-emerald-700 dark:text-emerald-400 text-xs font-bold hover:underline flex items-center gap-1 cursor-pointer"
-              >
-                <span>البرنامج الكامل</span>
-                <ChevronLeft className="h-3.5 w-3.5" />
-              </button>
+            <div className="p-3 sm:p-4 border-b border-slate-100 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-800/40 space-y-2.5 sm:space-y-3">
+              <div className="flex items-center justify-between gap-2">
+                <h4 className="text-xs sm:text-sm font-black text-slate-800 dark:text-white flex items-center gap-1.5 sm:gap-2 min-w-0">
+                  <CalendarDays className="h-4 w-4 text-emerald-600 shrink-0" />
+                  <span className="truncate">أحدث المباريات والبرمجة الإقليمية</span>
+                </h4>
+                <button
+                  onClick={() => navigate('/matches')}
+                  className="text-emerald-600 hover:text-emerald-700 dark:text-emerald-400 text-[11px] sm:text-xs font-bold hover:underline flex items-center gap-0.5 sm:gap-1 cursor-pointer shrink-0 whitespace-nowrap"
+                >
+                  <span>البرنامج الكامل</span>
+                  <ChevronLeft className="h-3.5 w-3.5" />
+                </button>
+              </div>
+
+              {filteredDashboardMatches.length > 0 && (
+                <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedMatchSportFilter('ALL')}
+                    className={`px-2.5 sm:px-3.5 py-1 sm:py-1.5 rounded-xl text-[11px] sm:text-xs font-black transition-all cursor-pointer tabular-nums ${
+                      selectedMatchSportFilter === 'ALL'
+                        ? 'bg-emerald-600 text-white shadow-xs'
+                        : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:bg-slate-50'
+                    }`}
+                  >
+                    الكل ({filteredDashboardMatches.length})
+                  </button>
+                  {availableMatchSports.map(sportId => {
+                    const sportMeta = SPORTS_MAP[sportId];
+                    const isActive = selectedMatchSportFilter === sportId;
+                    return (
+                      <button
+                        key={sportId}
+                        type="button"
+                        onClick={() => setSelectedMatchSportFilter(sportId)}
+                        title={sportMeta?.name || sportId}
+                        aria-label={sportMeta?.name || sportId}
+                        className={`px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-xl text-sm sm:text-base leading-none transition-all cursor-pointer border ${
+                          isActive
+                            ? 'bg-emerald-50 dark:bg-emerald-950/50 border-emerald-500 ring-2 ring-emerald-200 dark:ring-emerald-800 shadow-xs'
+                            : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800'
+                        }`}
+                      >
+                        {sportMeta?.icon || '🏆'}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
             </div>
 
-            <div className="flex-1 p-4 space-y-3">
-              {recentMatches.map((m) => (
-                <div
-                  key={m.id}
-                  onClick={() => navigate('/matches')}
-                  className="flex items-center gap-3 p-3 border border-slate-100 dark:border-slate-800 rounded-xl hover:border-emerald-200 dark:hover:border-emerald-800 hover:bg-emerald-50/20 dark:hover:bg-emerald-950/20 transition-all cursor-pointer"
-                >
-                  <div className="w-20 text-center border-l border-slate-100 dark:border-slate-800 pl-2 shrink-0">
-                    <p className="text-[10px] font-bold text-slate-500 dark:text-slate-400 mb-0.5">{formatMatchDate(m.date)}</p>
-                    <p className="text-xs font-bold text-emerald-600 dark:text-emerald-400">{m.startTime || '10:00'}</p>
-                    <p className="text-[10px] text-slate-400 font-medium">
-                      {m.status === 'Completed' ? 'انتهت' : m.status === 'Ongoing' ? 'مباشر' : 'مبرمجة'}
-                    </p>
-                  </div>
-                  <div className="flex-1 flex items-center justify-between px-2">
-                    <span className="font-bold text-xs text-slate-800 dark:text-slate-200">
-                      {m.stage || 'مباراة إقليمية'}
-                    </span>
-                    <div className="font-black text-xs px-2.5 py-1 bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 rounded-md border border-slate-200 dark:border-slate-700">
-                      {m.status === 'Completed' ? `${m.score1 || 0} - ${m.score2 || 0}` : 'مقابلة مبرمجة'}
-                    </div>
-                  </div>
+            <div className="flex-1 p-2.5 sm:p-4 space-y-2.5 sm:space-y-3">
+              {visibleRecentMatches.length === 0 ? (
+                <div className="text-center py-8 text-xs font-bold text-slate-400">
+                  لا توجد مباريات مبرمجة حالياً ضمن هذا النطاق.
                 </div>
-              ))}
+              ) : (
+                visibleRecentMatches.map((m, idx) => {
+                  const isFinished = m.status === 'Completed';
+                  const scoreLeft = m.score1 ?? m.scoreA ?? 0;
+                  const scoreRight = m.score2 ?? m.scoreB ?? 0;
+                  return (
+                    <div
+                      key={m.id}
+                      onClick={() => navigate('/matches')}
+                      className={`flex items-center gap-2 sm:gap-3 p-2.5 sm:p-3.5 border rounded-2xl transition-all cursor-pointer ${
+                        isFinished
+                          ? 'border-emerald-300 bg-emerald-50/40 hover:bg-emerald-50/70 dark:border-emerald-800 dark:bg-emerald-950/20'
+                          : 'border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 hover:border-emerald-200 dark:hover:border-emerald-800 hover:bg-emerald-50/20 dark:hover:bg-emerald-950/20'
+                      }`}
+                    >
+                      <div className="w-[64px] sm:w-24 text-center border-l border-slate-100 dark:border-slate-800 pl-2 sm:pl-2.5 shrink-0">
+                        <p className="text-[9.5px] sm:text-[11px] font-bold text-slate-500 dark:text-slate-400 mb-0.5 tabular-nums whitespace-nowrap">
+                          {formatMatchDate(m.date)}
+                        </p>
+                        <p className="text-[11px] sm:text-xs font-black text-emerald-600 dark:text-emerald-400 tabular-nums">
+                          {m.startTime || '10:00'}
+                        </p>
+                        <p className="text-[9px] sm:text-[10px] text-slate-400 font-medium mt-0.5">
+                          {m.status === 'Completed' ? 'انتهت' : m.status === 'Ongoing' ? 'مباشر' : 'مبرمجة'}
+                        </p>
+                      </div>
+                      <div className="flex-1 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1.5 sm:gap-3 px-0.5 sm:px-1 min-w-0">
+                        <span className="font-bold text-[10.5px] sm:text-xs md:text-sm leading-relaxed text-slate-800 dark:text-slate-100 break-words">
+                          {formatDashboardMatchTitle(m, idx)}
+                        </span>
+                        <div
+                          className={`self-end sm:self-auto font-black text-[10px] sm:text-xs px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg border shrink-0 tabular-nums whitespace-nowrap ${
+                            isFinished
+                              ? 'bg-emerald-50 dark:bg-emerald-900/40 text-emerald-800 dark:text-emerald-200 border-emerald-200 dark:border-emerald-700'
+                              : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700'
+                          }`}
+                        >
+                          {isFinished ? `${scoreLeft} - ${scoreRight}` : 'مقابلة مبرمجة'}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
             </div>
           </div>
         </div>

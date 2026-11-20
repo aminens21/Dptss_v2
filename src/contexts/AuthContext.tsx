@@ -21,7 +21,7 @@ interface AuthContextType {
   openProfileModal: () => void;
   closeProfileModal: () => void;
   loginAsDemo: (role: Role, name?: string, email?: string, sportId?: string, assignedTournamentId?: string, extraFields?: Partial<User>) => void;
-  startTeacherImpersonation: (teacher: User) => void;
+  startTeacherImpersonation: (teacher: User, options?: { preserveTechCommitteeRole?: boolean }) => void;
   stopTeacherImpersonation: () => void;
   logout: () => Promise<void>;
   updateProfileState: (updatedFields: Partial<User>) => void;
@@ -302,7 +302,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             const managerDocId = `mgr_${cleanUserEmail.replace(/[^a-z0-9]/g, '_')}`;
             let mgrFound = false;
             let detectedRole: Role = isSuperAdmin ? 'CENTRAL_ADMIN' : (managedDirectorate ? 'CENTRAL_ADMIN' : 'TEACHER');
-            let detectedName = user.displayName || (isSuperAdmin ? (cleanUserEmail === 'sayhihassan@gmail.com' ? 'حسن السايحي' : 'المسير المركزي الرئيسي') : user.email?.split('@')[0] || 'مستخدم');
+            let detectedName = user.displayName || (isSuperAdmin ? (cleanUserEmail === 'sayhihassan@gmail.com' ? 'حسن السايحي' : cleanUserEmail === 'meqnou@gmail.com' ? 'مقتل نور الدين' : 'المسير المركزي الرئيسي') : user.email?.split('@')[0] || 'مستخدم');
             let detectedSportId: string | undefined = undefined;
             let detectedTournamentId: string | undefined = undefined;
             let detectedWorkLocation: string | undefined = undefined;
@@ -404,7 +404,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           if (isSuper) {
             setUserProfile({
               id: user.uid,
-              fullName: cleanUserEmail === 'sayhihassan@gmail.com' ? 'حسن السايحي' : 'المسير المركزي الرئيسي',
+              fullName: cleanUserEmail === 'sayhihassan@gmail.com' ? 'حسن السايحي' : cleanUserEmail === 'meqnou@gmail.com' ? 'مقتل نور الدين' : 'المسير المركزي الرئيسي',
               email: cleanUserEmail,
               role: 'CENTRAL_ADMIN',
               isSuperAdmin: true,
@@ -432,14 +432,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const loginAsDemo = (role: Role, customName?: string, customEmail?: string, sportId?: string, assignedTournamentId?: string, extraFields?: Partial<User>) => {
     const defaultInfo = DEMO_PROFILES[role] || DEMO_PROFILES.CENTRAL_ADMIN;
     const targetEmail = (customEmail || defaultInfo.email).trim().toLowerCase();
-    const isSuper = isSuperAdminEmail(targetEmail) || (role === 'CENTRAL_ADMIN' && (targetEmail === 'aminens21@gmail.com' || targetEmail === 'omrhaman.figuig@gmail.com' || targetEmail === 'sayhihassan@gmail.com'));
+    const isSuper = isSuperAdminEmail(targetEmail) || (role === 'CENTRAL_ADMIN' && (targetEmail === 'aminens21@gmail.com' || targetEmail === 'omrhaman.figuig@gmail.com' || targetEmail === 'sayhihassan@gmail.com' || targetEmail === 'meqnou@gmail.com'));
 
     const demoProfile: User = {
       id: `demo-${role.toLowerCase()}`,
       fullName: customName || defaultInfo.name,
       email: targetEmail,
-      role: isSuper ? 'CENTRAL_ADMIN' : role,
-      isSuperAdmin: isSuper,
       sportId: sportId || defaultInfo.sportId,
       assignedTournamentId: assignedTournamentId,
       directorateId: extraFields?.directorateId || defaultInfo.directorateId || 'taourirt',
@@ -449,7 +447,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       isActive: true,
       createdAt: new Date(),
       updatedAt: new Date(),
-      ...extraFields
+      ...extraFields,
+      role: isSuper ? 'CENTRAL_ADMIN' : role,
+      isSuperAdmin: isSuper || Boolean(extraFields?.isSuperAdmin && role === 'CENTRAL_ADMIN')
     };
 
     localStorage.setItem('demo_user_profile', JSON.stringify(demoProfile));
@@ -469,16 +469,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     } as any);
   };
 
-  const startTeacherImpersonation = (teacher: User) => {
+  const startTeacherImpersonation = (teacher: User, options?: { preserveTechCommitteeRole?: boolean }) => {
     if (!userProfile) return;
     if (!userProfile.isTechCommitteeHead && userProfile.role !== 'CENTRAL_ADMIN' && !userProfile.isSuperAdmin) {
       return;
     }
+    const isRealTechHead = Boolean(userProfile.isTechCommitteeHead && userProfile.role !== 'CENTRAL_ADMIN' && !userProfile.isSuperAdmin);
+    const preserveTechCommitteeRole = Boolean(options?.preserveTechCommitteeRole || isRealTechHead);
+    const keepTechHead = Boolean(preserveTechCommitteeRole && teacher.isTechCommitteeHead);
+    const keepTechMember = Boolean(preserveTechCommitteeRole && teacher.isTechCommitteeMember);
+
     const impersonatedProfile: User = {
       ...teacher,
       role: 'TEACHER',
-      isTechCommitteeHead: false,
-      isTechCommitteeMember: false,
+      isTechCommitteeHead: keepTechHead,
+      techCommitteeSports: keepTechHead ? (teacher.techCommitteeSports || []) : [],
+      isTechCommitteeMember: keepTechMember,
+      techCommitteeSportsMemberOf: keepTechMember ? (teacher.techCommitteeSportsMemberOf || []) : [],
       isSuperAdmin: false,
       schoolAccessVerified: true,
       directorateId: teacher.directorateId || userProfile.directorateId || 'taourirt',

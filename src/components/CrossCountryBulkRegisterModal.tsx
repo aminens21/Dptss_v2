@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { School, Student, User, Tournament } from '../types';
-import { DataService, validateBirthDateForCategory, normalizeCategoryKey, getCategoryGenderLabel, getCategoryYearsLabel, isSchoolLevelAllowedForTournament, getTournamentLevelAr, isSchoolSectorAllowedForTournament, getTournamentEducationSectorsAr, getSchoolEducationSector, schoolNamesMatch } from '../lib/dataService';
+import { DataService, validateBirthDateForCategory, normalizeCategoryKey, getCategoryGenderLabel, getCategoryYearsLabel, isSchoolLevelAllowedForTournament, getTournamentLevelAr, isTeacherLevelAllowedForTournament, isSchoolSectorAllowedForTournament, getTournamentEducationSectorsAr, getSchoolEducationSector, schoolNamesMatch, resolveEffectiveTeacherCadre, isCategoryAllowedForTeacherLevel } from '../lib/dataService';
 import { CROSS_COUNTRY_CATEGORIES, CrossCountryCategoryDef } from '../lib/crossCountryConfig';
 import { useAuth } from '../contexts/AuthContext';
 import * as XLSX from 'xlsx';
@@ -69,24 +69,49 @@ export const CrossCountryBulkRegisterModal: React.FC<CrossCountryBulkRegisterMod
   const isTeacher = userProfile?.role === 'TEACHER';
   const [currentSeason, setCurrentSeason] = useState(initialSeason);
 
-  // Filter categories based on programmed tournaments
-  const availableRaceCategories = useMemo(() => {
-    if (!tournaments || tournaments.length === 0) {
-      return CROSS_COUNTRY_CATEGORIES;
-    }
-    const ccTournaments = tournaments.filter(t => t.sportId === 'cross_country');
-    if (ccTournaments.length === 0) {
-      return CROSS_COUNTRY_CATEGORIES;
-    }
+  const teacherSchoolObj = useMemo(() => {
+    const lookupName = preselectedSchoolName || userProfile?.workLocation || (userProfile as any)?.schoolName;
+    return schools.find(s =>
+      (preselectedSchoolId && s.id === preselectedSchoolId) ||
+      (userProfile?.schoolId && s.id === userProfile.schoolId) ||
+      (lookupName && schoolNamesMatch(s.name, lookupName))
+    );
+  }, [schools, userProfile, preselectedSchoolId, preselectedSchoolName]);
 
-    return CROSS_COUNTRY_CATEGORIES.filter(cat => {
-      return ccTournaments.some(t => {
-        const matchesCategory = normalizeCategoryKey(t.ageCategory) === normalizeCategoryKey(cat.category);
-        const matchesGender = t.gender === 'Both' || t.gender === 'Mixed' || t.gender === cat.gender;
-        return matchesCategory && matchesGender;
-      });
-    });
-  }, [tournaments]);
+  const effectiveTeacherCadre = useMemo(() => {
+    return resolveEffectiveTeacherCadre(userProfile, teacherSchoolObj);
+  }, [userProfile, teacherSchoolObj]);
+
+  // Filter programmed cross-country tournaments (respecting teacher level & sector if teacher)
+  const ccTourns = useMemo(() => {
+    if (!tournaments) return [];
+    const base = tournaments.filter(t => t.sportId === 'cross_country' && t.status !== 'Draft' && (t as any).isActive !== false);
+    if (!isTeacher) return base;
+    return base.filter(t =>
+      isTeacherLevelAllowedForTournament(effectiveTeacherCadre, t.level) &&
+      (!teacherSchoolObj || isSchoolSectorAllowedForTournament(teacherSchoolObj, t))
+    );
+  }, [tournaments, isTeacher, effectiveTeacherCadre, teacherSchoolObj]);
+
+  // Filter categories based on programmed tournaments & teacher cadre
+  const availableRaceCategories = useMemo(() => {
+    let cats = CROSS_COUNTRY_CATEGORIES;
+    if (ccTourns.length > 0) {
+      const matched = cats.filter(cat =>
+        ccTourns.some(t => {
+          const matchesCategory = normalizeCategoryKey(t.ageCategory) === normalizeCategoryKey(cat.category);
+          const matchesGender = (t.gender as string) === 'Both' || t.gender === 'Mixed' || t.gender === cat.gender;
+          return matchesCategory && matchesGender;
+        })
+      );
+      if (matched.length > 0) cats = matched;
+    }
+    if (isTeacher && effectiveTeacherCadre) {
+      const levelMatched = cats.filter(cat => isCategoryAllowedForTeacherLevel(effectiveTeacherCadre, cat.category));
+      if (levelMatched.length > 0) cats = levelMatched;
+    }
+    return cats;
+  }, [ccTourns, isTeacher, effectiveTeacherCadre]);
 
   const finalCategories = useMemo(() => {
     return availableRaceCategories.length > 0 ? availableRaceCategories : CROSS_COUNTRY_CATEGORIES;
@@ -102,47 +127,45 @@ export const CrossCountryBulkRegisterModal: React.FC<CrossCountryBulkRegisterMod
     return getCategoryYearsLabel(activeRaceDef.category, currentSeason, 'cross_country');
   }, [activeRaceDef.category, currentSeason]);
 
-  // Filter programmed affiliation types for cross country
-  const ccTourns = useMemo(() => {
-    if (!tournaments) return [];
-    return tournaments.filter(t => t.sportId === 'cross_country');
-  }, [tournaments]);
-
   const hasClub = useMemo(() => {
     if (ccTourns.length === 0) return true;
-    return ccTourns.some(t => t.affiliationType === 'club_affiliated' || t.affiliationType === 'open' || t.affiliationType === 'both');
+    return ccTourns.some(t => t.affiliationType === 'club_affiliated' || t.affiliationType === 'open' || (t.affiliationType as string) === 'both');
   }, [ccTourns]);
 
   const hasSchool = useMemo(() => {
     if (ccTourns.length === 0) return true;
-    return ccTourns.some(t => !t.affiliationType || t.affiliationType === 'non_club' || t.affiliationType === 'open' || t.affiliationType === 'both');
+    return ccTourns.some(t => !t.affiliationType || t.affiliationType === 'non_club' || t.affiliationType === 'open' || (t.affiliationType as string) === 'both');
   }, [ccTourns]);
 
   const [selectedAffiliation, setSelectedAffiliation] = useState<'non_club' | 'club_affiliated'>('non_club');
 
-  // Sync selected race when opened
-  useEffect(() => {
-    if (isOpen) {
-      if (initialCategoryDefId && finalCategories.some(c => c.id === initialCategoryDefId)) {
-        setSelectedRaceId(initialCategoryDefId);
-      } else if (finalCategories.length > 0) {
-        setSelectedRaceId(finalCategories[0].id);
-      }
-    }
-  }, [isOpen, initialCategoryDefId, finalCategories]);
+  const wasOpenForSelectionRef = useRef(false);
+  const wasOpenForSchoolRef = useRef(false);
+  const lastPopulatedContextKeyRef = useRef<string>('');
 
-  // Sync affiliation when modal opens, adaptive to programmed settings
+  // Sync selected race and affiliation ONLY on modal open
   useEffect(() => {
-    if (isOpen) {
-      if (hasSchool && !hasClub) {
-        setSelectedAffiliation('non_club');
-      } else if (hasClub && !hasSchool) {
-        setSelectedAffiliation('club_affiliated');
-      } else {
-        setSelectedAffiliation(affiliationType === 'club_affiliated' ? 'club_affiliated' : 'non_club');
-      }
+    if (!isOpen) {
+      wasOpenForSelectionRef.current = false;
+      return;
     }
-  }, [isOpen, hasClub, hasSchool, affiliationType]);
+    if (wasOpenForSelectionRef.current) return;
+    wasOpenForSelectionRef.current = true;
+
+    if (initialCategoryDefId && finalCategories.some(c => c.id === initialCategoryDefId)) {
+      setSelectedRaceId(initialCategoryDefId);
+    } else if (finalCategories.length > 0) {
+      setSelectedRaceId(finalCategories[0].id);
+    }
+
+    if (hasSchool && !hasClub) {
+      setSelectedAffiliation('non_club');
+    } else if (hasClub && !hasSchool) {
+      setSelectedAffiliation('club_affiliated');
+    } else {
+      setSelectedAffiliation(affiliationType === 'club_affiliated' ? 'club_affiliated' : 'non_club');
+    }
+  }, [isOpen, initialCategoryDefId, finalCategories, hasClub, hasSchool, affiliationType]);
 
   // Computed custom championship title
   const customTitle = useMemo(() => {
@@ -198,16 +221,14 @@ export const CrossCountryBulkRegisterModal: React.FC<CrossCountryBulkRegisterMod
     });
   }, []);
 
-  // Sync initial category def when opened
+  // Sync selected school on open ONLY once per modal session
   useEffect(() => {
-    if (isOpen && initialCategoryDefId) {
-      setSelectedRaceId(initialCategoryDefId);
+    if (!isOpen) {
+      wasOpenForSchoolRef.current = false;
+      return;
     }
-  }, [isOpen, initialCategoryDefId]);
-
-  // Sync selected school on open
-  useEffect(() => {
-    if (!isOpen) return;
+    if (wasOpenForSchoolRef.current) return;
+    wasOpenForSchoolRef.current = true;
 
     if (isTeacher) {
       if (userProfile?.workLocation) {
@@ -264,9 +285,19 @@ export const CrossCountryBulkRegisterModal: React.FC<CrossCountryBulkRegisterMod
     return resolvedSchool?.name || preselectedSchoolName || userProfile?.workLocation || 'المؤسسة التعليمية';
   }, [isTeacher, userProfile, resolvedSchool, preselectedSchoolName]);
 
-  // Auto-populate slots from existing students matching this school, race category, and gender
+  // Auto-populate slots ONLY when modal opens or user switches race/school/affiliation.
+  // Never overwrite typed slot inputs when allExistingStudents / schools / userProfile re-render!
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen) {
+      lastPopulatedContextKeyRef.current = '';
+      return;
+    }
+
+    const contextKey = `${activeRaceDef.id}__${selectedSchoolId}__${selectedAffiliation}`;
+    if (lastPopulatedContextKeyRef.current === contextKey) {
+      return;
+    }
+    lastPopulatedContextKeyRef.current = contextKey;
 
     const normCat = normalizeCategoryKey(activeRaceDef.category);
     const raceGender = activeRaceDef.gender;

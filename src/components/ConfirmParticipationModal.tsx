@@ -13,8 +13,12 @@ import {
   getSchoolEducationSector,
   getTournamentEducationSectorsAr,
   schoolNamesMatch,
-  isAffiliationAllowedByDisplayConfig
+  isAffiliationAllowedByDisplayConfig,
+  resolveEffectiveTeacherCadre,
+  isTeacherLevelAllowedForTournament,
+  isCategoryAllowedForTeacherLevel
 } from '../lib/dataService';
+import { useAuth } from '../contexts/AuthContext';
 import { CountdownTimer } from './CountdownTimer';
 import { ConfirmedParticipationBadge } from './ConfirmedParticipationBadge';
 import {
@@ -124,10 +128,7 @@ export const ConfirmParticipationModal: React.FC<ConfirmParticipationModalProps>
     };
   }, [isOpen, propTournaments, sport.id]);
 
-  const activeSportTournaments = useMemo(() => {
-    const source = propTournaments && propTournaments.length > 0 ? propTournaments : loadedTournaments;
-    return source.filter(t => t.sportId === sport.id && t.status !== 'Archived' && t.status !== 'Draft');
-  }, [propTournaments, loadedTournaments, sport.id]);
+  const { userProfile } = useAuth();
 
   const matchedSchool = useMemo(() => {
     if (!loadedSchools.length) return undefined;
@@ -135,6 +136,20 @@ export const ConfirmParticipationModal: React.FC<ConfirmParticipationModalProps>
       s => (schoolId && s.id === schoolId) || (schoolName && schoolNamesMatch(s.name, schoolName))
     );
   }, [loadedSchools, schoolId, schoolName]);
+
+  const effectiveCycleLevel = useMemo(() => {
+    const profileForSchool = userProfile?.role === 'TEACHER'
+      ? userProfile
+      : { schoolName, workLocation: schoolName };
+    return resolveEffectiveTeacherCadre(profileForSchool, matchedSchool);
+  }, [userProfile, matchedSchool, schoolName]);
+
+  const activeSportTournaments = useMemo(() => {
+    const source = propTournaments && propTournaments.length > 0 ? propTournaments : loadedTournaments;
+    const base = source.filter(t => t.sportId === sport.id && t.status !== 'Archived' && t.status !== 'Draft');
+    if (!effectiveCycleLevel) return base;
+    return base.filter(t => isTeacherLevelAllowedForTournament(effectiveCycleLevel, t.level));
+  }, [propTournaments, loadedTournaments, sport.id, effectiveCycleLevel]);
 
   const isSectorAllowed = useMemo(() => {
     if (!matchedSchool || activeSportTournaments.length === 0) return true;
@@ -155,40 +170,47 @@ export const ConfirmParticipationModal: React.FC<ConfirmParticipationModalProps>
     return getTournamentEducationSectorsAr(Array.from(sectorsSet));
   }, [activeSportTournaments]);
 
-  // Available categories for this sport
+  // Available categories for this sport (filtered by school/teacher educational cycle)
   const availableCategories = useMemo(() => {
     const customCats = (sport as any)?.customAgeCategories;
+    let baseCats: { id: string; name: string; years: string }[] = [];
     if (Array.isArray(customCats) && customCats.length > 0) {
-      return customCats.map((c: any) => ({
+      baseCats = customCats.map((c: any) => ({
         id: normalizeCategoryKey(c.id),
         name: c.name,
         years: c.yearsExpression || ''
       }));
+    } else {
+      const ageCats = (sport as any)?.ageCategories;
+      if (Array.isArray(ageCats) && ageCats.length > 0) {
+        baseCats = ageCats.map((cat: string) => {
+          const norm = normalizeCategoryKey(cat);
+          return {
+            id: norm,
+            name: getCustomCategoryName(norm, sport.id) || getCategoryShortName(norm) || norm,
+            years: ''
+          };
+        });
+      } else if (sport.id === 'cross_country' || sport.id === 'athletics') {
+        baseCats = [
+          { id: 'U12', name: 'البراعم والبرعمات (U12)', years: '' },
+          { id: 'U15', name: 'الصغار والصغيرات (U15)', years: '' },
+          { id: 'U18', name: 'الفتيان والفتيات (U18)', years: '' },
+          { id: 'U20', name: 'الشبان والشابات (U20)', years: '' }
+        ];
+      } else {
+        baseCats = [
+          { id: 'U15', name: 'الصغار والصغيرات (U15)', years: '' },
+          { id: 'U18', name: 'الفتيان والفتيات (U18)', years: '' }
+        ];
+      }
     }
-    const ageCats = (sport as any)?.ageCategories;
-    if (Array.isArray(ageCats) && ageCats.length > 0) {
-      return ageCats.map((cat: string) => {
-        const norm = normalizeCategoryKey(cat);
-        return {
-          id: norm,
-          name: getCustomCategoryName(norm, sport.id) || getCategoryShortName(norm) || norm,
-          years: ''
-        };
-      });
+    if (effectiveCycleLevel) {
+      const filtered = baseCats.filter(c => isCategoryAllowedForTeacherLevel(effectiveCycleLevel, c.id));
+      if (filtered.length > 0) return filtered;
     }
-    if (sport.id === 'cross_country' || sport.id === 'athletics') {
-      return [
-        { id: 'U12', name: 'البراعم والبرعمات (U12)', years: '' },
-        { id: 'U15', name: 'الصغار والصغيرات (U15)', years: '' },
-        { id: 'U18', name: 'الفتيان والفتيات (U18)', years: '' },
-        { id: 'U20', name: 'الشبان والشابات (U20)', years: '' }
-      ];
-    }
-    return [
-      { id: 'U15', name: 'الصغار والصغيرات (U15)', years: '' },
-      { id: 'U18', name: 'الفتيان والفتيات (U18)', years: '' }
-    ];
-  }, [sport]);
+    return baseCats;
+  }, [sport, effectiveCycleLevel]);
 
   // Build exact programmable branches grouped by affiliation
   const affiliationGroups = useMemo(() => {
@@ -223,6 +245,7 @@ export const ConfirmParticipationModal: React.FC<ConfirmParticipationModalProps>
       activeSportTournaments.forEach(t => {
         const aff = t.affiliationType || 'non_club';
         const catId = normalizeCategoryKey(t.ageCategory || t.category || 'U15');
+        if (effectiveCycleLevel && !isCategoryAllowedForTeacherLevel(effectiveCycleLevel, catId)) return;
         if (t.gender === 'Male' || t.gender === 'Female') {
           addBranchOption(aff, catId, t.gender);
         } else {
@@ -276,7 +299,7 @@ export const ConfirmParticipationModal: React.FC<ConfirmParticipationModalProps>
           items: sortedItems
         };
       });
-  }, [activeSportTournaments, availableCategories, sport, affiliationDisplayConfig]);
+  }, [activeSportTournaments, availableCategories, sport, affiliationDisplayConfig, effectiveCycleLevel]);
 
   // Exact selected branches state (NO hidden Cartesian product & NO auto-selecting club_affiliated!)
   const [selectedBranches, setSelectedBranches] = useState<ConfirmedBranchTuple[]>(() => {

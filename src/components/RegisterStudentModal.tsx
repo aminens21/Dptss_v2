@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Sport, Student, School, Tournament } from '../types';
-import { DataService, getAgeCategoriesForSeason, SPORTS_MAP, getCategoryGenderLabel, validateBirthDateForCategory, normalizeCategoryKey, isSchoolLevelAllowedForTournament, getTournamentLevelAr, isTeacherLevelAllowedForTournament, isSchoolSectorAllowedForTournament, getTournamentEducationSectorsAr, getSchoolEducationSector, schoolNamesMatch } from '../lib/dataService';
+import { DataService, getAgeCategoriesForSeason, SPORTS_MAP, getCategoryGenderLabel, validateBirthDateForCategory, normalizeCategoryKey, isSchoolLevelAllowedForTournament, getTournamentLevelAr, isTeacherLevelAllowedForTournament, isSchoolSectorAllowedForTournament, getTournamentEducationSectorsAr, getSchoolEducationSector, schoolNamesMatch, resolveEffectiveTeacherCadre, isCategoryAllowedForTeacherLevel } from '../lib/dataService';
 import { AthleticsService } from '../lib/athleticsService';
 import { useAuth } from '../contexts/AuthContext';
 import { X, GraduationCap, User, Calendar, Upload, AlertCircle, Lock, ShieldCheck, CheckCircle2, Camera } from 'lucide-react';
@@ -12,7 +12,7 @@ interface RegisterStudentModalProps {
   sport: Sport | null;
   preselectedCategory?: string;
   preselectedGender?: 'Male' | 'Female';
-  preselectedAffiliation?: 'non_club' | 'club_affiliated';
+  preselectedAffiliation?: 'non_club' | 'club_affiliated' | 'open';
   schools: School[];
   registrationDeadline?: any;
   onRegistered: () => void;
@@ -57,36 +57,43 @@ export const RegisterStudentModal: React.FC<RegisterStudentModalProps> = ({
 
   const effectiveLockedAffiliation = preselectedAffiliation === 'open' ? null : preselectedAffiliation;
 
-  useEffect(() => {
-    if (isOpen) {
-      setCategory(preselectedCategory || 'U15');
-      setGender(preselectedGender || 'Male');
-      setAffiliationType(preselectedAffiliation === 'club_affiliated' ? 'club_affiliated' : 'non_club');
+  const wasOpenRef = useRef(false);
 
-      // Reset text inputs to prevent stale data between modal openings
-      setFullName('');
-      setMassarNumber('');
-      setBirthDate('');
-      setPhoto('');
-      setAthleticsSpecialty('');
-      const targetSchoolForInit = preselectedSchoolName || (userProfile?.role === 'TEACHER' ? (userProfile?.workLocation || '') : '');
-      const isUserForTarget = Boolean(
-        userProfile &&
-        (userProfile.role === 'TEACHER' || (
-          targetSchoolForInit &&
-          (schoolNamesMatch(userProfile.workLocation, targetSchoolForInit) ||
-            schoolNamesMatch((userProfile as any).schoolName, targetSchoolForInit))
-        ))
-      );
-      if (isUserForTarget) {
-        setCoachName(userProfile?.fullName || '');
-        setCoachLeaseNumber(userProfile?.leaseNumber || '');
-        setCoachPhone(userProfile?.phone || '');
-      } else {
-        setCoachName('');
-        setCoachLeaseNumber('');
-        setCoachPhone('');
-      }
+  useEffect(() => {
+    if (!isOpen) {
+      wasOpenRef.current = false;
+      return;
+    }
+    if (wasOpenRef.current) return;
+    wasOpenRef.current = true;
+
+    setCategory(preselectedCategory || 'U15');
+    setGender(preselectedGender || 'Male');
+    setAffiliationType(preselectedAffiliation === 'club_affiliated' ? 'club_affiliated' : 'non_club');
+
+    // Reset text inputs to prevent stale data between modal openings
+    setFullName('');
+    setMassarNumber('');
+    setBirthDate('');
+    setPhoto('');
+    setAthleticsSpecialty('');
+    const targetSchoolForInit = preselectedSchoolName || (userProfile?.role === 'TEACHER' ? (userProfile?.workLocation || '') : '');
+    const isUserForTarget = Boolean(
+      userProfile &&
+      (userProfile.role === 'TEACHER' || (
+        targetSchoolForInit &&
+        (schoolNamesMatch(userProfile.workLocation, targetSchoolForInit) ||
+          schoolNamesMatch((userProfile as any).schoolName, targetSchoolForInit))
+      ))
+    );
+    if (isUserForTarget) {
+      setCoachName(userProfile?.fullName || '');
+      setCoachLeaseNumber(userProfile?.leaseNumber || '');
+      setCoachPhone(userProfile?.phone || '');
+    } else {
+      setCoachName('');
+      setCoachLeaseNumber('');
+      setCoachPhone('');
     }
   }, [isOpen, preselectedCategory, preselectedGender, preselectedAffiliation, userProfile, preselectedSchoolName]);
 
@@ -148,20 +155,25 @@ export const RegisterStudentModal: React.FC<RegisterStudentModalProps> = ({
     ? sport.ageCategories.map(normalizeCategoryKey)
     : seasonalCategories.map(c => c.id);
 
+  const matchedTeacherSchool = useMemo(() => {
+    const lookupName = preselectedSchoolName || userProfile?.workLocation || (userProfile as any)?.schoolName;
+    return schools.find(s =>
+      (userProfile?.schoolId && s.id === userProfile.schoolId) ||
+      (lookupName && schoolNamesMatch(s.name, lookupName))
+    );
+  }, [schools, userProfile, preselectedSchoolName]);
+
+  const effectiveTeacherCadre = useMemo(() => {
+    return resolveEffectiveTeacherCadre(userProfile, matchedTeacherSchool);
+  }, [userProfile, matchedTeacherSchool]);
+
   const availableCategories = useMemo(() => {
     // If not a teacher, show everything
-    if (userProfile?.role !== 'TEACHER' || !userProfile?.teachingCadre) return baseCategories;
+    if (userProfile?.role !== 'TEACHER' || !effectiveTeacherCadre) return baseCategories;
 
-    // Filter categories based on teacher cadre
-    const cadre = userProfile.teachingCadre.toUpperCase();
-    return baseCategories.filter(catId => {
-      const norm = normalizeCategoryKey(catId);
-      if (cadre.includes('PRIMARY')) return norm === 'U12';
-      if (cadre.includes('MIDDLE')) return norm === 'U15';
-      if (cadre.includes('HIGH') || cadre.includes('SECONDARY')) return norm === 'U18' || norm === 'U20';
-      return true;
-    });
-  }, [baseCategories, userProfile]);
+    // Filter categories based on teacher cadre (Middle includes both U15 and U18)
+    return baseCategories.filter(catId => isCategoryAllowedForTeacherLevel(effectiveTeacherCadre, catId));
+  }, [baseCategories, userProfile?.role, effectiveTeacherCadre]);
 
   const availableAthleticsDisciplines = useMemo(() => {
     if (sport?.id !== 'athletics') return [];

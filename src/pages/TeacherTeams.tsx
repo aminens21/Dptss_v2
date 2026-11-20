@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { DataService, SPORTS_MAP, AGE_CATEGORIES, getAgeCategoriesForSeason, getCategoryGenderLabel, isClubTournament, normalizeCategoryKey, validateBirthDateForCategory, isTeacherLevelAllowedForTournament, getEffectiveConfirmedBranches, formatBranchLabelAr, getGenderSpecificCategoryTitle, isSchoolSectorAllowedForTournament, schoolNamesMatch, isAffiliationAllowedByDisplayConfig } from '../lib/dataService';
+import { DataService, SPORTS_MAP, AGE_CATEGORIES, getAgeCategoriesForSeason, getCategoryGenderLabel, isClubTournament, normalizeCategoryKey, validateBirthDateForCategory, isTeacherLevelAllowedForTournament, getEffectiveConfirmedBranches, formatBranchLabelAr, getGenderSpecificCategoryTitle, isSchoolSectorAllowedForTournament, schoolNamesMatch, isAffiliationAllowedByDisplayConfig, resolveEffectiveTeacherCadre, isCategoryAllowedForTeacherLevel } from '../lib/dataService';
 import { useSchoolConfirmations } from '../hooks/useSchoolConfirmations';
 import { Student, Sport, Tournament, School, Directorate, AffiliationDisplayConfig } from '../types';
 import { ParticipationFormPdfModal } from '../components/ParticipationFormPdfModal';
@@ -65,18 +65,6 @@ export const TeacherTeams: React.FC = () => {
   const isTeacherRole = userProfile?.role === 'TEACHER';
   const canManage = userProfile?.role === 'CENTRAL_ADMIN' || userProfile?.role === 'REGIONAL_ADMIN' || userProfile?.role === 'PROVINCIAL_ADMIN' || userProfile?.isTechCommitteeHead;
 
-  const teacherCadre = useMemo(() => {
-    if (userProfile?.teachingCadre) return userProfile.teachingCadre;
-    if (userProfile?.schoolId || userProfile?.schoolName) {
-      const userSchool = (schools || []).find(s => 
-        (userProfile.schoolId && s.id === userProfile.schoolId) || 
-        (userProfile.schoolName && s.name === userProfile.schoolName)
-      );
-      if (userSchool?.type) return userSchool.type;
-    }
-    return undefined;
-  }, [userProfile, schools]);
-
   const teacherSchoolObj = useMemo(() => {
     const schoolLookup = userProfile?.workLocation || userProfile?.schoolName;
     return (schools || []).find(s =>
@@ -84,6 +72,10 @@ export const TeacherTeams: React.FC = () => {
       (schoolLookup && schoolNamesMatch(s.name, schoolLookup))
     );
   }, [schools, userProfile]);
+
+  const teacherCadre = useMemo(() => {
+    return resolveEffectiveTeacherCadre(userProfile, teacherSchoolObj);
+  }, [userProfile, teacherSchoolObj]);
 
   const teacherAllowedTournaments = useMemo(() => {
     const activeTourns = tournaments.filter(t => {
@@ -448,13 +440,13 @@ export const TeacherTeams: React.FC = () => {
     return '3000 م';
   };
 
-  // Helpers for checking regional tournament existence
+  // Helpers for checking regional tournament existence (scoped for teachers)
   const hasActiveTournament = (sportId: string): boolean => {
-    return tournaments.some(t => t.sportId === sportId);
+    return teacherAllowedTournaments.some(t => t.sportId === sportId);
   };
 
   const getSportTournament = (sportId: string): Tournament | undefined => {
-    return tournaments.find(t => t.sportId === sportId);
+    return teacherAllowedTournaments.find(t => t.sportId === sportId);
   };
 
   const handleOpenNewStudentForm = (initialCat?: string, initialGender?: 'Male' | 'Female', initialAffiliation?: 'non_club' | 'club_affiliated') => {
@@ -1222,9 +1214,26 @@ export const TeacherTeams: React.FC = () => {
     const rawCats = (activeSportConfig?.ageCategories && activeSportConfig.ageCategories.length > 0)
       ? activeSportConfig.ageCategories
       : getAgeCategoriesForSeason(currentSeason).map(c => c.id);
-    const normalized = rawCats.map(c => normalizeCategoryKey(c));
-    return Array.from(new Set(normalized));
-  }, [activeSportConfig, currentSeason]);
+    let normalized: string[] = Array.from(
+      new Set<string>(rawCats.map((c: string) => String(normalizeCategoryKey(c))))
+    );
+    if (isTeacherRole && !canManage && selectedSportId) {
+      const sportTourns = teacherAllowedTournaments.filter(t => t.sportId === selectedSportId);
+      if (sportTourns.length > 0) {
+        const hasOpenCat = sportTourns.some(t => !t.ageCategory || normalizeCategoryKey(t.ageCategory) === 'OPEN');
+        if (!hasOpenCat) {
+          const allowedSet = new Set<string>(sportTourns.map(t => String(normalizeCategoryKey(t.ageCategory))).filter(Boolean));
+          const tournFiltered = normalized.filter(c => allowedSet.has(c));
+          if (tournFiltered.length > 0) normalized = tournFiltered;
+        }
+      }
+      if (teacherCadre) {
+        const levelFiltered = normalized.filter(c => isCategoryAllowedForTeacherLevel(teacherCadre, c));
+        if (levelFiltered.length > 0) normalized = levelFiltered;
+      }
+    }
+    return normalized;
+  }, [activeSportConfig, currentSeason, isTeacherRole, canManage, selectedSportId, teacherAllowedTournaments, teacherCadre]);
 
   // Real-time limit checking for rendering warning indicators
   const isGeneralLimitReached = (() => {
@@ -2412,9 +2421,20 @@ export const TeacherTeams: React.FC = () => {
                     }
                   });
 
-                  const allItems = allItemsRaw.filter(item =>
-                    isAffiliationAllowedByDisplayConfig(item.affiliationType, affiliationDisplayConfig, selectedSportId || undefined)
-                  );
+                  const allItems = allItemsRaw.filter(item => {
+                    if (!isAffiliationAllowedByDisplayConfig(item.affiliationType, affiliationDisplayConfig, selectedSportId || undefined)) {
+                      return false;
+                    }
+                    if (isTeacherRole && !canManage && teacherCadre) {
+                      const hasExisting = activeSportStudents.some(s =>
+                        normalizeCategoryKey(s.category) === item.catId && s.gender === item.gender
+                      );
+                      if (!hasExisting && !isCategoryAllowedForTeacherLevel(teacherCadre, item.catId)) {
+                        return false;
+                      }
+                    }
+                    return true;
+                  });
 
                   const filteredItems = allItems.filter(item => {
                     const { catId, gender: g, affiliationType: aff } = item;
@@ -2468,7 +2488,7 @@ export const TeacherTeams: React.FC = () => {
                     });
                   });
 
-                  return filteredItems.length > 0 ? filteredItems : allItems;
+                  return (filteredItems.length > 0 || (isTeacherRole && !canManage && sportTourns.length > 0)) ? filteredItems : allItems;
                 })().map((item) => {
                   const { catId, gender: g, label, affiliationType: aff } = item;
                   const key = aff ? `${catId}_${g}_${aff}` : `${catId}_${g}`;
@@ -2825,15 +2845,26 @@ export const TeacherTeams: React.FC = () => {
                     {selectedSportId === 'cross_country' && (() => {
                       const parsedCC = parseBranchKey(selectedCategoryKey);
                       return (
-                        <button
-                          type="button"
-                          onClick={() => handleOpenCrossCountryBulk(selectedCategoryKey, parsedCC.affiliationType)}
-                          className="text-[10px] font-black bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 text-slate-950 px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-all cursor-pointer shadow-xs hover:scale-102"
-                          title="تسجيل 8 مشاركين في آن واحد (3 فردي + 5 فريق المؤسسة)"
-                        >
-                          <Sparkles className="w-3.5 h-3.5 text-slate-950" />
-                          <span>تسجيل 8 مشاركين ⚡</span>
-                        </button>
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => handleOpenNewStudentForm(parsedCC.catId, parsedCC.gender, (parsedCC.affiliationType || 'non_club') as 'non_club' | 'club_affiliated')}
+                            className="text-[10px] font-bold bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-all cursor-pointer shadow-xs"
+                            title="تسجيل مشارك واحد تلو الآخر في هذه الفئة"
+                          >
+                            <UserPlus className="w-3.5 h-3.5" />
+                            <span>تسجيل واحد تلو الآخر</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleOpenCrossCountryBulk(selectedCategoryKey, parsedCC.affiliationType)}
+                            className="text-[10px] font-black bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 text-slate-950 px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-all cursor-pointer shadow-xs hover:scale-102"
+                            title="تسجيل 8 مشاركين في آن واحد (3 فردي + 5 فريق المؤسسة)"
+                          >
+                            <Sparkles className="w-3.5 h-3.5 text-slate-950" />
+                            <span>تسجيل 8 مشاركين ⚡</span>
+                          </button>
+                        </>
                       );
                     })()}
                   </div>

@@ -326,6 +326,22 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
       const activeDirId = activeDirObj?.id || DataService.getActiveDirectorateId();
 
       for (const catId of selectedCategories) {
+        const normCatForLevel = normalizeCategoryKey(catId);
+        const inferredCatLevel: 'Primary' | 'Middle' | 'High' | null =
+          normCatForLevel === 'U12'
+            ? 'Primary'
+            : normCatForLevel === 'U15'
+            ? 'Middle'
+            : (normCatForLevel === 'U18' || normCatForLevel === 'U20')
+            ? 'High'
+            : null;
+        const resolvedLevelForCat =
+          selectedLevels && selectedLevels.length > 0
+            ? (selectedLevels.length > 1 && inferredCatLevel && selectedLevels.includes(inferredCatLevel)
+                ? inferredCatLevel
+                : selectedLevels.join(','))
+            : (inferredCatLevel || 'Primary,Middle,High');
+
         for (const gen of gendersToGenerate) {
           const genderCatName = getCategoryGenderLabel(catId, gen);
 
@@ -345,7 +361,7 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
               sportId,
               ageCategory: catId,
               gender: gen,
-              level: selectedLevels && selectedLevels.length > 0 ? selectedLevels.join(',') : (catId === 'U12' ? 'Primary' : catId === 'U15' ? 'Middle' : (catId === 'U18' || catId === 'U20') ? 'High' : 'Primary,Middle,High'),
+              level: resolvedLevelForCat,
               educationSectors: selectedEducationSectors.length > 0 ? selectedEducationSectors : ['public', 'private'],
               scope,
               affiliationType: affId,
@@ -371,7 +387,7 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
         console.warn("Could not updateSportRosterLimit:", err);
       }
 
-      // Sync sport dates & settings across tournaments
+      // Sync sport dates & settings across tournaments (preserve per-category level if multiple levels selected)
       try {
         await DataService.updateSportDates(sportId, {
           startDate: new Date(startDate),
@@ -379,7 +395,7 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
           registrationDeadline: registrationDeadline ? new Date(registrationDeadline) : null,
           status,
           description: description.trim(),
-          level: selectedLevels.join(','),
+          ...(selectedLevels.length === 1 ? { level: selectedLevels[0] } : {}),
           educationSectors: selectedEducationSectors.length > 0 ? selectedEducationSectors : ['public', 'private']
         });
       } catch (err) {

@@ -114,27 +114,40 @@ export const Teachers: React.FC = () => {
     isCentralOrSportManager ||
     (effectiveAdminProfile?.isTechCommitteeHead && !isImpersonatingTeacher)
   );
+  const isOrigCentralAdmin = Boolean(
+    effectiveAdminProfile?.role === 'CENTRAL_ADMIN' || effectiveAdminProfile?.isSuperAdmin
+  );
   const canTechHeadImpersonate = Boolean(
-    effectiveAdminProfile?.isTechCommitteeHead && !isImpersonatingTeacher
+    (effectiveAdminProfile?.isTechCommitteeHead || isOrigCentralAdmin) && !isImpersonatingTeacher
   );
 
   const handleStartImpersonation = (targetTeacher: User, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
     if (!canTechHeadImpersonate) return;
-    if (targetTeacher.role === 'CENTRAL_ADMIN' || targetTeacher.isSuperAdmin) {
+    if ((targetTeacher.role === 'CENTRAL_ADMIN' || targetTeacher.isSuperAdmin) && !(isOrigCentralAdmin && targetTeacher.isTechCommitteeHead)) {
       toast.error('لا يمكن الدخول بصفة حساب مسير مركزي أو مسؤول عام');
       return;
     }
+    const preserveTechHead = Boolean(isOrigCentralAdmin && targetTeacher.isTechCommitteeHead);
     const scopedSports =
-      effectiveAdminProfile?.techCommitteeSports && effectiveAdminProfile.techCommitteeSports.length > 0
+      !isOrigCentralAdmin && effectiveAdminProfile?.techCommitteeSports && effectiveAdminProfile.techCommitteeSports.length > 0
         ? effectiveAdminProfile.techCommitteeSports
-        : effectiveAdminProfile?.sportId
+        : !isOrigCentralAdmin && effectiveAdminProfile?.sportId
         ? [effectiveAdminProfile.sportId]
         : [];
-    startTeacherImpersonation(targetTeacher);
+    startTeacherImpersonation(targetTeacher, { preserveTechCommitteeRole: preserveTechHead });
     setIsDetailModalOpen(false);
-    toast.success(`تم الدخول بصفة الأستاذ ${targetTeacher.fullName} (محصور في رياضتك)`);
-    navigate(scopedSports.length === 1 ? `/teacher-teams?sport=${scopedSports[0]}` : '/teacher-teams');
+    if (preserveTechHead) {
+      toast.success(`تم الدخول بصفة رئيس اللجنة التقنية ${targetTeacher.fullName} مع الحفاظ على صفتك الأصلية`);
+      navigate('/tournaments');
+    } else {
+      toast.success(
+        isOrigCentralAdmin
+          ? `تم الدخول بصفة الأستاذ ${targetTeacher.fullName} مع الحفاظ على صفتك الأصلية`
+          : `تم الدخول بصفة الأستاذ ${targetTeacher.fullName} (محصور في رياضتك)`
+      );
+      navigate(scopedSports.length === 1 ? `/teacher-teams?sport=${scopedSports[0]}` : '/teacher-teams');
+    }
   };
 
   const [teachers, setTeachers] = useState<User[]>([]);
@@ -1066,15 +1079,15 @@ export const Teachers: React.FC = () => {
                       {/* Actions */}
                       <td className="px-6 py-4 text-center">
                         <div className="flex items-center justify-center gap-1.5">
-                          {canTechHeadImpersonate && teacher.role !== 'CENTRAL_ADMIN' && !teacher.isSuperAdmin && (
+                          {canTechHeadImpersonate && ((teacher.role !== 'CENTRAL_ADMIN' && !teacher.isSuperAdmin) || (isOrigCentralAdmin && teacher.isTechCommitteeHead)) && (
                             <button
                               type="button"
                               onClick={(e) => handleStartImpersonation(teacher, e)}
                               className="px-2.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl border border-indigo-700 transition-all cursor-pointer shadow-3xs flex items-center gap-1 text-[11px] font-black"
-                              title="الدخول بصفة هذا الأستاذ لتعديل مشاركاته في رياضتك"
+                              title={teacher.isTechCommitteeHead && isOrigCentralAdmin ? 'الدخول بصفة رئيس اللجنة التقنية مع الحفاظ على صفتك الأصلية' : 'الدخول بصفة هذا الأستاذ'}
                             >
                               <LogIn className="h-3.5 w-3.5" />
-                              <span className="hidden xl:inline">دخول بصفته</span>
+                              <span className="hidden xl:inline">{teacher.isTechCommitteeHead && isOrigCentralAdmin ? 'دخول كرئيس لجنة' : 'دخول بصفته'}</span>
                             </button>
                           )}
                           {canEditTeachers && (isCentralOrSportManager || (teacher.role !== 'CENTRAL_ADMIN' && !teacher.isSuperAdmin)) && (
@@ -1146,15 +1159,15 @@ export const Teachers: React.FC = () => {
                 >
                   {/* Mobile Action Buttons: Icons only, centered above name */}
                   <div className="flex items-center justify-center flex-wrap gap-2 w-full pb-2.5 border-b border-slate-100">
-                    {canTechHeadImpersonate && teacher.role !== 'CENTRAL_ADMIN' && !teacher.isSuperAdmin && (
+                    {canTechHeadImpersonate && ((teacher.role !== 'CENTRAL_ADMIN' && !teacher.isSuperAdmin) || (isOrigCentralAdmin && teacher.isTechCommitteeHead)) && (
                       <button
                         type="button"
                         onClick={(e) => handleStartImpersonation(teacher, e)}
                         className="px-2.5 py-2 bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white rounded-xl border border-indigo-700 transition-all cursor-pointer shadow-3xs flex items-center justify-center gap-1 text-[11px] font-black"
-                        title="الدخول بصفة هذا الأستاذ لتعديل مشاركاته في رياضتك"
+                        title={teacher.isTechCommitteeHead && isOrigCentralAdmin ? 'الدخول بصفة رئيس اللجنة التقنية مع الحفاظ على صفتك الأصلية' : 'الدخول بصفة هذا الأستاذ'}
                       >
                         <LogIn className="h-3.5 w-3.5" />
-                        <span>الدخول بصفة الأستاذ</span>
+                        <span>{teacher.isTechCommitteeHead && isOrigCentralAdmin ? 'الدخول كرئيس لجنة' : 'الدخول بصفة الأستاذ'}</span>
                       </button>
                     )}
                     {canEditTeachers && (isCentralOrSportManager || (teacher.role !== 'CENTRAL_ADMIN' && !teacher.isSuperAdmin)) && (

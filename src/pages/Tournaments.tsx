@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { DataService, SPORTS_MAP, getAgeCategoriesForSeason, deduplicateById, getCategoryGenderLabel, isClubTournament, normalizeCategoryKey, getTournamentLevelAr, isTeacherLevelAllowedForTournament, getCustomCategoryName, getCustomCategoryDetails, isSchoolSectorAllowedForTournament, getTournamentEducationSectorsAr, normalizeTournamentEducationSectors, getSchoolEducationSector, schoolNamesMatch, normalizeCanonicalSportId, areSportIdsEquivalent, isAffiliationAllowedByDisplayConfig, resolveEffectiveAffiliationMode, getEffectiveConfirmedBranches } from '../lib/dataService';
+import { DataService, SPORTS_MAP, getAgeCategoriesForSeason, deduplicateById, getCategoryGenderLabel, isClubTournament, normalizeCategoryKey, getTournamentLevelAr, isTeacherLevelAllowedForTournament, getCustomCategoryName, getCustomCategoryDetails, isSchoolSectorAllowedForTournament, getTournamentEducationSectorsAr, normalizeTournamentEducationSectors, getSchoolEducationSector, schoolNamesMatch, normalizeCanonicalSportId, areSportIdsEquivalent, isAffiliationAllowedByDisplayConfig, resolveEffectiveAffiliationMode, getEffectiveConfirmedBranches, resolveEffectiveTeacherCadre } from '../lib/dataService';
 import { Tournament, User, Student, School, Sport, Match, Directorate, AffiliationDisplayConfig } from '../types';
 import { CountdownTimer } from '../components/CountdownTimer';
 import * as XLSX from 'xlsx';
@@ -943,10 +943,10 @@ export const Tournaments: React.FC = () => {
   const sportsWithTournamentData = useMemo(() => {
     const seasonalCats = getAgeCategoriesForSeason(activeSeason);
 
-    let teacherCadre = userProfile?.teachingCadre || currentTeacherProfile?.teachingCadre;
-    if (isTeacherRole && !teacherCadre && teacherSchoolObj?.type) {
-      teacherCadre = teacherSchoolObj.type;
-    }
+    const teacherCadre = resolveEffectiveTeacherCadre(
+      userProfile || currentTeacherProfile,
+      teacherSchoolObj
+    );
 
     return sportsConfig
       .filter(sport => impersonationScopedSportIds.length === 0 || impersonationScopedSportIds.includes(sport.id))
@@ -1092,16 +1092,16 @@ export const Tournaments: React.FC = () => {
 
     // 2. Strict Cadre & Sector restriction for Teachers
     if (isTeacherRole && !canManageSport(sport.id)) {
-      let teacherCadre = userProfile?.teachingCadre || currentTeacherProfile?.teachingCadre;
       const teacherSchoolId = userProfile?.schoolId || currentTeacherProfile?.schoolId;
       const teacherSchoolLookupName = userProfile?.workLocation || userProfile?.schoolName || currentTeacherProfile?.workLocation || currentTeacherProfile?.schoolName;
       const userSchool = schools.find(s => 
         (teacherSchoolId && s.id === teacherSchoolId) || 
         (teacherSchoolLookupName && schoolNamesMatch(s.name, teacherSchoolLookupName))
       );
-      if (!teacherCadre && userSchool?.type) {
-        teacherCadre = userSchool.type;
-      }
+      const teacherCadre = resolveEffectiveTeacherCadre(
+        userProfile || currentTeacherProfile,
+        userSchool
+      );
 
       if (sportTourns.length > 0) {
         const isAnyLevelAllowed = sportTourns.some(t => 

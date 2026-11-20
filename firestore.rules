@@ -7,7 +7,8 @@ service cloud.firestore {
         request.auth.token.email == 'aminens21@gmail.com' ||
         request.auth.token.email == 'omrhaman.figuig@gmail.com' ||
         request.auth.token.email == 'printomrdesigne@gmail.com' ||
-        request.auth.token.email == 'sayhihassan@gmail.com'
+        request.auth.token.email == 'sayhihassan@gmail.com' ||
+        request.auth.token.email == 'meqnou@gmail.com'
       );
     }
 
