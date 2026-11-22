@@ -22,7 +22,6 @@ import { prepareFontEmbedCss } from './fontExportHelper';
 export interface ParticipationTableRow {
   schoolName: string;
   categoriesLabel: string;
-  coachName: string;
 }
 
 export interface TournamentTablePdfOptions {
@@ -261,23 +260,9 @@ export function buildParticipationTableRows(params: {
       });
 
       const firstBranch = sortedBranches[0];
-      const coach = resolveSchoolCoach({
-        schoolName: b.schoolName,
-        sportId,
-        category: sortedBranches.length === 1 ? firstBranch.category : undefined,
-        gender: sortedBranches.length === 1 ? firstBranch.gender : undefined,
-        affiliationType: sortedBranches.length === 1 ? firstBranch.affiliationType : undefined,
-        students: b.studentsInBucket,
-        schools,
-        teachers,
-        confirmations: b.conf ? [b.conf] : confirmations,
-        currentUser
-      });
-
       return {
         schoolName: b.schoolName,
-        categoriesLabel: sortedBranches.map(br => br.label).join(' • '),
-        coachName: coach.fullName || '—'
+        categoriesLabel: sortedBranches.map(br => br.label).join(' • ')
       };
     })
     .sort((a, b) => a.schoolName.localeCompare(b.schoolName, 'ar'));
@@ -296,7 +281,7 @@ function buildTablePageHtml(
   const rowsHtml = rowsSlice.length === 0
     ? `
       <tr>
-        <td colspan="4" style="border: 1.5px solid #000; padding: 24px 12px; text-align: center; font-weight: 700; color: #475569; font-size: 16px;">
+        <td colspan="3" style="border: 1.5px solid #000; padding: 24px 12px; text-align: center; font-weight: 700; color: #475569; font-size: 16px;">
           لا توجد مؤسسات مشاركة مسجلة حالياً في هذه البطولة
         </td>
       </tr>
@@ -306,14 +291,11 @@ function buildTablePageHtml(
         <td style="border: 1.5px solid #000; padding: 9px 10px; text-align: center; font-weight: 700; font-size: 15px; color: #000; background: #fff; width: 62px;">
           ${r.seq}
         </td>
-        <td style="border: 1.5px solid #000; padding: 9px 14px; text-align: center; font-weight: 700; font-size: 15px; color: #000; background: #fff; width: 29%;">
+        <td style="border: 1.5px solid #000; padding: 9px 14px; text-align: center; font-weight: 700; font-size: 15px; color: #000; background: #fff; width: 42%;">
           ${escapeHtml(r.schoolName)}
         </td>
-        <td style="border: 1.5px solid #000; padding: 9px 12px; text-align: center; font-weight: 700; font-size: 14.5px; color: #000; background: #fff; width: 47%;">
+        <td style="border: 1.5px solid #000; padding: 9px 12px; text-align: center; font-weight: 700; font-size: 14.5px; color: #000; background: #fff;">
           ${escapeHtml(r.categoriesLabel)}
-        </td>
-        <td style="border: 1.5px solid #000; padding: 9px 12px; text-align: center; font-weight: 700; font-size: 15px; color: #000; background: #fff;">
-          ${escapeHtml(r.coachName)}
         </td>
       </tr>
     `).join('');
@@ -331,21 +313,18 @@ function buildTablePageHtml(
         ${subtitle ? `<div style="font-size: 12px; font-weight: 700; color: #334155; margin-top: 2px;">${escapeHtml(subtitle)}</div>` : ''}
       </div>
 
-      <!-- Bordered 4-column table -->
+      <!-- Bordered 3-column table -->
       <table style="width: 100%; border-collapse: collapse; border: 2px solid #000000; table-layout: fixed;">
         <thead>
           <tr style="background: #d9d9d9;">
             <th style="border: 1.5px solid #000; padding: 10px 8px; text-align: center; font-weight: 900; font-size: 15px; color: #000; width: 62px;">
               ر.ت
             </th>
-            <th style="border: 1.5px solid #000; padding: 10px 14px; text-align: center; font-weight: 900; font-size: 16px; color: #000; width: 29%;">
+            <th style="border: 1.5px solid #000; padding: 10px 14px; text-align: center; font-weight: 900; font-size: 16px; color: #000; width: 42%;">
               المؤسسة التعليمية
             </th>
-            <th style="border: 1.5px solid #000; padding: 10px 12px; text-align: center; font-weight: 900; font-size: 16px; color: #000; width: 47%;">
-              الفئات المعنية
-            </th>
             <th style="border: 1.5px solid #000; padding: 10px 12px; text-align: center; font-weight: 900; font-size: 16px; color: #000;">
-              المسؤول
+              الفئات المعنية
             </th>
           </tr>
         </thead>
