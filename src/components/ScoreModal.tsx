@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Match, School, Venue } from '../types';
+import { Match, School, Venue, Referee, User } from '../types';
 import { X, CheckCircle2, ShieldAlert, Plus, Minus, Database, Megaphone, CalendarClock, ShieldCheck } from 'lucide-react';
-import { SPORTS_MAP, GENDER_MAP, canUserApproveSportResult } from '../lib/dataService';
+import { SPORTS_MAP, GENDER_MAP, canUserEnterMatchScore, isUserTechHeadForSport } from '../lib/dataService';
 import { formatTeamDisplayName, doesMatchRequirePenaltyOnDraw } from '../lib/drawTournamentUtils';
 import { useAuth } from '../contexts/AuthContext';
 import toast from 'react-hot-toast';
@@ -13,6 +13,8 @@ interface ScoreModalProps {
   match: Match | null;
   schools: School[];
   venues?: Venue[];
+  referees?: Referee[];
+  teachers?: User[];
   canApprove?: boolean;
   currentUserName?: string;
   onNotifySchedule?: (match: Match) => void;
@@ -56,6 +58,8 @@ export const ScoreModal: React.FC<ScoreModalProps> = ({
   onClose,
   match,
   schools,
+  referees,
+  teachers,
   canApprove,
   currentUserName,
   onNotifySchedule,
@@ -100,7 +104,8 @@ export const ScoreModal: React.FC<ScoreModalProps> = ({
   const effectiveCanApprove =
     canApprove !== undefined
       ? canApprove
-      : canUserApproveSportResult(userProfile, match.sportId);
+      : isUserTechHeadForSport(userProfile, match.sportId, teachers);
+  const canEnterThisMatchScore = canUserEnterMatchScore(userProfile, match, referees, teachers);
 
   const actorName =
     currentUserName ||
@@ -178,6 +183,10 @@ export const ScoreModal: React.FC<ScoreModalProps> = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canEnterThisMatchScore) {
+      toast.error('إدخال نتائج المباريات مقتصر فقط على الحكام المعينين في هذه المباراة أو رئيس اللجنة التقنية المختص');
+      return;
+    }
     if (!validatePenaltyResolution(status)) return;
     setIsSubmitting(true);
     const extras = buildWinnerAndExtras(status);
@@ -190,7 +199,7 @@ export const ScoreModal: React.FC<ScoreModalProps> = ({
   };
 
   const handleApproveAndNotify = async () => {
-    if (!effectiveCanApprove) return;
+    if (!canEnterThisMatchScore || !effectiveCanApprove) return;
     const finalStatus: Match['status'] = 'Completed';
     if (!validatePenaltyResolution(finalStatus)) return;
     setIsSubmitting(true);
@@ -278,12 +287,21 @@ export const ScoreModal: React.FC<ScoreModalProps> = ({
         {/* Body Form */}
         <form onSubmit={handleSubmit} className="p-4 sm:p-5 space-y-3.5 overflow-y-auto flex-1">
           {/* Provisional vs Homologation Role Banner */}
-          {!effectiveCanApprove ? (
+          {!canEnterThisMatchScore ? (
+            <div className="p-3 bg-rose-50 border border-rose-300 rounded-xl flex items-start gap-2.5 text-xs text-rose-950">
+              <ShieldAlert className="h-4 w-4 text-rose-600 shrink-0 mt-0.5" />
+              <div className="leading-relaxed">
+                <span className="font-black">غير مصرح بإدخال النتيجة:</span> إدخال نتائج المباريات مقتصر فقط على{' '}
+                <span className="underline font-black">الحكام المعينين في هذه المباراة</span> أو{' '}
+                <span className="underline font-black">رئيس اللجنة التقنية المختص</span>.
+              </div>
+            </div>
+          ) : !effectiveCanApprove ? (
             <div className="p-3 bg-amber-50 border border-amber-300 rounded-xl flex items-start gap-2.5 text-xs text-amber-950">
               <ShieldAlert className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
               <div className="leading-relaxed">
                 <span className="font-black">نتيجة أولية (حكم المقابلة):</span> ستظهر النتيجة المدونة كـ{' '}
-                <span className="underline font-black">نتيجة أولية</span> إلى حين المصادقة النهائية عليها من طرف رئيس اللجنة التقنية المختص أو المسير المركزي.
+                <span className="underline font-black">نتيجة أولية</span> إلى حين المصادقة النهائية عليها من طرف رئيس اللجنة التقنية المختص.
               </div>
             </div>
           ) : match.approvalStatus === 'provisional' ? (
@@ -530,7 +548,7 @@ export const ScoreModal: React.FC<ScoreModalProps> = ({
               إلغاء
             </button>
 
-            {effectiveCanApprove && onNotifyApprovedResult && (
+            {canEnterThisMatchScore && effectiveCanApprove && onNotifyApprovedResult && (
               <button
                 type="button"
                 disabled={isSubmitting}
@@ -544,16 +562,20 @@ export const ScoreModal: React.FC<ScoreModalProps> = ({
 
             <button
               type="submit"
-              disabled={isSubmitting}
-              className={`px-4 py-2.5 text-xs font-black text-white active:scale-95 rounded-xl transition-all shadow-md cursor-pointer flex items-center justify-center gap-1.5 order-2 sm:order-3 ${
-                effectiveCanApprove
-                  ? 'bg-emerald-700 hover:bg-emerald-800 shadow-emerald-700/20'
-                  : 'bg-amber-600 hover:bg-amber-700 shadow-amber-600/20'
+              disabled={isSubmitting || !canEnterThisMatchScore}
+              className={`px-4 py-2.5 text-xs font-black text-white active:scale-95 rounded-xl transition-all shadow-md flex items-center justify-center gap-1.5 order-2 sm:order-3 disabled:opacity-50 disabled:cursor-not-allowed ${
+                !canEnterThisMatchScore
+                  ? 'bg-slate-400 cursor-not-allowed'
+                  : effectiveCanApprove
+                  ? 'bg-emerald-700 hover:bg-emerald-800 shadow-emerald-700/20 cursor-pointer'
+                  : 'bg-amber-600 hover:bg-amber-700 shadow-amber-600/20 cursor-pointer'
               }`}
             >
               <CheckCircle2 className="h-4 w-4 shrink-0" />
               <span>
-                {isSubmitting
+                {!canEnterThisMatchScore
+                  ? 'غير مصرح بإدخال النتيجة'
+                  : isSubmitting
                   ? 'جاري الحفظ...'
                   : effectiveCanApprove
                   ? 'مصادقة وحفظ النتيجة'

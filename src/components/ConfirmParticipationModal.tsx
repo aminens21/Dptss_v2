@@ -16,7 +16,8 @@ import {
   isAffiliationAllowedByDisplayConfig,
   resolveEffectiveTeacherCadre,
   isTeacherLevelAllowedForTournament,
-  isCategoryAllowedForTeacherLevel
+  isCategoryAllowedForTeacherLevel,
+  findMatchingSchoolForTeacher
 } from '../lib/dataService';
 import { useAuth } from '../contexts/AuthContext';
 import { CountdownTimer } from './CountdownTimer';
@@ -132,10 +133,13 @@ export const ConfirmParticipationModal: React.FC<ConfirmParticipationModalProps>
 
   const matchedSchool = useMemo(() => {
     if (!loadedSchools.length) return undefined;
-    return loadedSchools.find(
-      s => (schoolId && s.id === schoolId) || (schoolName && schoolNamesMatch(s.name, schoolName))
-    );
-  }, [loadedSchools, schoolId, schoolName]);
+    return findMatchingSchoolForTeacher(loadedSchools, {
+      schoolId,
+      workLocation: schoolName,
+      schoolName,
+      teachingCadre: userProfile?.teachingCadre
+    });
+  }, [loadedSchools, schoolId, schoolName, userProfile?.teachingCadre]);
 
   const effectiveCycleLevel = useMemo(() => {
     const profileForSchool = userProfile?.role === 'TEACHER'
@@ -144,12 +148,19 @@ export const ConfirmParticipationModal: React.FC<ConfirmParticipationModalProps>
     return resolveEffectiveTeacherCadre(profileForSchool, matchedSchool);
   }, [userProfile, matchedSchool, schoolName]);
 
-  const activeSportTournaments = useMemo(() => {
+  const baseSportTournaments = useMemo(() => {
     const source = propTournaments && propTournaments.length > 0 ? propTournaments : loadedTournaments;
-    const base = source.filter(t => t.sportId === sport.id && t.status !== 'Archived' && t.status !== 'Draft');
-    if (!effectiveCycleLevel) return base;
-    return base.filter(t => isTeacherLevelAllowedForTournament(effectiveCycleLevel, t.level));
-  }, [propTournaments, loadedTournaments, sport.id, effectiveCycleLevel]);
+    return source.filter(t => t.sportId === sport.id && t.status !== 'Archived' && t.status !== 'Draft' && (t as any).isActive !== false);
+  }, [propTournaments, loadedTournaments, sport.id]);
+
+  const activeSportTournaments = useMemo(() => {
+    if (!effectiveCycleLevel) return baseSportTournaments;
+    return baseSportTournaments.filter(t => isTeacherLevelAllowedForTournament(effectiveCycleLevel, t.level, t.ageCategory));
+  }, [baseSportTournaments, effectiveCycleLevel]);
+
+  const isLevelRestrictedOut = useMemo(() => {
+    return Boolean(effectiveCycleLevel && baseSportTournaments.length > 0 && activeSportTournaments.length === 0);
+  }, [effectiveCycleLevel, baseSportTournaments.length, activeSportTournaments.length]);
 
   const isSectorAllowed = useMemo(() => {
     if (!matchedSchool || activeSportTournaments.length === 0) return true;
@@ -206,8 +217,7 @@ export const ConfirmParticipationModal: React.FC<ConfirmParticipationModalProps>
       }
     }
     if (effectiveCycleLevel) {
-      const filtered = baseCats.filter(c => isCategoryAllowedForTeacherLevel(effectiveCycleLevel, c.id));
-      if (filtered.length > 0) return filtered;
+      return baseCats.filter(c => isCategoryAllowedForTeacherLevel(effectiveCycleLevel, c.id));
     }
     return baseCats;
   }, [sport, effectiveCycleLevel]);
@@ -241,6 +251,10 @@ export const ConfirmParticipationModal: React.FC<ConfirmParticipationModalProps>
       }
     };
 
+    if (isLevelRestrictedOut || !isSectorAllowed) {
+      return [];
+    }
+
     if (activeSportTournaments.length > 0) {
       activeSportTournaments.forEach(t => {
         const aff = t.affiliationType || 'non_club';
@@ -253,7 +267,7 @@ export const ConfirmParticipationModal: React.FC<ConfirmParticipationModalProps>
           addBranchOption(aff, catId, 'Female');
         }
       });
-    } else {
+    } else if (baseSportTournaments.length === 0) {
       const sportAffs: string[] = Array.isArray((sport as any)?.targetAffiliations) && (sport as any).targetAffiliations.length > 0
         ? (sport as any).targetAffiliations
         : (sport.id === 'cross_country' ? ['non_club', 'club_affiliated'] : ['non_club', 'club_affiliated']);
@@ -299,7 +313,7 @@ export const ConfirmParticipationModal: React.FC<ConfirmParticipationModalProps>
           items: sortedItems
         };
       });
-  }, [activeSportTournaments, availableCategories, sport, affiliationDisplayConfig, effectiveCycleLevel]);
+  }, [activeSportTournaments, baseSportTournaments.length, availableCategories, sport, affiliationDisplayConfig, effectiveCycleLevel, isLevelRestrictedOut, isSectorAllowed]);
 
   // Exact selected branches state (NO hidden Cartesian product & NO auto-selecting club_affiliated!)
   const [selectedBranches, setSelectedBranches] = useState<ConfirmedBranchTuple[]>(() => {
@@ -913,6 +927,19 @@ export const ConfirmParticipationModal: React.FC<ConfirmParticipationModalProps>
             </div>
           )}
 
+          {/* Level / cycle ineligible warning */}
+          {isLevelRestrictedOut && (
+            <div className="p-3.5 bg-rose-50 border-2 border-rose-300 rounded-2xl text-rose-900 font-bold text-xs flex items-center gap-2.5 shadow-xs">
+              <AlertCircle className="w-5 h-5 text-rose-600 shrink-0" />
+              <div>
+                <div className="font-black text-xs text-rose-950">السلك التعليمي لمؤسستكم غير مسموح له بالمشاركة في هذه البطولة</div>
+                <div className="text-[11px] text-rose-800 mt-0.5">
+                  لا يمكن تأكيد المشاركة لأن إعدادات هذه البطولة لم تفتحها للسلك التعليمي الذي تنتمي إليه مؤسستكم.
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Sector ineligible warning */}
           {!isSectorAllowed && matchedSchool && (
             <div className="p-3.5 bg-rose-50 border-2 border-rose-300 rounded-2xl text-rose-900 font-bold text-xs flex items-center gap-2.5 shadow-xs">
@@ -1003,7 +1030,7 @@ export const ConfirmParticipationModal: React.FC<ConfirmParticipationModalProps>
             ) : (
               <button
                 type="button"
-                disabled={isSubmitting || isDeadlinePassed || !isSectorAllowed || selectedBranches.length === 0}
+                disabled={isSubmitting || isDeadlinePassed || !isSectorAllowed || isLevelRestrictedOut || selectedBranches.length === 0}
                 onClick={handleConfirm}
                 className="w-full sm:w-auto px-6 py-2.5 bg-gradient-to-r from-emerald-600 to-emerald-700 hover:from-emerald-500 hover:to-emerald-600 disabled:opacity-50 text-white rounded-xl font-black text-xs shadow-md shadow-emerald-700/20 transition-all cursor-pointer flex items-center justify-center gap-2 active:scale-98"
               >

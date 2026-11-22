@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { DataService, SPORTS_MAP, AGE_CATEGORIES, getAgeCategoriesForSeason, getCategoryGenderLabel, isClubTournament, normalizeCategoryKey, validateBirthDateForCategory, isTeacherLevelAllowedForTournament, getEffectiveConfirmedBranches, formatBranchLabelAr, getGenderSpecificCategoryTitle, isSchoolSectorAllowedForTournament, schoolNamesMatch, isAffiliationAllowedByDisplayConfig, resolveEffectiveTeacherCadre, isCategoryAllowedForTeacherLevel } from '../lib/dataService';
+import { DataService, SPORTS_MAP, AGE_CATEGORIES, getAgeCategoriesForSeason, getCategoryGenderLabel, isClubTournament, normalizeCategoryKey, validateBirthDateForCategory, isTeacherLevelAllowedForTournament, getEffectiveConfirmedBranches, formatBranchLabelAr, getGenderSpecificCategoryTitle, isSchoolSectorAllowedForTournament, schoolNamesMatch, isAffiliationAllowedByDisplayConfig, resolveEffectiveTeacherCadre, isCategoryAllowedForTeacherLevel, findMatchingSchoolForTeacher } from '../lib/dataService';
 import { useSchoolConfirmations } from '../hooks/useSchoolConfirmations';
 import { Student, Sport, Tournament, School, Directorate, AffiliationDisplayConfig } from '../types';
 import { ParticipationFormPdfModal } from '../components/ParticipationFormPdfModal';
@@ -38,7 +38,7 @@ import {
 import toast from 'react-hot-toast';
 
 export const TeacherTeams: React.FC = () => {
-  const { userProfile, openProfileModal, impersonationScopedSportIds } = useAuth();
+  const { userProfile, openProfileModal, impersonationScopedSportIds, isImpersonatingTeacher } = useAuth();
   const [searchParams] = useSearchParams();
   const urlSport = searchParams.get('sport');
   const urlSchool = searchParams.get('school');
@@ -63,14 +63,10 @@ export const TeacherTeams: React.FC = () => {
   const [sportTabFilter, setSportTabFilter] = useState<'PROGRAMMED' | 'NON_PROGRAMMED' | 'ALL'>('PROGRAMMED');
 
   const isTeacherRole = userProfile?.role === 'TEACHER';
-  const canManage = userProfile?.role === 'CENTRAL_ADMIN' || userProfile?.role === 'REGIONAL_ADMIN' || userProfile?.role === 'PROVINCIAL_ADMIN' || userProfile?.isTechCommitteeHead;
+  const canManage = !isImpersonatingTeacher && (userProfile?.role === 'CENTRAL_ADMIN' || userProfile?.role === 'REGIONAL_ADMIN' || userProfile?.role === 'PROVINCIAL_ADMIN' || userProfile?.isTechCommitteeHead);
 
   const teacherSchoolObj = useMemo(() => {
-    const schoolLookup = userProfile?.workLocation || userProfile?.schoolName;
-    return (schools || []).find(s =>
-      (userProfile?.schoolId && s.id === userProfile.schoolId) ||
-      (schoolLookup && schoolNamesMatch(s.name, schoolLookup))
-    );
+    return findMatchingSchoolForTeacher(schools, userProfile);
   }, [schools, userProfile]);
 
   const teacherCadre = useMemo(() => {
@@ -85,7 +81,7 @@ export const TeacherTeams: React.FC = () => {
     });
     if (!isTeacherRole || canManage) return activeTourns;
     return activeTourns.filter(t =>
-      isTeacherLevelAllowedForTournament(teacherCadre, t.level) &&
+      isTeacherLevelAllowedForTournament(teacherCadre, t.level, t.ageCategory) &&
       (!teacherSchoolObj || isSchoolSectorAllowedForTournament(teacherSchoolObj, t))
     );
   }, [tournaments, isTeacherRole, canManage, teacherCadre, teacherSchoolObj, affiliationDisplayConfig]);
@@ -113,6 +109,15 @@ export const TeacherTeams: React.FC = () => {
       (impersonationScopedSportIds.length === 0 || impersonationScopedSportIds.includes(s.id))
     );
   }, [sportsConfig, teacherAllowedTournaments, affiliationDisplayConfig, impersonationScopedSportIds]);
+
+  // Clear selectedSportId if a teacher attempts to access a sport not open to their educational cycle
+  useEffect(() => {
+    if (!loading && isTeacherRole && !canManage && selectedSportId && sportsConfig.length > 0) {
+      if (!programmedSports.some(s => s.id === selectedSportId)) {
+        setSelectedSportId(null);
+      }
+    }
+  }, [loading, isTeacherRole, canManage, selectedSportId, sportsConfig.length, programmedSports]);
 
   // New Student Form State
   const [isFormOpen, setIsFormOpen] = useState(false);
@@ -335,6 +340,10 @@ export const TeacherTeams: React.FC = () => {
   const handleSelectSport = (sportId: string) => {
     if (impersonationScopedSportIds.length > 0 && !impersonationScopedSportIds.includes(sportId)) {
       toast.error('أثناء الدخول بصفة أستاذ آخر، التعديل متاح حصراً في رياضتك المسندة.');
+      return;
+    }
+    if (isTeacherRole && !canManage && !programmedSports.some(s => s.id === sportId)) {
+      toast.error('هذه البطولة غير مبرمجة أو غير مفتوحة للسلك التعليمي لمؤسستكم.');
       return;
     }
     setSelectedSportId(sportId);

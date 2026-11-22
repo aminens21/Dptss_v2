@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { DataService, SPORTS_MAP, AGE_CATEGORIES, deduplicateById, generateSecureAccessCode, getEffectiveConfirmedBranches, formatBranchLabelAr, normalizeCategoryKey, ConfirmedBranchTuple, normalizeSchoolCycleType, getSchoolEducationSector, normalizeSchoolPureCycleLabel, normalizeArabicSearch } from '../lib/dataService';
+import { DataService, SPORTS_MAP, AGE_CATEGORIES, deduplicateById, generateSecureAccessCode, getEffectiveConfirmedBranches, formatBranchLabelAr, normalizeCategoryKey, ConfirmedBranchTuple, normalizeSchoolCycleType, getSchoolEducationSector, normalizeSchoolPureCycleLabel, normalizeArabicSearch, schoolNamesMatch, findMatchingSchoolForTeacher, areSportIdsEquivalent } from '../lib/dataService';
 import { School, Match, Directorate } from '../types';
 import { useSchoolConfirmations } from '../hooks/useSchoolConfirmations';
 import * as XLSX from 'xlsx';
@@ -116,17 +116,13 @@ export const Schools: React.FC = () => {
                     isTechCommitteeHead;
 
   const isTeacherSchool = (s: School) => {
-    if (!userProfile?.workLocation && !userProfile?.schoolId) return false;
-    const cleanWorkLoc = (userProfile.workLocation || '').trim().toLowerCase();
-    const cleanSchoolName = (s.name || '').trim().toLowerCase();
-    return (
-      (userProfile.schoolId && s.id === userProfile.schoolId) ||
-      (cleanWorkLoc.length > 0 && (
-        cleanSchoolName === cleanWorkLoc ||
-        cleanSchoolName.includes(cleanWorkLoc) ||
-        cleanWorkLoc.includes(cleanSchoolName)
-      ))
-    );
+    if (!userProfile) return false;
+    if (userProfile.schoolId && s.id === userProfile.schoolId) return true;
+    const profileLoc = (userProfile.workLocation || (userProfile as any).schoolName || '').trim();
+    if (profileLoc && schoolNamesMatch(s.name, profileLoc)) return true;
+    const matched = findMatchingSchoolForTeacher(schools, userProfile);
+    if (matched && matched.id === s.id) return true;
+    return false;
   };
 
   const canEditSchool = (s: School) => {
@@ -713,10 +709,10 @@ export const Schools: React.FC = () => {
 
     // 2. Schools with registered students in this sport
     students.forEach(s => {
-      if (s.sportId === selectedSport) {
+      if (areSportIdsEquivalent(s.sportId, selectedSport)) {
         if (s.schoolId) ids.add(s.schoolId);
         if (s.schoolName) ids.add(s.schoolName.trim().toLowerCase());
-        const school = schools.find(sch => sch.id === s.schoolId || sch.name.trim().toLowerCase() === s.schoolName?.trim().toLowerCase());
+        const school = schools.find(sch => sch.id === s.schoolId || schoolNamesMatch(sch.name, s.schoolName));
         if (school) {
           ids.add(school.id);
           ids.add(school.name.trim().toLowerCase());
@@ -726,10 +722,10 @@ export const Schools: React.FC = () => {
 
     // 3. Schools with active Phase 1 confirmations in this sport
     confirmations.forEach(conf => {
-      if (conf.sportId === selectedSport && conf.status === 'confirmed' && getEffectiveConfirmedBranches(conf, true).length > 0) {
+      if (areSportIdsEquivalent(conf.sportId, selectedSport) && conf.status === 'confirmed' && getEffectiveConfirmedBranches(conf, true).length > 0) {
         if (conf.schoolId) ids.add(conf.schoolId);
         if (conf.schoolName) ids.add(conf.schoolName.trim().toLowerCase());
-        const school = schools.find(sch => sch.id === conf.schoolId || sch.name.trim().toLowerCase() === conf.schoolName?.trim().toLowerCase());
+        const school = schools.find(sch => sch.id === conf.schoolId || schoolNamesMatch(sch.name, conf.schoolName));
         if (school) {
           ids.add(school.id);
           ids.add(school.name.trim().toLowerCase());
@@ -743,29 +739,34 @@ export const Schools: React.FC = () => {
   // For teachers: Locate their exact institution, or synthesize from profile if not yet in database
   const teacherMatchedSchool = useMemo(() => {
     if (!isTeacher) return null;
-    let found = schools.find(s => isTeacherSchool(s));
-    if (!found && userProfile?.workLocation) {
-      const cleanLoc = userProfile.workLocation.trim().toLowerCase();
-      found = schools.find(s => {
-        const sName = (s.name || '').trim().toLowerCase();
-        return sName === cleanLoc || sName.includes(cleanLoc) || cleanLoc.includes(sName);
-      });
+    let found = findMatchingSchoolForTeacher(schools, userProfile);
+    if (!found && (userProfile?.workLocation || (userProfile as any)?.schoolName)) {
+      const targetLoc = userProfile?.workLocation || (userProfile as any)?.schoolName || '';
+      found = schools.find(s => schoolNamesMatch(s.name, targetLoc));
     }
-    if (!found && userProfile?.workLocation) {
+    if (!found && userProfile?.fullName) {
+      const normUser = normalizeArabicSearch(userProfile.fullName);
+      found = schools.find(s =>
+        (s.teacherName && normalizeArabicSearch(s.teacherName) === normUser) ||
+        (s.coordinatorName && normalizeArabicSearch(s.coordinatorName) === normUser)
+      );
+    }
+    const fallbackName = userProfile?.workLocation || (userProfile as any)?.schoolName || '';
+    if (!found && fallbackName) {
       found = {
-        id: userProfile.schoolId || 'teacher-school',
-        name: userProfile.workLocation,
-        type: userProfile.teachingCadre === 'PRIMARY' ? 'ابتدائي' : userProfile.teachingCadre === 'MIDDLE' ? 'إعدادي' : 'تأهيلي',
+        id: userProfile?.schoolId || 'teacher-school',
+        name: fallbackName,
+        type: userProfile?.teachingCadre === 'PRIMARY' ? 'ابتدائي' : userProfile?.teachingCadre === 'MIDDLE' ? 'إعدادي' : 'تأهيلي',
         commune: activeDirObj?.shortName || 'تاوريرت',
-        teacherName: userProfile.fullName || '',
-        coordinatorName: userProfile.fullName,
-        phone: userProfile.phone || '',
+        teacherName: userProfile?.fullName || '',
+        coordinatorName: userProfile?.fullName,
+        phone: userProfile?.phone || '',
         principalName: '',
         directorateId: activeDirObj?.id || 'taourirt'
       };
     }
-    return found;
-  }, [isTeacher, schools, userProfile?.workLocation, userProfile?.schoolId, userProfile?.fullName, userProfile?.phone, userProfile?.teachingCadre, activeDirObj]);
+    return found || null;
+  }, [isTeacher, schools, userProfile, activeDirObj]);
 
   // Base list of schools: For teachers, ONLY their institution is available
   const effectiveSchools = useMemo(() => {
@@ -964,7 +965,7 @@ export const Schools: React.FC = () => {
       </div>
 
       {/* Teacher's School Highlight Notice & Permissions Banner */}
-      {userProfile?.workLocation && (
+      {(userProfile?.workLocation || teacherMatchedSchool) && (
         <div className="p-3.5 bg-gradient-to-r from-amber-500/15 via-amber-50 to-white border border-amber-300/90 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-amber-950 font-bold shadow-xs">
           <div className="flex items-center gap-2.5">
             <div className="w-8 h-8 rounded-xl bg-amber-500 text-white flex items-center justify-center font-bold text-sm shadow-2xs shrink-0">
@@ -973,20 +974,32 @@ export const Schools: React.FC = () => {
             <div>
               <p className="font-extrabold text-amber-950">
                 {isTeacher
-                  ? <>مرحباً بك يا أستاذ! يتم حصر العرض على مؤسستك التعليمية فقط (<span className="text-amber-900 underline font-black">{teacherMatchedSchool?.name || userProfile.workLocation}</span>).</>
-                  : <>مرحباً بك يا أستاذ! تم إبراز مؤسستك (<span className="text-amber-900 underline font-black">{userProfile.workLocation}</span>) في أول القائمة لتيسير الولوج إليها.</>}
+                  ? <>مرحباً بك يا أستاذ! يتم حصر العرض على مؤسستك التعليمية فقط (<span className="text-amber-900 underline font-black">{teacherMatchedSchool?.name || userProfile?.workLocation}</span>).</>
+                  : <>مرحباً بك يا أستاذ! تم إبراز مؤسستك (<span className="text-amber-900 underline font-black">{userProfile?.workLocation}</span>) في أول القائمة لتيسير الولوج إليها.</>}
               </p>
               <p className="text-[11px] text-amber-800 font-normal mt-0.5">
                 {isTeacher
-                  ? 'بصفتك أستاذاً، يقتصر العرض والتدبير على بيانات ومشاركات وتلاميذ مؤسستك التعليمية حصرياً.'
+                  ? 'بصفتك أستاذاً، يمكنك فتح ملف المشاركات والفرق وتدبير لوائح وتلاميذ مؤسستك مباشرة من هنا.'
                   : 'تظهر مؤسستك دائماً في المرتبة الأولى لتسهيل الوصول المباشر إلى تلاميذك ومشاركاتك.'}
               </p>
             </div>
           </div>
-          <span className="shrink-0 self-start sm:self-center inline-flex items-center gap-1 text-[11px] font-black bg-amber-500 text-white px-3 py-1 rounded-full shadow-2xs">
-            <span>{isTeacher ? 'مؤسستي حصرياً' : 'مؤسستي أولاً'}</span>
-            <span>⭐</span>
-          </span>
+          <div className="flex items-center gap-2 flex-wrap shrink-0 self-start sm:self-center">
+            {isTeacher && teacherMatchedSchool && (
+              <button
+                type="button"
+                onClick={() => setSelectedSchoolForParticipants(teacherMatchedSchool)}
+                className="inline-flex items-center gap-1.5 text-xs font-black bg-blue-600 hover:bg-blue-700 text-white px-3.5 py-2 rounded-xl shadow-xs transition-all cursor-pointer"
+              >
+                <FileText className="w-4 h-4" />
+                <span>ملف المشاركات والفرق</span>
+              </button>
+            )}
+            <span className="inline-flex items-center gap-1 text-[11px] font-black bg-amber-500 text-white px-3 py-1.5 rounded-full shadow-2xs">
+              <span>{isTeacher ? 'مؤسستي حصرياً' : 'مؤسستي أولاً'}</span>
+              <span>⭐</span>
+            </span>
+          </div>
         </div>
       )}
 
@@ -1017,9 +1030,8 @@ export const Schools: React.FC = () => {
             <span className="text-[10px] font-bold text-amber-700 uppercase">التلاميذ المسجلون بالمؤسسة</span>
             <p className="text-base font-black text-slate-800 mt-1">
               {students.filter(st => {
-                const sName = (st.schoolName || '').trim().toLowerCase();
-                const myName = (teacherMatchedSchool?.name || userProfile?.workLocation || '').trim().toLowerCase();
-                return (teacherMatchedSchool && st.schoolId === teacherMatchedSchool.id) || (myName && sName.includes(myName));
+                const myName = teacherMatchedSchool?.name || userProfile?.workLocation || '';
+                return (teacherMatchedSchool && st.schoolId === teacherMatchedSchool.id) || schoolNamesMatch(st.schoolName, myName);
               }).length} تلاميذ
             </p>
           </div>
@@ -1322,7 +1334,7 @@ export const Schools: React.FC = () => {
                 <tbody className="divide-y divide-slate-100 text-xs">
                   {filtered.map((s, idx) => {
                     const schoolStudentsForSport = students.filter(
-                      stud => (stud.schoolId === s.id || stud.schoolName === s.name) && (selectedSport === 'ALL' || stud.sportId === selectedSport)
+                      stud => (stud.schoolId === s.id || schoolNamesMatch(stud.schoolName, s.name)) && (selectedSport === 'ALL' || areSportIdsEquivalent(stud.sportId, selectedSport))
                     );
                     const count = schoolStudentsForSport.length;
                     const isMine = isTeacherSchool(s);
@@ -1427,9 +1439,9 @@ export const Schools: React.FC = () => {
                                     ? 'bg-amber-600 hover:bg-amber-700 text-white ring-2 ring-amber-400/40'
                                     : 'bg-blue-600 hover:bg-blue-700 text-white'
                                 }`}
-                                title={isMine ? 'الولوج وإدارة لوائح تلاميذ مؤسستك المعتمدة' : 'عرض المشاركات واللائحة'}
+                                title={isMine ? 'فتح ملف المشاركات والفرق وإدارة لوائح مؤسستك' : 'عرض ملف المشاركات والفرق'}
                               >
-                                <span>{isMine ? 'عرض وإدارة لوائح مؤسستي' : 'عرض المشاركات واللائحة'}</span>
+                                <span>{isMine ? 'ملف المشاركات والفرق (مؤسستي)' : 'ملف المشاركات والفرق'}</span>
                                 <FileText className="w-3.5 h-3.5" />
                               </button>
                             )}
@@ -1478,7 +1490,7 @@ export const Schools: React.FC = () => {
           {filtered.length > 0 ? (
             filtered.map((s) => {
               const schoolStudentsForSport = students.filter(
-                stud => (stud.schoolId === s.id || stud.schoolName === s.name) && (selectedSport === 'ALL' || stud.sportId === selectedSport)
+                stud => (stud.schoolId === s.id || schoolNamesMatch(stud.schoolName, s.name)) && (selectedSport === 'ALL' || areSportIdsEquivalent(stud.sportId, selectedSport))
               );
               const count = schoolStudentsForSport.length;
               const isMine = isTeacherSchool(s);
@@ -1622,15 +1634,13 @@ export const Schools: React.FC = () => {
 
                         {/* Participation Breakdown Preview (Exact Branches: Students + Phase 1 Confirmations) */}
                         {(() => {
-                          const targetNameLower = (s.name || '').trim().toLowerCase();
                           const schoolStudentsAll = students.filter(
-                            stud => stud.schoolId === s.id || (stud.schoolName && stud.schoolName.trim().toLowerCase() === targetNameLower)
+                            stud => stud.schoolId === s.id || schoolNamesMatch(stud.schoolName, s.name)
                           );
                           const schoolConfsAll = confirmations.filter(conf => {
                             if (conf.status !== 'confirmed') return false;
-                            const cName = (conf.schoolName || '').trim().toLowerCase();
-                            return (conf.schoolId && (conf.schoolId === s.id || conf.schoolId.trim().toLowerCase() === targetNameLower)) ||
-                                   (cName.length > 0 && cName === targetNameLower);
+                            return (conf.schoolId && (conf.schoolId === s.id || schoolNamesMatch(conf.schoolId, s.name))) ||
+                                   schoolNamesMatch(conf.schoolName, s.name);
                           });
 
                           const sportIdsSet = new Set<string>();
@@ -1799,25 +1809,56 @@ export const Schools: React.FC = () => {
                   </div>
 
                   {/* BOTTOM FOOTER BAR (Always Visible) */}
-                  <div className="pt-3 mt-3 border-t border-slate-100 flex items-center justify-between gap-2">
-                    {/* Right side: Participant count badge */}
-                    <span className="inline-flex items-center gap-1.5 font-mono font-black text-xs text-blue-800 bg-blue-50 px-2.5 py-1 rounded-lg border border-blue-200/80">
-                      <Users className="w-3.5 h-3.5 text-blue-600 shrink-0" />
-                      <span>{count} مشارك</span>
-                    </span>
+                  <div className="pt-3 mt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2">
+                    {/* Right side: Participant count badge + Expand toggle */}
+                    <div className="flex items-center gap-1.5">
+                      <span className="inline-flex items-center gap-1.5 font-mono font-black text-xs text-blue-800 bg-blue-50 px-2.5 py-1 rounded-lg border border-blue-200/80">
+                        <Users className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                        <span>{count} مشارك</span>
+                      </span>
+                      <button
+                        type="button"
+                        onClick={(e) => toggleSchoolExpand(s.id, e)}
+                        className="p-1.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-600 transition-colors cursor-pointer"
+                        title={isExpanded ? 'طي البطاقة' : 'عرض المشاركات المختصرة'}
+                      >
+                        <ChevronDown className={`w-3.5 h-3.5 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+                      </button>
+                    </div>
 
-                    {/* Left side (Bottom Left): Eye button for opening details modal */}
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setSelectedSchoolForDetails(s);
-                      }}
-                      className="px-3 py-1.5 rounded-xl border border-slate-200 bg-slate-50 hover:bg-blue-50 text-slate-700 hover:text-blue-700 transition-all flex items-center gap-1.5 text-xs font-bold cursor-pointer shadow-3xs"
-                      title="عرض تفاصيل وبيانات المؤسسة بشكل مفصل ومنسق"
-                    >
-                      <Eye className="w-4 h-4 shrink-0 text-blue-600" />
-                      <span>التفاصيل</span>
-                    </button>
+                    {/* Left side: Participations & Teams File + Details modal */}
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      {!(isTeacher && !isMine) && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSelectedSchoolForParticipants(s);
+                          }}
+                          className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs ${
+                            isMine
+                              ? 'bg-amber-600 hover:bg-amber-700 text-white'
+                              : 'bg-blue-600 hover:bg-blue-700 text-white'
+                          }`}
+                          title={isMine ? 'فتح ملف المشاركات والفرق وإدارة لوائح مؤسستك' : 'فتح ملف المشاركات والفرق'}
+                        >
+                          <FileText className="w-3.5 h-3.5 shrink-0" />
+                          <span>ملف المشاركات والفرق</span>
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setSelectedSchoolForDetails(s);
+                        }}
+                        className="px-3 py-1.5 rounded-xl border border-slate-200 bg-slate-50 hover:bg-blue-50 text-slate-700 hover:text-blue-700 transition-all flex items-center gap-1.5 text-xs font-bold cursor-pointer shadow-3xs"
+                        title="عرض تفاصيل وبيانات المؤسسة بشكل مفصل ومنسق"
+                      >
+                        <Eye className="w-4 h-4 shrink-0 text-blue-600" />
+                        <span>التفاصيل</span>
+                      </button>
+                    </div>
                   </div>
                 </div>
               );
@@ -2053,7 +2094,7 @@ export const Schools: React.FC = () => {
               {/* Institution Participation Stats Card */}
               {(() => {
                 const schoolStudentsAll = students.filter(
-                  stud => stud.schoolId === selectedSchoolForDetails.id || stud.schoolName === selectedSchoolForDetails.name
+                  stud => stud.schoolId === selectedSchoolForDetails.id || schoolNamesMatch(stud.schoolName, selectedSchoolForDetails.name)
                 );
                 const count = schoolStudentsAll.length;
                 const boysCount = schoolStudentsAll.filter(st => st.gender === 'Male').length;
@@ -2139,7 +2180,7 @@ export const Schools: React.FC = () => {
                           className="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white font-black rounded-xl border border-blue-500 text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer shadow-xs"
                         >
                           <FileText className="w-4 h-4 text-white" />
-                          <span>عرض لائحة المشاركين التفصيلية للمؤسسة 📂</span>
+                          <span>فتح ملف المشاركات والفرق للمؤسسة 📂</span>
                         </button>
                       )}
                     </div>

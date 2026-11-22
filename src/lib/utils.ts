@@ -251,14 +251,45 @@ export function fixTeacherFieldJumble(user: any): any {
 
   // 4. Detect Real School Location: text containing school terms or Arabic text
   const realSchool = values.find(v => v !== realEmail && v !== rawPhoneFound && v !== realLease && (
-    v.includes('اع') || v.includes('ث') || v.includes('مدرسة') || v.includes('إعداد') || v.includes('تأهيل') || v.includes('ابتدائ') || v.includes('مؤسس') || v.includes('ثانوية') || /[\u0600-\u06FF]/.test(v)
+    v.includes('اع') || v.includes('ث') || v.includes('مدرسة') || v.includes('مدرسه') || v.includes('م.م') || v.includes('مجموع') || v.includes('إعداد') || v.includes('تأهيل') || v.includes('ابتدائ') || v.includes('مؤسس') || v.includes('ثانوية') || /[\u0600-\u06FF]/.test(v)
   ));
 
-  // 5. Detect Real Cadre
-  let teachingCadre = user.teachingCadre || 'HIGH';
-  const cadreText = (rawCadre + ' ' + workLocation).toLowerCase();
-  if (cadreText.includes('ابتدائ') || cadreText.includes('primary')) teachingCadre = 'PRIMARY';
-  else if (cadreText.includes('إعداد') || cadreText.includes('اعداد') || cadreText.includes('middle')) teachingCadre = 'MIDDLE';
+  // 5. Detect Real Cadre cleanly without falsely forcing HIGH on unknown/Primary teachers
+  const normOrigCadre = String(user.teachingCadre || '').trim().toUpperCase();
+  let teachingCadre = (normOrigCadre === 'PRIMARY' || normOrigCadre === 'MIDDLE' || normOrigCadre === 'HIGH') ? normOrigCadre : '';
+  const detectedSchool = realSchool || workLocation || '';
+  const cadreText = (rawCadre + ' ' + detectedSchool)
+    .toLowerCase()
+    .replace(/[أإآٱ]/g, 'ا')
+    .replace(/ة/g, 'ه');
+  const trimmedSchool = detectedSchool
+    .trim()
+    .toLowerCase()
+    .replace(/[أإآٱ]/g, 'ا')
+    .replace(/ة/g, 'ه');
+
+  if (
+    cadreText.includes('ابتدائ') ||
+    cadreText.includes('primary') ||
+    cadreText.includes('م.م') ||
+    cadreText.includes('م م') ||
+    cadreText.includes('مجموعه مدارس') ||
+    cadreText.includes('مدرسه جماعاتيه') ||
+    cadreText.includes('فرعيه') ||
+    /^مدرسه\s/.test(trimmedSchool)
+  ) {
+    teachingCadre = 'PRIMARY';
+  } else if (cadreText.includes('اعداد') || cadreText.includes('middle')) {
+    teachingCadre = 'MIDDLE';
+  } else if (
+    cadreText.includes('تاهيل') ||
+    cadreText.includes('ثانويه') ||
+    cadreText.includes('high') ||
+    cadreText.includes('secondary') ||
+    (cadreText.includes('ثانوي') && !cadreText.includes('اعداد'))
+  ) {
+    teachingCadre = 'HIGH';
+  }
 
   // Strict field assignment:
   const formattedOrigPhone = formatMoroccanPhone(rawPhone);
@@ -272,7 +303,7 @@ export function fixTeacherFieldJumble(user: any): any {
     workLocation: realSchool || (workLocation && !isPhoneLike(workLocation) && !isLeaseLike(workLocation) ? workLocation : ''),
     leaseNumber: finalLease,
     phone: finalPhone,
-    teachingCadre
+    ...(teachingCadre ? { teachingCadre } : { teachingCadre: user.teachingCadre || '' })
   };
 }
 

@@ -190,6 +190,166 @@ export function canUserApproveSportResult(
   return false;
 }
 
+/**
+ * Checks whether a user is assigned as a referee (field, table, or general) on a specific match.
+ */
+export function isUserAssignedRefereeToMatch(
+  user?: User | null,
+  match?: Match | null,
+  refereesList?: Referee[],
+  teachersList?: User[]
+): boolean {
+  if (!user || !match) return false;
+
+  const stripTeacherTag = (name?: string): string =>
+    (name || '').replace(/\s*\(أستاذ\)\s*/g, '').replace(/\s+/g, ' ').trim();
+
+  const candidateIds = new Set<string>();
+  const candidateNames = new Set<string>();
+  const candidateEmails = new Set<string>();
+  const candidatePhones = new Set<string>();
+
+  const collectUser = (u?: Partial<User> | null) => {
+    if (!u) return;
+    if (u.id) candidateIds.add(String(u.id).trim());
+    if (u.email) candidateEmails.add(String(u.email).trim().toLowerCase());
+    if (u.phone) candidatePhones.add(String(u.phone).replace(/\s+/g, '').trim());
+    const stripped = stripTeacherTag(u.fullName);
+    if (stripped) candidateNames.add(normalizeArabicName(stripped));
+  };
+
+  collectUser(user);
+
+  if (Array.isArray(teachersList)) {
+    const cleanEmail = (user.email || '').trim().toLowerCase();
+    teachersList.forEach(t => {
+      if (
+        (t.id && user.id && t.id === user.id) ||
+        (t.email && cleanEmail && isFlexibleEmailMatch(t.email, cleanEmail))
+      ) {
+        collectUser(t);
+      }
+    });
+  }
+
+  if (Array.isArray(refereesList)) {
+    refereesList.forEach(r => {
+      const rEmail = (r.email || '').trim().toLowerCase();
+      const rPhone = (r.phone || '').replace(/\s+/g, '').trim();
+      const rNormName = normalizeArabicName(stripTeacherTag(r.fullName));
+      const matchesUser =
+        (r.id && candidateIds.has(r.id)) ||
+        (r.teacherId && candidateIds.has(r.teacherId)) ||
+        ((r as any).userId && candidateIds.has((r as any).userId)) ||
+        (rEmail && Array.from(candidateEmails).some(em => isFlexibleEmailMatch(rEmail, em))) ||
+        (rPhone && candidatePhones.has(rPhone)) ||
+        (rNormName && candidateNames.has(rNormName));
+      if (matchesUser) {
+        if (r.id) candidateIds.add(String(r.id).trim());
+        if (r.teacherId) candidateIds.add(String(r.teacherId).trim());
+        if ((r as any).userId) candidateIds.add(String((r as any).userId).trim());
+        if (rNormName) candidateNames.add(rNormName);
+      }
+    });
+  }
+
+  const rawEntries = [
+    ...(Array.isArray(match.fieldReferees) ? match.fieldReferees : []),
+    ...(Array.isArray(match.tableReferees) ? match.tableReferees : []),
+    ...(Array.isArray(match.referees) ? match.referees : []),
+    ...(match.referee1Id ? [match.referee1Id] : []),
+    ...(match.referee2Id ? [match.referee2Id] : [])
+  ]
+    .map(v => String(v || '').trim())
+    .filter(Boolean);
+
+  for (const raw of rawEntries) {
+    if (candidateIds.has(raw)) return true;
+    const strippedRaw = stripTeacherTag(raw);
+    const normRaw = normalizeArabicName(strippedRaw);
+    if (normRaw && candidateNames.has(normRaw)) return true;
+
+    if (Array.isArray(refereesList)) {
+      const refObj = refereesList.find(
+        r => r.id === raw || r.teacherId === raw || (r as any).userId === raw
+      );
+      if (refObj) {
+        if (
+          (refObj.teacherId && candidateIds.has(refObj.teacherId)) ||
+          ((refObj as any).userId && candidateIds.has((refObj as any).userId)) ||
+          (refObj.email && Array.from(candidateEmails).some(em => isFlexibleEmailMatch(refObj.email!, em))) ||
+          (refObj.fullName && candidateNames.has(normalizeArabicName(stripTeacherTag(refObj.fullName))))
+        ) {
+          return true;
+        }
+      }
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Checks whether the user is the Technical Committee Head (رئيس اللجنة التقنية) for the given sport.
+ */
+export function isUserTechHeadForSport(
+  user?: User | null,
+  sportId?: string,
+  teachersList?: User[]
+): boolean {
+  if (!user) return false;
+
+  const checkProfile = (u: Partial<User>): boolean => {
+    const isHead =
+      u.isTechCommitteeHead === true ||
+      u.role === 'TECH_HEAD' ||
+      (u.role as string) === 'TECH_COMMITTEE_HEAD';
+    if (!isHead) return false;
+    if (!sportId) return true;
+    const assigned = [
+      ...(Array.isArray(u.techCommitteeSports) ? u.techCommitteeSports : []),
+      ...(u.sportId ? [u.sportId] : [])
+    ].filter(Boolean);
+    if (assigned.length === 0) {
+      return u.role === 'TECH_HEAD' || (u.role as string) === 'TECH_COMMITTEE_HEAD';
+    }
+    return assigned.some(id => areSportIdsEquivalent(id, sportId));
+  };
+
+  if (checkProfile(user)) return true;
+
+  if (Array.isArray(teachersList) && teachersList.length > 0) {
+    const cleanEmail = (user.email || '').trim().toLowerCase();
+    const matchedTeacher = teachersList.find(
+      t =>
+        (t.id && user.id && t.id === user.id) ||
+        (t.email && cleanEmail && isFlexibleEmailMatch(t.email, cleanEmail))
+    );
+    if (matchedTeacher && checkProfile(matchedTeacher)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Strict score-entry permission check:
+ * ONLY referees assigned to this match OR the Technical Committee Head for this sport can enter/update match results.
+ */
+export function canUserEnterMatchScore(
+  user?: User | null,
+  match?: Match | null,
+  refereesList?: Referee[],
+  teachersList?: User[]
+): boolean {
+  if (!user || !match) return false;
+  return (
+    isUserTechHeadForSport(user, match.sportId, teachersList) ||
+    isUserAssignedRefereeToMatch(user, match, refereesList, teachersList)
+  );
+}
+
 const CLOUD_SYNC_PAUSED_KEY = 'app_cloud_sync_paused_v1';
 const EXCEL_CLOUD_SYNC_QUEUE_KEY = 'taourirt_excel_pending_cloud_sync_v1';
 
@@ -408,6 +568,12 @@ export function deduplicateById<T extends { id?: string }>(items: T[]): T[] {
 export function normalizeMatchRecord(m: Match): Match {
   const s1 = m.score1 ?? m.team1Score;
   const s2 = m.score2 ?? m.team2Score;
+  const cleanRef1 = typeof m.referee1Id === 'string' ? m.referee1Id.trim() : '';
+  const cleanRef2 = typeof m.referee2Id === 'string' ? m.referee2Id.trim() : '';
+  const cleanLegacyRefId = typeof (m as any).refereeId === 'string' ? (m as any).refereeId.trim() : '';
+  const cleanLegacyRefIds = Array.isArray((m as any).refereeIds)
+    ? (m as any).refereeIds.map((r: any) => String(r || '').trim()).filter(Boolean)
+    : undefined;
   return {
     ...m,
     date: normalizeDateToYmd(m.date),
@@ -415,8 +581,35 @@ export function normalizeMatchRecord(m: Match): Match {
     score1: s1,
     score2: s2,
     team1Score: s1,
-    team2Score: s2
+    team2Score: s2,
+    referee1Id: cleanRef1 || undefined,
+    referee2Id: cleanRef2 || undefined,
+    ...(cleanLegacyRefId !== '' ? { refereeId: cleanLegacyRefId } : { refereeId: undefined }),
+    ...(cleanLegacyRefIds !== undefined ? { refereeIds: cleanLegacyRefIds } : {}),
+    ...(Array.isArray(m.referees)
+      ? { referees: m.referees.map(r => String(r || '').trim()).filter(Boolean) }
+      : {}),
+    ...(Array.isArray(m.tableReferees)
+      ? { tableReferees: m.tableReferees.map(r => String(r || '').trim()).filter(Boolean) }
+      : {}),
+    ...(Array.isArray(m.fieldReferees)
+      ? { fieldReferees: m.fieldReferees.map(r => String(r || '').trim()).filter(Boolean) }
+      : {})
   };
+}
+
+export function isMatchProgramPendingApproval(match?: Partial<Match> | null): boolean {
+  if (!match) return false;
+  if (
+    match.programApprovalStatus === 'approved' ||
+    Boolean(match.programApprovedAt) ||
+    Boolean(match.programApprovedBy)
+  ) {
+    return false;
+  }
+  if (match.programApprovalStatus === 'pending') return true;
+  const normalizedStatus = String(match.status || 'Scheduled').trim().toLowerCase();
+  return normalizedStatus !== 'completed';
 }
 
 // Helper to recursively sanitize payloads for Firestore (removes/replaces undefined with empty string, preserves FieldValues)
@@ -647,6 +840,28 @@ function setLocal<T extends { id?: string }>(key: string, data: T[]) {
   try {
     const clean = deduplicateById(data);
     inMemoryCollectionCache[key] = clean;
+    safeSetLocalJson(key, clean);
+  } catch (e) {
+    console.warn("Local storage error:", e);
+  }
+}
+
+function getLocalStringArray(key: string): string[] {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed)
+      ? Array.from(new Set(parsed.map(v => String(v || '').trim()).filter(Boolean)))
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function setLocalStringArray(key: string, data: string[]): void {
+  try {
+    const clean = Array.from(new Set((data || []).map(v => String(v || '').trim()).filter(Boolean)));
     safeSetLocalJson(key, clean);
   } catch (e) {
     console.warn("Local storage error:", e);
@@ -1176,27 +1391,122 @@ export function resolveEffectiveTeacherCadre(
   return '';
 }
 
-function parseTournamentAllowedLevels(tournamentLevel?: string): Set<'Primary' | 'Middle' | 'High'> | 'ALL' {
-  if (!tournamentLevel) return 'ALL';
-  const raw = String(tournamentLevel).trim();
-  if (!raw || raw === 'جميع الأسلاك' || raw.includes('جميع') || raw.toUpperCase() === 'ALL') {
-    return 'ALL';
+export function findMatchingSchoolForTeacher(
+  schools: School[],
+  userOrProfile?: {
+    id?: string;
+    schoolId?: string;
+    workLocation?: string;
+    schoolName?: string;
+    teachingCadre?: string;
+    directorateId?: string;
+  } | null
+): School | undefined {
+  if (!Array.isArray(schools) || schools.length === 0 || !userOrProfile) return undefined;
+
+  const targetDirId = userOrProfile.directorateId?.trim();
+  const dirScopedSchools = targetDirId
+    ? schools.filter(s => !s.directorateId || s.directorateId === targetDirId)
+    : schools;
+  const searchPools = dirScopedSchools.length > 0 && dirScopedSchools.length < schools.length
+    ? [dirScopedSchools, schools]
+    : [schools];
+
+  const targetSchoolId = String(userOrProfile.schoolId || '').trim();
+  if (targetSchoolId) {
+    for (const pool of searchPools) {
+      const byId = pool.find(s => s.id === targetSchoolId);
+      if (byId) return byId;
+    }
   }
 
-  const tokens = raw.split(/[,،/|]+/).map(t => t.trim()).filter(Boolean);
-  const parsed = new Set<'Primary' | 'Middle' | 'High'>();
-  for (const token of tokens) {
-    const key = normalizeCadreToLevelKey(token);
-    if (key) parsed.add(key);
+  const rawLocation = String(userOrProfile.workLocation || userOrProfile.schoolName || '').trim();
+  if (!rawLocation) return undefined;
+
+  const normTarget = normalizeArabicMatchText(rawLocation);
+  const coreTarget = normalizeCoreSchoolName(rawLocation);
+  const preferredCycle =
+    normalizeCadreToLevelKey(userOrProfile.teachingCadre) ||
+    inferLevelFromSchoolName(rawLocation);
+
+  const pickBestCycleMatch = (candidates: School[]): School | undefined => {
+    if (candidates.length === 0) return undefined;
+    if (candidates.length === 1 || !preferredCycle) return candidates[0];
+    const sameCycle = candidates.find(s => {
+      const schoolCycle = normalizeCadreToLevelKey(s.type) || inferLevelFromSchoolName(s.name);
+      return schoolCycle === preferredCycle;
+    });
+    return sameCycle || candidates[0];
+  };
+
+  for (const pool of searchPools) {
+    const exactMatches = pool.filter(s => normalizeArabicMatchText(s.name) === normTarget);
+    if (exactMatches.length > 0) return pickBestCycleMatch(exactMatches);
+
+    const flexibleMatches = pool.filter(s => schoolNamesMatch(s.name, rawLocation));
+    if (flexibleMatches.length > 0) return pickBestCycleMatch(flexibleMatches);
+
+    if (coreTarget && coreTarget.length >= 3) {
+      const coreMatches = pool.filter(s => {
+        const sCore = normalizeCoreSchoolName(s.name);
+        return sCore && (sCore === coreTarget || sCore.includes(coreTarget) || coreTarget.includes(sCore));
+      });
+      if (coreMatches.length > 0) return pickBestCycleMatch(coreMatches);
+    }
   }
 
-  // Fallback for unexpected values (e.g. scope accidentally stored in level like Provincial/Regional/National)
-  if (parsed.size === 0) return 'ALL';
-  return parsed;
+  return undefined;
 }
 
-export function isSchoolLevelAllowedForTournament(schoolType: string, tournamentLevel?: string): boolean {
-  const allowedLevels = parseTournamentAllowedLevels(tournamentLevel);
+function getAllowedLevelsForAgeCategory(ageCategory?: string): Set<'Primary' | 'Middle' | 'High'> | null {
+  if (!ageCategory) return null;
+  const normCat = normalizeCategoryKey(ageCategory);
+  if (normCat === 'U12') return new Set(['Primary']);
+  if (normCat === 'U15') return new Set(['Middle']);
+  if (normCat === 'U18') return new Set(['Middle', 'High']);
+  if (normCat === 'U20') return new Set(['High']);
+  return null;
+}
+
+export function parseTournamentAllowedLevels(
+  tournamentLevel?: string,
+  ageCategory?: string
+): Set<'Primary' | 'Middle' | 'High'> | 'ALL' {
+  const catAllowed = getAllowedLevelsForAgeCategory(ageCategory);
+
+  const raw = String(tournamentLevel || '').trim();
+  const isExplicitAll =
+    !raw || raw === 'جميع الأسلاك' || raw.includes('جميع') || raw.toUpperCase() === 'ALL';
+
+  let parsedFromLevel: Set<'Primary' | 'Middle' | 'High'> | 'ALL' = 'ALL';
+  if (!isExplicitAll) {
+    const tokens = raw.split(/[,،/|]+/).map(t => t.trim()).filter(Boolean);
+    const parsed = new Set<'Primary' | 'Middle' | 'High'>();
+    for (const token of tokens) {
+      const key = normalizeCadreToLevelKey(token);
+      if (key) parsed.add(key);
+    }
+    if (parsed.size > 0) {
+      parsedFromLevel = parsed;
+    }
+  }
+
+  if (!catAllowed) return parsedFromLevel;
+  if (parsedFromLevel === 'ALL') return catAllowed;
+
+  const intersection = new Set<'Primary' | 'Middle' | 'High'>();
+  parsedFromLevel.forEach(lvl => {
+    if (catAllowed.has(lvl)) intersection.add(lvl);
+  });
+  return intersection.size > 0 ? intersection : parsedFromLevel;
+}
+
+export function isSchoolLevelAllowedForTournament(
+  schoolType: string,
+  tournamentLevel?: string,
+  ageCategory?: string
+): boolean {
+  const allowedLevels = parseTournamentAllowedLevels(tournamentLevel, ageCategory);
   if (allowedLevels === 'ALL') return true;
 
   const schoolLevelKey = normalizeCadreToLevelKey(schoolType) || inferLevelFromSchoolName(schoolType);
@@ -1205,8 +1515,12 @@ export function isSchoolLevelAllowedForTournament(schoolType: string, tournament
   return allowedLevels.has(schoolLevelKey);
 }
 
-export function isTeacherLevelAllowedForTournament(teachingCadre?: string, tournamentLevel?: string): boolean {
-  const allowedLevels = parseTournamentAllowedLevels(tournamentLevel);
+export function isTeacherLevelAllowedForTournament(
+  teachingCadre?: string,
+  tournamentLevel?: string,
+  ageCategory?: string
+): boolean {
+  const allowedLevels = parseTournamentAllowedLevels(tournamentLevel, ageCategory);
   if (allowedLevels === 'ALL') return true;
   if (!teachingCadre) return true; // Flexible fallback when no cadre/school can be determined
 
@@ -1331,7 +1645,19 @@ export function schoolNamesMatch(a?: string | null, b?: string | null): boolean 
   const cleanA = normalizeArabicMatchText(a);
   const cleanB = normalizeArabicMatchText(b);
   if (!cleanA || !cleanB) return false;
-  return cleanA === cleanB || cleanA.includes(cleanB) || cleanB.includes(cleanA);
+  if (cleanA === cleanB || cleanA.includes(cleanB) || cleanB.includes(cleanA)) {
+    return true;
+  }
+  const coreA = normalizeCoreSchoolName(a);
+  const coreB = normalizeCoreSchoolName(b);
+  if (coreA && coreB && coreA.length >= 2 && coreA === coreB) {
+    const cycleA = inferLevelFromSchoolName(a);
+    const cycleB = inferLevelFromSchoolName(b);
+    if (!cycleA || !cycleB || cycleA === cycleB) {
+      return true;
+    }
+  }
+  return false;
 }
 
 const SCHOOL_PREFIX_STOPWORDS = new Set([
@@ -1339,12 +1665,13 @@ const SCHOOL_PREFIX_STOPWORDS = new Set([
   'الاعداديه', 'اعداديه', 'الاعدادي', 'اعدادي',
   'الابتدائيه', 'ابتدائيه', 'الابتدائي', 'ابتدائي',
   'مؤسسه', 'المؤسسه', 'التعليميه', 'المدرسه', 'مدرسه',
-  'مجموعه', 'مدارس'
+  'مجموعه', 'مدارس', 'ثانوي', 'الثانوي'
 ]);
 
 export function normalizeCoreSchoolName(name?: string | null): string {
   const clean = normalizeArabicMatchText(name)
     .replace(/[.\-_/()،,]+/g, ' ')
+    .replace(/^(?:م\s+م|ثا\s+ت|ثا\s+اع)\s+/g, '')
     .replace(/\s+/g, ' ')
     .trim();
   if (!clean) return '';
@@ -3045,18 +3372,86 @@ export const DataService = {
   },
 
   async updateMatch(matchId: string, matchData: Partial<Match>): Promise<void> {
-    const normalizedPatch: Partial<Match> = {
+    const hasRef1Key = Object.prototype.hasOwnProperty.call(matchData, 'referee1Id');
+    const hasRef2Key = Object.prototype.hasOwnProperty.call(matchData, 'referee2Id');
+    const hasRefereesKey = Object.prototype.hasOwnProperty.call(matchData, 'referees');
+    const hasTableRefsKey = Object.prototype.hasOwnProperty.call(matchData, 'tableReferees');
+    const hasFieldRefsKey = Object.prototype.hasOwnProperty.call(matchData, 'fieldReferees');
+    const hasAnyRefereeUpdate = hasRef1Key || hasRef2Key || hasRefereesKey || hasTableRefsKey || hasFieldRefsKey;
+
+    const cleanRef1 = hasRef1Key ? String(matchData.referee1Id || '').trim() : undefined;
+    const cleanRef2 = hasRef2Key ? String(matchData.referee2Id || '').trim() : undefined;
+    const cleanReferees = hasRefereesKey && Array.isArray(matchData.referees)
+      ? matchData.referees.map(r => String(r || '').trim()).filter(Boolean)
+      : undefined;
+    const cleanTableRefs = hasTableRefsKey && Array.isArray(matchData.tableReferees)
+      ? matchData.tableReferees.map(r => String(r || '').trim()).filter(Boolean)
+      : undefined;
+    const cleanFieldRefs = hasFieldRefsKey && Array.isArray(matchData.fieldReferees)
+      ? matchData.fieldReferees.map(r => String(r || '').trim()).filter(Boolean)
+      : undefined;
+
+    const normalizedPatch: Partial<Match> & Record<string, any> = {
       ...matchData,
-      ...(matchData.date !== undefined ? { date: normalizeDateToYmd(matchData.date) } : {})
+      ...(matchData.date !== undefined ? { date: normalizeDateToYmd(matchData.date) } : {}),
+      ...(hasRef1Key ? { referee1Id: cleanRef1 || undefined } : {}),
+      ...(hasRef2Key ? { referee2Id: cleanRef2 || undefined } : {}),
+      ...(cleanReferees !== undefined ? { referees: cleanReferees } : {}),
+      ...(cleanTableRefs !== undefined ? { tableReferees: cleanTableRefs } : {}),
+      ...(cleanFieldRefs !== undefined ? { fieldReferees: cleanFieldRefs } : {}),
+      ...(hasAnyRefereeUpdate
+        ? {
+            refereeId: cleanRef1 || (cleanReferees && cleanReferees[0]) || undefined,
+            refereeIds: cleanReferees !== undefined ? cleanReferees : undefined
+          }
+        : {})
     };
     const localList = getLocal<Match>(STORAGE_KEYS.MATCHES, []).map(normalizeMatchRecord);
-    const updated = localList.map(m => m.id === matchId ? normalizeMatchRecord({ ...m, ...normalizedPatch }) : m);
+    const existsLocally = localList.some(m => m.id === matchId);
+    const updated = existsLocally
+      ? localList.map(m => {
+          if (m.id !== matchId) return m;
+          const merged = { ...m, ...normalizedPatch } as any;
+          if (hasAnyRefereeUpdate) {
+            delete merged.refereeName;
+            delete merged.referee2Name;
+            delete merged.refereeNames;
+            delete merged.tableRefereeIds;
+            delete merged.fieldRefereeIds;
+            delete merged.tableRefereeNames;
+            delete merged.fieldRefereeNames;
+          }
+          return normalizeMatchRecord(merged);
+        })
+      : [normalizeMatchRecord({ id: matchId, ...normalizedPatch } as Match), ...localList];
     setLocal(STORAGE_KEYS.MATCHES, updated);
     markPendingWrite('matches', matchId);
 
     try {
       const { id, ...dataToUpdate } = normalizedPatch as any;
       const cleanData = stripUndefinedDeep(dataToUpdate);
+      if (hasRef1Key && !cleanRef1) {
+        cleanData.referee1Id = deleteField();
+      }
+      if (hasRef2Key && !cleanRef2) {
+        cleanData.referee2Id = deleteField();
+      }
+      if (hasAnyRefereeUpdate) {
+        const syncedPrimary = cleanRef1 || (cleanReferees && cleanReferees[0]) || '';
+        cleanData.refereeId = syncedPrimary ? syncedPrimary : deleteField();
+        if (cleanReferees !== undefined) {
+          cleanData.refereeIds = cleanReferees;
+        } else if (!syncedPrimary) {
+          cleanData.refereeIds = deleteField();
+        }
+        cleanData.refereeName = deleteField();
+        cleanData.referee2Name = deleteField();
+        cleanData.refereeNames = deleteField();
+        cleanData.tableRefereeIds = deleteField();
+        cleanData.fieldRefereeIds = deleteField();
+        cleanData.tableRefereeNames = deleteField();
+        cleanData.fieldRefereeNames = deleteField();
+      }
       await setDoc(doc(db, 'matches', matchId), {
         ...cleanData,
         id: matchId,
@@ -3264,6 +3659,176 @@ export const DataService = {
       this.triggerMatchNotification('result', approvedMatch);
     }
     return approvedMatch;
+  },
+
+  async approveMatchProgram(matchId: string, approverName: string): Promise<Match | null> {
+    const programApprovedAt = new Date().toISOString();
+    const localList = getLocal<Match>(STORAGE_KEYS.MATCHES, []).map(normalizeMatchRecord);
+    let approvedMatch: Match | null = null;
+    const updated = localList.map(m => {
+      if (m.id === matchId) {
+        approvedMatch = normalizeMatchRecord({
+          ...m,
+          programApprovalStatus: 'approved',
+          programApprovedBy: approverName,
+          programApprovedAt
+        });
+        return approvedMatch;
+      }
+      return m;
+    });
+    setLocal(STORAGE_KEYS.MATCHES, updated);
+    markPendingWrite('matches', matchId);
+
+    try {
+      await setDoc(doc(db, 'matches', matchId), {
+        id: matchId,
+        programApprovalStatus: 'approved',
+        programApprovedBy: approverName,
+        programApprovedAt,
+        updatedAt: serverTimestamp()
+      }, { merge: true });
+      clearPendingWrite('matches', matchId);
+    } catch (e) {
+      console.warn("Program approval saved locally; Firestore sync pending:", e);
+    }
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('matchesDataChanged'));
+      window.dispatchEvent(new CustomEvent('matchesUpdated'));
+    }
+
+    return approvedMatch;
+  },
+
+  async approveMatchesProgramBatch(matchIds: string[], approverName: string): Promise<number> {
+    const uniqueIds = Array.from(new Set(matchIds.filter(Boolean)));
+    if (uniqueIds.length === 0) return 0;
+
+    const programApprovedAt = new Date().toISOString();
+    const idSet = new Set(uniqueIds);
+    const localList = getLocal<Match>(STORAGE_KEYS.MATCHES, []).map(normalizeMatchRecord);
+    const updated = localList.map(m => {
+      if (idSet.has(m.id)) {
+        return normalizeMatchRecord({
+          ...m,
+          programApprovalStatus: 'approved',
+          programApprovedBy: approverName,
+          programApprovedAt
+        });
+      }
+      return m;
+    });
+    setLocal(STORAGE_KEYS.MATCHES, updated);
+    uniqueIds.forEach(id => markPendingWrite('matches', id));
+
+    await Promise.all(
+      uniqueIds.map(async id => {
+        try {
+          await setDoc(doc(db, 'matches', id), {
+            id,
+            programApprovalStatus: 'approved',
+            programApprovedBy: approverName,
+            programApprovedAt,
+            updatedAt: serverTimestamp()
+          }, { merge: true });
+          clearPendingWrite('matches', id);
+        } catch (e) {
+          console.warn(`Program approval sync pending for ${id}:`, e);
+        }
+      })
+    );
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('matchesDataChanged'));
+      window.dispatchEvent(new CustomEvent('matchesUpdated'));
+    }
+
+    return uniqueIds.length;
+  },
+
+  async revertMatchProgram(matchId: string): Promise<Match | null> {
+    const localList = getLocal<Match>(STORAGE_KEYS.MATCHES, []).map(normalizeMatchRecord);
+    let revertedMatch: Match | null = null;
+    const updated = localList.map(m => {
+      if (m.id === matchId) {
+        revertedMatch = normalizeMatchRecord({
+          ...m,
+          programApprovalStatus: 'pending',
+          programApprovedBy: '',
+          programApprovedAt: ''
+        });
+        return revertedMatch;
+      }
+      return m;
+    });
+    setLocal(STORAGE_KEYS.MATCHES, updated);
+    markPendingWrite('matches', matchId);
+
+    try {
+      await setDoc(doc(db, 'matches', matchId), {
+        id: matchId,
+        programApprovalStatus: 'pending',
+        programApprovedBy: deleteField(),
+        programApprovedAt: deleteField(),
+        updatedAt: serverTimestamp()
+      }, { merge: true });
+      clearPendingWrite('matches', matchId);
+    } catch (e) {
+      console.warn("Program approval revert saved locally; Firestore sync pending:", e);
+    }
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('matchesDataChanged'));
+      window.dispatchEvent(new CustomEvent('matchesUpdated'));
+    }
+
+    return revertedMatch;
+  },
+
+  async revertMatchesProgramBatch(matchIds: string[]): Promise<number> {
+    const uniqueIds = Array.from(new Set(matchIds.filter(Boolean)));
+    if (uniqueIds.length === 0) return 0;
+
+    const idSet = new Set(uniqueIds);
+    const localList = getLocal<Match>(STORAGE_KEYS.MATCHES, []).map(normalizeMatchRecord);
+    const updated = localList.map(m => {
+      if (idSet.has(m.id)) {
+        return normalizeMatchRecord({
+          ...m,
+          programApprovalStatus: 'pending',
+          programApprovedBy: '',
+          programApprovedAt: ''
+        });
+      }
+      return m;
+    });
+    setLocal(STORAGE_KEYS.MATCHES, updated);
+    uniqueIds.forEach(id => markPendingWrite('matches', id));
+
+    await Promise.all(
+      uniqueIds.map(async id => {
+        try {
+          await setDoc(doc(db, 'matches', id), {
+            id,
+            programApprovalStatus: 'pending',
+            programApprovedBy: deleteField(),
+            programApprovedAt: deleteField(),
+            updatedAt: serverTimestamp()
+          }, { merge: true });
+          clearPendingWrite('matches', id);
+        } catch (e) {
+          console.warn(`Program approval revert sync pending for ${id}:`, e);
+        }
+      })
+    );
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('matchesDataChanged'));
+      window.dispatchEvent(new CustomEvent('matchesUpdated'));
+    }
+
+    return uniqueIds.length;
   },
 
   async deleteMatch(id: string): Promise<void> {
@@ -3568,7 +4133,8 @@ export const DataService = {
     window.addEventListener('tournamentsUpdated', handleLocalUpdate);
 
     try {
-      if (isCloudSyncPaused()) emitLocal();
+      const cachedTournaments = getLocal<Tournament>(STORAGE_KEYS.TOURNAMENTS, []);
+      if (isCloudSyncPaused() || cachedTournaments.length > 0) emitLocal();
       const unsubscribe = onSnapshot(collection(db, 'tournaments'), (snap) => {
         const tournsMap = new Map<string, Tournament>();
         snap.docs.forEach((d: any) => {
@@ -3609,6 +4175,7 @@ export const DataService = {
         callback(normalizeAndDedupe(allNormalized));
       }, (err) => {
         console.warn("Real-time tournaments listener error:", err);
+        emitLocal();
       });
       return () => {
         window.removeEventListener('tournamentsUpdated', handleLocalUpdate);
@@ -3616,6 +4183,7 @@ export const DataService = {
       };
     } catch (err) {
       console.warn("Failed to subscribe to tournaments:", err);
+      emitLocal();
       return () => {
         window.removeEventListener('tournamentsUpdated', handleLocalUpdate);
       };
@@ -3640,7 +4208,8 @@ export const DataService = {
     window.addEventListener('matchesUpdated', handleLocalUpdate);
 
     try {
-      if (isCloudSyncPaused()) emitLocal();
+      const cachedMatches = getLocal<Match>(STORAGE_KEYS.MATCHES, []);
+      if (isCloudSyncPaused() || cachedMatches.length > 0) emitLocal();
       const unsubscribe = onSnapshot(collection(db, 'matches'), (snap) => {
         const firestoreList = snap.docs
           .filter((d: any) => !isRecentlyDeleted('matches', d.id))
@@ -3654,6 +4223,7 @@ export const DataService = {
         callback(scopeMatchesByDir(deduped));
       }, (err) => {
         console.warn("Real-time matches listener error:", err);
+        emitLocal();
       });
       return () => {
         window.removeEventListener('matchesUpdated', handleLocalUpdate);
@@ -3661,6 +4231,7 @@ export const DataService = {
       };
     } catch (err) {
       console.warn("Failed to subscribe to matches:", err);
+      emitLocal();
       return () => {
         window.removeEventListener('matchesUpdated', handleLocalUpdate);
       };
@@ -3693,6 +4264,7 @@ export const DataService = {
         callback(deduped);
       }, (err) => {
         console.warn("Real-time venues listener error:", err);
+        emitLocal();
       });
       return () => {
         window.removeEventListener('venuesUpdated', handleLocalUpdate);
@@ -3700,6 +4272,7 @@ export const DataService = {
       };
     } catch (err) {
       console.warn("Failed to subscribe to venues:", err);
+      emitLocal();
       return () => {
         window.removeEventListener('venuesUpdated', handleLocalUpdate);
       };
@@ -3716,7 +4289,8 @@ export const DataService = {
     window.addEventListener('sportsConfigChanged', handleLocalUpdate);
 
     try {
-      if (isCloudSyncPaused()) emitLocal();
+      const cachedSports = getLocal<Sport>('taourirt_sports_config', []);
+      if (isCloudSyncPaused() || cachedSports.length > 0) emitLocal();
       const unsubscribe = onSnapshot(collection(db, 'sports'), (snap) => {
         let fetchedSports: Sport[] = [];
         if (!snap.empty) {
@@ -3757,6 +4331,7 @@ export const DataService = {
         callback(fetchedSports);
       }, (err) => {
         console.warn("Real-time sports listener error:", err);
+        emitLocal();
       });
       return () => {
         window.removeEventListener('sportsConfigChanged', handleLocalUpdate);
@@ -3764,6 +4339,7 @@ export const DataService = {
       };
     } catch (err) {
       console.warn("Failed to subscribe to sports configuration:", err);
+      emitLocal();
       return () => {
         window.removeEventListener('sportsConfigChanged', handleLocalUpdate);
       };
@@ -4213,18 +4789,34 @@ export const DataService = {
     }
 
     explicitReferees = explicitReferees.map(r => {
-      const matchedUser = usersList.find(u => 
-        u.id === r.id || 
-        (r.teacherId && u.id === r.teacherId) ||
-        (u.fullName && r.fullName && (norm(u.fullName) === norm(r.fullName.replace(/\s*\(أستاذ\)\s*/g, '')) || norm(u.fullName).includes(norm(r.fullName.replace(/\s*\(أستاذ\)\s*/g, ''))) || norm(r.fullName.replace(/\s*\(أستاذ\)\s*/g, '')).includes(norm(u.fullName))))
-      );
+      const cleanRName = norm((r.fullName || '').replace(/\s*\(أستاذ\)\s*/g, ''));
+      const matchedUser = usersList.find(u => {
+        const aliasHit = Array.isArray(u.aliasIds) && (
+          u.aliasIds.includes(r.id) ||
+          (r.teacherId ? u.aliasIds.includes(r.teacherId) : false)
+        );
+        return (
+          u.id === r.id ||
+          aliasHit ||
+          (r.teacherId && u.id === r.teacherId) ||
+          (u.fullName && cleanRName && (norm(u.fullName) === cleanRName || norm(u.fullName).includes(cleanRName) || cleanRName.includes(norm(u.fullName))))
+        );
+      });
       if (matchedUser) {
         const mergedDiplomas = {
           ...(matchedUser.refereeDiplomas || {}),
           ...(r.specialtyDiplomas || {})
         };
+        const mergedAliases = Array.from(new Set([
+          ...(Array.isArray(r.aliasIds) ? r.aliasIds : []),
+          ...(Array.isArray(matchedUser.aliasIds) ? matchedUser.aliasIds : []),
+          r.id,
+          r.teacherId,
+          matchedUser.id
+        ].filter(Boolean) as string[]));
         return {
           ...r,
+          aliasIds: mergedAliases,
           fullName: (r.fullName || '').replace(/\s*\(أستاذ\)\s*/g, '').trim(),
           phone: (matchedUser.phone && matchedUser.phone.trim()) ? matchedUser.phone.trim() : r.phone,
           photoUrl: matchedUser.photoUrl || r.photoUrl,
@@ -4244,23 +4836,39 @@ export const DataService = {
     });
 
     const teacherReferees: Referee[] = usersList
-      .filter(t => !isRecentlyDeleted('referees', t.id) && t.role === 'TEACHER' && (Array.isArray(t.refereeSpecialty) ? t.refereeSpecialty.length > 0 : !!t.refereeSpecialty))
-      .map(t => ({
-        id: t.id,
-        teacherId: t.id,
-        fullName: (t.fullName || '').replace(/\s*\(أستاذ\)\s*/g, '').trim(),
-        phone: t.phone || 'غير محدد',
-        specialty: Array.isArray(t.refereeSpecialty) ? t.refereeSpecialty : [t.refereeSpecialty || 'كرة القدم'],
-        diploma: t.refereeDiploma,
-        specialtyDiplomas: t.refereeDiplomas,
-        workLocation: t.workLocation,
-        teachingCadre: t.teachingCadre,
-        email: t.email,
-        directorateId: t.directorateId || 'taourirt',
-        isActive: t.isActive !== false,
-        isTeacher: true,
-        photoUrl: t.photoUrl
-      }));
+      .filter(t => {
+        if (!t || !t.id || isRecentlyDeleted('referees', t.id)) return false;
+        const hasSpecs = Array.isArray(t.refereeSpecialty) ? t.refereeSpecialty.length > 0 : !!t.refereeSpecialty;
+        const isHeadWithSpecs = Boolean(
+          t.isTechCommitteeHead &&
+            (hasSpecs || (Array.isArray(t.techCommitteeSports) && t.techCommitteeSports.length > 0))
+        );
+        return hasSpecs || isHeadWithSpecs;
+      })
+      .map(t => {
+        const baseSpecs = Array.isArray(t.refereeSpecialty)
+          ? t.refereeSpecialty
+          : (t.refereeSpecialty ? [t.refereeSpecialty] : []);
+        const techSpecs = Array.isArray(t.techCommitteeSports) ? t.techCommitteeSports : [];
+        const combinedSpecs = Array.from(new Set([...baseSpecs, ...(baseSpecs.length === 0 ? techSpecs : [])].filter(Boolean)));
+        return {
+          id: t.id,
+          teacherId: t.id,
+          aliasIds: Array.from(new Set([t.id, ...(Array.isArray(t.aliasIds) ? t.aliasIds : [])].filter(Boolean) as string[])),
+          fullName: (t.fullName || '').replace(/\s*\(أستاذ\)\s*/g, '').trim(),
+          phone: t.phone || 'غير محدد',
+          specialty: combinedSpecs.length > 0 ? combinedSpecs : ['كرة القدم'],
+          diploma: t.refereeDiploma,
+          specialtyDiplomas: t.refereeDiplomas,
+          workLocation: t.workLocation,
+          teachingCadre: t.teachingCadre,
+          email: t.email,
+          directorateId: t.directorateId || 'taourirt',
+          isActive: t.isActive !== false,
+          isTeacher: t.role === 'TEACHER' || !!t.workLocation,
+          photoUrl: t.photoUrl
+        };
+      });
 
     const idMap = new Map<string, Referee>();
     [...explicitReferees, ...teacherReferees].forEach(r => {
@@ -4277,9 +4885,18 @@ export const DataService = {
           ...(r.specialtyDiplomas || {}),
           ...(existing.specialtyDiplomas || {})
         };
+        const mergedAliases = Array.from(new Set([
+          ...(Array.isArray(existing.aliasIds) ? existing.aliasIds : []),
+          ...(Array.isArray(r.aliasIds) ? r.aliasIds : []),
+          existing.id,
+          r.id,
+          existing.teacherId,
+          r.teacherId
+        ].filter(Boolean) as string[]));
         idMap.set(r.id, {
           ...existing,
           ...r,
+          aliasIds: mergedAliases,
           specialty: mergedSpecialties,
           diploma: existing.diploma || r.diploma,
           specialtyDiplomas: Object.keys(mergedDiplomas).length > 0 ? mergedDiplomas : undefined,
@@ -4308,9 +4925,18 @@ export const DataService = {
           ...(r.specialtyDiplomas || {}),
           ...(prev.specialtyDiplomas || {})
         };
+        const mergedAliases = Array.from(new Set([
+          ...(Array.isArray(prev.aliasIds) ? prev.aliasIds : []),
+          ...(Array.isArray(r.aliasIds) ? r.aliasIds : []),
+          prev.id,
+          r.id,
+          prev.teacherId,
+          r.teacherId
+        ].filter(Boolean) as string[]));
         uniqueMap.set(key, {
           ...r,
           ...prev,
+          aliasIds: mergedAliases,
           specialty: mergedSpecs,
           diploma: prev.diploma || r.diploma,
           specialtyDiplomas: Object.keys(mergedDiplomas).length > 0 ? mergedDiplomas : undefined,
@@ -4678,7 +5304,23 @@ export const DataService = {
     const activeDirId = this.getActiveDirectorateId();
     const usersMap = new Map<string, User>();
 
-    // Helper to find existing map entry by id, email, leaseNumber, or normalized name
+    const collectUserAliases = (...entries: any[]): string[] => {
+      const set = new Set<string>();
+      entries.forEach(entry => {
+        if (!entry) return;
+        if (typeof entry.id === 'string' && entry.id.trim()) set.add(entry.id.trim());
+        if (typeof entry.uid === 'string' && entry.uid.trim()) set.add(entry.uid.trim());
+        if (typeof entry.teacherId === 'string' && entry.teacherId.trim()) set.add(entry.teacherId.trim());
+        if (Array.isArray(entry.aliasIds)) {
+          entry.aliasIds.forEach((aid: any) => {
+            if (typeof aid === 'string' && aid.trim()) set.add(aid.trim());
+          });
+        }
+      });
+      return Array.from(set);
+    };
+
+    // Helper to find existing map entry by id, aliasIds, email, leaseNumber, or normalized name
     const findMatchingKey = (u: any): string | null => {
       if (!u) return null;
       const cleanEmail = u.email ? String(u.email).trim().toLowerCase() : '';
@@ -4686,8 +5328,11 @@ export const DataService = {
       const cleanName = u.fullName ? normalizeArabicName(u.fullName) : '';
 
       for (const [k, existing] of usersMap.entries()) {
+        const aliasHit =
+          (u.id && Array.isArray(existing.aliasIds) && existing.aliasIds.includes(u.id)) ||
+          (Array.isArray(u.aliasIds) && u.aliasIds.includes(existing.id));
         if (
-          k === u.id || existing.id === u.id ||
+          k === u.id || existing.id === u.id || aliasHit ||
           (cleanEmail && existing.email && isFlexibleEmailMatch(existing.email, cleanEmail)) ||
           (cleanLease && existing.leaseNumber && existing.leaseNumber === cleanLease) ||
           (cleanName && existing.fullName && cleanName.length >= 6 && normalizeArabicName(existing.fullName) === cleanName)
@@ -4719,10 +5364,12 @@ export const DataService = {
             const dataPhoto = typeof data.photoUrl === 'string' ? data.photoUrl.trim() : '';
             const existingPhoto = typeof existing.photoUrl === 'string' ? existing.photoUrl.trim() : '';
             const mergedPhoto = preferData ? (dataPhoto || existingPhoto) : (existingPhoto || dataPhoto);
+            const mergedAliases = collectUserAliases(existing, { id: docId, ...data });
             const merged: User = {
               ...existing,
               ...data,
               id: preferData ? docId : existing.id,
+              aliasIds: mergedAliases,
               role: data.role || existing.role || 'TEACHER',
               fullName: data.fullName || data.name || existing.fullName || 'أستاذ',
               directorateId: data.directorateId || existing.directorateId || activeDirId,
@@ -4745,6 +5392,7 @@ export const DataService = {
           } else {
             usersMap.set(docId, {
               id: docId,
+              aliasIds: collectUserAliases({ id: docId, ...data }),
               fullName: data.fullName || data.name || 'أستاذ',
               email: data.email || '',
               role: data.role || 'TEACHER',
@@ -4779,6 +5427,7 @@ export const DataService = {
             const matchedKey = findMatchingKey(u);
             const userObj: User = {
               id: u.id || matchedKey || u.email || u.leaseNumber,
+              aliasIds: collectUserAliases(u),
               fullName: u.fullName || u.name || 'أستاذ',
               email: u.email || '',
               role: u.role || 'TEACHER',
@@ -4801,6 +5450,7 @@ export const DataService = {
               const merged: User = {
                 ...existing,
                 ...(preferNew ? userObj : {}),
+                aliasIds: collectUserAliases(existing, userObj),
                 workLocation: preferNew ? (u.workLocation || existing.workLocation) : (existing.workLocation || u.workLocation),
                 schoolId: preferNew ? (u.schoolId || existing.schoolId) : (existing.schoolId || u.schoolId),
                 photoUrl: preferNew ? (uPhoto || exPhoto) : (exPhoto || uPhoto),
@@ -4830,6 +5480,7 @@ export const DataService = {
             ...existing,
             ...demo,
             id: demo.id,
+            aliasIds: collectUserAliases(existing, demo),
             role: demo.role || existing?.role || 'TEACHER',
             photoUrl: dPhoto || ePhoto
           });
@@ -6525,6 +7176,7 @@ export const DataService = {
         callback(merged);
       }, (error) => {
         console.warn("Firestore subscription error for referees:", error);
+        emitLocal();
       });
       return () => {
         window.removeEventListener('refereesUpdated', handleLocalUpdate);
@@ -6532,6 +7184,7 @@ export const DataService = {
       };
     } catch (e) {
       console.warn("Error setting up onSnapshot for referees:", e);
+      emitLocal();
       return () => {
         window.removeEventListener('refereesUpdated', handleLocalUpdate);
       };
@@ -6563,6 +7216,7 @@ export const DataService = {
         callback(merged);
       }, (error) => {
         console.warn("Firestore subscription error for users:", error);
+        emitLocal();
       });
       return () => {
         window.removeEventListener('userDataChanged', handleLocalUpdate);
@@ -6570,6 +7224,7 @@ export const DataService = {
       };
     } catch (e) {
       console.warn("Error setting up onSnapshot for users:", e);
+      emitLocal();
       return () => {
         window.removeEventListener('userDataChanged', handleLocalUpdate);
       };
@@ -9709,26 +10364,29 @@ export const DataService = {
   async getBlockedScheduleDates(directorateId?: string): Promise<BlockedSchedulePeriod[]> {
     const activeDirId = directorateId || this.getActiveDirectorateId() || 'taourirt';
     const localKey = `taourirt_blocked_schedule_${activeDirId}`;
+    const dismissedKey = `taourirt_blocked_schedule_dismissed_${activeDirId}`;
     const localList = getLocal<BlockedSchedulePeriod>(localKey, []);
+    const localDismissed = getLocalStringArray(dismissedKey);
 
     if (this.isCloudSyncPaused()) {
-      return localList;
+      return mergeBlockedWithOfficialHolidays(localList, localDismissed, activeDirId);
     }
 
     try {
       const snap = await fbGetDoc(doc(db, 'settings', `blocked_schedule_dates_${activeDirId}`));
       if (snap.exists()) {
         const data = snap.data() as any;
-        if (Array.isArray(data?.periods)) {
-          setLocal(localKey, data.periods);
-          return data.periods;
-        }
+        const periods = Array.isArray(data?.periods) ? data.periods : localList;
+        const dismissed = Array.isArray(data?.dismissedDefaultIds) ? data.dismissedDefaultIds : localDismissed;
+        setLocal(localKey, periods);
+        setLocalStringArray(dismissedKey, dismissed);
+        return mergeBlockedWithOfficialHolidays(periods, dismissed, activeDirId);
       }
     } catch (e) {
       console.warn('getBlockedScheduleDates fallback to local:', e);
     }
 
-    return localList;
+    return mergeBlockedWithOfficialHolidays(localList, localDismissed, activeDirId);
   },
 
   subscribeToBlockedScheduleDates(
@@ -9737,10 +10395,17 @@ export const DataService = {
   ): () => void {
     const activeDirId = directorateId || this.getActiveDirectorateId() || 'taourirt';
     const localKey = `taourirt_blocked_schedule_${activeDirId}`;
-    callback(getLocal<BlockedSchedulePeriod>(localKey, []));
+    const dismissedKey = `taourirt_blocked_schedule_dismissed_${activeDirId}`;
+    const emitMerged = () => {
+      const localList = getLocal<BlockedSchedulePeriod>(localKey, []);
+      const localDismissed = getLocalStringArray(dismissedKey);
+      callback(mergeBlockedWithOfficialHolidays(localList, localDismissed, activeDirId));
+    };
+
+    emitMerged();
 
     const handleLocal = () => {
-      callback(getLocal<BlockedSchedulePeriod>(localKey, []));
+      emitMerged();
     };
     window.addEventListener('blockedScheduleDatesUpdated', handleLocal);
 
@@ -9755,10 +10420,13 @@ export const DataService = {
       (snap) => {
         if (snap.exists()) {
           const data = snap.data() as any;
-          if (Array.isArray(data?.periods)) {
-            setLocal(localKey, data.periods);
-            callback(data.periods);
-          }
+          const periods = Array.isArray(data?.periods) ? data.periods : [];
+          const dismissed = Array.isArray(data?.dismissedDefaultIds) ? data.dismissedDefaultIds : [];
+          setLocal(localKey, periods);
+          setLocalStringArray(dismissedKey, dismissed);
+          callback(mergeBlockedWithOfficialHolidays(periods, dismissed, activeDirId));
+        } else {
+          emitMerged();
         }
       },
       () => {
@@ -9780,25 +10448,68 @@ export const DataService = {
   ): Promise<void> {
     const activeDirId = directorateId || this.getActiveDirectorateId() || 'taourirt';
     const localKey = `taourirt_blocked_schedule_${activeDirId}`;
-    const cleanPeriods = periods.map(p => ({
-      ...p,
-      startDate: normalizeDateToYmd(p.startDate) || p.startDate,
-      endDate: normalizeDateToYmd(p.endDate || p.startDate) || p.endDate || p.startDate,
-      directorateId: activeDirId
-    }));
+    const dismissedKey = `taourirt_blocked_schedule_dismissed_${activeDirId}`;
+    const cleanPeriods = periods
+      .filter(p => !OBSOLETE_DEFAULT_BLOCKED_IDS_2026_2027.has(p.id))
+      .map(p => ({
+        ...p,
+        startDate: normalizeDateToYmd(p.startDate) || p.startDate,
+        endDate: normalizeDateToYmd(p.endDate || p.startDate) || p.endDate || p.startDate,
+        directorateId: activeDirId
+      }));
+
+    const presentIds = new Set(cleanPeriods.map(p => p.id));
+    const dismissedDefaultIds = OFFICIAL_DEFAULT_BLOCKED_PERIODS_2026_2027
+      .filter(h => !presentIds.has(h.id))
+      .map(h => h.id);
 
     setLocal(localKey, cleanPeriods);
-    window.dispatchEvent(new CustomEvent('blockedScheduleDatesUpdated', { detail: cleanPeriods }));
+    setLocalStringArray(dismissedKey, dismissedDefaultIds);
+    const mergedForEvent = mergeBlockedWithOfficialHolidays(cleanPeriods, dismissedDefaultIds, activeDirId);
+    window.dispatchEvent(new CustomEvent('blockedScheduleDatesUpdated', { detail: mergedForEvent }));
 
     try {
       await fbSetDoc(doc(db, 'settings', `blocked_schedule_dates_${activeDirId}`), {
         periods: cleanPeriods,
+        dismissedDefaultIds,
         directorateId: activeDirId,
         updatedAt: serverTimestamp()
       });
     } catch (e) {
       console.warn('saveBlockedScheduleDates saved locally; Firestore sync pending:', e);
     }
+  },
+
+  async restoreOfficialBlockedScheduleDates(
+    directorateId?: string,
+    keepCustomPeriods: boolean = true
+  ): Promise<BlockedSchedulePeriod[]> {
+    const activeDirId = directorateId || this.getActiveDirectorateId() || 'taourirt';
+    const localKey = `taourirt_blocked_schedule_${activeDirId}`;
+    const dismissedKey = `taourirt_blocked_schedule_dismissed_${activeDirId}`;
+
+    const officialIds = new Set(OFFICIAL_DEFAULT_BLOCKED_PERIODS_2026_2027.map(p => p.id));
+    const existing = await this.getBlockedScheduleDates(activeDirId).catch(() => []);
+    const customOnly = keepCustomPeriods
+      ? existing.filter(p => !officialIds.has(p.id) && !OBSOLETE_DEFAULT_BLOCKED_IDS_2026_2027.has(p.id))
+      : [];
+
+    const restored = mergeBlockedWithOfficialHolidays(customOnly, [], activeDirId);
+    setLocal(localKey, restored);
+    setLocalStringArray(dismissedKey, []);
+    window.dispatchEvent(new CustomEvent('blockedScheduleDatesUpdated', { detail: restored }));
+
+    try {
+      await fbSetDoc(doc(db, 'settings', `blocked_schedule_dates_${activeDirId}`), {
+        periods: restored,
+        dismissedDefaultIds: [],
+        directorateId: activeDirId,
+        updatedAt: serverTimestamp()
+      });
+    } catch (e) {
+      console.warn('restoreOfficialBlockedScheduleDates saved locally; Firestore sync pending:', e);
+    }
+    return restored;
   },
 
   // ============================================================================
@@ -10110,42 +10821,311 @@ export function getMatchEducationalCycles(
 ): ('ابتدائي' | 'إعدادي' | 'تأهيلي' | 'خصوصي')[] {
   const cycles = new Set<'ابتدائي' | 'إعدادي' | 'تأهيلي' | 'خصوصي'>();
 
+  const inferPrivateCycleHint = (s: School): 'ابتدائي' | 'إعدادي' | 'تأهيلي' | null => {
+    const combined = normalizeArabicSearch(`${s.type || ''} ${s.name || ''}`);
+    if (combined.includes('تاهيل')) return 'تأهيلي';
+    if (combined.includes('اعداد')) return 'إعدادي';
+    if (combined.includes('ابتدائ') || combined.includes('مدرسه')) return 'ابتدائي';
+    return null;
+  };
+
   const s1 = params.team1Id ? schools.find(s => s.id === params.team1Id || s.name === params.team1Id) : undefined;
   const s2 = params.team2Id ? schools.find(s => s.id === params.team2Id || s.name === params.team2Id) : undefined;
 
-  if (s1) cycles.add(normalizeSchoolCycleType(s1) as 'ابتدائي' | 'إعدادي' | 'تأهيلي' | 'خصوصي');
-  if (s2) cycles.add(normalizeSchoolCycleType(s2) as 'ابتدائي' | 'إعدادي' | 'تأهيلي' | 'خصوصي');
-
-  if (cycles.size === 0) {
-    const tourn = params.tournamentId ? tournaments.find(t => t.id === params.tournamentId) : undefined;
-    const rawLevel = (params.level || tourn?.level || '').toLowerCase();
-    if (rawLevel.includes('primary') || rawLevel.includes('ابتدائ')) cycles.add('ابتدائي');
-    if (rawLevel.includes('middle') || rawLevel.includes('إعداد') || rawLevel.includes('اعداد')) cycles.add('إعدادي');
-    if (rawLevel.includes('high') || rawLevel.includes('تأهيل') || rawLevel.includes('تاهيل')) cycles.add('تأهيلي');
-
-    if (cycles.size === 0 && (params.ageCategory || tourn?.ageCategory)) {
-      const cat = normalizeCategoryKey(params.ageCategory || tourn?.ageCategory || '');
-      if (cat === 'U12') cycles.add('ابتدائي');
-      else if (cat === 'U15') cycles.add('إعدادي');
-      else if (cat === 'U18' || cat === 'U20') cycles.add('تأهيلي');
+  [s1, s2].forEach(sch => {
+    if (!sch) return;
+    const cyc = normalizeSchoolCycleType(sch) as 'ابتدائي' | 'إعدادي' | 'تأهيلي' | 'خصوصي';
+    cycles.add(cyc);
+    if (cyc === 'خصوصي') {
+      const hint = inferPrivateCycleHint(sch);
+      if (hint) cycles.add(hint);
     }
+  });
+
+  const tourn = params.tournamentId ? tournaments.find(t => t.id === params.tournamentId) : undefined;
+  const rawLevel = (params.level || tourn?.level || '').toLowerCase();
+  if (rawLevel.includes('primary') || rawLevel.includes('ابتدائ')) cycles.add('ابتدائي');
+  if (rawLevel.includes('middle') || rawLevel.includes('إعداد') || rawLevel.includes('اعداد')) cycles.add('إعدادي');
+  if (rawLevel.includes('high') || rawLevel.includes('تأهيل') || rawLevel.includes('تاهيل')) cycles.add('تأهيلي');
+
+  const hasStandardCycle = cycles.has('ابتدائي') || cycles.has('إعدادي') || cycles.has('تأهيلي');
+  if (!hasStandardCycle && (params.ageCategory || tourn?.ageCategory)) {
+    const cat = normalizeCategoryKey(params.ageCategory || tourn?.ageCategory || '');
+    if (cat === 'U12') cycles.add('ابتدائي');
+    else if (cat === 'U15') cycles.add('إعدادي');
+    else if (cat === 'U18' || cat === 'U20') cycles.add('تأهيلي');
   }
 
   return Array.from(cycles);
 }
 
+export const OFFICIAL_SCHOOL_HOLIDAYS_2026_2027: BlockedSchedulePeriod[] = [
+  {
+    id: 'holiday-2026-bayniya-1',
+    title: 'الفترة البينية الأولى',
+    type: 'holiday',
+    startDate: '2026-10-18',
+    endDate: '2026-10-25',
+    targetCycles: ['ALL'],
+    notes: '8 أيام — من الأحد 18 أكتوبر 2026 إلى الأحد 25 أكتوبر 2026'
+  },
+  {
+    id: 'holiday-2026-unity-day',
+    title: 'عيد الوحدة',
+    type: 'holiday',
+    startDate: '2026-10-31',
+    endDate: '2026-10-31',
+    targetCycles: ['ALL'],
+    notes: '1 يوم — السبت 31 أكتوبر 2026'
+  },
+  {
+    id: 'holiday-2026-green-march',
+    title: 'ذكرى المسيرة الخضراء',
+    type: 'holiday',
+    startDate: '2026-11-06',
+    endDate: '2026-11-06',
+    targetCycles: ['ALL'],
+    notes: '1 يوم — الجمعة 6 نونبر 2026'
+  },
+  {
+    id: 'holiday-2026-independence',
+    title: 'عيد الاستقلال',
+    type: 'holiday',
+    startDate: '2026-11-18',
+    endDate: '2026-11-18',
+    targetCycles: ['ALL'],
+    notes: '1 يوم — الأربعاء 18 نونبر 2026'
+  },
+  {
+    id: 'holiday-2026-bayniya-2',
+    title: 'الفترة البينية الثانية',
+    type: 'holiday',
+    startDate: '2026-12-06',
+    endDate: '2026-12-13',
+    targetCycles: ['ALL'],
+    notes: '8 أيام — من الأحد 6 دجنبر 2026 إلى الأحد 13 دجنبر 2026'
+  },
+  {
+    id: 'holiday-2027-new-year',
+    title: 'فاتح السنة الميلادية',
+    type: 'holiday',
+    startDate: '2027-01-01',
+    endDate: '2027-01-01',
+    targetCycles: ['ALL'],
+    notes: '1 يوم — الجمعة 1 يناير 2027'
+  },
+  {
+    id: 'holiday-2027-manifesto',
+    title: 'ذكرى تقديم وثيقة الاستقلال',
+    type: 'holiday',
+    startDate: '2027-01-11',
+    endDate: '2027-01-11',
+    targetCycles: ['ALL'],
+    notes: '1 يوم — الاثنين 11 يناير 2027'
+  },
+  {
+    id: 'holiday-2027-amazigh',
+    title: 'فاتح السنة الأمازيغية',
+    type: 'holiday',
+    startDate: '2027-01-14',
+    endDate: '2027-01-14',
+    targetCycles: ['ALL'],
+    notes: '1 يوم — الخميس 14 يناير 2027'
+  },
+  {
+    id: 'holiday-2027-midyear',
+    title: 'عطلة منتصف السنة الدراسية',
+    type: 'holiday',
+    startDate: '2027-01-24',
+    endDate: '2027-01-31',
+    targetCycles: ['ALL'],
+    notes: '8 أيام — من الأحد 24 يناير 2027 إلى الأحد 31 يناير 2027'
+  },
+  {
+    id: 'holiday-2027-eid-fitr',
+    title: 'عيد الفطر',
+    type: 'holiday',
+    startDate: '2027-03-08',
+    endDate: '2027-03-11',
+    targetCycles: ['ALL'],
+    notes: '3 أو 4 أيام — من الاثنين 8 مارس إلى الأربعاء 10 أو الخميس 11 مارس 2027'
+  },
+  {
+    id: 'holiday-2027-bayniya-3',
+    title: 'الفترة البينية الثالثة',
+    type: 'holiday',
+    startDate: '2027-03-21',
+    endDate: '2027-03-28',
+    targetCycles: ['ALL'],
+    notes: '8 أيام — من الأحد 21 مارس 2027 إلى الأحد 28 مارس 2027'
+  },
+  {
+    id: 'holiday-2027-labor-day',
+    title: 'عيد الشغل',
+    type: 'holiday',
+    startDate: '2027-05-01',
+    endDate: '2027-05-01',
+    targetCycles: ['ALL'],
+    notes: '1 يوم — السبت 1 ماي 2027'
+  },
+  {
+    id: 'holiday-2027-bayniya-4',
+    title: 'الفترة البينية الرابعة',
+    type: 'holiday',
+    startDate: '2027-05-09',
+    endDate: '2027-05-16',
+    targetCycles: ['ALL'],
+    notes: '8 أيام — من الأحد 9 ماي 2027 إلى الأحد 16 ماي 2027'
+  },
+  {
+    id: 'holiday-2027-eid-adha',
+    title: 'عيد الأضحى',
+    type: 'holiday',
+    startDate: '2027-05-15',
+    endDate: '2027-05-17',
+    targetCycles: ['ALL'],
+    notes: '3 أيام — من السبت 15 ماي 2027 إلى الاثنين 17 ماي 2027'
+  },
+  {
+    id: 'holiday-2027-hijri',
+    title: 'فاتح محرم',
+    type: 'holiday',
+    startDate: '2027-06-06',
+    endDate: '2027-06-06',
+    targetCycles: ['ALL'],
+    notes: '1 يوم — الأحد 6 يونيو 2027'
+  }
+];
+
+const OBSOLETE_DEFAULT_BLOCKED_IDS_2026_2027 = new Set<string>([
+  'exam-2027-prim-cc-1',
+  'exam-2027-prim-cc-2',
+  'exam-2027-mid-cc-1',
+  'exam-2027-mid-cc-2',
+  'exam-2027-high-cc-1',
+  'exam-2027-high-2bac-cc-2',
+  'exam-2027-high-cc-2'
+]);
+
+export const OFFICIAL_EXAM_PERIODS_2026_2027: BlockedSchedulePeriod[] = [
+  // السلك الابتدائي
+  {
+    id: 'exam-2027-prim-local',
+    title: 'الامتحان الموحد المحلي لنيل شهادة الدروس الابتدائية',
+    type: 'exams',
+    startDate: '2027-01-18',
+    endDate: '2027-01-19',
+    targetCycles: ['ابتدائي'],
+    notes: 'السلك الابتدائي — يومي 18 و19 يناير 2027'
+  },
+  {
+    id: 'exam-2027-prim-provincial',
+    title: 'الامتحان الموحد الإقليمي لنيل شهادة الدروس الابتدائية',
+    type: 'exams',
+    startDate: '2027-06-25',
+    endDate: '2027-06-26',
+    targetCycles: ['ابتدائي'],
+    notes: 'السلك الابتدائي — يومي 25 و26 يونيو 2027'
+  },
+
+  // السلك الإعدادي
+  {
+    id: 'exam-2027-mid-local',
+    title: 'الامتحان الموحد المحلي لنيل شهادة السلك الإعدادي',
+    type: 'exams',
+    startDate: '2027-01-18',
+    endDate: '2027-01-19',
+    targetCycles: ['إعدادي'],
+    notes: 'السلك الإعدادي — يومي 18 و19 يناير 2027'
+  },
+  {
+    id: 'exam-2027-mid-regional',
+    title: 'الامتحان الموحد الجهوي لنيل شهادة السلك الإعدادي',
+    type: 'exams',
+    startDate: '2027-06-23',
+    endDate: '2027-06-24',
+    targetCycles: ['إعدادي'],
+    notes: 'السلك الإعدادي — يومي 23 و24 يونيو 2027'
+  },
+
+  // السلك التأهيلي (السنة الأولى بكالوريا + السنة الثانية بكالوريا)
+  {
+    id: 'exam-2027-high-1bac-reg-norm',
+    title: 'الدورة العادية للامتحان الجهوي الموحد لنيل شهادة البكالوريا للممدرسين والأحرار (الأولى بكالوريا)',
+    type: 'exams',
+    startDate: '2027-05-28',
+    endDate: '2027-05-29',
+    targetCycles: ['تأهيلي'],
+    notes: 'السلك التأهيلي (السنة الأولى بكالوريا للممدرسين والأحرار) — 28 و29 ماي 2027'
+  },
+  {
+    id: 'exam-2027-high-2bac-nat-norm',
+    title: 'الدورة العادية للامتحان الوطني الموحد لنيل شهادة البكالوريا (الثانية بكالوريا)',
+    type: 'exams',
+    startDate: '2027-06-01',
+    endDate: '2027-06-03',
+    targetCycles: ['تأهيلي'],
+    notes: 'السلك التأهيلي (السنة الثانية بكالوريا) — من 1 إلى 3 يونيو 2027'
+  },
+  {
+    id: 'exam-2027-high-1bac-reg-rat',
+    title: 'الدورة الاستدراكية للامتحان الجهوي الموحد لنيل شهادة البكالوريا للممدرسين والأحرار (الأولى بكالوريا)',
+    type: 'exams',
+    startDate: '2027-06-28',
+    endDate: '2027-06-29',
+    targetCycles: ['تأهيلي'],
+    notes: 'السلك التأهيلي (السنة الأولى بكالوريا للممدرسين والأحرار) — 28 و29 يونيو 2027'
+  },
+  {
+    id: 'exam-2027-high-2bac-nat-rat',
+    title: 'الدورة الاستدراكية للامتحان الوطني الموحد لنيل شهادة البكالوريا (الثانية بكالوريا)',
+    type: 'exams',
+    startDate: '2027-07-01',
+    endDate: '2027-07-03',
+    targetCycles: ['تأهيلي'],
+    notes: 'السلك التأهيلي (السنة الثانية بكالوريا) — من 1 إلى 3 يوليوز 2027'
+  }
+];
+
+const OFFICIAL_DEFAULT_BLOCKED_PERIODS_2026_2027: BlockedSchedulePeriod[] = [
+  ...OFFICIAL_SCHOOL_HOLIDAYS_2026_2027,
+  ...OFFICIAL_EXAM_PERIODS_2026_2027
+];
+
+function mergeBlockedWithOfficialHolidays(
+  storedPeriods: BlockedSchedulePeriod[],
+  dismissedDefaultIds: string[],
+  directorateId: string
+): BlockedSchedulePeriod[] {
+  const safeStored = (Array.isArray(storedPeriods) ? storedPeriods : []).filter(
+    p => p && !OBSOLETE_DEFAULT_BLOCKED_IDS_2026_2027.has(p.id)
+  );
+  const storedIds = new Set(safeStored.map(p => p.id));
+  const dismissedSet = new Set(Array.isArray(dismissedDefaultIds) ? dismissedDefaultIds : []);
+
+  const merged: BlockedSchedulePeriod[] = [...safeStored];
+  for (const def of OFFICIAL_DEFAULT_BLOCKED_PERIODS_2026_2027) {
+    if (!storedIds.has(def.id) && !dismissedSet.has(def.id)) {
+      merged.push({ ...def, directorateId });
+    }
+  }
+
+  return merged.sort((a, b) => (a.startDate || '').localeCompare(b.startDate || ''));
+}
+
 /**
- * Checks whether a target date (YYYY-MM-DD) falls inside any blocked holiday or exam period
+ * Returns ALL blocked holiday or exam periods covering a target date (YYYY-MM-DD)
  * for the given educational cycle(s).
  */
-export function findBlockedPeriodForDate(
+export function findAllBlockedPeriodsForDate(
   dateStr: string,
   matchCycles: string[],
   periods: BlockedSchedulePeriod[]
-): BlockedSchedulePeriod | null {
+): BlockedSchedulePeriod[] {
   const ymd = normalizeDateToYmd(dateStr);
-  if (!ymd || !Array.isArray(periods) || periods.length === 0) return null;
+  if (!ymd || !Array.isArray(periods) || periods.length === 0) return [];
 
+  const matches: BlockedSchedulePeriod[] = [];
   for (const period of periods) {
     const start = normalizeDateToYmd(period.startDate) || period.startDate;
     const end = normalizeDateToYmd(period.endDate || period.startDate) || period.endDate || start;
@@ -10155,13 +11135,27 @@ export function findBlockedPeriodForDate(
       const targets = Array.isArray(period.targetCycles) && period.targetCycles.length > 0
         ? period.targetCycles
         : (['ALL'] as EducationalCycleKey[]);
-      if (targets.includes('ALL') || matchCycles.some(c => targets.includes(c as EducationalCycleKey))) {
-        return period;
+      if (matchCycles.includes('ALL') || targets.includes('ALL') || matchCycles.some(c => targets.includes(c as EducationalCycleKey))) {
+        matches.push(period);
       }
     }
   }
 
-  return null;
+  return matches;
+}
+
+/**
+ * Checks whether a target date (YYYY-MM-DD) falls inside any blocked holiday or exam period
+ * for the given educational cycle(s), prioritizing strict school holidays.
+ */
+export function findBlockedPeriodForDate(
+  dateStr: string,
+  matchCycles: string[],
+  periods: BlockedSchedulePeriod[]
+): BlockedSchedulePeriod | null {
+  const all = findAllBlockedPeriodsForDate(dateStr, matchCycles, periods);
+  if (all.length === 0) return null;
+  return all.find(p => p.type === 'holiday') || all[0];
 }
 
 export function resolveEffectiveAffiliationMode(

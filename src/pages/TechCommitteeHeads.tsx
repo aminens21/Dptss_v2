@@ -1,8 +1,8 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { DataService, SPORTS_MAP } from '../lib/dataService';
-import { User, Sport } from '../types';
+import { DataService, SPORTS_MAP, GENDER_MAP, areSportIdsEquivalent, deduplicateById } from '../lib/dataService';
+import { User, Sport, Tournament, Match } from '../types';
 import {
   ShieldCheck,
   Search,
@@ -21,7 +21,12 @@ import {
   Award,
   MessageCircle,
   Eye,
-  LogIn
+  LogIn,
+  Calendar,
+  CheckCircle2,
+  ClipboardList,
+  ExternalLink,
+  BadgeCheck
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { getWhatsAppUrl } from '../lib/whatsappService';
@@ -67,6 +72,8 @@ export const TechCommitteeHeads: React.FC = () => {
   const [isSubmittingMemberModal, setIsSubmittingMemberModal] = useState(false);
   const [viewingMembersHead, setViewingMembersHead] = useState<User | null>(null);
   const [sportsConfig, setSportsConfig] = useState<Sport[]>([]);
+  const [tournaments, setTournaments] = useState<Tournament[]>([]);
+  const [matches, setMatches] = useState<Match[]>([]);
 
   const effectiveSportsMap = useMemo(() => {
     const map: Record<string, { name: string; icon: string }> = { ...SPORTS_MAP };
@@ -104,14 +111,22 @@ export const TechCommitteeHeads: React.FC = () => {
   const loadData = async () => {
     setLoading(true);
     try {
-      const activeDirId = DataService.getActiveDirectorateId();
-      const [allTeachers, allSports] = await Promise.all([
+      const activeDirId = DataService.getActiveDirectorateId() || 'taourirt';
+      const [allTeachers, allSports, allTournaments, allMatches] = await Promise.all([
         DataService.getTeachers(),
-        DataService.getSportsConfig()
+        DataService.getSportsConfig(),
+        DataService.getTournaments().catch(() => [] as Tournament[]),
+        DataService.getMatches().catch(() => [] as Match[])
       ]);
       const dirTeachers = allTeachers.filter(t => (t.directorateId || 'taourirt') === activeDirId);
+      const dirTournaments = deduplicateById(allTournaments).filter(t =>
+        (t.directorateId || 'taourirt') === activeDirId && t.status !== 'Draft' && (t as any).isActive !== false
+      );
+      const dirMatches = allMatches.filter(m => !m.directorateId || m.directorateId === activeDirId);
       setTeachers(dirTeachers);
       setSportsConfig(allSports);
+      setTournaments(dirTournaments);
+      setMatches(dirMatches);
     } catch (error) {
       console.error('Error loading teachers data:', error);
       toast.error('حدث خطأ أثناء تحميل البيانات');
@@ -346,6 +361,62 @@ export const TechCommitteeHeads: React.FC = () => {
   const totalHeads = heads.length;
   const uniqueSportsCount = new Set(heads.flatMap(h => h.techCommitteeSports || [])).size;
 
+  // Detect signed-in Technical Committee Head (including Central Admin impersonation mode)
+  const currentHeadProfile = useMemo(() => {
+    if (!userProfile) return null;
+    const matchedTeacher = teachers.find(t =>
+      (t.id && t.id === userProfile.id) ||
+      (t.email && userProfile.email && t.email.toLowerCase() === userProfile.email.toLowerCase()) ||
+      (t.leaseNumber && userProfile.leaseNumber && t.leaseNumber === userProfile.leaseNumber)
+    ) || null;
+    const isUserHead =
+      userProfile.isTechCommitteeHead === true ||
+      matchedTeacher?.isTechCommitteeHead === true ||
+      userProfile.role === 'TECH_HEAD' ||
+      (userProfile.role as string) === 'TECH_COMMITTEE_HEAD' ||
+      matchedTeacher?.role === 'TECH_HEAD' ||
+      (matchedTeacher?.role as string) === 'TECH_COMMITTEE_HEAD';
+    if (!isUserHead) return null;
+    const mergedSports = Array.from(new Set([
+      ...(userProfile.techCommitteeSports || []),
+      ...(matchedTeacher?.techCommitteeSports || []),
+      ...(userProfile.sportId ? [userProfile.sportId] : []),
+      ...(matchedTeacher?.sportId ? [matchedTeacher.sportId] : [])
+    ].filter(Boolean)));
+    return {
+      ...(matchedTeacher || {}),
+      ...userProfile,
+      techCommitteeSports: mergedSports
+    };
+  }, [userProfile, teachers]);
+
+  const getTournamentsForHead = (head: User): Tournament[] => {
+    const headSports = Array.from(new Set([
+      ...(head.techCommitteeSports || []),
+      ...(head.sportId ? [head.sportId] : [])
+    ].filter(Boolean)));
+    return tournaments.filter(t => {
+      const sportMatch = headSports.some(sk => areSportIdsEquivalent(t.sportId, sk, sportsConfig));
+      const emailMatch = Boolean(t.managerEmail && head.email && t.managerEmail.toLowerCase() === head.email.toLowerCase());
+      const nameMatch = Boolean(t.managerName && head.fullName && t.managerName.trim() === head.fullName.trim());
+      return sportMatch || emailMatch || nameMatch;
+    });
+  };
+
+  const getMatchesCountForTournament = (t: Tournament): number => {
+    return matches.filter(m => {
+      if (m.tournamentId && m.tournamentId === t.id) return true;
+      return areSportIdsEquivalent(m.sportId, t.sportId, sportsConfig) &&
+        (!t.ageCategory || !m.ageCategory || m.ageCategory.toLowerCase() === t.ageCategory.toLowerCase()) &&
+        (!t.gender || !m.gender || m.gender === t.gender);
+    }).length;
+  };
+
+  const currentHeadTournaments = useMemo(() => {
+    if (!currentHeadProfile) return [];
+    return getTournamentsForHead(currentHeadProfile);
+  }, [currentHeadProfile, tournaments, sportsConfig]);
+
   return (
     <div className="space-y-6" dir="rtl">
       {/* Header and Quick Stats */}
@@ -394,6 +465,210 @@ export const TechCommitteeHeads: React.FC = () => {
           )}
         </div>
       </div>
+
+      {/* Personal Appointment Card & Assigned Championships for Signed-In Tech Committee Head */}
+      {currentHeadProfile && (
+        <div className="bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 rounded-3xl border border-indigo-400/30 shadow-xl overflow-hidden text-white">
+          <div className="p-5 sm:p-6 space-y-5">
+            {/* Top Identity Row */}
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-white/10 pb-4">
+              <div className="flex items-start sm:items-center gap-3.5">
+                {currentHeadProfile.photoUrl ? (
+                  <img
+                    src={currentHeadProfile.photoUrl}
+                    alt={currentHeadProfile.fullName}
+                    className="w-16 h-16 rounded-2xl object-cover border-2 border-amber-400 shadow-lg shrink-0 bg-slate-800"
+                  />
+                ) : (
+                  <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-amber-400/25 to-indigo-500/35 border-2 border-amber-400/80 flex items-center justify-center shrink-0 shadow-lg">
+                    <span className="text-2xl font-black text-amber-300">
+                      {(currentHeadProfile.fullName || 'ر').trim().charAt(0)}
+                    </span>
+                  </div>
+                )}
+
+                <div className="space-y-1 min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-amber-400/20 text-amber-300 border border-amber-400/40 text-[11px] font-black">
+                      <BadgeCheck className="w-3.5 h-3.5" />
+                      <span>بطاقة التعيين الرسمية — رئيس اللجنة التقنية الإقليمية</span>
+                    </span>
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-400/40 text-[10px] font-bold">
+                      <CheckCircle2 className="w-3 h-3" />
+                      <span>تكليف مفعّل</span>
+                    </span>
+                  </div>
+
+                  <h3 className="text-lg sm:text-xl font-black text-white leading-snug">
+                    {currentHeadProfile.fullName}
+                  </h3>
+
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-300">
+                    {currentHeadProfile.workLocation && (
+                      <span className="inline-flex items-center gap-1">
+                        <MapPin className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                        <span>{currentHeadProfile.workLocation}</span>
+                      </span>
+                    )}
+                    {currentHeadProfile.leaseNumber && (
+                      <span className="inline-flex items-center gap-1 font-mono text-[11px] bg-white/10 px-2 py-0.5 rounded-md">
+                        <span>رقم التأجير:</span>
+                        <strong className="text-amber-200">{currentHeadProfile.leaseNumber}</strong>
+                      </span>
+                    )}
+                    {currentHeadProfile.email && (
+                      <span className="inline-flex items-center gap-1">
+                        <Mail className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                        <span>{currentHeadProfile.email}</span>
+                      </span>
+                    )}
+                    {currentHeadProfile.phone && (
+                      <span className="inline-flex items-center gap-1 font-mono" dir="ltr">
+                        <Phone className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                        <span>{currentHeadProfile.phone}</span>
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => navigate('/tournaments')}
+                  className="px-3.5 py-2 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 text-xs font-black transition-all cursor-pointer inline-flex items-center gap-1.5 shadow-sm"
+                >
+                  <Trophy className="w-4 h-4" />
+                  <span>تدبير البطولات</span>
+                  <ExternalLink className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => navigate('/matches')}
+                  className="px-3.5 py-2 rounded-xl bg-white/15 hover:bg-white/25 text-white border border-white/20 text-xs font-black transition-all cursor-pointer inline-flex items-center gap-1.5"
+                >
+                  <Calendar className="w-4 h-4" />
+                  <span>البرنامج والنتائج</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Assigned Sports + Championships */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+              {/* Assigned Sports */}
+              <div className="bg-white/5 border border-white/10 rounded-2xl p-4 space-y-2.5">
+                <div className="flex items-center gap-1.5 text-xs font-black text-amber-300">
+                  <Award className="w-4 h-4" />
+                  <span>التخصصات الرياضية المكلف بها</span>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {(currentHeadProfile.techCommitteeSports || []).length > 0 ? (
+                    (currentHeadProfile.techCommitteeSports || []).map(sk => {
+                      const info = effectiveSportsMap[sk];
+                      if (!info) return null;
+                      return (
+                        <span
+                          key={sk}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/10 border border-white/15 text-xs font-bold text-white"
+                        >
+                          <span>{info.icon}</span>
+                          <span>{info.name}</span>
+                        </span>
+                      );
+                    })
+                  ) : (
+                    <span className="text-xs text-slate-400">لم يتم ربط تخصص رياضي بعد</span>
+                  )}
+                </div>
+              </div>
+
+              {/* Assigned Championships */}
+              <div className="lg:col-span-2 bg-white/5 border border-white/10 rounded-2xl p-4 space-y-3">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-1.5 text-xs font-black text-emerald-300">
+                    <ClipboardList className="w-4 h-4" />
+                    <span>البطولات الإقليمية المكلف بها</span>
+                  </div>
+                  <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-200 border border-emerald-400/30 text-[10px] font-black">
+                    {currentHeadTournaments.length > 0
+                      ? `${currentHeadTournaments.length} بطولة`
+                      : `${(currentHeadProfile.techCommitteeSports || []).length} صنف رياضي`}
+                  </span>
+                </div>
+
+                {currentHeadTournaments.length > 0 ? (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    {currentHeadTournaments.map(t => {
+                      const sInfo = effectiveSportsMap[t.sportId];
+                      const gInfo = t.gender ? GENDER_MAP[t.gender] : null;
+                      const mCount = getMatchesCountForTournament(t);
+                      return (
+                        <div
+                          key={t.id}
+                          onClick={() => navigate('/matches')}
+                          className="p-3 rounded-xl bg-white/10 hover:bg-white/15 border border-white/15 transition-all cursor-pointer flex items-center justify-between gap-2"
+                        >
+                          <div className="min-w-0 space-y-1">
+                            <div className="flex items-center gap-1.5 text-xs font-black text-white truncate">
+                              <span>{sInfo?.icon || '🏆'}</span>
+                              <span className="truncate" title={t.name}>{t.name}</span>
+                            </div>
+                            <div className="flex flex-wrap items-center gap-1.5 text-[10px] text-slate-300 font-bold">
+                              {sInfo && (
+                                <span className="px-1.5 py-0.5 rounded bg-indigo-500/30 text-indigo-100">
+                                  {sInfo.name}
+                                </span>
+                              )}
+                              {t.ageCategory && (
+                                <span className="px-1.5 py-0.5 rounded bg-white/10 text-slate-200">
+                                  {t.ageCategory}
+                                </span>
+                              )}
+                              {gInfo && (
+                                <span className="px-1.5 py-0.5 rounded bg-white/10 text-slate-200">
+                                  {gInfo.icon} {gInfo.name}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                          <span className="px-2 py-1 rounded-lg bg-amber-400/20 text-amber-200 border border-amber-400/30 text-[10px] font-black shrink-0">
+                            {mCount} مباراة
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    {(currentHeadProfile.techCommitteeSports || []).map(sk => {
+                      const sInfo = effectiveSportsMap[sk];
+                      if (!sInfo) return null;
+                      const sportMatchCount = matches.filter(m => areSportIdsEquivalent(m.sportId, sk, sportsConfig)).length;
+                      return (
+                        <div
+                          key={`fallback-tourn-${sk}`}
+                          onClick={() => navigate('/tournaments')}
+                          className="p-3 rounded-xl bg-white/10 hover:bg-white/15 border border-white/15 transition-all cursor-pointer flex items-center justify-between gap-2"
+                        >
+                          <div className="min-w-0">
+                            <p className="text-xs font-black text-white truncate">
+                              {sInfo.icon} البطولة الإقليمية المدرسية لـ {sInfo.name}
+                            </p>
+                            <p className="text-[10px] text-slate-300 mt-0.5">بطولة إقليمية مكلف بالإشراف التقني عليها</p>
+                          </div>
+                          <span className="px-2 py-1 rounded-lg bg-amber-400/20 text-amber-200 border border-amber-400/30 text-[10px] font-black shrink-0">
+                            {sportMatchCount} مباراة
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Stats Cards Dashboard Section */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -560,6 +835,56 @@ export const TechCommitteeHeads: React.FC = () => {
                           )}
                         </div>
                       </div>
+
+                      {/* Assigned Championships for this Head */}
+                      {(() => {
+                        const headTournaments = getTournamentsForHead(head);
+                        return (
+                          <div className="pt-2 border-t border-slate-100">
+                            <p className="text-[11px] text-slate-500 font-bold mb-1.5 flex items-center gap-1">
+                              <Trophy className="w-3.5 h-3.5 text-amber-500" />
+                              <span>البطولات المكلف بها:</span>
+                            </p>
+                            {headTournaments.length > 0 ? (
+                              <div className="flex flex-wrap gap-1.5">
+                                {headTournaments.slice(0, 4).map(t => (
+                                  <span
+                                    key={t.id}
+                                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-amber-50 text-amber-950 border border-amber-200 text-[10px] font-bold"
+                                    title={t.name}
+                                  >
+                                    <span>{effectiveSportsMap[t.sportId]?.icon || '🏆'}</span>
+                                    <span className="truncate max-w-[160px]">{t.name}</span>
+                                  </span>
+                                ))}
+                                {headTournaments.length > 4 && (
+                                  <span className="px-2 py-0.5 rounded-lg bg-slate-100 text-slate-600 text-[10px] font-bold">
+                                    +{headTournaments.length - 4} أخرى
+                                  </span>
+                                )}
+                              </div>
+                            ) : headSportKeys.length > 0 ? (
+                              <div className="flex flex-wrap gap-1.5">
+                                {headSportKeys.map(sk => {
+                                  const sInfo = effectiveSportsMap[sk];
+                                  if (!sInfo) return null;
+                                  return (
+                                    <span
+                                      key={`${head.id}-tourn-${sk}`}
+                                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-amber-50 text-amber-950 border border-amber-200 text-[10px] font-bold"
+                                    >
+                                      <span>{sInfo.icon}</span>
+                                      <span>البطولة الإقليمية لـ {sInfo.name}</span>
+                                    </span>
+                                  );
+                                })}
+                              </div>
+                            ) : (
+                              <span className="text-slate-400 italic text-[11px]">لا توجد بطولات مسندة</span>
+                            )}
+                          </div>
+                        );
+                      })()}
 
                       {/* Contact Details */}
                       <div className="space-y-2 text-xs pt-3 border-t border-slate-100">

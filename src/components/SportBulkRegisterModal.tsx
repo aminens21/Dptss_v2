@@ -680,21 +680,20 @@ export const SportBulkRegisterModal: React.FC<SportBulkRegisterModalProps> = ({
           ((t.affiliationType || 'non_club') === selectedAffiliation || t.affiliationType === 'open')
         );
         if (relevantTournament) {
-          if (relevantTournament.level) {
-            const isAllowed = isSchoolLevelAllowedForTournament(activeSchoolObj.type, relevantTournament.level);
-            if (!isAllowed) {
-              toast.error(`عذراً، السلك التعليمي لمؤسسة "${activeSchoolObj.name}" (${activeSchoolObj.type}) غير مسموح له بالمشاركة في هذه البطولة المخصصة لـ (${getTournamentLevelAr(relevantTournament.level)})`);
-              setIsSubmitting(false);
-              return;
-            }
+          const isAllowed = isSchoolLevelAllowedForTournament(activeSchoolObj.type, relevantTournament.level);
+          if (!isAllowed) {
+            toast.error(`عذراً، السلك التعليمي لمؤسسة "${activeSchoolObj.name}" (${activeSchoolObj.type}) غير مسموح له بالمشاركة في هذه البطولة المخصصة لـ (${getTournamentLevelAr(relevantTournament.level)})`);
+            setIsSubmitting(false);
+            return;
+          }
 
-            // Check teacher cadre (extra safety)
-            if (userProfile?.teachingCadre && !isTeacherLevelAllowedForTournament(userProfile.teachingCadre, relevantTournament.level)) {
-              const cadreAr = userProfile.teachingCadre.includes('PRIMARY') ? 'ابتدائي' : userProfile.teachingCadre.includes('MIDDLE') ? 'إعدادي' : 'تأهيلي';
-              toast.error(`عذراً، بصفتك أستاذ سلك (${cadreAr})، لا يمكنك التسجيل في بطولة مخصصة لـ (${getTournamentLevelAr(relevantTournament.level)})`);
-              setIsSubmitting(false);
-              return;
-            }
+          // Check teacher cadre (extra safety)
+          const resolvedCadre = resolveEffectiveTeacherCadre(userProfile, activeSchoolObj);
+          if (resolvedCadre && !isTeacherLevelAllowedForTournament(resolvedCadre, relevantTournament.level, relevantTournament.ageCategory)) {
+            const cadreAr = resolvedCadre === 'Primary' ? 'ابتدائي' : resolvedCadre === 'Middle' ? 'إعدادي' : 'تأهيلي';
+            toast.error(`عذراً، بصفتك أستاذ سلك (${cadreAr})، لا يمكنك التسجيل في بطولة مخصصة لـ (${getTournamentLevelAr(relevantTournament.level)})`);
+            setIsSubmitting(false);
+            return;
           }
 
           if (!isSchoolSectorAllowedForTournament(activeSchoolObj, relevantTournament)) {

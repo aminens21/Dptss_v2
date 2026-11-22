@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { Tournament, Match, School, User, Venue, Referee } from '../types';
-import { DataService, SPORTS_MAP } from '../lib/dataService';
+import { Tournament, Match, School, User, Venue, Referee, BlockedSchedulePeriod } from '../types';
+import { DataService, SPORTS_MAP, findAllBlockedPeriodsForDate, isMatchProgramPendingApproval } from '../lib/dataService';
 import { SPORTS_CONFIG } from '../config/sportsConfig';
 import { ProgramExportModal } from './ProgramExportModal';
 import {
@@ -33,7 +33,8 @@ import {
   Plus,
   Layers,
   ShieldCheck,
-  X
+  X,
+  Undo2
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { formatMatchDate } from '../lib/utils';
@@ -57,6 +58,7 @@ export interface CalendarEventItem {
   referees?: string[];
   refereesText?: string;
   notes?: string;
+  programApprovalStatus?: 'pending' | 'approved';
   isRealData?: boolean;
   rawTournament?: Tournament;
   rawMatch?: Match;
@@ -160,10 +162,13 @@ export const ChampionshipCalendarView: React.FC<ChampionshipCalendarViewProps> =
   const [searchQuery, setSearchQuery] = useState('');
   const [loadedReferees, setLoadedReferees] = useState<Referee[]>([]);
   const [loadedTeachers, setLoadedTeachers] = useState<User[]>([]);
+  const [blockedPeriods, setBlockedPeriods] = useState<BlockedSchedulePeriod[]>([]);
 
   useEffect(() => {
     DataService.getReferees().then(setLoadedReferees).catch(() => {});
     DataService.getTeachers().then(setLoadedTeachers).catch(() => {});
+    const unsubBlocked = DataService.subscribeToBlockedScheduleDates(setBlockedPeriods);
+    return () => unsubBlocked();
   }, []);
 
   // Keep sportFilter locked/valid when scoped to Technical Committee Head
@@ -182,7 +187,7 @@ export const ChampionshipCalendarView: React.FC<ChampionshipCalendarViewProps> =
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   const [exportModalInitialSports, setExportModalInitialSports] = useState<string[]>([]);
 
-  // Build calendar events EXCLUSIVELY from real matches, scoped strictly for Tech Head
+  // Build calendar events for monthly/screen views: hide Technical Committee Heads assigned as referees
   const allEvents = useMemo<CalendarEventItem[]>(() => {
     const allowedSet = isScopedToTechHead ? new Set(effectiveAllowedSportIds || []) : null;
     const matchById = new Map<string, Match>();
@@ -219,9 +224,24 @@ export const ChampionshipCalendarView: React.FC<ChampionshipCalendarViewProps> =
         referees: ev.referees,
         refereesText: ev.refereesText,
         notes: (ev.notes || '').trim(),
+        programApprovalStatus: ev.programApprovalStatus,
         isRealData: true,
         rawMatch: matchById.get(ev.id)
       }));
+  }, [tournaments, matches, schools, venues, loadedReferees, loadedTeachers, isScopedToTechHead, effectiveAllowedSportIds]);
+
+  // Build export events WITH Technical Committee Heads visible when assigned to a match (البرنامج المحمل)
+  const allExportEvents = useMemo(() => {
+    const allowedSet = isScopedToTechHead ? new Set(effectiveAllowedSportIds || []) : null;
+    const built = buildAllCalendarEvents(
+      tournaments,
+      matches,
+      schools,
+      venues || [],
+      loadedReferees,
+      loadedTeachers
+    );
+    return built.filter(ev => !allowedSet || allowedSet.has(ev.sportId));
   }, [tournaments, matches, schools, venues, loadedReferees, loadedTeachers, isScopedToTechHead, effectiveAllowedSportIds]);
 
   // Available sports for dropdown (strictly Tech Head's assigned sports, or sports that have matches for Admin)
@@ -314,6 +334,31 @@ export const ChampionshipCalendarView: React.FC<ChampionshipCalendarViewProps> =
     return eventsByDate[selectedDateStr] || [];
   }, [eventsByDate, selectedDateStr]);
 
+  const selectedDateBlocked = useMemo(() => {
+    return findAllBlockedPeriodsForDate(selectedDateStr, ['ALL'], blockedPeriods);
+  }, [selectedDateStr, blockedPeriods]);
+
+  const selectedDateHolidays = useMemo(() => {
+    return selectedDateBlocked.filter(p => p.type === 'holiday');
+  }, [selectedDateBlocked]);
+
+  const selectedDateExams = useMemo(() => {
+    return selectedDateBlocked.filter(p => p.type === 'exams');
+  }, [selectedDateBlocked]);
+
+  const quickModalDateBlocked = useMemo(() => {
+    if (!activeQuickModalDate) return [];
+    return findAllBlockedPeriodsForDate(activeQuickModalDate, ['ALL'], blockedPeriods);
+  }, [activeQuickModalDate, blockedPeriods]);
+
+  const quickModalDateHolidays = useMemo(() => {
+    return quickModalDateBlocked.filter(p => p.type === 'holiday');
+  }, [quickModalDateBlocked]);
+
+  const quickModalDateExams = useMemo(() => {
+    return quickModalDateBlocked.filter(p => p.type === 'exams');
+  }, [quickModalDateBlocked]);
+
   // Days in month logic
   const year = currentDate.getFullYear();
   const month = currentDate.getMonth(); // 0-indexed
@@ -378,11 +423,105 @@ export const ChampionshipCalendarView: React.FC<ChampionshipCalendarViewProps> =
     }
   };
 
+  const [approvingSportId, setApprovingSportId] = useState<string | null>(null);
+  const [revertingSportId, setRevertingSportId] = useState<string | null>(null);
+
+  const handleApproveMatchProgram = async (matchId: string) => {
+    if (!effectiveIsCentralAdmin) return;
+    await DataService.approveMatchProgram(matchId, activeUser?.fullName || 'المسير المركزي');
+    toast.success('تمت المصادقة على برمجة المباراة وإظهارها بلونها الطبيعي');
+  };
+
+  const handleRevertMatchProgram = async (matchId: string) => {
+    if (!effectiveIsCentralAdmin) return;
+    await DataService.revertMatchProgram(matchId);
+    toast.success('تم التراجع عن مصادقة المباراة وإعادتها إلى حالة انتظار المصادقة 🔄');
+  };
+
+  const pendingCalendarBySport = useMemo(() => {
+    const map = new Map<string, { sportId: string; sportName: string; sportIcon: string; ids: Set<string> }>();
+    allEvents.forEach(ev => {
+      if (ev.rawMatch?.id && isMatchProgramPendingApproval(ev.rawMatch)) {
+        const sid = ev.sportId || ev.rawMatch.sportId || 'other';
+        const sp = SPORTS_MAP[sid];
+        const existing = map.get(sid) || {
+          sportId: sid,
+          sportName: ev.sportName || sp?.name || sid,
+          sportIcon: ev.sportIcon || sp?.icon || '🏆',
+          ids: new Set<string>()
+        };
+        existing.ids.add(ev.rawMatch.id);
+        map.set(sid, existing);
+      }
+    });
+    return Array.from(map.values()).map(item => ({
+      ...item,
+      matchIds: Array.from(item.ids)
+    }));
+  }, [allEvents]);
+
+  const approvedCalendarBySport = useMemo(() => {
+    const map = new Map<string, { sportId: string; sportName: string; sportIcon: string; ids: Set<string> }>();
+    allEvents.forEach(ev => {
+      if (ev.rawMatch?.id && !isMatchProgramPendingApproval(ev.rawMatch)) {
+        const sid = ev.sportId || ev.rawMatch.sportId || 'other';
+        const sp = SPORTS_MAP[sid];
+        const existing = map.get(sid) || {
+          sportId: sid,
+          sportName: ev.sportName || sp?.name || sid,
+          sportIcon: ev.sportIcon || sp?.icon || '🏆',
+          ids: new Set<string>()
+        };
+        existing.ids.add(ev.rawMatch.id);
+        map.set(sid, existing);
+      }
+    });
+    return Array.from(map.values()).map(item => ({
+      ...item,
+      matchIds: Array.from(item.ids)
+    }));
+  }, [allEvents]);
+
+  const totalPendingCalendarCount = useMemo(
+    () => pendingCalendarBySport.reduce((sum, s) => sum + s.matchIds.length, 0),
+    [pendingCalendarBySport]
+  );
+
+  const totalApprovedCalendarCount = useMemo(
+    () => approvedCalendarBySport.reduce((sum, s) => sum + s.matchIds.length, 0),
+    [approvedCalendarBySport]
+  );
+
+  const handleBatchApproveSportCalendarProgram = async (sportId: string, sportName: string, matchIds: string[]) => {
+    if (!effectiveIsCentralAdmin || matchIds.length === 0) return;
+    setApprovingSportId(sportId);
+    try {
+      const count = await DataService.approveMatchesProgramBatch(
+        matchIds,
+        activeUser?.fullName || 'المسير المركزي'
+      );
+      toast.success(`تمت المصادقة على برنامج ${sportName} (${count} مباراة) وإظهارها بلونها الطبيعي ✅`);
+    } finally {
+      setApprovingSportId(null);
+    }
+  };
+
+  const handleBatchRevertSportCalendarProgram = async (sportId: string, sportName: string, matchIds: string[]) => {
+    if (!effectiveIsCentralAdmin || matchIds.length === 0) return;
+    setRevertingSportId(sportId);
+    try {
+      const count = await DataService.revertMatchesProgramBatch(matchIds);
+      toast.success(`تم التراجع عن مصادقة برنامج ${sportName} (${count} مباراة) وإعادته إلى انتظار المصادقة 🔄`);
+    } finally {
+      setRevertingSportId(null);
+    }
+  };
+
   // ==========================================
   // EXPORT HANDLERS (PDF / WORD / PRINT)
   // ==========================================
   const getCalendarExportOptions = () => ({
-    events: allEvents.map(e => ({
+    events: allExportEvents.map(e => ({
       ...e,
       sportName: e.sportName || SPORTS_MAP[e.sportId]?.name || e.sportId,
       sportIcon: e.sportIcon || SPORTS_MAP[e.sportId]?.icon || '🏆'
@@ -601,6 +740,83 @@ export const ChampionshipCalendarView: React.FC<ChampionshipCalendarViewProps> =
         )}
       </div>
 
+      {/* Central Admin Per-Sport Program Approval & Revert Banner in Calendar */}
+      {effectiveIsCentralAdmin && (pendingCalendarBySport.length > 0 || approvedCalendarBySport.length > 0) && (
+        <div className="bg-slate-100 border border-slate-300 rounded-2xl px-4 py-3 space-y-3 shadow-xs">
+          {pendingCalendarBySport.length > 0 && (
+            <div className="space-y-2">
+              <div className="flex items-center gap-2.5">
+                <span className="w-8 h-8 rounded-xl bg-red-100 text-red-700 border border-red-200 flex items-center justify-center text-sm font-black shrink-0">
+                  ⏳
+                </span>
+                <div>
+                  <p className="text-xs font-black text-red-700">
+                    برامج في انتظار المصادقة ({totalPendingCalendarCount} مباراة) — مصادقة مستقلة لكل بطولة
+                  </p>
+                  <p className="text-[11px] font-medium text-slate-600">
+                    يمكنك المصادقة على برنامج كل رياضة على حدة مع إبقاء باقي الرياضات في انتظار المصادقة.
+                  </p>
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                {pendingCalendarBySport.map(item => (
+                  <button
+                    key={`cal-approve-${item.sportId}`}
+                    type="button"
+                    disabled={approvingSportId === item.sportId}
+                    onClick={() => handleBatchApproveSportCalendarProgram(item.sportId, item.sportName, item.matchIds)}
+                    className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-black shadow-xs transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                  >
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    <span>
+                      {approvingSportId === item.sportId
+                        ? 'جاري المصادقة...'
+                        : `${item.sportIcon} المصادقة على برنامج ${item.sportName} (${item.matchIds.length})`}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {approvedCalendarBySport.length > 0 && (
+            <div className={`space-y-2 ${pendingCalendarBySport.length > 0 ? 'pt-3 border-t border-slate-300/80' : ''}`}>
+              <div className="flex items-center gap-2.5">
+                <span className="w-8 h-8 rounded-xl bg-emerald-100 text-emerald-700 border border-emerald-200 flex items-center justify-center text-sm font-black shrink-0">
+                  ✅
+                </span>
+                <div>
+                  <p className="text-xs font-black text-emerald-800">
+                    برامج مصادق عليها ({totalApprovedCalendarCount} مباراة) — إمكانية التراجع عن المصادقة
+                  </p>
+                  <p className="text-[11px] font-medium text-slate-600">
+                    يمكنك التراجع عن مصادقة برنامج أي بطولة رياضية لإعادته إلى حالة انتظار المصادقة (باللون الرمادي).
+                  </p>
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                {approvedCalendarBySport.map(item => (
+                  <button
+                    key={`cal-revert-${item.sportId}`}
+                    type="button"
+                    disabled={revertingSportId === item.sportId}
+                    onClick={() => handleBatchRevertSportCalendarProgram(item.sportId, item.sportName, item.matchIds)}
+                    className="px-3 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-[11px] font-black shadow-xs transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                  >
+                    <Undo2 className="w-3.5 h-3.5" />
+                    <span>
+                      {revertingSportId === item.sportId
+                        ? 'جاري التراجع...'
+                        : `${item.sportIcon} التراجع عن مصادقة برنامج ${item.sportName} (${item.matchIds.length})`}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Main Grid: Interactive Calendar on Right (8 cols) + Selected Day Events on Left (4 cols) */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
         
@@ -680,56 +896,111 @@ export const ChampionshipCalendarView: React.FC<ChampionshipCalendarViewProps> =
               const dayNumber = i + 1;
               const dateKey = `${year}-${String(month + 1).padStart(2, '0')}-${String(dayNumber).padStart(2, '0')}`;
               const dayEvents = eventsByDate[dateKey] || [];
+              const dayBlocked = findAllBlockedPeriodsForDate(dateKey, ['ALL'], blockedPeriods);
+              const dayHolidays = dayBlocked.filter(p => p.type === 'holiday');
+              const dayExams = dayBlocked.filter(p => p.type === 'exams');
               const isSelected = selectedDateStr === dateKey;
               const hasEvents = dayEvents.length > 0;
+              const hasHolidays = dayHolidays.length > 0;
+              const hasExams = dayExams.length > 0;
+              const holidayTitles = dayHolidays.map(h => h.title).join(' • ');
+              const examTitles = dayExams.map(e => e.title).join(' • ');
+              const titleParts: string[] = [];
+              if (hasHolidays) titleParts.push(`🏖️ عطلة مدرسية: ${holidayTitles}`);
+              if (hasExams) titleParts.push(`📝 أيام الامتحانات: ${examTitles}`);
 
               return (
                 <div
                   key={dateKey}
+                  title={titleParts.length > 0 ? titleParts.join('\n') : undefined}
                   onMouseEnter={() => setHoveredDateKey(dateKey)}
                   onMouseLeave={() => setHoveredDateKey(null)}
                   onClick={() => {
                     setSelectedDateStr(dateKey);
-                    if (hasEvents) {
+                    if (hasEvents || hasHolidays || hasExams) {
                       setActiveQuickModalDate(dateKey);
                     }
                   }}
                   className={`min-h-[75px] sm:min-h-[95px] p-1.5 rounded-xl border transition-all cursor-pointer flex flex-col justify-between group relative ${
-                    isSelected
+                    isSelected && hasHolidays
+                      ? 'border-red-600 bg-red-100 ring-2 ring-red-500/30 shadow-xs'
+                      : isSelected && hasExams
+                      ? 'border-blue-600 bg-blue-100 ring-2 ring-blue-500/30 shadow-xs'
+                      : isSelected
                       ? 'border-blue-600 bg-blue-50/70 ring-2 ring-blue-500/30 shadow-xs'
+                      : hasHolidays
+                      ? 'border-red-200 bg-red-50 hover:bg-red-100/80 hover:border-red-300 shadow-3xs'
+                      : hasExams
+                      ? 'border-blue-300 bg-blue-50/95 hover:bg-blue-100/80 hover:border-blue-400 shadow-3xs'
                       : hasEvents
                       ? 'border-blue-200 bg-white hover:bg-blue-50/30 hover:border-blue-300 shadow-3xs'
                       : 'border-slate-100 bg-white hover:bg-slate-50 hover:border-slate-200'
                   }`}
                 >
                   {/* Hover Popover preview tooltip on hover */}
-                  {hoveredDateKey === dateKey && hasEvents && (
-                    <div className="absolute z-40 bottom-full mb-2 right-0 w-64 bg-slate-900 text-white rounded-xl p-3 shadow-2xl border border-slate-700 animate-in fade-in zoom-in-95 duration-100 pointer-events-none" dir="rtl">
+                  {hoveredDateKey === dateKey && (hasEvents || hasHolidays || hasExams) && (
+                    <div className="absolute z-40 bottom-full mb-2 right-0 w-72 bg-slate-900 text-white rounded-xl p-3 shadow-2xl border border-slate-700 animate-in fade-in zoom-in-95 duration-100 pointer-events-none" dir="rtl">
                       <div className="flex items-center justify-between pb-1.5 border-b border-slate-700 text-[10px] text-blue-300 font-bold">
                         <span className="flex items-center gap-1">
-                          <CalendarDays className="w-3 h-3 text-blue-400" />
+                          <CalendarDays className={`w-3 h-3 ${hasHolidays ? 'text-red-400' : 'text-blue-400'}`} />
                           <span>{dateKey}</span>
                         </span>
-                        <span className="bg-blue-600 text-white px-1.5 py-0.5 rounded-full text-[9px]">
-                          {dayEvents.length} {dayEvents.length === 1 ? 'مباراة' : 'مباريات'}
-                        </span>
+                        {hasHolidays ? (
+                          <span className="bg-red-500/90 text-white px-1.5 py-0.5 rounded-full text-[9px] font-black">
+                            عطلة مدرسية
+                          </span>
+                        ) : hasExams ? (
+                          <span className="bg-blue-600 text-white px-1.5 py-0.5 rounded-full text-[9px] font-black">
+                            أيام الامتحانات
+                          </span>
+                        ) : (
+                          <span className="bg-blue-600 text-white px-1.5 py-0.5 rounded-full text-[9px]">
+                            {dayEvents.length} {dayEvents.length === 1 ? 'مباراة' : 'مباريات'}
+                          </span>
+                        )}
                       </div>
-                      <div className="mt-2 space-y-1.5 max-h-36 overflow-y-auto">
-                        {dayEvents.slice(0, 3).map(ev => (
-                          <div key={`hov-${ev.id}`} className="p-1.5 rounded-lg bg-slate-800 border border-slate-700 text-[10px]">
-                            <div className="flex items-center gap-1 font-bold text-blue-200 truncate">
-                              <span>{ev.sportIcon}</span>
-                              <span className="truncate">{ev.title}</span>
+                      {hasHolidays && (
+                        <div className="mt-2 space-y-1">
+                          {dayHolidays.map(h => (
+                            <div key={`hov-hol-${h.id}`} className="p-1.5 rounded-lg bg-red-950/90 border border-red-700/80 text-[10px] text-red-100 font-black">
+                              🏖️ {h.title}
+                              <div className="text-[9px] font-bold text-red-300 mt-0.5">
+                                ممنوع برمجة المباريات في هذا التاريخ
+                              </div>
                             </div>
-                            <div className="text-[9px] text-slate-300 mt-1 flex items-center justify-between font-medium">
-                              <span className="truncate max-w-[120px]">📍 {ev.venue}</span>
-                              <span>⏰ {ev.time}</span>
+                          ))}
+                        </div>
+                      )}
+                      {hasExams && (
+                        <div className="mt-2 space-y-1 max-h-32 overflow-y-auto">
+                          {dayExams.map(ex => (
+                            <div key={`hov-ex-${ex.id}`} className="p-1.5 rounded-lg bg-blue-950/90 border border-blue-700/80 text-[10px] text-blue-100 font-black">
+                              📝 {ex.title}
+                              <div className="text-[9px] font-bold text-blue-300 mt-0.5">
+                                يُمنع برمجة بطولات هذا السلك في هذا التاريخ
+                              </div>
                             </div>
-                          </div>
-                        ))}
-                      </div>
+                          ))}
+                        </div>
+                      )}
+                      {hasEvents && (
+                        <div className="mt-2 space-y-1.5 max-h-36 overflow-y-auto">
+                          {dayEvents.slice(0, 3).map(ev => (
+                            <div key={`hov-${ev.id}`} className="p-1.5 rounded-lg bg-slate-800 border border-slate-700 text-[10px]">
+                              <div className="flex items-center gap-1 font-bold text-blue-200 truncate">
+                                <span>{ev.sportIcon}</span>
+                                <span className="truncate">{ev.title}</span>
+                              </div>
+                              <div className="text-[9px] text-slate-300 mt-1 flex items-center justify-between font-medium">
+                                <span className="truncate max-w-[120px]">📍 {ev.venue}</span>
+                                <span>⏰ {ev.time}</span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                       <div className="mt-1.5 text-[9px] text-blue-400 font-extrabold text-center border-t border-slate-800 pt-1">
-                        ✨ انقر لالتقاط الخلية واقتطاع النافذة المنبثقة
+                        ✨ انقر لعرض التفاصيل الكاملة
                       </div>
                     </div>
                   )}
@@ -738,8 +1009,14 @@ export const ChampionshipCalendarView: React.FC<ChampionshipCalendarViewProps> =
                   <div className="flex items-center justify-between">
                     <span
                       className={`text-xs sm:text-sm font-black w-6 h-6 rounded-full flex items-center justify-center transition-colors ${
-                        isSelected
+                        isSelected && hasHolidays
+                          ? 'bg-red-600 text-white shadow-xs'
+                          : isSelected
                           ? 'bg-blue-600 text-white shadow-xs'
+                          : hasHolidays
+                          ? 'text-red-700 font-black'
+                          : hasExams
+                          ? 'text-blue-700 font-black'
                           : hasEvents
                           ? 'text-blue-700 font-black'
                           : 'text-slate-700'
@@ -748,28 +1025,62 @@ export const ChampionshipCalendarView: React.FC<ChampionshipCalendarViewProps> =
                       {dayNumber}
                     </span>
 
-                    {hasEvents && (
-                      <span className="text-[10px] bg-blue-100 text-blue-800 font-bold px-1.5 py-0.5 rounded-full">
-                        {dayEvents.length}
-                      </span>
-                    )}
+                    <div className="flex items-center gap-1">
+                      {hasHolidays && (
+                        <span className="text-[9px] bg-red-100 text-red-800 border border-red-200 font-black px-1.5 py-0.2 rounded-full">
+                          عطلة
+                        </span>
+                      )}
+                      {hasExams && (
+                        <span className="text-[9px] bg-blue-600 text-white border border-blue-700 font-black px-1.5 py-0.2 rounded-full">
+                          امتحانات
+                        </span>
+                      )}
+                      {hasEvents && (
+                        <span className="text-[10px] bg-blue-100 text-blue-800 font-bold px-1.5 py-0.5 rounded-full">
+                          {dayEvents.length}
+                        </span>
+                      )}
+                    </div>
                   </div>
 
-                  {/* Event Badges inside calendar cell */}
+                  {/* Holiday, Exam & Event Badges inside calendar cell */}
                   <div className="mt-1 space-y-1 overflow-hidden">
-                    {dayEvents.slice(0, 2).map(ev => {
-                      const scopeColor =
-                        ev.scope === 'national'
-                          ? 'bg-amber-100 text-amber-900 border-amber-300'
-                          : ev.scope === 'regional'
-                          ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
-                          : 'bg-blue-100 text-blue-800 border-blue-300';
+                    {dayHolidays.slice(0, 1).map(h => (
+                      <div
+                        key={`cell-hol-${h.id}`}
+                        className="text-[9px] sm:text-[10px] font-black px-1.5 py-0.5 rounded truncate border bg-red-100/90 text-red-800 border-red-300"
+                        title={`عطلة مدرسية: ${holidayTitles}`}
+                      >
+                        <span>🏖️ {h.title}{dayHolidays.length > 1 ? ` (+${dayHolidays.length - 1})` : ''}</span>
+                      </div>
+                    ))}
+
+                    {!hasHolidays && dayExams.slice(0, 1).map(ex => (
+                      <div
+                        key={`cell-ex-${ex.id}`}
+                        className="text-[9px] sm:text-[10px] font-black px-1.5 py-0.5 rounded truncate border bg-blue-600/10 text-blue-900 border-blue-300"
+                        title={`أيام الامتحانات: ${examTitles}`}
+                      >
+                        <span>📝 {ex.title}{dayExams.length > 1 ? ` (+${dayExams.length - 1})` : ''}</span>
+                      </div>
+                    ))}
+
+                    {dayEvents.slice(0, hasHolidays || hasExams ? 1 : 2).map(ev => {
+                      const isPendingApproval = ev.rawMatch ? isMatchProgramPendingApproval(ev.rawMatch) : ev.programApprovalStatus === 'pending';
+                      const scopeColor = isPendingApproval
+                        ? 'bg-slate-200 text-slate-600 border-slate-300'
+                        : ev.scope === 'national'
+                        ? 'bg-amber-100 text-amber-900 border-amber-300'
+                        : ev.scope === 'regional'
+                        ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
+                        : 'bg-blue-100 text-blue-800 border-blue-300';
 
                       return (
                         <div
                           key={ev.id}
                           className={`text-[9px] sm:text-[10px] font-bold px-1 py-0.5 rounded truncate border ${scopeColor}`}
-                          title={`${ev.sportName}: ${ev.title}`}
+                          title={`${ev.sportName}: ${ev.title}${isPendingApproval ? ' (في انتظار المصادقة على البرنامج)' : ''}`}
                         >
                           <span className="ml-1">{ev.sportIcon}</span>
                           <span>{ev.title}</span>
@@ -777,9 +1088,9 @@ export const ChampionshipCalendarView: React.FC<ChampionshipCalendarViewProps> =
                       );
                     })}
 
-                    {dayEvents.length > 2 && (
+                    {dayEvents.length > (hasHolidays || hasExams ? 1 : 2) && (
                       <div className="text-[9px] font-bold text-slate-400 text-center">
-                        +{dayEvents.length - 2} المزيد...
+                        +{dayEvents.length - (hasHolidays || hasExams ? 1 : 2)} المزيد...
                       </div>
                     )}
                   </div>
@@ -802,6 +1113,14 @@ export const ChampionshipCalendarView: React.FC<ChampionshipCalendarViewProps> =
               <span className="flex items-center gap-1.5">
                 <span className="w-2.5 h-2.5 rounded-full bg-amber-600" />
                 <span>بطولة وطنية</span>
+              </span>
+              <span className="flex items-center gap-1.5 text-red-700 font-bold">
+                <span className="w-3 h-3 rounded bg-red-100 border border-red-300 inline-block" />
+                <span>عطلة مدرسية (يُمنع فيها البرمجة)</span>
+              </span>
+              <span className="flex items-center gap-1.5 text-blue-700 font-bold">
+                <span className="w-3 h-3 rounded bg-blue-100 border border-blue-300 inline-block" />
+                <span>أيام الامتحانات (يُمنع برمجة السلك المعني)</span>
               </span>
             </div>
 
@@ -831,19 +1150,81 @@ export const ChampionshipCalendarView: React.FC<ChampionshipCalendarViewProps> =
               )}
             </div>
 
+            {/* Holiday Notice for Selected Date */}
+            {selectedDateHolidays.length > 0 && (
+              <div className="mt-3 p-3 rounded-2xl bg-red-50 border border-red-200 space-y-1.5">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[11px] font-black text-red-800 flex items-center gap-1.5">
+                    <span>🏖️ عطلة مدرسية رسمية</span>
+                  </span>
+                  <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-red-100 text-red-800 border border-red-300">
+                    البرمجة ممنوعة
+                  </span>
+                </div>
+                {selectedDateHolidays.map(h => (
+                  <div key={`side-hol-${h.id}`} className="text-xs font-black text-red-900">
+                    • {h.title}{' '}
+                    <span className="text-[10px] font-bold text-red-700 font-mono" dir="ltr">
+                      ({h.startDate === h.endDate ? h.startDate : `${h.startDate} → ${h.endDate}`})
+                    </span>
+                  </div>
+                ))}
+                <p className="text-[10.5px] font-bold text-red-700 leading-relaxed">
+                  لا يُسمح ببرمجة أي مباراة رياضية خلال العطل المدرسية المعتمدة.
+                </p>
+              </div>
+            )}
+
+            {/* Exam Notice for Selected Date */}
+            {selectedDateExams.length > 0 && (
+              <div className="mt-3 p-3 rounded-2xl bg-blue-50 border border-blue-200 space-y-1.5">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[11px] font-black text-blue-900 flex items-center gap-1.5">
+                    <span>📝 فترة الامتحانات</span>
+                  </span>
+                  <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 border border-blue-300">
+                    ممنوع للسلك المعني
+                  </span>
+                </div>
+                {selectedDateExams.map(ex => (
+                  <div key={`side-ex-${ex.id}`} className="text-xs font-black text-blue-950">
+                    • {ex.title}{' '}
+                    <span className="text-[10px] font-bold text-blue-700 font-mono" dir="ltr">
+                      ({ex.startDate === ex.endDate ? ex.startDate : `${ex.startDate} → ${ex.endDate}`})
+                    </span>
+                  </div>
+                ))}
+                <p className="text-[10.5px] font-bold text-blue-800 leading-relaxed">
+                  يُمنع برمجة بطولات السلك المعني خلال تواريخ الامتحانات الخاصة به.
+                </p>
+              </div>
+            )}
+
             {/* List of Events on Selected Day */}
             <div className="mt-4 space-y-3">
               {selectedDateEvents.length === 0 ? (
-                <div className="text-center py-8 px-4 bg-slate-50 rounded-2xl border border-dashed border-slate-200">
-                  <div className="w-12 h-12 rounded-full bg-slate-100 text-slate-400 flex items-center justify-center mx-auto mb-2 text-xl">
-                    📅
+                <div className={`text-center py-8 px-4 rounded-2xl border border-dashed ${
+                  selectedDateHolidays.length > 0
+                    ? 'bg-red-50/40 border-red-200'
+                    : 'bg-slate-50 border-slate-200'
+                }`}>
+                  <div className={`w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-2 text-xl ${
+                    selectedDateHolidays.length > 0 ? 'bg-red-100 text-red-600' : 'bg-slate-100 text-slate-400'
+                  }`}>
+                    {selectedDateHolidays.length > 0 ? '🏖️' : '📅'}
                   </div>
-                  <h5 className="text-xs font-bold text-slate-700">لا توجد بطولات أو مباريات في هذا اليوم</h5>
+                  <h5 className="text-xs font-bold text-slate-700">
+                    {selectedDateHolidays.length > 0
+                      ? 'يوم عطلة مدرسية — لا توجد مباريات مبرمجة'
+                      : 'لا توجد بطولات أو مباريات في هذا اليوم'}
+                  </h5>
                   <p className="text-[11px] text-slate-400 mt-1">
-                    يمكنك استعراض الأيام المميزة في الرزنامة، أو برمجة نشاط أو مباراة جديدة في هذا التاريخ.
+                    {selectedDateHolidays.length > 0
+                      ? 'تُمنع برمجة أي مقابلة في تواريخ العطل المدرسية.'
+                      : 'يمكنك استعراض الأيام المميزة في الرزنامة، أو برمجة نشاط أو مباراة جديدة في هذا التاريخ.'}
                   </p>
 
-                  {!isTeacher && onOpenCreateMatch && (
+                  {!isTeacher && onOpenCreateMatch && selectedDateHolidays.length === 0 && (
                     <button
                       onClick={() => onOpenCreateMatch(selectedDateStr)}
                       className="mt-3.5 inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition-all cursor-pointer"
@@ -854,30 +1235,45 @@ export const ChampionshipCalendarView: React.FC<ChampionshipCalendarViewProps> =
                   )}
                 </div>
               ) : (
-                selectedDateEvents.map(ev => (
+                selectedDateEvents.map(ev => {
+                  const isPendingApproval = ev.rawMatch ? isMatchProgramPendingApproval(ev.rawMatch) : ev.programApprovalStatus === 'pending';
+                  const displayedRefs = ev.refereesText && ev.refereesText !== '-' ? ev.refereesText : 'يعين لاحقاً';
+                  return (
                   <div
                     key={ev.id}
-                    className="p-3.5 rounded-xl border border-slate-200 bg-gradient-to-b from-white to-slate-50/50 hover:border-blue-300 transition-all shadow-3xs space-y-2.5"
+                    className={`p-3.5 rounded-xl border transition-all shadow-3xs space-y-2.5 ${
+                      isPendingApproval
+                        ? 'bg-slate-200/90 border-slate-300 text-slate-600'
+                        : 'border-slate-200 bg-gradient-to-b from-white to-slate-50/50 hover:border-blue-300'
+                    }`}
                   >
-                    <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-start justify-between gap-2 flex-wrap">
                       <div className="flex items-center gap-2">
-                        <span className="w-9 h-9 rounded-xl bg-blue-50 text-blue-700 text-lg flex items-center justify-center shrink-0 border border-blue-100">
+                        <span className={`w-9 h-9 rounded-xl text-lg flex items-center justify-center shrink-0 border ${
+                          isPendingApproval ? 'bg-slate-300/70 text-slate-600 border-slate-300 grayscale' : 'bg-blue-50 text-blue-700 border-blue-100'
+                        }`}>
                           {ev.sportIcon}
                         </span>
                         <div>
                           <h5 className="text-xs font-black text-slate-800 leading-tight">
                             {ev.title}
                           </h5>
-                          <span className="text-[10px] text-slate-400 font-bold block">
+                          <span className="text-[10px] text-slate-500 font-bold block">
                             رياضة: {ev.sportName}
                           </span>
                         </div>
                       </div>
 
+                      {isPendingApproval && (
+                        <span className="px-2 py-0.5 rounded-full bg-red-50 text-red-700 border border-red-300 text-[10px] font-black">
+                          في انتظار المصادقة على البرنامج
+                        </span>
+                      )}
+
                       {getScopeBadge(ev.scope)}
                     </div>
 
-                    <div className="text-[11px] text-slate-600 space-y-1 pt-1 border-t border-slate-100">
+                    <div className="text-[11px] text-slate-600 space-y-1 pt-1 border-t border-slate-200/70">
                       <div className="flex items-center gap-1.5">
                         <MapPin className="h-3.5 w-3.5 text-slate-400 shrink-0" />
                         <span className="font-semibold text-slate-700">{ev.venue}</span>
@@ -907,18 +1303,38 @@ export const ChampionshipCalendarView: React.FC<ChampionshipCalendarViewProps> =
                         </div>
                       )}
 
-                      {ev.refereesText && ev.refereesText !== '-' && (
-                        <div className="flex items-center gap-1.5 text-slate-500">
-                          <ShieldCheck className="h-3.5 w-3.5 text-indigo-500 shrink-0" />
-                          <span>الحكام: <strong className="text-slate-700">{ev.refereesText}</strong></span>
-                        </div>
-                      )}
+                      <div className="flex items-center gap-1.5 text-slate-500">
+                        <ShieldCheck className="h-3.5 w-3.5 text-indigo-500 shrink-0" />
+                        <span>الحكام: <strong className="text-slate-700">{displayedRefs}</strong></span>
+                      </div>
                     </div>
 
                     {ev.notes && (
-                      <div className="text-[10px] bg-white p-2 rounded-lg border border-slate-200/80 text-slate-500 leading-relaxed">
+                      <div className="text-[10px] bg-white/80 p-2 rounded-lg border border-slate-200/80 text-slate-500 leading-relaxed">
                         ℹ️ {ev.notes}
                       </div>
+                    )}
+
+                    {effectiveIsCentralAdmin && ev.rawMatch?.id && (
+                      isPendingApproval ? (
+                        <button
+                          type="button"
+                          onClick={() => handleApproveMatchProgram(ev.rawMatch!.id)}
+                          className="w-full py-1.5 px-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-black text-[11px] flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                        >
+                          <CheckCircle2 className="h-3.5 w-3.5" />
+                          <span>المصادقة على البرنامج</span>
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => handleRevertMatchProgram(ev.rawMatch!.id)}
+                          className="w-full py-1.5 px-2.5 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-300 font-black text-[11px] flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                        >
+                          <Undo2 className="h-3.5 w-3.5" />
+                          <span>التراجع عن مصادقة البرنامج</span>
+                        </button>
+                      )
                     )}
 
                     {ev.rawTournament && onNavigateToTournament && (
@@ -931,7 +1347,8 @@ export const ChampionshipCalendarView: React.FC<ChampionshipCalendarViewProps> =
                       </button>
                     )}
                   </div>
-                ))
+                  );
+                })
               )}
             </div>
           </div>
@@ -998,11 +1415,47 @@ export const ChampionshipCalendarView: React.FC<ChampionshipCalendarViewProps> =
 
             {/* Body */}
             <div className="p-4 space-y-3 overflow-y-auto flex-1 bg-slate-50/50">
+              {quickModalDateHolidays.length > 0 && (
+                <div className="p-3.5 rounded-2xl bg-red-50 border border-red-200 space-y-1">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs font-black text-red-800">🏖️ عطلة مدرسية رسمية</span>
+                    <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-red-100 text-red-800 border border-red-300">
+                      ممنوع البرمجة
+                    </span>
+                  </div>
+                  {quickModalDateHolidays.map(h => (
+                    <p key={`modal-hol-${h.id}`} className="text-xs font-black text-red-900">
+                      • {h.title}
+                    </p>
+                  ))}
+                </div>
+              )}
+
+              {quickModalDateExams.length > 0 && (
+                <div className="p-3.5 rounded-2xl bg-blue-50 border border-blue-200 space-y-1">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs font-black text-blue-900">📝 فترة الامتحانات</span>
+                    <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 border border-blue-300">
+                      ممنوع للسلك المعني
+                    </span>
+                  </div>
+                  {quickModalDateExams.map(ex => (
+                    <p key={`modal-ex-${ex.id}`} className="text-xs font-black text-blue-950">
+                      • {ex.title}
+                    </p>
+                  ))}
+                </div>
+              )}
+
               {(eventsByDate[activeQuickModalDate] || []).length === 0 ? (
                 <div className="text-center py-10 bg-white rounded-2xl border border-dashed border-slate-200 p-6">
                   <CalendarIcon className="w-12 h-12 text-slate-300 mx-auto mb-2" />
-                  <p className="text-xs font-bold text-slate-700">لم يتم تسجيل أية مباراة مبرمجة لهذا اليوم</p>
-                  {!isTeacher && onOpenCreateMatch && (
+                  <p className="text-xs font-bold text-slate-700">
+                    {quickModalDateHolidays.length > 0
+                      ? 'يوم عطلة مدرسية — لا يُسمح ببرمجة المباريات في هذا التاريخ'
+                      : 'لم يتم تسجيل أية مباراة مبرمجة لهذا اليوم'}
+                  </p>
+                  {!isTeacher && onOpenCreateMatch && quickModalDateHolidays.length === 0 && (
                     <button
                       onClick={() => {
                         const d = activeQuickModalDate;
@@ -1019,14 +1472,22 @@ export const ChampionshipCalendarView: React.FC<ChampionshipCalendarViewProps> =
               ) : (
                 (eventsByDate[activeQuickModalDate] || []).map(ev => {
                   const rawM = ev.rawMatch;
+                  const isPendingApproval = rawM ? isMatchProgramPendingApproval(rawM) : ev.programApprovalStatus === 'pending';
+                  const displayedRefs = ev.refereesText && ev.refereesText !== '-' ? ev.refereesText : 'يعين لاحقاً';
                   return (
                     <div
                       key={`modal-ev-${ev.id}`}
-                      className="bg-white rounded-2xl border border-slate-200 p-4 shadow-xs space-y-3 hover:border-blue-300 transition-all"
+                      className={`rounded-2xl border p-4 shadow-xs space-y-3 transition-all ${
+                        isPendingApproval
+                          ? 'bg-slate-200/90 border-slate-300'
+                          : 'bg-white border-slate-200 hover:border-blue-300'
+                      }`}
                     >
-                      <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
+                      <div className="flex items-center justify-between gap-2 flex-wrap border-b border-slate-300/70 pb-2.5">
                         <div className="flex items-center gap-2.5">
-                          <span className="w-9 h-9 rounded-xl bg-blue-50 text-blue-700 font-black flex items-center justify-center text-lg border border-blue-100">
+                          <span className={`w-9 h-9 rounded-xl font-black flex items-center justify-center text-lg border ${
+                            isPendingApproval ? 'bg-slate-300 text-slate-600 border-slate-400/50 grayscale' : 'bg-blue-50 text-blue-700 border-blue-100'
+                          }`}>
                             {ev.sportIcon}
                           </span>
                           <div>
@@ -1034,6 +1495,11 @@ export const ChampionshipCalendarView: React.FC<ChampionshipCalendarViewProps> =
                             <span className="text-[10px] text-slate-500 font-bold">الرياضة: {ev.sportName}</span>
                           </div>
                         </div>
+                        {isPendingApproval && (
+                          <span className="px-2 py-0.5 rounded-full bg-red-50 text-red-700 border border-red-300 text-[10px] font-black">
+                            في انتظار المصادقة على البرنامج
+                          </span>
+                        )}
                         {getScopeBadge(ev.scope)}
                       </div>
 
@@ -1058,12 +1524,10 @@ export const ChampionshipCalendarView: React.FC<ChampionshipCalendarViewProps> =
                           <Trophy className="w-3.5 h-3.5 text-amber-500 shrink-0" />
                           <span>الجنس: <strong>{ev.gender === 'Male' ? 'ذكور' : ev.gender === 'Female' ? 'إناث' : 'مختلط'}</strong></span>
                         </div>
-                        {ev.refereesText && ev.refereesText !== '-' && (
-                          <div className="flex items-center gap-1.5 col-span-2">
-                            <ShieldCheck className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
-                            <span className="truncate" title={ev.refereesText}>الحكام: <strong>{ev.refereesText}</strong></span>
-                          </div>
-                        )}
+                        <div className="flex items-center gap-1.5 col-span-2">
+                          <ShieldCheck className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+                          <span className="truncate" title={displayedRefs}>الحكام: <strong>{displayedRefs}</strong></span>
+                        </div>
                       </div>
 
                       {ev.notes && (
@@ -1073,7 +1537,28 @@ export const ChampionshipCalendarView: React.FC<ChampionshipCalendarViewProps> =
                       )}
 
                       {/* Actions */}
-                      <div className="flex items-center justify-between pt-1">
+                      <div className="flex flex-col gap-2 pt-1">
+                        {effectiveIsCentralAdmin && rawM?.id && (
+                          isPendingApproval ? (
+                            <button
+                              type="button"
+                              onClick={() => handleApproveMatchProgram(rawM.id)}
+                              className="w-full py-2 px-3 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black rounded-xl transition-colors flex items-center justify-center gap-2 cursor-pointer"
+                            >
+                              <CheckCircle2 className="w-4 h-4" />
+                              <span>المصادقة على البرنامج</span>
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => handleRevertMatchProgram(rawM.id)}
+                              className="w-full py-2 px-3 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-300 text-xs font-black rounded-xl transition-colors flex items-center justify-center gap-2 cursor-pointer"
+                            >
+                              <Undo2 className="w-4 h-4" />
+                              <span>التراجع عن مصادقة البرنامج</span>
+                            </button>
+                          )
+                        )}
                         {rawM && onOpenMatchDetail ? (
                           <button
                             onClick={() => {
@@ -1105,7 +1590,7 @@ export const ChampionshipCalendarView: React.FC<ChampionshipCalendarViewProps> =
 
             {/* Footer */}
             <div className="p-3.5 bg-slate-100 border-t border-slate-200 flex items-center justify-between">
-              {!isTeacher && onOpenCreateMatch ? (
+              {!isTeacher && onOpenCreateMatch && quickModalDateHolidays.length === 0 ? (
                 <button
                   onClick={() => {
                     const d = activeQuickModalDate;

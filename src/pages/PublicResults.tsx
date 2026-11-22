@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { DataService, SPORTS_MAP, normalizeTournamentAffiliation, resolveEffectiveAffiliationMode, isAffiliationAllowedByDisplayConfig } from '../lib/dataService';
+import { DataService, SPORTS_MAP, normalizeTournamentAffiliation, resolveEffectiveAffiliationMode, isAffiliationAllowedByDisplayConfig, isMatchProgramPendingApproval } from '../lib/dataService';
 import { computeGroupStandings, formatTeamDisplayName, hasValidMatchTeams, extractMatchGroupLabel, isPlaceholderTeamId } from '../lib/drawTournamentUtils';
 import { resolveMatchRefereesInfo, resolveMatchAffiliation, getOrdinalRefLabel } from '../lib/programExportService';
 import { Match, School, Venue, CrossCountryCategoryResult, AthleticsCategoryResult, Student, Directorate, Sport, Tournament, Referee, User, AffiliationDisplayConfig } from '../types';
@@ -82,16 +82,35 @@ export const PublicResults: React.FC = () => {
       loadData();
     };
 
+    const unsubMatches = DataService.subscribeToMatches((m) => setMatches(m));
+    const unsubReferees = DataService.subscribeToReferees(() => {
+      DataService.getReferees().then(setReferees).catch(() => {});
+    });
+    const unsubUsers = DataService.subscribeToUsers(() => {
+      DataService.getUsers().then(setUsersDirectory).catch(() => {});
+    });
+
     window.addEventListener('athleticsResultsUpdated', handleResultsUpdate);
     window.addEventListener('resultsChanged', handleResultsUpdate);
     window.addEventListener('tournamentDataChanged', handleResultsUpdate);
+    window.addEventListener('matchesDataChanged', handleResultsUpdate);
+    window.addEventListener('matchesUpdated', handleResultsUpdate);
+    window.addEventListener('refereesUpdated', handleResultsUpdate);
+    window.addEventListener('userDataChanged', handleResultsUpdate);
     window.addEventListener('storage', handleResultsUpdate);
 
     return () => {
       unsubAffiliation();
+      unsubMatches();
+      unsubReferees();
+      unsubUsers();
       window.removeEventListener('athleticsResultsUpdated', handleResultsUpdate);
       window.removeEventListener('resultsChanged', handleResultsUpdate);
       window.removeEventListener('tournamentDataChanged', handleResultsUpdate);
+      window.removeEventListener('matchesDataChanged', handleResultsUpdate);
+      window.removeEventListener('matchesUpdated', handleResultsUpdate);
+      window.removeEventListener('refereesUpdated', handleResultsUpdate);
+      window.removeEventListener('userDataChanged', handleResultsUpdate);
       window.removeEventListener('storage', handleResultsUpdate);
     };
   }, [selectedDirId]);
@@ -864,13 +883,27 @@ export const PublicResults: React.FC = () => {
                   const isT2Placeholder = isPlaceholderTeamId(m.team2Id) || /الفائز\s*من\s*المباراة/.test(team2Label);
                   const refInfo = resolveMatchRefereesInfo(m, referees, usersDirectory);
                   const hasCategorizedRefs = refInfo.tableRefs.length > 0 || refInfo.fieldRefs.length > 0;
+                  const isPendingProgramApproval = isMatchProgramPendingApproval(m);
                   return (
-                    <div key={m.id} className="bg-white p-6 rounded-3xl border border-slate-200 shadow-xs hover:shadow-md transition-all space-y-4">
-                      <div className="flex justify-between items-center text-[10px] font-bold text-slate-500 border-b border-slate-100 pb-2">
-                        <div className="flex items-center gap-1.5">
+                    <div
+                      key={m.id}
+                      className={cn(
+                        "p-6 rounded-3xl border shadow-xs hover:shadow-md transition-all space-y-4",
+                        isPendingProgramApproval
+                          ? "bg-slate-200/95 border-slate-300"
+                          : "bg-white border-slate-200"
+                      )}
+                    >
+                      <div className="flex justify-between items-center gap-2 text-[10px] font-bold text-slate-500 border-b border-slate-300/70 pb-2">
+                        <div className={cn("flex items-center gap-1.5", isPendingProgramApproval && "grayscale opacity-80")}>
                           <span className="text-xs">{matchSport.icon}</span>
                           <span className="font-black text-slate-700">{matchSport.name}</span>
                         </div>
+                        {isPendingProgramApproval && (
+                          <span className="px-2 py-0.5 rounded-full bg-red-50 text-red-700 border border-red-300 text-[9.5px] font-black text-center">
+                            في انتظار المصادقة على البرنامج
+                          </span>
+                        )}
                         <span className={cn(
                           "px-2 py-0.5 rounded-full font-bold",
                           m.status?.toLowerCase() === 'completed'
@@ -957,7 +990,7 @@ export const PublicResults: React.FC = () => {
                             <ShieldCheck className="w-3 h-3 text-slate-400 shrink-0" />
                             <span>الحكام:</span>
                           </span>
-                          <span className="font-bold text-slate-400">لم يحدد طاقم التحكيم بعد</span>
+                          <span className="font-bold text-slate-500">يعين لاحقاً</span>
                         </div>
                       )}
 

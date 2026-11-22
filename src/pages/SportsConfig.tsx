@@ -445,10 +445,13 @@ export const SportsConfig: React.FC = () => {
   const [editingPeriodId, setEditingPeriodId] = useState<string | null>(null);
   const [periodTitle, setPeriodTitle] = useState('');
   const [periodType, setPeriodType] = useState<'holiday' | 'exams'>('holiday');
+  const [periodDateMode, setPeriodDateMode] = useState<'single' | 'range'>('range');
   const [periodStartDate, setPeriodStartDate] = useState('');
   const [periodEndDate, setPeriodEndDate] = useState('');
   const [periodCycles, setPeriodCycles] = useState<EducationalCycleKey[]>(['ALL']);
   const [periodNotes, setPeriodNotes] = useState('');
+  const [blockedTypeFilter, setBlockedTypeFilter] = useState<'ALL' | 'holiday' | 'exams'>('ALL');
+  const [blockedCycleFilter, setBlockedCycleFilter] = useState<EducationalCycleKey>('ALL');
 
   // Affiliation Display Configuration (Provincial Supervisor / Central Admin Only)
   const [affiliationDisplayConfig, setAffiliationDisplayConfig] = useState<AffiliationDisplayConfig>(() =>
@@ -682,6 +685,7 @@ export const SportsConfig: React.FC = () => {
     setEditingPeriodId(null);
     setPeriodTitle('');
     setPeriodType('holiday');
+    setPeriodDateMode('range');
     setPeriodStartDate('');
     setPeriodEndDate('');
     setPeriodCycles(['ALL']);
@@ -704,18 +708,23 @@ export const SportsConfig: React.FC = () => {
   const handleSaveBlockedPeriod = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!isCentralAdmin) {
-      toast.error('صلاحية تعديل لائحة العطل وتواريخ الفروض مخصصة للمسير الإقليمي / المركزي فقط.');
+      toast.error('صلاحية تحديد أيام العطل والامتحانات مخصصة للمسير المركزي / الإقليمي فقط.');
       return;
     }
     if (!periodTitle.trim()) {
-      toast.error('يرجى إدخال عنوان العطلة أو فترة الفروض');
+      toast.error('يرجى إدخال اسم أو عنوان العطلة أو الامتحان');
       return;
     }
     if (!periodStartDate) {
-      toast.error('يرجى تحديد تاريخ البداية');
+      toast.error('يرجى تحديد التاريخ');
       return;
     }
-    const effectiveEnd = periodEndDate && periodEndDate >= periodStartDate ? periodEndDate : periodStartDate;
+    const effectiveEnd =
+      periodDateMode === 'single'
+        ? periodStartDate
+        : periodEndDate && periodEndDate >= periodStartDate
+        ? periodEndDate
+        : periodStartDate;
     const effectiveCycles: EducationalCycleKey[] = periodCycles.length > 0 ? periodCycles : ['ALL'];
 
     setSavingBlockedDates(true);
@@ -744,19 +753,26 @@ export const SportsConfig: React.FC = () => {
           endDate: effectiveEnd,
           targetCycles: effectiveCycles,
           notes: periodNotes.trim(),
-          createdBy: userProfile?.fullName || 'المسير الإقليمي',
+          createdBy: userProfile?.fullName || 'المسير المركزي',
           createdAt: new Date().toISOString()
         };
         nextList = [newPeriod, ...blockedPeriods];
       }
 
       await DataService.saveBlockedScheduleDates(nextList);
-      setBlockedPeriods(nextList);
-      toast.success(editingPeriodId ? 'تم تحديث الفترة بنجاح' : 'تمت إضافة الفترة إلى لائحة العطل والفروض بنجاح');
+      const refreshed = await DataService.getBlockedScheduleDates();
+      setBlockedPeriods(refreshed);
+      toast.success(
+        editingPeriodId
+          ? 'تم تحديث الفترة بنجاح'
+          : periodType === 'exams'
+          ? 'تمت إضافة أيام الامتحانات إلى اللائحة بنجاح'
+          : 'تمت إضافة أيام العطلة إلى اللائحة بنجاح'
+      );
       resetBlockedPeriodForm();
     } catch (err) {
       console.error('Error saving blocked dates:', err);
-      toast.error('تعذر حفظ لائحة العطل والفروض');
+      toast.error('تعذر حفظ أيام العطل والامتحانات');
     } finally {
       setSavingBlockedDates(false);
     }
@@ -768,13 +784,29 @@ export const SportsConfig: React.FC = () => {
     try {
       const nextList = blockedPeriods.filter((p) => p.id !== id);
       await DataService.saveBlockedScheduleDates(nextList);
-      setBlockedPeriods(nextList);
+      const refreshed = await DataService.getBlockedScheduleDates();
+      setBlockedPeriods(refreshed);
       if (editingPeriodId === id) {
         resetBlockedPeriodForm();
       }
       toast.success('تم حذف الفترة من اللائحة بنجاح');
     } catch (err) {
       toast.error('تعذر حذف الفترة');
+    } finally {
+      setSavingBlockedDates(false);
+    }
+  };
+
+  const handleRestoreOfficialBlockedDates = async () => {
+    if (!isCentralAdmin) return;
+    setSavingBlockedDates(true);
+    try {
+      const restored = await DataService.restoreOfficialBlockedScheduleDates(undefined, true);
+      setBlockedPeriods(restored);
+      toast.success('تمت استعادة اللائحة الرسمية للعطل والامتحانات مع الحفاظ على التواريخ المخصصة ✅');
+    } catch (err) {
+      console.error('Error restoring official dates:', err);
+      toast.error('تعذر استعادة التواريخ الرسمية');
     } finally {
       setSavingBlockedDates(false);
     }
@@ -1195,7 +1227,7 @@ export const SportsConfig: React.FC = () => {
             }`}
           >
             <Calendar className="h-4 w-4" />
-            <span>لائحة العطل وتواريخ الفروض</span>
+            <span>أيام العطل والامتحانات</span>
             {blockedPeriods.length > 0 && (
               <span
                 className={`px-2 py-0.5 rounded-full text-[10px] font-black tabular-nums ${
@@ -1561,36 +1593,78 @@ export const SportsConfig: React.FC = () => {
             <div>
               <h3 className="text-sm font-black text-slate-900 flex items-center gap-2">
                 <Calendar className="h-4 w-4 text-rose-600" />
-                <span>لائحة العطل المدرسية وتواريخ الفروض المحمية</span>
+                <span>تحديد أيام العطل المدرسية وأيام الامتحانات</span>
               </h3>
               <p className="text-xs text-slate-500 mt-1 leading-relaxed">
                 {isCentralAdmin
-                  ? 'أدخل تواريخ العطل المدرسية وفترات الفروض والامتحانات وحدد السلك التعليمي المعني. تُمنع اللجن التقنية تلقائياً من برمجة أي مقابلة في التواريخ المحددة للسلك المعني.'
-                  : 'استعرض تواريخ العطل المدرسية وفترات الفروض التي اعتمدها المسير الإقليمي والتي يُمنع فيها برمجة المقابلات للسلك التعليمي المعني.'}
+                  ? 'يمكن للمسير المركزي تحديد أيام العطل المدرسية وتواريخ الامتحانات الخاصة بكل سلك تعليمي. تظهر العطل بالأحمر والامتحانات بالأزرق في البرنامج الشهري وتُمنع اللجن التقنية تلقائياً من برمجة المباريات خلالها.'
+                  : 'استعرض أيام العطل المدرسية وتواريخ الامتحانات التي حددها المسير المركزي والتي يُمنع فيها برمجة المقابلات للسلك التعليمي المعني.'}
               </p>
             </div>
-            <span className="px-3 py-1.5 rounded-xl bg-rose-50 text-rose-800 border border-rose-200 text-xs font-black tabular-nums shrink-0 self-start sm:self-auto">
-              {blockedPeriods.length} فترة مسجلة
-            </span>
+            <div className="flex flex-wrap items-center gap-2 shrink-0 self-start sm:self-auto">
+              <span className="px-2.5 py-1.5 rounded-xl bg-rose-50 text-rose-800 border border-rose-200 text-[11px] font-black tabular-nums">
+                🏖️ {blockedPeriods.filter(p => p.type === 'holiday').length} عطلة
+              </span>
+              <span className="px-2.5 py-1.5 rounded-xl bg-blue-50 text-blue-800 border border-blue-200 text-[11px] font-black tabular-nums">
+                📝 {blockedPeriods.filter(p => p.type === 'exams').length} امتحان
+              </span>
+              {isCentralAdmin && (
+                <button
+                  type="button"
+                  disabled={savingBlockedDates}
+                  onClick={handleRestoreOfficialBlockedDates}
+                  className="px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300 text-[11px] font-black flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                  title="استعادة العطل الرسمية وتواريخ الامتحانات المعتمدة للموسم 2026/2027"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${savingBlockedDates ? 'animate-spin' : ''}`} />
+                  <span>استعادة التواريخ الرسمية</span>
+                </button>
+              )}
+            </div>
           </div>
 
           {/* Add / Edit Form (Central/Regional Admin Only) */}
           {isCentralAdmin ? (
             <form onSubmit={handleSaveBlockedPeriod} className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs space-y-4">
-              <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3">
                 <h4 className="text-xs font-black text-slate-800 flex items-center gap-1.5">
                   <PlusCircle className="w-4 h-4 text-rose-600" />
-                  <span>{editingPeriodId ? 'تعديل فترة عطلة أو فروض' : 'إضافة عطلة مدرسية أو فترة فروض جديدة'}</span>
+                  <span>{editingPeriodId ? 'تعديل يوم / فترة عطلة أو امتحان' : 'إضافة يوم عطلة أو أيام امتحانات جديدة'}</span>
                 </h4>
-                {editingPeriodId && (
-                  <button
-                    type="button"
-                    onClick={resetBlockedPeriodForm}
-                    className="text-xs font-bold text-slate-500 hover:text-slate-800 cursor-pointer"
-                  >
-                    إلغاء التعديل
-                  </button>
-                )}
+                <div className="flex items-center gap-2">
+                  <div className="inline-flex rounded-xl bg-slate-100 p-0.5 border border-slate-200 text-[11px] font-bold">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPeriodDateMode('single');
+                        if (periodStartDate) setPeriodEndDate(periodStartDate);
+                      }}
+                      className={`px-2.5 py-1 rounded-lg cursor-pointer transition-all ${
+                        periodDateMode === 'single' ? 'bg-white text-slate-900 shadow-2xs font-black' : 'text-slate-600'
+                      }`}
+                    >
+                      يوم واحد
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPeriodDateMode('range')}
+                      className={`px-2.5 py-1 rounded-lg cursor-pointer transition-all ${
+                        periodDateMode === 'range' ? 'bg-white text-slate-900 shadow-2xs font-black' : 'text-slate-600'
+                      }`}
+                    >
+                      فترة (من - إلى)
+                    </button>
+                  </div>
+                  {editingPeriodId && (
+                    <button
+                      type="button"
+                      onClick={resetBlockedPeriodForm}
+                      className="text-xs font-bold text-slate-500 hover:text-slate-800 cursor-pointer"
+                    >
+                      إلغاء التعديل
+                    </button>
+                  )}
+                </div>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
@@ -1603,7 +1677,7 @@ export const SportsConfig: React.FC = () => {
                     required
                     value={periodTitle}
                     onChange={(e) => setPeriodTitle(e.target.value)}
-                    placeholder="مثال: عطلة منتصف الأسدوس الأول / فروض المراقبة المستمرة 2..."
+                    placeholder="مثال: عطلة رسمية / الامتحان الموحد المحلي..."
                     className="w-full px-3 py-2 text-xs font-bold rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-rose-500 text-slate-800"
                   />
                 </div>
@@ -1615,15 +1689,15 @@ export const SportsConfig: React.FC = () => {
                     onChange={(e) => setPeriodType(e.target.value as 'holiday' | 'exams')}
                     className="w-full px-3 py-2 text-xs font-bold rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-rose-500 text-slate-800 cursor-pointer"
                   >
-                    <option value="holiday">🏖️ عطلة مدرسية</option>
-                    <option value="exams">📝 تواريخ الفروض / الامتحانات</option>
+                    <option value="holiday">🏖️ عطلة مدرسية (أحمر)</option>
+                    <option value="exams">📝 أيام الامتحانات (أزرق)</option>
                   </select>
                 </div>
 
-                <div className="grid grid-cols-2 gap-2">
+                <div className={periodDateMode === 'single' ? '' : 'grid grid-cols-2 gap-2'}>
                   <div>
                     <label className="block text-[11px] font-bold text-slate-700 mb-1">
-                      من تاريخ <span className="text-rose-500">*</span>
+                      {periodDateMode === 'single' ? 'التاريخ' : 'من تاريخ'} <span className="text-rose-500">*</span>
                     </label>
                     <input
                       type="date"
@@ -1631,23 +1705,25 @@ export const SportsConfig: React.FC = () => {
                       value={periodStartDate}
                       onChange={(e) => {
                         setPeriodStartDate(e.target.value);
-                        if (!periodEndDate || periodEndDate < e.target.value) {
+                        if (periodDateMode === 'single' || !periodEndDate || periodEndDate < e.target.value) {
                           setPeriodEndDate(e.target.value);
                         }
                       }}
                       className="w-full px-2.5 py-2 text-xs font-bold rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-rose-500 text-slate-800"
                     />
                   </div>
-                  <div>
-                    <label className="block text-[11px] font-bold text-slate-700 mb-1">إلى تاريخ</label>
-                    <input
-                      type="date"
-                      value={periodEndDate}
-                      min={periodStartDate}
-                      onChange={(e) => setPeriodEndDate(e.target.value)}
-                      className="w-full px-2.5 py-2 text-xs font-bold rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-rose-500 text-slate-800"
-                    />
-                  </div>
+                  {periodDateMode === 'range' && (
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-700 mb-1">إلى تاريخ</label>
+                      <input
+                        type="date"
+                        value={periodEndDate}
+                        min={periodStartDate}
+                        onChange={(e) => setPeriodEndDate(e.target.value)}
+                        className="w-full px-2.5 py-2 text-xs font-bold rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-rose-500 text-slate-800"
+                      />
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -1666,7 +1742,9 @@ export const SportsConfig: React.FC = () => {
                         onClick={() => handleTogglePeriodCycle(cycleKey)}
                         className={`px-3 py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer flex items-center gap-1.5 ${
                           isChecked
-                            ? 'bg-rose-600 text-white border-rose-600 shadow-2xs'
+                            ? periodType === 'exams'
+                              ? 'bg-blue-600 text-white border-blue-600 shadow-2xs'
+                              : 'bg-rose-600 text-white border-rose-600 shadow-2xs'
                             : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
                         }`}
                       >
@@ -1685,117 +1763,182 @@ export const SportsConfig: React.FC = () => {
                     type="text"
                     value={periodNotes}
                     onChange={(e) => setPeriodNotes(e.target.value)}
-                    placeholder="مثال: مذكرة وزارية أو توجيه إقليمي..."
+                    placeholder="مثال: مقرر تنظيم السنة الدراسية / مذكرة إقليمية..."
                     className="w-full px-3 py-2 text-xs font-medium rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-rose-500 text-slate-800"
                   />
                 </div>
                 <button
                   type="submit"
                   disabled={savingBlockedDates}
-                  className="px-5 py-2.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-black flex items-center justify-center gap-2 shadow-xs cursor-pointer disabled:opacity-50 shrink-0"
+                  className={`px-5 py-2.5 text-white rounded-xl text-xs font-black flex items-center justify-center gap-2 shadow-xs cursor-pointer disabled:opacity-50 shrink-0 ${
+                    periodType === 'exams' ? 'bg-blue-600 hover:bg-blue-700' : 'bg-rose-600 hover:bg-rose-700'
+                  }`}
                 >
                   <Save className="w-4 h-4" />
-                  <span>{savingBlockedDates ? 'جاري الحفظ...' : editingPeriodId ? 'حفظ التعديل' : 'إضافة إلى لائحة المنع'}</span>
+                  <span>
+                    {savingBlockedDates
+                      ? 'جاري الحفظ...'
+                      : editingPeriodId
+                      ? 'حفظ التعديل'
+                      : periodType === 'exams'
+                      ? 'إضافة أيام الامتحانات'
+                      : 'إضافة أيام العطلة'}
+                  </span>
                 </button>
               </div>
             </form>
           ) : (
             <div className="p-4 bg-amber-50 border border-amber-200 rounded-2xl text-xs font-bold text-amber-900 flex items-center gap-2">
               <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
-              <span>يُتاح تعديل هذه اللائحة للمسير الإقليمي / المركزي فقط، ويُمنع رئيس اللجنة التقنية تلقائياً من برمجة مباريات خلال الفترات أدناه.</span>
+              <span>يُتاح تحديد وتعديل أيام العطل والامتحانات للمسير المركزي / الإقليمي فقط، ويُمنع رئيس اللجنة التقنية تلقائياً من برمجة مباريات خلال الفترات أدناه.</span>
             </div>
           )}
 
           {/* List of Blocked Periods */}
-          <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs space-y-3">
-            <h4 className="text-xs font-black text-slate-800">الفترات المسجلة حالياً:</h4>
-            {blockedPeriods.length === 0 ? (
-              <div className="py-10 text-center text-slate-400 space-y-2 border border-dashed border-slate-200 rounded-2xl">
-                <Calendar className="w-9 h-9 mx-auto text-slate-300" />
-                <p className="text-xs font-bold">لم يتم إدخال أي عطل أو تواريخ فروض بعد</p>
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                {blockedPeriods.map((period) => (
-                  <div
-                    key={period.id}
-                    className={`p-4 rounded-2xl border flex flex-col justify-between gap-3 ${
-                      period.type === 'exams'
-                        ? 'bg-amber-50/50 border-amber-200'
-                        : 'bg-rose-50/50 border-rose-200'
-                    }`}
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="space-y-1 min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span
-                            className={`text-[10px] font-black px-2 py-0.5 rounded border ${
-                              period.type === 'exams'
-                                ? 'bg-amber-100 text-amber-900 border-amber-300'
-                                : 'bg-rose-100 text-rose-900 border-rose-300'
-                            }`}
-                          >
-                            {period.type === 'exams' ? '📝 فروض / امتحانات' : '🏖️ عطلة مدرسية'}
-                          </span>
-                          <h5 className="text-xs sm:text-sm font-black text-slate-900">{period.title}</h5>
-                        </div>
-                        <p className="text-xs font-bold text-slate-700 tabular-nums" dir="ltr">
-                          {period.startDate === period.endDate
-                            ? period.startDate
-                            : `${period.startDate}  →  ${period.endDate}`}
-                        </p>
-                      </div>
-
-                      {isCentralAdmin && (
-                        <div className="flex items-center gap-1 shrink-0">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setEditingPeriodId(period.id);
-                              setPeriodTitle(period.title);
-                              setPeriodType(period.type);
-                              setPeriodStartDate(period.startDate);
-                              setPeriodEndDate(period.endDate || period.startDate);
-                              setPeriodCycles(period.targetCycles?.length ? period.targetCycles : ['ALL']);
-                              setPeriodNotes(period.notes || '');
-                            }}
-                            title="تعديل"
-                            className="p-1.5 rounded-lg text-blue-600 hover:bg-blue-50 cursor-pointer"
-                          >
-                            <Edit3 className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleDeleteBlockedPeriod(period.id)}
-                            title="حذف"
-                            className="p-1.5 rounded-lg text-rose-600 hover:bg-rose-100 cursor-pointer"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      )}
+          {(() => {
+            const visibleBlockedPeriods = blockedPeriods.filter((period) => {
+              if (blockedTypeFilter !== 'ALL' && period.type !== blockedTypeFilter) return false;
+              if (blockedCycleFilter !== 'ALL') {
+                const targets = period.targetCycles || ['ALL'];
+                if (!targets.includes('ALL') && !targets.includes(blockedCycleFilter)) return false;
+              }
+              return true;
+            });
+            return (
+              <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
+                  <h4 className="text-xs font-black text-slate-800">
+                    لائحة أيام العطل والامتحانات المعتمدة ({visibleBlockedPeriods.length}):
+                  </h4>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <div className="inline-flex rounded-xl bg-slate-100 p-0.5 border border-slate-200 text-[11px] font-bold">
+                      <button
+                        type="button"
+                        onClick={() => setBlockedTypeFilter('ALL')}
+                        className={`px-2.5 py-1 rounded-lg cursor-pointer ${blockedTypeFilter === 'ALL' ? 'bg-white text-slate-900 shadow-2xs font-black' : 'text-slate-600'}`}
+                      >
+                        الكل ({blockedPeriods.length})
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setBlockedTypeFilter('holiday')}
+                        className={`px-2.5 py-1 rounded-lg cursor-pointer ${blockedTypeFilter === 'holiday' ? 'bg-rose-600 text-white shadow-2xs font-black' : 'text-rose-700'}`}
+                      >
+                        🏖️ العطل ({blockedPeriods.filter(p => p.type === 'holiday').length})
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setBlockedTypeFilter('exams')}
+                        className={`px-2.5 py-1 rounded-lg cursor-pointer ${blockedTypeFilter === 'exams' ? 'bg-blue-600 text-white shadow-2xs font-black' : 'text-blue-700'}`}
+                      >
+                        📝 الامتحانات ({blockedPeriods.filter(p => p.type === 'exams').length})
+                      </button>
                     </div>
-
-                    <div className="flex flex-wrap items-center gap-1.5 pt-2 border-t border-black/5">
-                      <span className="text-[10px] font-bold text-slate-500">الأسلاك المعنية:</span>
-                      {(period.targetCycles || ['ALL']).map((cyc) => (
-                        <span
-                          key={cyc}
-                          className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-white border border-slate-200 text-slate-700"
-                        >
-                          {EDUCATIONAL_CYCLE_LABELS[cyc] || cyc}
-                        </span>
-                      ))}
-                    </div>
-
-                    {period.notes && (
-                      <p className="text-[11px] text-slate-600 font-medium">{period.notes}</p>
-                    )}
+                    <select
+                      value={blockedCycleFilter}
+                      onChange={(e) => setBlockedCycleFilter(e.target.value as EducationalCycleKey)}
+                      className="px-2.5 py-1.5 text-[11px] font-bold rounded-xl border border-slate-200 bg-white text-slate-700 cursor-pointer"
+                    >
+                      <option value="ALL">جميع الأسلاك</option>
+                      <option value="ابتدائي">السلك الابتدائي</option>
+                      <option value="إعدادي">السلك الإعدادي</option>
+                      <option value="تأهيلي">السلك التأهيلي</option>
+                      <option value="خصوصي">التعليم الخصوصي</option>
+                    </select>
                   </div>
-                ))}
+                </div>
+
+                {visibleBlockedPeriods.length === 0 ? (
+                  <div className="py-10 text-center text-slate-400 space-y-2 border border-dashed border-slate-200 rounded-2xl">
+                    <Calendar className="w-9 h-9 mx-auto text-slate-300" />
+                    <p className="text-xs font-bold">لا توجد فترات مطابقة للتصفية الحالية</p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    {visibleBlockedPeriods.map((period) => (
+                      <div
+                        key={period.id}
+                        className={`p-4 rounded-2xl border flex flex-col justify-between gap-3 ${
+                          period.type === 'exams'
+                            ? 'bg-blue-50/70 border-blue-200'
+                            : 'bg-rose-50/50 border-rose-200'
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="space-y-1 min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span
+                                className={`text-[10px] font-black px-2 py-0.5 rounded border ${
+                                  period.type === 'exams'
+                                    ? 'bg-blue-100 text-blue-900 border-blue-300'
+                                    : 'bg-rose-100 text-rose-900 border-rose-300'
+                                }`}
+                              >
+                                {period.type === 'exams' ? '📝 أيام الامتحانات' : '🏖️ عطلة مدرسية'}
+                              </span>
+                              <h5 className="text-xs sm:text-sm font-black text-slate-900">{period.title}</h5>
+                            </div>
+                            <p className="text-xs font-bold text-slate-700 tabular-nums" dir="ltr">
+                              {period.startDate === period.endDate
+                                ? period.startDate
+                                : `${period.startDate}  →  ${period.endDate}`}
+                            </p>
+                          </div>
+
+                          {isCentralAdmin && (
+                            <div className="flex items-center gap-1 shrink-0">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const isSingle = !period.endDate || period.endDate === period.startDate;
+                                  setEditingPeriodId(period.id);
+                                  setPeriodTitle(period.title);
+                                  setPeriodType(period.type);
+                                  setPeriodDateMode(isSingle ? 'single' : 'range');
+                                  setPeriodStartDate(period.startDate);
+                                  setPeriodEndDate(period.endDate || period.startDate);
+                                  setPeriodCycles(period.targetCycles?.length ? period.targetCycles : ['ALL']);
+                                  setPeriodNotes(period.notes || '');
+                                }}
+                                title="تعديل"
+                                className="p-1.5 rounded-lg text-blue-600 hover:bg-blue-50 cursor-pointer"
+                              >
+                                <Edit3 className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteBlockedPeriod(period.id)}
+                                title="حذف"
+                                className="p-1.5 rounded-lg text-rose-600 hover:bg-rose-100 cursor-pointer"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-1.5 pt-2 border-t border-black/5">
+                          <span className="text-[10px] font-bold text-slate-500">الأسلاك المعنية:</span>
+                          {(period.targetCycles || ['ALL']).map((cyc) => (
+                            <span
+                              key={cyc}
+                              className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-white border border-slate-200 text-slate-700"
+                            >
+                              {EDUCATIONAL_CYCLE_LABELS[cyc] || cyc}
+                            </span>
+                          ))}
+                        </div>
+
+                        {period.notes && (
+                          <p className="text-[11px] text-slate-600 font-medium">{period.notes}</p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
-            )}
-          </div>
+            );
+          })()}
         </div>
       ) : (
         <div className="space-y-6">

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { User, School, Sport } from '../types';
-import { DataService, SPORTS_MAP } from '../lib/dataService';
+import { DataService, SPORTS_MAP, inferLevelFromSchoolName, findMatchingSchoolForTeacher, normalizeCadreToLevelKey } from '../lib/dataService';
 import { useAuth, isSuperAdminEmail } from '../contexts/AuthContext';
 import {
   X,
@@ -41,7 +41,28 @@ export const EditTeacherRoleModal: React.FC<EditTeacherRoleModalProps> = ({
   const navigate = useNavigate();
   const { userProfile, updateProfileState, isDemo, loginAsDemo, startTeacherImpersonation } = useAuth();
 
-  const [cadre, setCadre] = useState<'PRIMARY' | 'MIDDLE' | 'HIGH' | string>(teacher?.teachingCadre || 'HIGH');
+  const resolveTeacherCadreCode = (
+    tch?: User | null,
+    schoolsList: School[] = schools
+  ): 'PRIMARY' | 'MIDDLE' | 'HIGH' => {
+    const explicit = normalizeCadreToLevelKey(tch?.teachingCadre);
+    if (explicit === 'Primary') return 'PRIMARY';
+    if (explicit === 'Middle') return 'MIDDLE';
+    if (explicit === 'High') return 'HIGH';
+
+    const matchedSchool = findMatchingSchoolForTeacher(schoolsList, tch);
+    const fromSchool = normalizeCadreToLevelKey(matchedSchool?.type);
+    if (fromSchool === 'Primary') return 'PRIMARY';
+    if (fromSchool === 'Middle') return 'MIDDLE';
+    if (fromSchool === 'High') return 'HIGH';
+
+    const fromName = inferLevelFromSchoolName(tch?.workLocation || (tch as (User & { schoolName?: string }) | undefined)?.schoolName);
+    if (fromName === 'Primary') return 'PRIMARY';
+    if (fromName === 'Middle') return 'MIDDLE';
+    return 'HIGH';
+  };
+
+  const [cadre, setCadre] = useState<'PRIMARY' | 'MIDDLE' | 'HIGH' | string>(() => resolveTeacherCadreCode(teacher, schools));
   const [role, setRole] = useState<'TEACHER' | 'SPORT_MANAGER' | 'CENTRAL_ADMIN'>(
     (teacher?.role === 'CENTRAL_ADMIN' || teacher?.role === 'SUPER_ADMIN' || teacher?.isSuperAdmin || isSuperAdminEmail(teacher?.email))
       ? 'CENTRAL_ADMIN'
@@ -96,7 +117,7 @@ export const EditTeacherRoleModal: React.FC<EditTeacherRoleModalProps> = ({
   // Sync state whenever selected teacher changes or modal opens
   useEffect(() => {
     if (teacher) {
-      setCadre(teacher.teachingCadre || 'HIGH');
+      setCadre(resolveTeacherCadreCode(teacher, schools));
       setRole(
         (teacher.role === 'CENTRAL_ADMIN' || teacher.role === 'SUPER_ADMIN' || teacher.isSuperAdmin || isSuperAdminEmail(teacher.email))
           ? 'CENTRAL_ADMIN'
@@ -144,7 +165,7 @@ export const EditTeacherRoleModal: React.FC<EditTeacherRoleModalProps> = ({
       setSchoolTypeFilter('ALL');
       setShowDeleteConfirm(false);
     }
-  }, [teacher, isOpen]);
+  }, [teacher, isOpen, schools]);
 
   if (!isOpen) return null;
 
@@ -793,7 +814,15 @@ export const EditTeacherRoleModal: React.FC<EditTeacherRoleModalProps> = ({
                     {/* Filtered Dropdown List */}
                     <select
                       value={workLocation}
-                      onChange={(e) => setWorkLocation(e.target.value)}
+                      onChange={(e) => {
+                        const nextLoc = e.target.value;
+                        setWorkLocation(nextLoc);
+                        const sch = schools.find(s => s.name === nextLoc);
+                        const inferred = normalizeCadreToLevelKey(sch?.type) || inferLevelFromSchoolName(nextLoc);
+                        if (inferred === 'Primary') setCadre('PRIMARY');
+                        else if (inferred === 'Middle') setCadre('MIDDLE');
+                        else if (inferred === 'High') setCadre('HIGH');
+                      }}
                       className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-blue-500 font-bold"
                     >
                       <option value="">اختر المؤسسة التعليمية...</option>

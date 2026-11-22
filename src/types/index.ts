@@ -69,6 +69,7 @@ export interface User {
   photoUrl?: string; // صورة الأستاذ الشخصية
   teachingCadre?: 'PRIMARY' | 'MIDDLE' | 'HIGH' | string; // الإطار التعليمي: أستاذ الابتدائي / ثانوي إعدادي / ثانوي تأهيلي
   pendingTransfer?: DirectorateTransferRequest | null; // طلب انتقال معلق إلى مديرية أخرى بانتظار موافقة مسيرها
+  aliasIds?: string[]; // معرفات الوثائق المدمجة لنفس المستخدم لضمان التطابق مع التعيينات السابقة
 }
 
 export interface CustomAgeCategory {
@@ -277,6 +278,7 @@ export interface Referee {
   isTeacher?: boolean;
   photoUrl?: string;
   directorateId?: string;
+  aliasIds?: string[];
 }
 
 export type DrawSystemType = 'groups_home_away' | 'groups_single' | 'knockout_groups';
@@ -334,6 +336,9 @@ export interface Match {
   notes?: string;
   scorers?: string;
   approvalStatus?: 'provisional' | 'approved';
+  programApprovalStatus?: 'pending' | 'approved';
+  programApprovedBy?: string;
+  programApprovedAt?: any;
   recordedByName?: string;
   recordedByRole?: string;
   approvedByName?: string;

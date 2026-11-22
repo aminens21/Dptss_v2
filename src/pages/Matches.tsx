@@ -1,8 +1,8 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import clsx from 'clsx';
-import { useAuth } from '../contexts/AuthContext';
-import { DataService, SPORTS_MAP, GENDER_MAP, deduplicateById, AGE_CATEGORIES, isClubTournament, getAgeCategoriesForSeason, normalizeCategoryKey, getCustomCategoryName, getCustomCategoryDetails, canUserApproveSportResult, normalizeCanonicalSportId, areSportIdsEquivalent, normalizeArabicMatchText, isAffiliationAllowedByDisplayConfig, normalizeTournamentAffiliation, resolveEffectiveTeacherCadre, isTeacherLevelAllowedForTournament, isSchoolSectorAllowedForTournament, schoolNamesMatch } from '../lib/dataService';
+import { useAuth, isSuperAdminEmail } from '../contexts/AuthContext';
+import { DataService, SPORTS_MAP, GENDER_MAP, deduplicateById, AGE_CATEGORIES, isClubTournament, getAgeCategoriesForSeason, normalizeCategoryKey, getCustomCategoryName, getCustomCategoryDetails, canUserApproveSportResult, canUserEnterMatchScore, isUserTechHeadForSport, normalizeCanonicalSportId, areSportIdsEquivalent, normalizeArabicMatchText, isAffiliationAllowedByDisplayConfig, normalizeTournamentAffiliation, resolveEffectiveTeacherCadre, isTeacherLevelAllowedForTournament, isSchoolSectorAllowedForTournament, schoolNamesMatch, getMatchEducationalCycles, findAllBlockedPeriodsForDate, isMatchProgramPendingApproval } from '../lib/dataService';
 import { formatTeamDisplayName, hasValidMatchTeams } from '../lib/drawTournamentUtils';
 import { Match, School, Venue, Tournament, Sport, Student, User, Referee, AffiliationDisplayConfig } from '../types';
 import { CountdownTimer } from '../components/CountdownTimer';
@@ -38,7 +38,8 @@ import {
   Star,
   LayoutGrid,
   Table as TableIcon,
-  Shuffle
+  Shuffle,
+  Undo2
 } from 'lucide-react';
 import { CreateMatchModal } from '../components/CreateMatchModal';
 import { ScoreModal } from '../components/ScoreModal';
@@ -125,6 +126,7 @@ export const Matches: React.FC = () => {
   const [isCreateMatchOpen, setIsCreateMatchOpen] = useState(false);
   const [createMatchInitialSportId, setCreateMatchInitialSportId] = useState<string | undefined>(undefined);
   const [createMatchInitialAffiliation, setCreateMatchInitialAffiliation] = useState<'non_club' | 'club_affiliated' | 'open' | undefined>(undefined);
+  const [createMatchInitialDate, setCreateMatchInitialDate] = useState<string | undefined>(undefined);
   const [editingMatch, setEditingMatch] = useState<Match | null>(null);
   const [selectedMatchForScore, setSelectedMatchForScore] = useState<Match | null>(null);
   const [scoreDiffusionTarget, setScoreDiffusionTarget] = useState<MatchBroadcastDiffusionTarget | null>(null);
@@ -142,6 +144,8 @@ export const Matches: React.FC = () => {
   const [deleteSportResultsMode, setDeleteSportResultsMode] = useState<'reset_scores' | 'delete_all'>('reset_scores');
   const [isDeletingSportResults, setIsDeletingSportResults] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [approvingProgramSportId, setApprovingProgramSportId] = useState<string | null>(null);
+  const [revertingProgramSportId, setRevertingProgramSportId] = useState<string | null>(null);
 
   // Matching teacher profile from database to ensure real-time permission sync
   const currentTeacherProfile = useMemo(() => {
@@ -159,7 +163,11 @@ export const Matches: React.FC = () => {
   }, [userProfile, currentTeacherProfile]);
 
   // Role flags
-  const isSuperAdmin = userProfile?.isSuperAdmin === true || currentTeacherProfile?.isSuperAdmin === true || userProfile?.role === 'SUPER_ADMIN';
+  const isSuperAdmin =
+    userProfile?.isSuperAdmin === true ||
+    currentTeacherProfile?.isSuperAdmin === true ||
+    userProfile?.role === 'SUPER_ADMIN' ||
+    isSuperAdminEmail(userProfile?.email);
   const effectiveRole = currentTeacherProfile?.role || userProfile?.role;
   const isCentralAdmin = effectiveRole === 'CENTRAL_ADMIN' || isSuperAdmin;
   const isSportManager = effectiveRole === 'SPORT_MANAGER';
@@ -444,8 +452,33 @@ export const Matches: React.FC = () => {
   // Save/Update match
   const handleSaveMatch = async (matchData: Omit<Match, 'id'>, matchId?: string) => {
     try {
+      if (matchData.date) {
+        const blockedPeriods = await DataService.getBlockedScheduleDates(matchData.directorateId);
+        const cycles = getMatchEducationalCycles(
+          {
+            team1Id: matchData.team1Id,
+            team2Id: matchData.team2Id,
+            ageCategory: matchData.ageCategory,
+            tournamentId: matchData.tournamentId
+          },
+          schools,
+          tournaments
+        );
+        const blockedConflicts = findAllBlockedPeriodsForDate(matchData.date, cycles, blockedPeriods);
+        const holidayConflict = blockedConflicts.find(p => p.type === 'holiday');
+        const examConflict = blockedConflicts.find(p => p.type === 'exams');
+        if (holidayConflict) {
+          throw new Error(`ممنوع برمجة أي مقابلة في تاريخ ${matchData.date}: يصادف عطلة مدرسية (${holidayConflict.title}).`);
+        }
+        if (examConflict) {
+          throw new Error(`ممنوع برمجة مقابلة السلك المعني في تاريخ ${matchData.date}: يصادف فترة الامتحانات (${examConflict.title}).`);
+        }
+      }
+
       if (matchId) {
         await DataService.updateMatch(matchId, matchData);
+        setMatches(prev => prev.map(m => (m.id === matchId ? { ...m, ...matchData, id: matchId } : m)));
+        setEditingMatch(prev => (prev && prev.id === matchId ? { ...prev, ...matchData, id: matchId } : prev));
         toast.success('تم تحيين بيانات المقابلة بنجاح');
       } else {
         await DataService.addMatch(matchData);
@@ -503,6 +536,20 @@ export const Matches: React.FC = () => {
     });
   };
 
+  const openScoreModalGuarded = (match: Match) => {
+    const userDirectory = allUsers.length > 0 ? allUsers : teachers;
+    if (!canUserEnterMatchScore(effectiveUserProfile, match, referees, userDirectory)) {
+      toast.error('إدخال نتائج المباريات مقتصر فقط على الحكام المعينين في هذه المباراة أو رئيس اللجنة التقنية المختص');
+      return;
+    }
+    const isTechHeadForSport = isUserTechHeadForSport(effectiveUserProfile, match.sportId, userDirectory);
+    if (!isTechHeadForSport && match.status === 'Completed' && match.approvalStatus === 'approved') {
+      toast.error('تمت المصادقة النهائية على هذه النتيجة ولا يمكن تعديلها إلا من طرف رئيس اللجنة التقنية المختص');
+      return;
+    }
+    setSelectedMatchForScore(match);
+  };
+
   // Save match score
   const handleSaveScore = async (
     matchId: string,
@@ -522,6 +569,12 @@ export const Matches: React.FC = () => {
       approvedAt?: string;
     }
   ) => {
+    const targetMatch = matches.find(m => m.id === matchId) || selectedMatchForScore;
+    const userDirectory = allUsers.length > 0 ? allUsers : teachers;
+    if (targetMatch && !canUserEnterMatchScore(effectiveUserProfile, targetMatch, referees, userDirectory)) {
+      toast.error('إدخال أو تعديل نتائج المباريات مقتصر فقط على الحكام المعينين في هذه المباراة أو رئيس اللجنة التقنية المختص');
+      return;
+    }
     try {
       await DataService.updateMatchScore(matchId, score1, score2, status, options);
       if (options?.approvalStatus === 'provisional') {
@@ -857,6 +910,9 @@ export const Matches: React.FC = () => {
       const mainTourn = sportTournaments.length > 0 ? sportTournaments[0] : null;
       const isClub = Boolean(allowClubCfg && mainTourn && normalizeTournamentAffiliation(mainTourn.affiliationType, mainTourn.name) === 'club_affiliated' && !hasBothClasses);
 
+      const pendingProgramCount = sportMatches.filter(m => isMatchProgramPendingApproval(m)).length;
+      const approvedProgramCount = sportMatches.filter(m => !isMatchProgramPendingApproval(m)).length;
+
       return {
         sport,
         sportTournaments,
@@ -864,6 +920,8 @@ export const Matches: React.FC = () => {
         scheduledCount,
         ongoingCount,
         completedCount,
+        pendingProgramCount,
+        approvedProgramCount,
         totalMatches,
         nonClubCount,
         clubCount,
@@ -947,6 +1005,48 @@ export const Matches: React.FC = () => {
   const overallOngoingCount = filteredMatches.filter(m => m.status === 'Ongoing').length;
   const overallCompletedCount = filteredMatches.filter(m => m.status === 'Completed').length;
   const programmedSportsCount = filteredSports.length;
+  const pendingProgramMatches = useMemo(() => {
+    return filteredMatches.filter(m => isMatchProgramPendingApproval(m));
+  }, [filteredMatches]);
+
+  const approvedProgramMatches = useMemo(() => {
+    return filteredMatches.filter(m => !isMatchProgramPendingApproval(m));
+  }, [filteredMatches]);
+
+  const handleApproveSportProgram = async (sportId: string, sportName: string, sportMatches: Match[]) => {
+    if (!isCentralAdmin) return;
+    const pendingIds = sportMatches.filter(m => isMatchProgramPendingApproval(m)).map(m => m.id);
+    if (pendingIds.length === 0) return;
+    setApprovingProgramSportId(sportId);
+    try {
+      const approverName = effectiveUserProfile?.fullName || userProfile?.fullName || 'المسير المركزي';
+      const count = await DataService.approveMatchesProgramBatch(pendingIds, approverName);
+      toast.success(`تمت المصادقة على برنامج ${sportName} (${count} مباراة) وإظهارها بلونها الطبيعي ✅`);
+      await loadData();
+    } catch (e) {
+      console.error('Failed to approve sport program:', e);
+      toast.error(`تعذرت المصادقة على برنامج ${sportName}`);
+    } finally {
+      setApprovingProgramSportId(null);
+    }
+  };
+
+  const handleRevertSportProgram = async (sportId: string, sportName: string, sportMatches: Match[]) => {
+    if (!isCentralAdmin) return;
+    const approvedIds = sportMatches.filter(m => !isMatchProgramPendingApproval(m)).map(m => m.id);
+    if (approvedIds.length === 0) return;
+    setRevertingProgramSportId(sportId);
+    try {
+      const count = await DataService.revertMatchesProgramBatch(approvedIds);
+      toast.success(`تم التراجع عن مصادقة برنامج ${sportName} (${count} مباراة) وإعادته إلى انتظار المصادقة 🔄`);
+      await loadData();
+    } catch (e) {
+      console.error('Failed to revert sport program approval:', e);
+      toast.error(`تعذر التراجع عن مصادقة برنامج ${sportName}`);
+    } finally {
+      setRevertingProgramSportId(null);
+    }
+  };
 
   // Accurate count of matches assigned to the current user as referee (across fieldReferees, tableReferees, referees, referee1Id, referee2Id)
   const assignedRefereeMatchesCount = useMemo(() => {
@@ -1132,8 +1232,9 @@ export const Matches: React.FC = () => {
               toast.error('يمكنك تعديل وبرمجة المباريات الخاصة برياضتك المسندة فقط');
             }
           }}
-          onOpenCreateMatch={canCreate ? () => {
+          onOpenCreateMatch={canCreate ? (initialDate?: string) => {
             setEditingMatch(null);
+            setCreateMatchInitialDate(initialDate);
             setCreateMatchInitialSportId(
               techCommitteeAllowedSports && techCommitteeAllowedSports.length > 0
                 ? techCommitteeAllowedSports[0]
@@ -1151,7 +1252,7 @@ export const Matches: React.FC = () => {
           refereeName={effectiveUserProfile?.fullName || userProfile?.fullName || ''}
           userProfile={effectiveUserProfile || userProfile}
           onEditScore={(match) => {
-            setSelectedMatchForScore(match);
+            openScoreModalGuarded(match);
           }}
         />
       ) : (
@@ -1196,6 +1297,113 @@ export const Matches: React.FC = () => {
               <span className="text-[10px] text-emerald-600/80 font-medium">مباراة منتهية بنتائج رسمية</span>
             </div>
           </div>
+
+          {/* Central Admin Per-Sport Program Approval & Revert Banner */}
+          {isCentralAdmin && (pendingProgramMatches.length > 0 || approvedProgramMatches.length > 0) && (
+            <div className="bg-slate-100 border-2 border-slate-300 rounded-2xl p-4 shadow-xs space-y-4">
+              {pendingProgramMatches.length > 0 && (
+                <div className="space-y-2.5">
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="px-2.5 py-0.5 rounded-full bg-red-50 text-red-700 border border-red-300 text-xs font-black">
+                        ⏳ برامج في انتظار المصادقة ({pendingProgramMatches.length} مباراة)
+                      </span>
+                      <span className="text-xs font-bold text-slate-600">
+                        تتم المصادقة على برنامج كل بطولة رياضية بشكل مستقل، وتبقى باقي الرياضات في انتظار المصادقة إلى حين اعتمادها.
+                      </span>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {filteredSports
+                      .filter(item => item.pendingProgramCount > 0)
+                      .map(item => (
+                        <div
+                          key={`pending-chip-${item.sport.id}`}
+                          className="flex items-center gap-1.5 bg-white border border-slate-300 rounded-xl p-1.5 shadow-2xs"
+                        >
+                          <button
+                            type="button"
+                            onClick={() => handleOpenSportResults(item.sport)}
+                            className="px-2 py-1 rounded-lg hover:bg-slate-100 text-[11px] font-black text-slate-800 flex items-center gap-1.5 cursor-pointer transition-colors"
+                            title={`استعراض مباريات ${item.sport.name}`}
+                          >
+                            <span>{item.sport.icon || '🏆'}</span>
+                            <span>{item.sport.name}</span>
+                            <span className="px-1.5 py-0.2 rounded-full bg-red-100 text-red-700 text-[10px]">
+                              {item.pendingProgramCount}
+                            </span>
+                          </button>
+                          <button
+                            type="button"
+                            disabled={approvingProgramSportId === item.sport.id}
+                            onClick={() => handleApproveSportProgram(item.sport.id, item.sport.name, item.sportMatches)}
+                            className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-black flex items-center gap-1 cursor-pointer transition-colors disabled:opacity-50"
+                          >
+                            <CheckCircle2 className="w-3 h-3" />
+                            <span>
+                              {approvingProgramSportId === item.sport.id
+                                ? 'جاري المصادقة...'
+                                : 'المصادقة على البرنامج'}
+                            </span>
+                          </button>
+                        </div>
+                      ))}
+                  </div>
+                </div>
+              )}
+
+              {approvedProgramMatches.length > 0 && (
+                <div className={cn("space-y-2.5", pendingProgramMatches.length > 0 && "pt-3 border-t border-slate-300/80")}>
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-300 text-xs font-black">
+                        ✅ برامج تمت المصادقة عليها ({approvedProgramMatches.length} مباراة)
+                      </span>
+                      <span className="text-xs font-bold text-slate-600">
+                        يمكن للمسير المركزي التراجع عن المصادقة على برنامج أي بطولة لإعادتها إلى حالة انتظار المصادقة (باللون الرمادي).
+                      </span>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {filteredSports
+                      .filter(item => item.approvedProgramCount > 0)
+                      .map(item => (
+                        <div
+                          key={`approved-chip-${item.sport.id}`}
+                          className="flex items-center gap-1.5 bg-white border border-emerald-200 rounded-xl p-1.5 shadow-2xs"
+                        >
+                          <button
+                            type="button"
+                            onClick={() => handleOpenSportResults(item.sport)}
+                            className="px-2 py-1 rounded-lg hover:bg-slate-100 text-[11px] font-black text-slate-800 flex items-center gap-1.5 cursor-pointer transition-colors"
+                            title={`استعراض مباريات ${item.sport.name}`}
+                          >
+                            <span>{item.sport.icon || '🏆'}</span>
+                            <span>{item.sport.name}</span>
+                            <span className="px-1.5 py-0.2 rounded-full bg-emerald-100 text-emerald-800 text-[10px]">
+                              {item.approvedProgramCount}
+                            </span>
+                          </button>
+                          <button
+                            type="button"
+                            disabled={revertingProgramSportId === item.sport.id}
+                            onClick={() => handleRevertSportProgram(item.sport.id, item.sport.name, item.sportMatches)}
+                            className="px-2.5 py-1 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-[10px] font-black flex items-center gap-1 cursor-pointer transition-colors disabled:opacity-50"
+                          >
+                            <Undo2 className="w-3 h-3" />
+                            <span>
+                              {revertingProgramSportId === item.sport.id
+                                ? 'جاري التراجع...'
+                                : 'التراجع عن المصادقة'}
+                            </span>
+                          </button>
+                        </div>
+                      ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Level 1 Search & Filter Bar */}
           <div className="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-xs flex flex-col md:flex-row items-center justify-between gap-3">
@@ -1428,6 +1636,7 @@ export const Matches: React.FC = () => {
                   scheduledCount,
                   ongoingCount,
                   completedCount,
+                  pendingProgramCount,
                   sportTournaments,
                   isProgrammed,
                   techHead,
@@ -1766,6 +1975,11 @@ export const Matches: React.FC = () => {
                               🟢 مفتوحة ({totalMatches} مباراة)
                             </span>
                           )}
+                          {pendingProgramCount > 0 && (
+                            <span className="inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-black bg-red-50 text-red-700 border border-red-200">
+                              ⏳ {pendingProgramCount} في انتظار المصادقة
+                            </span>
+                          )}
                           <CountdownTimer deadline={sportTournaments.find(t => t.registrationDeadline)?.registrationDeadline} compact={true} />
                         </div>
                       </div>
@@ -1856,6 +2070,47 @@ export const Matches: React.FC = () => {
                       </div>
                     </div>
 
+                    {isCentralAdmin && (item.pendingProgramCount > 0 || item.approvedProgramCount > 0) && (
+                      <div className="px-3 pb-2 space-y-1.5">
+                        {item.pendingProgramCount > 0 && (
+                          <button
+                            type="button"
+                            disabled={approvingProgramSportId === sport.id}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleApproveSportProgram(sport.id, sport.name, item.sportMatches);
+                            }}
+                            className="w-full py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-[11px] flex items-center justify-center gap-1.5 shadow-2xs transition-colors cursor-pointer disabled:opacity-50"
+                          >
+                            <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                            <span>
+                              {approvingProgramSportId === sport.id
+                                ? 'جاري المصادقة...'
+                                : `المصادقة على برنامج ${sport.name} (${item.pendingProgramCount})`}
+                            </span>
+                          </button>
+                        )}
+                        {item.approvedProgramCount > 0 && (
+                          <button
+                            type="button"
+                            disabled={revertingProgramSportId === sport.id}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleRevertSportProgram(sport.id, sport.name, item.sportMatches);
+                            }}
+                            className="w-full py-2 px-3 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-black text-[11px] flex items-center justify-center gap-1.5 shadow-2xs transition-colors cursor-pointer disabled:opacity-50"
+                          >
+                            <Undo2 className="w-3.5 h-3.5 shrink-0" />
+                            <span>
+                              {revertingProgramSportId === sport.id
+                                ? 'جاري التراجع...'
+                                : `التراجع عن مصادقة برنامج ${sport.name} (${item.approvedProgramCount})`}
+                            </span>
+                          </button>
+                        )}
+                      </div>
+                    )}
+
                     <div className="p-3 bg-slate-50 border-t border-slate-100 flex items-center justify-between gap-2">
                       <button
                         type="button"
@@ -1938,7 +2193,7 @@ export const Matches: React.FC = () => {
         userProfile={effectiveUserProfile}
         activeSeason={activeSeason}
         onEditScore={(match) => {
-          setSelectedMatchForScore(match);
+          openScoreModalGuarded(match);
         }}
         onEditMatch={(match) => {
           setEditingMatch(match);
@@ -1968,6 +2223,7 @@ export const Matches: React.FC = () => {
         onClose={() => {
           setIsCreateMatchOpen(false);
           setEditingMatch(null);
+          setCreateMatchInitialDate(undefined);
         }}
         tournaments={tournaments}
         schools={schools}
@@ -1979,6 +2235,7 @@ export const Matches: React.FC = () => {
         allowedSportIds={techCommitteeAllowedSports}
         initialSportId={createMatchInitialSportId}
         initialAffiliation={createMatchInitialAffiliation}
+        initialDate={createMatchInitialDate}
         onSave={handleSaveMatch}
         editingMatch={editingMatch}
       />
@@ -1991,9 +2248,11 @@ export const Matches: React.FC = () => {
         onSave={handleSaveScore}
         schools={schools}
         venues={venues}
+        referees={referees}
+        teachers={allUsers.length > 0 ? allUsers : teachers}
         canApprove={
           selectedMatchForScore
-            ? canUserApproveSportResult(effectiveUserProfile, selectedMatchForScore.sportId, teachers)
+            ? isUserTechHeadForSport(effectiveUserProfile, selectedMatchForScore.sportId, allUsers.length > 0 ? allUsers : teachers)
             : false
         }
         currentUserName={effectiveUserProfile?.fullName}

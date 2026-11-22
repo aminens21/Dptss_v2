@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { Tournament, Sport, Directorate, TARGET_AFFILIATIONS, TargetAffiliationConfig } from '../types';
-import { AGE_CATEGORIES, DataService, getAgeCategoriesForSeason, SPORTS_MAP, getCategoryGenderLabel, normalizeCategoryKey, isTeamSport, normalizeTournamentEducationSectors } from '../lib/dataService';
+import { AGE_CATEGORIES, DataService, getAgeCategoriesForSeason, SPORTS_MAP, getCategoryGenderLabel, normalizeCategoryKey, isTeamSport, normalizeTournamentEducationSectors, parseTournamentAllowedLevels } from '../lib/dataService';
 import { X, Trophy, Calendar, Users, Target, Award, Sparkles, ShieldCheck, RefreshCw, Check, Clock, GraduationCap, Building2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -213,10 +213,28 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
         if (sample.description) setDescription(sample.description);
         if (sample.scope) setScope(sample.scope as any);
         if (sample.status) setStatus(sample.status);
-        if (sample.level) {
-          const lvls = sample.level.split(',').map((l: string) => l.trim()).filter(Boolean) as ('Primary' | 'Middle' | 'High')[];
-          if (lvls.length > 0) setSelectedLevels(lvls);
+
+        // Collect union of explicit allowed levels across all branches of this sport
+        const parsedLevelsSet = new Set<'Primary' | 'Middle' | 'High'>();
+        let sawAllLevels = false;
+        sportTourns.forEach(t => {
+          if (t.level && String(t.level).trim()) {
+            const parsed = parseTournamentAllowedLevels(t.level, t.ageCategory);
+            if (parsed === 'ALL') {
+              sawAllLevels = true;
+            } else {
+              parsed.forEach(lvl => parsedLevelsSet.add(lvl));
+            }
+          }
+        });
+        if (sawAllLevels) {
+          setSelectedLevels(['Primary', 'Middle', 'High']);
+        } else if (parsedLevelsSet.size > 0) {
+          setSelectedLevels(Array.from(parsedLevelsSet));
+        } else {
+          setSelectedLevels(['Middle', 'High']);
         }
+
         setSelectedEducationSectors(normalizeTournamentEducationSectors(sample));
 
         const existingCats = Array.from(new Set(
@@ -263,6 +281,11 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
         } else {
           setSelectedCategories(['U15']);
         }
+        setSelectedLevels(
+          sportId === 'cross_country' || sportId === 'athletics'
+            ? ['Primary', 'Middle', 'High']
+            : ['Middle', 'High']
+        );
         setGenderSelection('Both');
         setSelectedAffiliations(['non_club', 'club_affiliated']);
         setSelectedEducationSectors(['public', 'private']);
@@ -321,27 +344,25 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
         return;
       }
 
+      const normalizedSelectedLevels = Array.from(
+        new Set(
+          selectedLevels.filter(
+            (l): l is 'Primary' | 'Middle' | 'High' => l === 'Primary' || l === 'Middle' || l === 'High'
+          )
+        )
+      );
+      if (normalizedSelectedLevels.length === 0) {
+        toast.error('يرجى تحديد سلك تعليمي مسموح له بالمشاركة واحد على الأقل');
+        setIsSubmitting(false);
+        return;
+      }
+      const explicitLevelsValue = normalizedSelectedLevels.join(',');
+
       // Generate combinations: categories x genders x target affiliations
       const tournamentsBatch: Omit<Tournament, 'id'>[] = [];
       const activeDirId = activeDirObj?.id || DataService.getActiveDirectorateId();
 
       for (const catId of selectedCategories) {
-        const normCatForLevel = normalizeCategoryKey(catId);
-        const inferredCatLevel: 'Primary' | 'Middle' | 'High' | null =
-          normCatForLevel === 'U12'
-            ? 'Primary'
-            : normCatForLevel === 'U15'
-            ? 'Middle'
-            : (normCatForLevel === 'U18' || normCatForLevel === 'U20')
-            ? 'High'
-            : null;
-        const resolvedLevelForCat =
-          selectedLevels && selectedLevels.length > 0
-            ? (selectedLevels.length > 1 && inferredCatLevel && selectedLevels.includes(inferredCatLevel)
-                ? inferredCatLevel
-                : selectedLevels.join(','))
-            : (inferredCatLevel || 'Primary,Middle,High');
-
         for (const gen of gendersToGenerate) {
           const genderCatName = getCategoryGenderLabel(catId, gen);
 
@@ -361,7 +382,7 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
               sportId,
               ageCategory: catId,
               gender: gen,
-              level: resolvedLevelForCat,
+              level: explicitLevelsValue,
               educationSectors: selectedEducationSectors.length > 0 ? selectedEducationSectors : ['public', 'private'],
               scope,
               affiliationType: affId,
@@ -387,7 +408,7 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
         console.warn("Could not updateSportRosterLimit:", err);
       }
 
-      // Sync sport dates & settings across tournaments (preserve per-category level if multiple levels selected)
+      // Sync sport dates, allowed levels & education sectors across all branches of this sport
       try {
         await DataService.updateSportDates(sportId, {
           startDate: new Date(startDate),
@@ -395,7 +416,7 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
           registrationDeadline: registrationDeadline ? new Date(registrationDeadline) : null,
           status,
           description: description.trim(),
-          ...(selectedLevels.length === 1 ? { level: selectedLevels[0] } : {}),
+          level: explicitLevelsValue,
           educationSectors: selectedEducationSectors.length > 0 ? selectedEducationSectors : ['public', 'private']
         });
       } catch (err) {

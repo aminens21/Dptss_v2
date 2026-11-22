@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { Tournament, Student, School, User, Sport, AffiliationDisplayConfig } from '../types';
-import { DataService, SPORTS_MAP, getAgeCategoriesForSeason, validateBirthDateForCategory, resolveSchoolCoach, schoolNamesMatch, resolveEffectiveAffiliationMode, isAffiliationAllowedByDisplayConfig, normalizeCategoryKey, resolveEffectiveTeacherCadre, isTeacherLevelAllowedForTournament, isCategoryAllowedForTeacherLevel, isSchoolSectorAllowedForTournament } from '../lib/dataService';
+import { DataService, SPORTS_MAP, getAgeCategoriesForSeason, validateBirthDateForCategory, resolveSchoolCoach, schoolNamesMatch, resolveEffectiveAffiliationMode, isAffiliationAllowedByDisplayConfig, normalizeCategoryKey, resolveEffectiveTeacherCadre, isTeacherLevelAllowedForTournament, isCategoryAllowedForTeacherLevel, isSchoolSectorAllowedForTournament, findMatchingSchoolForTeacher, parseTournamentAllowedLevels, getTournamentLevelAr } from '../lib/dataService';
 import { canUserDownloadTournamentTablePdf, buildParticipationTableRows, downloadTournamentParticipationTablePdf, formatTournamentRedBannerTitle } from '../lib/tournamentTablePdfService';
 import { useAuth } from '../contexts/AuthContext';
 import { useRolePermissions } from '../hooks/useRolePermissions';
@@ -91,33 +91,66 @@ export const CrossCountryChampionshipModal: React.FC<CrossCountryChampionshipMod
 
   const effectiveSchoolNameForCadre = teacherSchoolName || userProfile?.schoolName || userProfile?.workLocation || '';
   const teacherSchoolObj = useMemo(() => {
-    return schools.find(s =>
-      (userProfile?.schoolId && s.id === userProfile.schoolId) ||
-      (effectiveSchoolNameForCadre && schoolNamesMatch(s.name, effectiveSchoolNameForCadre))
+    return findMatchingSchoolForTeacher(
+      schools,
+      userProfile
+        ? { ...userProfile, workLocation: effectiveSchoolNameForCadre || userProfile.workLocation }
+        : { workLocation: effectiveSchoolNameForCadre }
     );
-  }, [schools, effectiveSchoolNameForCadre, userProfile?.schoolId]);
+  }, [schools, effectiveSchoolNameForCadre, userProfile]);
 
   const effectiveTeacherCadre = useMemo(() => {
     return resolveEffectiveTeacherCadre(userProfile, teacherSchoolObj);
   }, [userProfile, teacherSchoolObj]);
 
+  const baseCcTournaments = useMemo(() => {
+    return tournaments.filter(t => t.sportId === 'cross_country' && t.status !== 'Draft' && (t as any).isActive !== false);
+  }, [tournaments]);
+
   // Compute deadline and affiliation for cross country (strictly scoped by teacher level if non-manager teacher)
   const ccTournaments = useMemo(() => {
-    const base = tournaments.filter(t => t.sportId === 'cross_country' && t.status !== 'Draft' && (t as any).isActive !== false);
     if (isTeacherRole && !canManage) {
-      return base.filter(t =>
-        isTeacherLevelAllowedForTournament(effectiveTeacherCadre, t.level) &&
+      return baseCcTournaments.filter(t =>
+        isTeacherLevelAllowedForTournament(effectiveTeacherCadre, t.level, t.ageCategory) &&
         (!teacherSchoolObj || isSchoolSectorAllowedForTournament(teacherSchoolObj, t))
       );
     }
-    return base;
-  }, [tournaments, isTeacherRole, canManage, effectiveTeacherCadre, teacherSchoolObj]);
+    return baseCcTournaments;
+  }, [baseCcTournaments, isTeacherRole, canManage, effectiveTeacherCadre, teacherSchoolObj]);
+
+  const isTeacherAllowedForCc = useMemo(() => {
+    if (!isTeacherRole || canManage || baseCcTournaments.length === 0) return true;
+    return ccTournaments.length > 0;
+  }, [isTeacherRole, canManage, baseCcTournaments.length, ccTournaments.length]);
+
+  useEffect(() => {
+    if (isOpen && !isTeacherAllowedForCc) {
+      const levelsSet = new Set<'Primary' | 'Middle' | 'High'>();
+      baseCcTournaments.forEach(t => {
+        const parsed = parseTournamentAllowedLevels(t.level, t.ageCategory);
+        if (parsed === 'ALL') {
+          levelsSet.add('Primary');
+          levelsSet.add('Middle');
+          levelsSet.add('High');
+        } else {
+          parsed.forEach(l => levelsSet.add(l));
+        }
+      });
+      const allowedLevelsAr = levelsSet.size > 0
+        ? getTournamentLevelAr(Array.from(levelsSet).join(','))
+        : 'أسلاك أخرى';
+      toast.error(
+        `عذراً، بطولة العدو الريفي مبرمجة لـ (${allowedLevelsAr}) ولا تشمل السلك التعليمي لمؤسستكم.`,
+        { id: 'cc-cadre-blocked' }
+      );
+      onClose();
+    }
+  }, [isOpen, isTeacherAllowedForCc, baseCcTournaments, onClose]);
 
   const visibleCategories = useMemo(() => {
     let list = CROSS_COUNTRY_CATEGORIES;
     if (isTeacherRole && !canManage && effectiveTeacherCadre) {
-      const levelFiltered = list.filter(cat => isCategoryAllowedForTeacherLevel(effectiveTeacherCadre, cat.category));
-      if (levelFiltered.length > 0) list = levelFiltered;
+      list = list.filter(cat => isCategoryAllowedForTeacherLevel(effectiveTeacherCadre, cat.category));
     }
     if (ccTournaments.length > 0) {
       const tourFiltered = list.filter(cat =>
@@ -127,9 +160,11 @@ export const CrossCountryChampionshipModal: React.FC<CrossCountryChampionshipMod
         )
       );
       if (tourFiltered.length > 0) list = tourFiltered;
+    } else if (isTeacherRole && !canManage && baseCcTournaments.length > 0) {
+      return [];
     }
     return list;
-  }, [isTeacherRole, canManage, effectiveTeacherCadre, ccTournaments]);
+  }, [isTeacherRole, canManage, effectiveTeacherCadre, ccTournaments, baseCcTournaments.length]);
 
   const [selectedCatId, setSelectedCatId] = useState<string>('u15_male');
   useEffect(() => {

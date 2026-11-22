@@ -1,5 +1,6 @@
 import { Tournament, Match, School, Sport, Venue, Referee, User } from '../types';
 import { SPORTS_MAP, normalizeDateToYmd, isClubTournament, normalizeCategoryKey } from './dataService';
+import { normalizeArabicName } from './utils';
 import { hasValidMatchTeams, formatTeamDisplayName } from './drawTournamentUtils';
 import toast from 'react-hot-toast';
 
@@ -32,6 +33,7 @@ export interface CalendarExportEvent {
   refereesText?: string;
   refereesHtml?: string;
   notes?: string;
+  programApprovalStatus?: 'pending' | 'approved';
 }
 
 export function resolveMatchAffiliation(
@@ -294,27 +296,131 @@ export function isOpaqueEntityId(value?: string): boolean {
   return false;
 }
 
+export function isRefereeTechCommitteeHead(
+  rawEntry?: string,
+  referees: Referee[] = [],
+  users: User[] = []
+): boolean {
+  const stripTeacherTag = (name: string): string =>
+    (name || '').replace(/\s*\(أستاذ\)\s*/g, '').replace(/\s+/g, ' ').trim();
+
+  const clean = stripTeacherTag(rawEntry || '');
+  if (!clean) return false;
+  const normClean = normalizeArabicName(clean);
+
+  const isTechHeadUser = (u?: Partial<User> | null): boolean =>
+    Boolean(
+      u &&
+        (u.isTechCommitteeHead === true ||
+          u.role === 'TECH_HEAD' ||
+          (u.role as string) === 'TECH_COMMITTEE_HEAD')
+    );
+
+  const userHasId = (u: Partial<User>, targetId: string): boolean => {
+    if (!targetId) return false;
+    if (u.id === targetId || (u as any).uid === targetId || (u as any).teacherId === targetId) return true;
+    return Array.isArray(u.aliasIds) && u.aliasIds.includes(targetId);
+  };
+
+  const refHasId = (r: Partial<Referee>, targetId: string): boolean => {
+    if (!targetId) return false;
+    if (r.id === targetId || r.teacherId === targetId || (r as any).userId === targetId) return true;
+    return Array.isArray(r.aliasIds) && r.aliasIds.includes(targetId);
+  };
+
+  const directUser = users.find(
+    u =>
+      userHasId(u, clean) ||
+      (u.email && u.email.trim().toLowerCase() === clean.toLowerCase()) ||
+      (normClean && normalizeArabicName(stripTeacherTag(u.fullName || '')) === normClean)
+  );
+  if (isTechHeadUser(directUser)) return true;
+
+  const refMatch = referees.find(
+    r =>
+      refHasId(r, clean) ||
+      (normClean && normalizeArabicName(stripTeacherTag(r.fullName || '')) === normClean)
+  );
+  if (refMatch) {
+    const refNormName = normalizeArabicName(stripTeacherTag(refMatch.fullName || ''));
+    const refEmail = (refMatch.email || '').trim().toLowerCase();
+    const linkedUser = users.find(
+      u =>
+        userHasId(u, refMatch.id || '') ||
+        (refMatch.teacherId ? userHasId(u, refMatch.teacherId) : false) ||
+        ((refMatch as any).userId ? userHasId(u, (refMatch as any).userId) : false) ||
+        (refEmail && u.email && u.email.trim().toLowerCase() === refEmail) ||
+        (refNormName && normalizeArabicName(stripTeacherTag(u.fullName || '')) === refNormName)
+    );
+    if (isTechHeadUser(linkedUser)) return true;
+  }
+
+  return false;
+}
+
 export function resolveMatchRefereesInfo(
   m: Match,
   referees: Referee[] = [],
-  users: User[] = []
+  users: User[] = [],
+  options?: { excludeTechCommitteeHeads?: boolean }
 ): ResolvedMatchReferees {
   const stripTeacherTag = (name: string): string =>
     (name || '').replace(/\s*\(أستاذ\)\s*/g, '').replace(/\s+/g, ' ').trim();
 
+  const excludeHeads = Boolean(options?.excludeTechCommitteeHeads);
+
+  const userHasId = (u: Partial<User>, targetId: string): boolean => {
+    if (!targetId) return false;
+    if (u.id === targetId || (u as any).uid === targetId || (u as any).teacherId === targetId) return true;
+    return Array.isArray(u.aliasIds) && u.aliasIds.includes(targetId);
+  };
+
+  const refHasId = (r: Partial<Referee>, targetId: string): boolean => {
+    if (!targetId) return false;
+    if (r.id === targetId || r.teacherId === targetId || (r as any).userId === targetId) return true;
+    return Array.isArray(r.aliasIds) && r.aliasIds.includes(targetId);
+  };
+
   const resolveSingle = (rawEntry?: string): string => {
     const clean = stripTeacherTag(rawEntry || '');
     if (!clean) return '';
+    if (excludeHeads && isRefereeTechCommitteeHead(clean, referees, users)) {
+      return '';
+    }
+    const normClean = normalizeArabicName(clean);
+
     const refMatch = referees.find(
       r =>
-        r.id === clean ||
-        r.teacherId === clean ||
-        (r as any).userId === clean ||
-        stripTeacherTag(r.fullName || '') === clean
+        refHasId(r, clean) ||
+        stripTeacherTag(r.fullName || '') === clean ||
+        (normClean && normalizeArabicName(stripTeacherTag(r.fullName || '')) === normClean)
     );
-    if (refMatch?.fullName) return stripTeacherTag(refMatch.fullName);
-    const userMatch = users.find(u => u.id === clean || stripTeacherTag(u.fullName || '') === clean);
-    if (userMatch?.fullName) return stripTeacherTag(userMatch.fullName);
+    if (refMatch?.fullName) {
+      const resolvedName = stripTeacherTag(refMatch.fullName);
+      if (excludeHeads && isRefereeTechCommitteeHead(resolvedName, referees, users)) {
+        return '';
+      }
+      return resolvedName;
+    }
+
+    const userMatch = users.find(
+      u =>
+        userHasId(u, clean) ||
+        (u.email && u.email.trim().toLowerCase() === clean.toLowerCase()) ||
+        stripTeacherTag(u.fullName || '') === clean ||
+        (normClean && normalizeArabicName(stripTeacherTag(u.fullName || '')) === normClean)
+    );
+    if (userMatch?.fullName) {
+      if (
+        excludeHeads &&
+        (userMatch.isTechCommitteeHead === true ||
+          userMatch.role === 'TECH_HEAD' ||
+          (userMatch.role as string) === 'TECH_COMMITTEE_HEAD')
+      ) {
+        return '';
+      }
+      return stripTeacherTag(userMatch.fullName);
+    }
     return isOpaqueEntityId(clean) ? '' : clean;
   };
 
@@ -328,10 +434,15 @@ export function resolveMatchRefereesInfo(
   );
   const categorizedSet = new Set([...tableRefs, ...fieldRefs]);
 
+  const legacyRefereeId = typeof (m as any).refereeId === 'string' ? (m as any).refereeId : '';
+  const legacyRefereeIds = Array.isArray((m as any).refereeIds) ? (m as any).refereeIds : [];
+
   const extraRefs = dedupePreserveOrder([
     ...(Array.isArray(m.referees) ? m.referees : []).map(resolveSingle),
     ...(m.referee1Id ? [resolveSingle(m.referee1Id)] : []),
-    ...(m.referee2Id ? [resolveSingle(m.referee2Id)] : [])
+    ...(m.referee2Id ? [resolveSingle(m.referee2Id)] : []),
+    ...legacyRefereeIds.map(resolveSingle),
+    ...(legacyRefereeId ? [resolveSingle(legacyRefereeId)] : [])
   ]).filter(name => !categorizedSet.has(name));
 
   const allRefs = dedupePreserveOrder([...tableRefs, ...fieldRefs, ...extraRefs]);
@@ -349,7 +460,8 @@ export function buildAllCalendarEvents(
   schools: School[],
   venues: Venue[] = [],
   referees: Referee[] = [],
-  teachers: User[] = []
+  teachers: User[] = [],
+  options?: { excludeTechCommitteeHeads?: boolean }
 ): CalendarExportEvent[] {
   const list: CalendarExportEvent[] = [];
 
@@ -389,7 +501,7 @@ export function buildAllCalendarEvents(
       'الملعب الإقليمي';
 
     const { tableRefs: tableRefNames, fieldRefs: fieldRefNames, allRefs: uniqueRefs } =
-      resolveMatchRefereesInfo(m, referees, teachers);
+      resolveMatchRefereesInfo(m, referees, teachers, options);
 
     const textParts: string[] = [];
     const htmlParts: string[] = [];
@@ -414,10 +526,10 @@ export function buildAllCalendarEvents(
 
     const refereesText = textParts.length > 0
       ? textParts.join(' | ')
-      : (uniqueRefs.length > 0 ? uniqueRefs.join(' • ') : '-');
+      : (uniqueRefs.length > 0 ? uniqueRefs.join(' • ') : 'يعين لاحقاً');
     const refereesHtml = htmlParts.length > 0
       ? htmlParts.join('')
-      : (uniqueRefs.length > 0 ? uniqueRefs.join(' • ') : '-');
+      : (uniqueRefs.length > 0 ? uniqueRefs.join(' • ') : 'يعين لاحقاً');
 
     const affiliationType = resolveMatchAffiliation(m, tournaments);
     const userNote = (m.notes || '').trim();
@@ -441,7 +553,8 @@ export function buildAllCalendarEvents(
       fieldReferees: fieldRefNames,
       refereesText,
       refereesHtml,
-      notes: userNote
+      notes: userNote,
+      programApprovalStatus: m.programApprovalStatus
     });
   });
 
@@ -596,7 +709,7 @@ export function generateProgramHtml({
         ${!hideSportColumn ? `<td style="border: 1px solid #cbd5e1; padding: 7px 6px; text-align: center; font-size: 11px; font-weight: bold; color: #334155;">${ev.sportName}</td>` : ''}
         <td style="border: 1px solid #cbd5e1; padding: 7px 6px; text-align: center; font-weight: bold; font-size: 10.5px; color: #334155;">${targetCategoryDisplay}</td>
         <td style="border: 1px solid #cbd5e1; padding: 7px 8px; font-size: 10.5px; color: #334155;">${ev.venue || '-'}</td>
-        <td style="border: 1px solid #cbd5e1; padding: 7px 8px; font-size: 10.5px; color: #1e293b;">${ev.refereesHtml || ev.refereesText || (ev.referees && ev.referees.length > 0 ? ev.referees.map(r => r.replace(/\s*\(أستاذ\)\s*/g, '').trim()).join(' • ') : '-')}</td>
+        <td style="border: 1px solid #cbd5e1; padding: 7px 8px; font-size: 10.5px; color: #1e293b;">${ev.refereesHtml || ev.refereesText || (ev.referees && ev.referees.length > 0 ? ev.referees.map(r => r.replace(/\s*\(أستاذ\)\s*/g, '').trim()).join(' • ') : 'يعين لاحقاً')}</td>
         ${showNotesColumn ? `<td style="border: 1px solid #cbd5e1; padding: 7px 6px; font-size: 10px; color: #334155;">${ev.notes?.trim() || '-'}</td>` : ''}
       </tr>
     `;

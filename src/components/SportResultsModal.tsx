@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { Sport, Tournament, Match, School, Venue, Student, User, Referee, AffiliationDisplayConfig } from '../types';
-import { DataService, isClubTournament, GENDER_MAP, SPORTS_MAP, getAgeCategoriesForSeason, normalizeCategoryKey, canUserApproveSportResult, areSportIdsEquivalent, normalizeCanonicalSportId, normalizeTournamentAffiliation, isAffiliationAllowedByDisplayConfig } from '../lib/dataService';
+import { DataService, isClubTournament, GENDER_MAP, SPORTS_MAP, getAgeCategoriesForSeason, normalizeCategoryKey, canUserApproveSportResult, areSportIdsEquivalent, normalizeCanonicalSportId, normalizeTournamentAffiliation, isAffiliationAllowedByDisplayConfig, canUserEnterMatchScore, isUserTechHeadForSport, isMatchProgramPendingApproval } from '../lib/dataService';
 import { computeGroupStandings, formatTeamDisplayName, isPlaceholderTeamId, isKnockoutBracketMatch, ComputedGroupStandings, hasValidMatchTeams, extractMatchGroupLabel } from '../lib/drawTournamentUtils';
 import { CrossCountryPodiumView } from './CrossCountryPodiumView';
 import { AthleticsResultsView } from './AthleticsResultsView';
@@ -27,10 +27,12 @@ import {
   Pencil,
   ChevronLeft,
   MessageCircle,
-  Share2
+  Share2,
+  Undo2
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useRolePermissions } from '../hooks/useRolePermissions';
+import { isSuperAdminEmail } from '../contexts/AuthContext';
 import { cn, formatMatchDate } from '../lib/utils';
 import {
   findRefereeContact,
@@ -102,6 +104,10 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
   const [savingNoteMatchId, setSavingNoteMatchId] = useState<string | null>(null);
   const [diffusionTarget, setDiffusionTarget] = useState<MatchBroadcastDiffusionTarget | null>(null);
   const [togglingLiveMatchId, setTogglingLiveMatchId] = useState<string | null>(null);
+  const [approvingProgramMatchId, setApprovingProgramMatchId] = useState<string | null>(null);
+  const [revertingProgramMatchId, setRevertingProgramMatchId] = useState<string | null>(null);
+  const [isBatchApprovingProgram, setIsBatchApprovingProgram] = useState(false);
+  const [isBatchRevertingProgram, setIsBatchRevertingProgram] = useState(false);
   const [affiliationDisplayConfig, setAffiliationDisplayConfig] = useState<AffiliationDisplayConfig>(() =>
     DataService.getAffiliationDisplayConfigSync()
   );
@@ -128,6 +134,68 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
       toast.error('تعذر تحديث حالة المباراة');
     } finally {
       setTogglingLiveMatchId(null);
+    }
+  };
+
+  const handleApproveMatchProgram = async (match: Match) => {
+    if (!isCentralAdmin) return;
+    const approverName = userProfile?.fullName || matchedTeacher?.fullName || userProfile?.email || 'المسير المركزي';
+    setApprovingProgramMatchId(match.id);
+    try {
+      await DataService.approveMatchProgram(match.id, approverName);
+      toast.success('تمت المصادقة على برنامج المقابلة بنجاح ✅');
+    } catch (err) {
+      console.error('Failed to approve match program:', err);
+      toast.error('تعذرت المصادقة على البرنامج');
+    } finally {
+      setApprovingProgramMatchId(null);
+    }
+  };
+
+  const handleRevertMatchProgram = async (match: Match) => {
+    if (!isCentralAdmin) return;
+    setRevertingProgramMatchId(match.id);
+    try {
+      await DataService.revertMatchProgram(match.id);
+      toast.success('تم التراجع عن مصادقة المقابلة وإعادتها إلى انتظار المصادقة 🔄');
+    } catch (err) {
+      console.error('Failed to revert match program:', err);
+      toast.error('تعذر التراجع عن مصادقة المقابلة');
+    } finally {
+      setRevertingProgramMatchId(null);
+    }
+  };
+
+  const handleBatchApproveBranchProgram = async (branchMatches: Match[]) => {
+    if (!isCentralAdmin) return;
+    const pendingIds = branchMatches.filter(m => isMatchProgramPendingApproval(m)).map(m => m.id);
+    if (pendingIds.length === 0) return;
+    const approverName = userProfile?.fullName || matchedTeacher?.fullName || userProfile?.email || 'المسير المركزي';
+    setIsBatchApprovingProgram(true);
+    try {
+      await DataService.approveMatchesProgramBatch(pendingIds, approverName);
+      toast.success(`تمت المصادقة على ${pendingIds.length} مباراة في هذا البرنامج بنجاح ✅`);
+    } catch (err) {
+      console.error('Failed to batch approve branch program:', err);
+      toast.error('تعذرت المصادقة الجماعية على البرنامج');
+    } finally {
+      setIsBatchApprovingProgram(false);
+    }
+  };
+
+  const handleBatchRevertBranchProgram = async (branchMatches: Match[]) => {
+    if (!isCentralAdmin) return;
+    const approvedIds = branchMatches.filter(m => !isMatchProgramPendingApproval(m)).map(m => m.id);
+    if (approvedIds.length === 0) return;
+    setIsBatchRevertingProgram(true);
+    try {
+      await DataService.revertMatchesProgramBatch(approvedIds);
+      toast.success(`تم التراجع عن مصادقة ${approvedIds.length} مباراة في هذا البرنامج بنجاح 🔄`);
+    } catch (err) {
+      console.error('Failed to batch revert branch program:', err);
+      toast.error('تعذر التراجع عن مصادقة البرنامج');
+    } finally {
+      setIsBatchRevertingProgram(false);
     }
   };
 
@@ -191,7 +259,11 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
     ) || null;
   }, [userProfile, effectiveTeachers]);
 
-  const isSuperAdmin = userProfile?.isSuperAdmin === true || matchedTeacher?.isSuperAdmin === true || userProfile?.role === 'SUPER_ADMIN';
+  const isSuperAdmin =
+    userProfile?.isSuperAdmin === true ||
+    matchedTeacher?.isSuperAdmin === true ||
+    userProfile?.role === 'SUPER_ADMIN' ||
+    isSuperAdminEmail(userProfile?.email);
   const effectiveRole = matchedTeacher?.role || userProfile?.role;
   const isCentralAdmin = effectiveRole === 'CENTRAL_ADMIN' || isSuperAdmin;
   const isSportManager = effectiveRole === 'SPORT_MANAGER';
@@ -588,6 +660,18 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
     return sportMatches.filter(m => getMatchAffiliation(m) === 'open').length;
   }, [sportMatches]);
 
+  const nonClubPendingCount = useMemo(() => {
+    return sportMatches.filter(m => getMatchAffiliation(m) === 'non_club' && isMatchProgramPendingApproval(m)).length;
+  }, [sportMatches]);
+
+  const clubPendingCount = useMemo(() => {
+    return sportMatches.filter(m => getMatchAffiliation(m) === 'club_affiliated' && isMatchProgramPendingApproval(m)).length;
+  }, [sportMatches]);
+
+  const openPendingCount = useMemo(() => {
+    return sportMatches.filter(m => getMatchAffiliation(m) === 'open' && isMatchProgramPendingApproval(m)).length;
+  }, [sportMatches]);
+
   if (!isOpen || !sport) return null;
 
   const getSchoolName = (id: string, fallbackName?: string) => {
@@ -707,6 +791,54 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
             />
           ) : (
             <>
+              {/* Central Admin Sport-Wide Program Approval / Revert Bar */}
+              {isCentralAdmin && sportMatches.length > 0 && (
+                <div className="bg-white border border-slate-200 rounded-2xl p-3.5 shadow-2xs flex flex-wrap items-center justify-between gap-2.5">
+                  <div className="flex items-center gap-2 flex-wrap text-xs font-black text-slate-800">
+                    <ShieldCheck className="w-4 h-4 text-indigo-600 shrink-0" />
+                    <span>تحكم المسير المركزي في برنامج {sport.name}:</span>
+                    <span className="px-2 py-0.5 rounded-full bg-red-50 text-red-700 border border-red-200 text-[10px]">
+                      ⏳ في الانتظار: {sportMatches.filter(m => isMatchProgramPendingApproval(m)).length}
+                    </span>
+                    <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px]">
+                      ✅ مصادق عليها: {sportMatches.filter(m => !isMatchProgramPendingApproval(m)).length}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {sportMatches.some(m => isMatchProgramPendingApproval(m)) && (
+                      <button
+                        type="button"
+                        disabled={isBatchApprovingProgram}
+                        onClick={() => handleBatchApproveBranchProgram(sportMatches)}
+                        className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-black shadow-xs transition-all cursor-pointer inline-flex items-center gap-1.5 disabled:opacity-50"
+                      >
+                        <CheckCircle2 className="w-3.5 h-3.5" />
+                        <span>
+                          {isBatchApprovingProgram
+                            ? 'جاري المصادقة...'
+                            : `المصادقة على كامل برنامج ${sport.name} (${sportMatches.filter(m => isMatchProgramPendingApproval(m)).length})`}
+                        </span>
+                      </button>
+                    )}
+                    {sportMatches.some(m => !isMatchProgramPendingApproval(m)) && (
+                      <button
+                        type="button"
+                        disabled={isBatchRevertingProgram}
+                        onClick={() => handleBatchRevertBranchProgram(sportMatches)}
+                        className="px-3 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-[11px] font-black shadow-xs transition-all cursor-pointer inline-flex items-center gap-1.5 disabled:opacity-50"
+                      >
+                        <Undo2 className="w-3.5 h-3.5" />
+                        <span>
+                          {isBatchRevertingProgram
+                            ? 'جاري التراجع...'
+                            : `التراجع عن مصادقة كامل برنامج ${sport.name} (${sportMatches.filter(m => !isMatchProgramPendingApproval(m)).length})`}
+                        </span>
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
+
               {/* BRANCH CARDS (Show only if corresponding matches or tournaments exist) */}
               <div className={`grid gap-5 ${
                 [hasNonClub, hasClub, hasOpen].filter(Boolean).length === 1 
@@ -726,14 +858,21 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
                     className="text-right p-5 rounded-3xl border-2 transition-all duration-300 cursor-pointer flex flex-col justify-between min-h-[220px] relative overflow-hidden shadow-sm hover:shadow-xl bg-white border-blue-200 hover:border-blue-500 group"
                   >
                     <div className="space-y-3 w-full">
-                      <div className="flex items-center justify-between w-full">
+                      <div className="flex items-center justify-between w-full gap-1.5 flex-wrap">
                         <span className="text-[10px] font-black px-2.5 py-1 rounded-full border bg-blue-50 text-blue-800 border-blue-200 flex items-center gap-1.5">
                           <span className="w-2 h-2 rounded-full bg-blue-600" />
                           ⚪ بطولة غير المنتمين للأندية
                         </span>
-                        <span className="text-[10px] font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-xl border border-blue-100">
-                          {nonClubMatchesCount} مباراة
-                        </span>
+                        <div className="flex items-center gap-1 flex-wrap">
+                          {nonClubPendingCount > 0 && (
+                            <span className="text-[10px] font-black text-red-700 bg-red-50 px-2 py-0.5 rounded-xl border border-red-200">
+                              ⏳ {nonClubPendingCount} في انتظار المصادقة
+                            </span>
+                          )}
+                          <span className="text-[10px] font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-xl border border-blue-100">
+                            {nonClubMatchesCount} مباراة
+                          </span>
+                        </div>
                       </div>
 
                       <h4 className="text-sm font-black text-slate-900 mt-1 group-hover:text-blue-600 transition-colors">
@@ -782,14 +921,21 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
                     className="text-right p-5 rounded-3xl border-2 transition-all duration-300 cursor-pointer flex flex-col justify-between min-h-[220px] relative overflow-hidden shadow-sm hover:shadow-xl bg-amber-50/70 hover:bg-amber-50 border-amber-300/80 hover:border-amber-500 text-amber-950 group"
                   >
                     <div className="space-y-3 w-full">
-                      <div className="flex items-center justify-between w-full">
+                      <div className="flex items-center justify-between w-full gap-1.5 flex-wrap">
                         <span className="text-[10px] font-black px-2.5 py-1 rounded-full border bg-amber-100 text-amber-900 border-amber-300 flex items-center gap-1.5">
                           <span className="w-2 h-2 rounded-full bg-amber-500" />
                           🟡 بطولة المنتمين للأندية
                         </span>
-                        <span className="text-[10px] font-bold text-amber-900 bg-amber-200/80 px-2 py-0.5 rounded-xl border border-amber-200">
-                          {clubMatchesCount} مباراة
-                        </span>
+                        <div className="flex items-center gap-1 flex-wrap">
+                          {clubPendingCount > 0 && (
+                            <span className="text-[10px] font-black text-red-700 bg-red-50 px-2 py-0.5 rounded-xl border border-red-200">
+                              ⏳ {clubPendingCount} في انتظار المصادقة
+                            </span>
+                          )}
+                          <span className="text-[10px] font-bold text-amber-900 bg-amber-200/80 px-2 py-0.5 rounded-xl border border-amber-200">
+                            {clubMatchesCount} مباراة
+                          </span>
+                        </div>
                       </div>
 
                       <h4 className="text-sm font-black text-amber-950 mt-1 group-hover:text-amber-800 transition-colors">
@@ -838,14 +984,21 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
                     className="text-right p-5 rounded-3xl border-2 transition-all duration-300 cursor-pointer flex flex-col justify-between min-h-[220px] relative overflow-hidden shadow-sm hover:shadow-xl bg-emerald-50/70 hover:bg-emerald-50 border-emerald-300/80 hover:border-emerald-500 text-emerald-950 group"
                   >
                     <div className="space-y-3 w-full">
-                      <div className="flex items-center justify-between w-full">
+                      <div className="flex items-center justify-between w-full gap-1.5 flex-wrap">
                         <span className="text-[10px] font-black px-2.5 py-1 rounded-full border bg-emerald-100 text-emerald-900 border-emerald-300 flex items-center gap-1.5">
                           <span className="w-2 h-2 rounded-full bg-emerald-500" />
                           🟢 البطولات المفتوحة
                         </span>
-                        <span className="text-[10px] font-bold text-emerald-900 bg-emerald-200/80 px-2 py-0.5 rounded-xl border border-emerald-200">
-                          {openMatchesCount} مباراة
-                        </span>
+                        <div className="flex items-center gap-1 flex-wrap">
+                          {openPendingCount > 0 && (
+                            <span className="text-[10px] font-black text-red-700 bg-red-50 px-2 py-0.5 rounded-xl border border-red-200">
+                              ⏳ {openPendingCount} في انتظار المصادقة
+                            </span>
+                          )}
+                          <span className="text-[10px] font-bold text-emerald-900 bg-emerald-200/80 px-2 py-0.5 rounded-xl border border-emerald-200">
+                            {openMatchesCount} مباراة
+                          </span>
+                        </div>
                       </div>
 
                       <h4 className="text-sm font-black text-emerald-950 mt-1 group-hover:text-emerald-800 transition-colors">
@@ -1288,16 +1441,48 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
 
                       {/* MATCHES LIST / GRID */}
                       <div className="space-y-3">
-                        <div className="flex items-center justify-between">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
                           <h4 className="text-xs font-black text-slate-700 flex items-center gap-1.5">
                             <span>قائمة المقابلات المبرمجة والنتائج</span>
                             <span className="px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 text-[10px] font-bold">
                               {activeBranchMatches.length} مباراة
                             </span>
                           </h4>
-                          <span className="text-[11px] text-slate-500 font-bold">
-                            الصنف: {activeBranchModal === 'non_club' ? '⚪ غير المنتمين للأندية' : activeBranchModal === 'club_affiliated' ? '🟡 المنتمين للأندية' : '🟢 البطولة المفتوحة'}
-                          </span>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            {isCentralAdmin && activeBranchMatches.some(m => isMatchProgramPendingApproval(m)) && (
+                              <button
+                                type="button"
+                                disabled={isBatchApprovingProgram}
+                                onClick={() => handleBatchApproveBranchProgram(activeBranchMatches)}
+                                className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-black shadow-xs transition-all cursor-pointer inline-flex items-center gap-1.5 disabled:opacity-50"
+                              >
+                                <CheckCircle2 className="w-3.5 h-3.5" />
+                                <span>
+                                  {isBatchApprovingProgram
+                                    ? 'جاري المصادقة...'
+                                    : `المصادقة على البرنامج (${activeBranchMatches.filter(m => isMatchProgramPendingApproval(m)).length})`}
+                                </span>
+                              </button>
+                            )}
+                            {isCentralAdmin && activeBranchMatches.some(m => !isMatchProgramPendingApproval(m)) && (
+                              <button
+                                type="button"
+                                disabled={isBatchRevertingProgram}
+                                onClick={() => handleBatchRevertBranchProgram(activeBranchMatches)}
+                                className="px-3 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-[11px] font-black shadow-xs transition-all cursor-pointer inline-flex items-center gap-1.5 disabled:opacity-50"
+                              >
+                                <Undo2 className="w-3.5 h-3.5" />
+                                <span>
+                                  {isBatchRevertingProgram
+                                    ? 'جاري التراجع...'
+                                    : `التراجع عن المصادقة (${activeBranchMatches.filter(m => !isMatchProgramPendingApproval(m)).length})`}
+                                </span>
+                              </button>
+                            )}
+                            <span className="text-[11px] text-slate-500 font-bold">
+                              الصنف: {activeBranchModal === 'non_club' ? '⚪ غير المنتمين للأندية' : activeBranchModal === 'club_affiliated' ? '🟡 المنتمين للأندية' : '🟢 البطولة المفتوحة'}
+                            </span>
+                          </div>
                         </div>
 
                         {activeBranchMatches.length === 0 ? (
@@ -1358,12 +1543,19 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
                               const hasPendingSlot = isPlaceholderTeamId(m.team1Id) || isPlaceholderTeamId(m.team2Id);
                               const vName = getVenueName(m.venueId, m.venueName, m.hostSchoolId);
                               const hostSchoolObj = resolveHostSchoolForMatch(m, schools);
-                              const resolvedRefs = resolveMatchRefereesInfo(m, effectiveReferees, effectiveUsers);
-                              const matchReferees = resolvedRefs.allRefs;
+                              const rawResolvedRefs = resolveMatchRefereesInfo(m, effectiveReferees, effectiveUsers);
+                              const visibleResolvedRefs = rawResolvedRefs;
+                              const matchReferees = rawResolvedRefs.allRefs;
+                              const visibleMatchReferees = visibleResolvedRefs.allRefs;
+                              const isProgramPending = isMatchProgramPendingApproval(m);
+                              const canScoreThisMatch = canUserEnterMatchScore(userProfile, m, effectiveReferees, effectiveUsers);
+                              const isTechHeadForMatchSport = isUserTechHeadForSport(userProfile, m.sportId || sport.id, effectiveUsers);
 
                               const normalizedMatchStatus = String(m.status || 'Scheduled').trim().toLowerCase();
                               const isCompleted = normalizedMatchStatus === 'completed';
                               const isOngoing = normalizedMatchStatus === 'ongoing';
+                              const canShowScoreButtons =
+                                canScoreThisMatch && (isTechHeadForMatchSport || !(isCompleted && m.approvalStatus === 'approved'));
 
                               const s1 = m.score1 ?? 0;
                               const s2 = m.score2 ?? 0;
@@ -1382,16 +1574,18 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
                                 <div
                                   key={m.id}
                                   className={cn(
-                                    "p-3.5 rounded-2xl border transition-all duration-200 flex flex-col justify-between space-y-2.5 bg-white shadow-3xs hover:shadow-xs",
-                                    activeBranchModal === 'club_affiliated'
-                                      ? 'border-yellow-200 hover:border-yellow-300 bg-yellow-50/10'
+                                    "p-3.5 rounded-2xl border transition-all duration-200 flex flex-col justify-between space-y-2.5 shadow-3xs hover:shadow-xs",
+                                    isProgramPending
+                                      ? 'bg-slate-200/95 border-slate-300 hover:border-slate-400'
+                                      : activeBranchModal === 'club_affiliated'
+                                      ? 'bg-yellow-50/10 border-yellow-200 hover:border-yellow-300'
                                       : activeBranchModal === 'open'
-                                      ? 'border-emerald-200 hover:border-emerald-300 bg-emerald-50/10'
-                                      : 'border-slate-150 hover:border-blue-300'
+                                      ? 'bg-emerald-50/10 border-emerald-200 hover:border-emerald-300'
+                                      : 'bg-white border-slate-150 hover:border-blue-300'
                                   )}
                                 >
-                                  {/* Compact Header: Match Number, Group, Round, Category, Gender, Status */}
-                                  <div className="flex items-center justify-between text-[10px] font-bold text-slate-500 border-b border-slate-100/80 pb-2">
+                                  {/* Compact Header: Match Number, Group, Round, Category, Gender, Program Approval, Status */}
+                                  <div className="flex flex-wrap items-center justify-between gap-1.5 text-[10px] font-bold text-slate-500 border-b border-slate-100/80 pb-2">
                                     <div className="flex items-center gap-1.5 flex-wrap">
                                       <span className="px-1.5 py-0.5 rounded bg-blue-100 text-blue-900 font-black">
                                         المباراة رقم {matchNum}
@@ -1416,10 +1610,16 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
                                       )}
                                     </div>
 
+                                    {isProgramPending && (
+                                      <span className="px-2.5 py-0.5 rounded-full bg-red-50 text-red-700 border border-red-300 text-[10px] font-black text-center shrink-0">
+                                        في انتظار المصادقة على البرنامج
+                                      </span>
+                                    )}
+
                                     {/* Status Badge */}
                                     <span
                                       className={cn(
-                                        "px-2 py-0.5 rounded-full text-[10px] font-black inline-flex items-center gap-1 border",
+                                        "px-2 py-0.5 rounded-full text-[10px] font-black inline-flex items-center gap-1 border shrink-0",
                                         isOngoing
                                           ? "bg-red-50 text-red-700 border-red-200 animate-pulse"
                                           : isCompleted && m.approvalStatus === 'provisional'
@@ -1441,7 +1641,10 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
                                   </div>
 
                                   {/* Compact Unified Scoreboard (Responsive: Stacked rows on mobile, side-by-side on desktop) */}
-                                  <div className="py-2 px-2.5 bg-slate-50/60 rounded-xl border border-slate-100/80">
+                                  <div className={cn(
+                                    "py-2 px-2.5 rounded-xl border",
+                                    isProgramPending ? "bg-slate-100/90 border-slate-300 grayscale opacity-80" : "bg-slate-50/60 border-slate-100/80"
+                                  )}>
                                     {/* Desktop view (sm:flex side-by-side) */}
                                     <div className="hidden sm:flex items-center justify-between">
                                       {/* Team 1 Side (RTL Right) */}
@@ -1587,13 +1790,16 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
                                   )}
 
                                   {/* Assigned Referees Summary */}
-                                  {matchReferees.length > 0 && (
-                                    <div className="bg-slate-50 border border-slate-200/80 rounded-xl px-2.5 py-1.5 flex flex-wrap items-center gap-1.5">
-                                      <span className="inline-flex items-center gap-1 text-[10px] font-black text-slate-700">
-                                        <ShieldCheck className="w-3 h-3 text-emerald-600 shrink-0" />
-                                        <span>الحكام:</span>
-                                      </span>
-                                      {matchReferees.map((refEntry, rIdx) => {
+                                  <div className={cn(
+                                    "border rounded-xl px-2.5 py-1.5 flex flex-wrap items-center gap-1.5",
+                                    isProgramPending ? "bg-slate-100/80 border-slate-300 grayscale opacity-80" : "bg-slate-50 border-slate-200/80"
+                                  )}>
+                                    <span className="inline-flex items-center gap-1 text-[10px] font-black text-slate-700">
+                                      <ShieldCheck className="w-3 h-3 text-emerald-600 shrink-0" />
+                                      <span>الحكام:</span>
+                                    </span>
+                                    {visibleMatchReferees.length > 0 ? (
+                                      visibleMatchReferees.map((refEntry, rIdx) => {
                                         const contact = findRefereeContact(refEntry, effectiveReferees, effectiveUsers);
                                         const displayName = contact.name || (!isOpaqueEntityId(refEntry) ? refEntry : '');
                                         if (!displayName) return null;
@@ -1605,8 +1811,36 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
                                             <span>🏁 {displayName}</span>
                                           </span>
                                         );
-                                      })}
-                                    </div>
+                                      })
+                                    ) : (
+                                      <span className="inline-flex items-center px-2 py-0.5 rounded-lg bg-amber-50 border border-amber-200 text-[10px] font-black text-amber-800">
+                                        يعين لاحقاً
+                                      </span>
+                                    )}
+                                  </div>
+
+                                  {isCentralAdmin && (
+                                    isProgramPending ? (
+                                      <button
+                                        type="button"
+                                        disabled={approvingProgramMatchId === m.id}
+                                        onClick={() => handleApproveMatchProgram(m)}
+                                        className="w-full py-2 px-3 rounded-xl bg-gradient-to-l from-emerald-600 to-green-700 hover:from-emerald-700 hover:to-green-800 text-white text-[11px] font-black shadow-xs transition-all cursor-pointer flex items-center justify-center gap-1.5 disabled:opacity-50"
+                                      >
+                                        <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                                        <span>{approvingProgramMatchId === m.id ? 'جاري المصادقة...' : 'المصادقة على البرنامج'}</span>
+                                      </button>
+                                    ) : (
+                                      <button
+                                        type="button"
+                                        disabled={revertingProgramMatchId === m.id}
+                                        onClick={() => handleRevertMatchProgram(m)}
+                                        className="w-full py-1.5 px-3 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-300 text-[10px] font-black transition-all cursor-pointer flex items-center justify-center gap-1.5 disabled:opacity-50"
+                                      >
+                                        <Undo2 className="w-3.5 h-3.5 shrink-0" />
+                                        <span>{revertingProgramMatchId === m.id ? 'جاري التراجع...' : 'التراجع عن مصادقة برمجة المقابلة'}</span>
+                                      </button>
+                                    )
                                   )}
 
                                   {/* Provisional Result Notice & Homologation Controls */}
@@ -1664,8 +1898,8 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
                                             dateStr: formatMatchDate(m.date),
                                             timeStr: m.startTime || '10:00',
                                               referees: matchReferees,
-                                              tableReferees: resolvedRefs.tableRefs,
-                                              fieldReferees: resolvedRefs.fieldRefs,
+                                              tableReferees: rawResolvedRefs.tableRefs,
+                                              fieldReferees: rawResolvedRefs.fieldRefs,
                                               notes: m.notes,
                                               score1: m.score1 ?? m.team1Score,
                                               score2: m.score2 ?? m.team2Score,
@@ -1710,8 +1944,8 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
                                                 dateStr: formatMatchDate(m.date),
                                                 timeStr: m.startTime || '10:00',
                                                 referees: matchReferees,
-                                                tableReferees: resolvedRefs.tableRefs,
-                                                fieldReferees: resolvedRefs.fieldRefs,
+                                                tableReferees: rawResolvedRefs.tableRefs,
+                                                fieldReferees: rawResolvedRefs.fieldRefs,
                                                 notes: m.notes,
                                                 score1: m.score1 ?? m.team1Score ?? 0,
                                                 score2: m.score2 ?? m.team2Score ?? 0,
@@ -1817,9 +2051,9 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
                                     </div>
 
                                     {/* Inline Actions */}
-                                    {canManage || canApproveThisSport ? (
+                                    {(canManage || canShowScoreButtons) ? (
                                       <div className="flex items-center gap-1 shrink-0 self-end sm:self-center flex-wrap justify-end">
-                                        {!hasPendingSlot && !isCompleted && (
+                                        {canShowScoreButtons && !hasPendingSlot && !isCompleted && (
                                           <button
                                             type="button"
                                             disabled={togglingLiveMatchId === m.id}
@@ -1836,40 +2070,48 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
                                           </button>
                                         )}
 
-                                        <button
-                                          type="button"
-                                          disabled={hasPendingSlot}
-                                          onClick={() => onEditScore(m)}
-                                          title={hasPendingSlot ? 'بانتظار حسم المباراة السابقة لتحديد المتأهل' : 'تسجيل أو تعديل النتيجة'}
-                                          className={cn(
-                                            "px-2.5 py-1 rounded-lg text-[9px] font-black transition-all flex items-center gap-1 shadow-3xs",
-                                            hasPendingSlot
-                                              ? "bg-slate-200 text-slate-500 cursor-not-allowed"
-                                              : "bg-blue-600 hover:bg-blue-700 text-white cursor-pointer"
-                                          )}
-                                        >
-                                          <Edit3 className="w-2.5 h-2.5" />
-                                          <span>
-                                            {hasPendingSlot
-                                              ? 'بانتظار المتأهل'
-                                              : isCompleted && m.approvalStatus === 'provisional'
-                                              ? 'مراجعة ومصادقة النتيجة'
-                                              : isCompleted
-                                              ? 'تعديل النتيجة'
-                                              : 'تسجيل النتيجة'}
-                                          </span>
-                                        </button>
+                                        {canShowScoreButtons && (
+                                          <button
+                                            type="button"
+                                            disabled={hasPendingSlot}
+                                            onClick={() => onEditScore(m)}
+                                            title={hasPendingSlot ? 'بانتظار حسم المباراة السابقة لتحديد المتأهل' : 'تسجيل أو تعديل النتيجة'}
+                                            className={cn(
+                                              "px-2.5 py-1 rounded-lg text-[9px] font-black transition-all flex items-center gap-1 shadow-3xs",
+                                              hasPendingSlot
+                                                ? "bg-slate-200 text-slate-500 cursor-not-allowed"
+                                                : isTechHeadForMatchSport
+                                                ? "bg-blue-600 hover:bg-blue-700 text-white cursor-pointer"
+                                                : "bg-amber-600 hover:bg-amber-700 text-white cursor-pointer"
+                                            )}
+                                          >
+                                            <Edit3 className="w-2.5 h-2.5" />
+                                            <span>
+                                              {hasPendingSlot
+                                                ? 'بانتظار المتأهل'
+                                                : isTechHeadForMatchSport
+                                                ? (isCompleted && m.approvalStatus === 'provisional'
+                                                  ? 'مراجعة ومصادقة النتيجة'
+                                                  : isCompleted
+                                                  ? 'تعديل النتيجة'
+                                                  : 'تسجيل النتيجة')
+                                                : (isCompleted ? 'تعديل النتيجة الأولية' : 'تدوين النتيجة الأولية')}
+                                            </span>
+                                          </button>
+                                        )}
 
-                                        <button
-                                          type="button"
-                                          onClick={() => onEditMatch(m)}
-                                          className="p-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg transition-all cursor-pointer"
-                                          title="تعديل تفاصيل المباراة"
-                                        >
-                                          <Pencil className="w-3 h-3" />
-                                        </button>
+                                        {canManage && (
+                                          <button
+                                            type="button"
+                                            onClick={() => onEditMatch(m)}
+                                            className="p-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg transition-all cursor-pointer"
+                                            title="تعديل تفاصيل المباراة"
+                                          >
+                                            <Pencil className="w-3 h-3" />
+                                          </button>
+                                        )}
 
-                                        {(isCentralAdmin || canManage || canApproveThisSport) && (
+                                        {(isCentralAdmin || canManage) && (
                                           <button
                                             type="button"
                                             onClick={() => onDeleteMatch(m)}
@@ -1879,32 +2121,6 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
                                             <Trash2 className="w-3 h-3" />
                                           </button>
                                         )}
-                                      </div>
-                                    ) : isUserAssignedReferee(m) && (!isCompleted || m.approvalStatus === 'provisional') ? (
-                                      <div className="flex items-center gap-1 shrink-0 self-end sm:self-center">
-                                        {!hasPendingSlot && !isCompleted && (
-                                          <button
-                                            type="button"
-                                            disabled={togglingLiveMatchId === m.id}
-                                            onClick={() => handleToggleLiveMatchStatus(m, isOngoing ? 'Scheduled' : 'Ongoing')}
-                                            className={cn(
-                                              "px-2 py-1 rounded-lg text-[9px] font-black transition-all cursor-pointer disabled:opacity-50",
-                                              isOngoing
-                                                ? "bg-red-100 text-red-700 border border-red-300"
-                                                : "bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200"
-                                            )}
-                                          >
-                                            <span>{isOngoing ? '⏸️ إيقاف المباشر' : '🔴 مباشر الآن'}</span>
-                                          </button>
-                                        )}
-                                        <button
-                                          type="button"
-                                          onClick={() => onEditScore(m)}
-                                          className="px-2.5 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-[9px] font-black transition-all cursor-pointer flex items-center gap-1 shadow-3xs"
-                                        >
-                                          <Edit3 className="w-2.5 h-2.5" />
-                                          <span>{isCompleted ? 'تعديل النتيجة الأولية' : 'تدوين النتيجة الأولية'}</span>
-                                        </button>
                                       </div>
                                     ) : (
                                       <span className="text-[9px] text-slate-400 font-normal">عرض فقط</span>

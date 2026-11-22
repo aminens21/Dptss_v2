@@ -1,8 +1,8 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Match, School, Venue, Tournament, Referee, Student, User, BlockedSchedulePeriod } from '../types';
 import { X, CalendarDays, Clock, MapPin, Trophy, AlertTriangle, AlertCircle, Calendar, ArrowRight, ShieldCheck, Lock, Users, Tag, UserCheck, Plus, Building, Info, Search, CheckCircle2, MessageCircle } from 'lucide-react';
-import { SPORTS_MAP, AGE_CATEGORIES, GENDER_MAP, DataService, getAgeCategoriesForSeason, normalizeCategoryKey, normalizeDateToYmd, EDUCATIONAL_CYCLE_LABELS, getMatchEducationalCycles, findBlockedPeriodForDate, normalizeArabicSearch, schoolNamesMatch, normalizeTournamentAffiliation, normalizeSchoolCycleType } from '../lib/dataService';
+import { SPORTS_MAP, AGE_CATEGORIES, GENDER_MAP, DataService, getAgeCategoriesForSeason, normalizeCategoryKey, normalizeDateToYmd, EDUCATIONAL_CYCLE_LABELS, getMatchEducationalCycles, findBlockedPeriodForDate, findAllBlockedPeriodsForDate, normalizeArabicSearch, schoolNamesMatch, normalizeTournamentAffiliation, normalizeSchoolCycleType } from '../lib/dataService';
 import { useAuth, isSuperAdminEmail } from '../contexts/AuthContext';
 import { resolveHostSchoolForMatch, findRefereeContact, generateRefereeMatchNotificationMessage, getWhatsAppUrl } from '../lib/whatsappService';
 import { resolveMatchRefereesInfo, isOpaqueEntityId } from '../lib/programExportService';
@@ -25,6 +25,7 @@ interface CreateMatchModalProps {
   initialAffiliation?: 'non_club' | 'club_affiliated' | 'open';
   initialCategory?: string;
   initialGender?: 'Male' | 'Female' | 'Mixed';
+  initialDate?: string;
   onSave: (match: Omit<Match, 'id'>, matchId?: string) => Promise<void>;
   editingMatch?: Match | null;
 }
@@ -45,6 +46,7 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
   initialAffiliation,
   initialCategory,
   initialGender,
+  initialDate,
   onSave,
   editingMatch
 }) => {
@@ -124,6 +126,9 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
   // Post-scheduling unified WhatsApp Nouvelle diffusion state
   const [savedMatchSummary, setSavedMatchSummary] = useState<MatchBroadcastDiffusionTarget | null>(null);
 
+  const hasUserEditedRefereesRef = useRef(false);
+  const lastInitializedSessionKeyRef = useRef<string | null>(null);
+
   useEffect(() => {
     if (isOpen) {
       setShowAllSchools(false);
@@ -133,6 +138,9 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
       DataService.getActiveSeason()
         .then(season => setCurrentSeason(season))
         .catch(err => console.warn("Error loading season in match modal:", err));
+    } else {
+      lastInitializedSessionKeyRef.current = null;
+      hasUserEditedRefereesRef.current = false;
     }
   }, [isOpen]);
 
@@ -183,8 +191,28 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
     });
   }, [allReferees, currentSport]);
 
-  // Sync sport and tournament when managerSportId or tournaments change
+  // Sync sport and tournament once per modal open/editingMatch session without clobbering user referee edits
   useEffect(() => {
+    if (!isOpen) {
+      lastInitializedSessionKeyRef.current = null;
+      hasUserEditedRefereesRef.current = false;
+      return;
+    }
+
+    const sessionKey = editingMatch ? `edit:${editingMatch.id}` : 'new';
+    const userDirectory = allUsers.length > 0 ? allUsers : teachers;
+
+    if (lastInitializedSessionKeyRef.current === sessionKey) {
+      if (editingMatch && !hasUserEditedRefereesRef.current) {
+        const resolvedRefs = resolveMatchRefereesInfo(editingMatch, allReferees, userDirectory);
+        setReferees(resolvedRefs.allRefs.length > 0 ? resolvedRefs.allRefs : ['']);
+      }
+      return;
+    }
+
+    lastInitializedSessionKeyRef.current = sessionKey;
+    hasUserEditedRefereesRef.current = false;
+
     if (editingMatch) {
       setTournamentId(editingMatch.tournamentId);
       setTeam1Id(editingMatch.team1Id);
@@ -217,7 +245,6 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
       }
       
       // Resolve existing referees to readable names without exposing opaque entity IDs
-      const userDirectory = allUsers.length > 0 ? allUsers : teachers;
       const resolvedRefs = resolveMatchRefereesInfo(editingMatch, allReferees, userDirectory);
       if (resolvedRefs.allRefs.length > 0) {
         setReferees(resolvedRefs.allRefs);
@@ -229,6 +256,7 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
       setNotes(editingMatch.notes || '');
       if (editingMatch.affiliationType) setAffiliationType(editingMatch.affiliationType);
     } else {
+      setReferees(['']);
       setNotes('');
       if (schools.length > 0) {
         setVenueMode('school');
@@ -257,6 +285,10 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
       if (initialAffiliation) {
         setAffiliationType(initialAffiliation);
       }
+      if (initialDate) {
+        const normInit = normalizeDateToYmd(initialDate);
+        if (normInit) setDate(normInit);
+      }
 
       if (initialTournamentId && availableTournaments.some(t => t.id === initialTournamentId)) {
         const target = availableTournaments.find(t => t.id === initialTournamentId)!;
@@ -282,7 +314,7 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
         }
       }
     }
-  }, [managerSportId, singleLockedSportId, effectiveAllowedSportIds, availableTournaments, isOpen, editingMatch, initialTournamentId, initialSportId, initialCategory, initialGender, initialAffiliation, schools, venues, allReferees, allUsers, teachers]);
+  }, [managerSportId, singleLockedSportId, effectiveAllowedSportIds, availableTournaments, isOpen, editingMatch, initialTournamentId, initialSportId, initialCategory, initialGender, initialAffiliation, initialDate, schools, venues, allReferees, allUsers, teachers]);
 
   // Effective venue ID & name based on venueMode ('school' vs 'custom')
   const selectedHostSchool = useMemo(
@@ -420,12 +452,18 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
     );
   }, [team1Id, team2Id, ageCategory, tournamentId, schools, availableTournaments]);
 
+  const blockedDateConflicts = useMemo(() => {
+    if (!date || blockedPeriods.length === 0) return [];
+    return findAllBlockedPeriodsForDate(date, matchCycles, blockedPeriods);
+  }, [date, matchCycles, blockedPeriods]);
+
   const blockedDateConflict = useMemo(() => {
     if (!date || blockedPeriods.length === 0) return null;
     return findBlockedPeriodForDate(date, matchCycles, blockedPeriods);
   }, [date, matchCycles, blockedPeriods]);
 
-  const isBlockedByHolidayOrExam = Boolean(blockedDateConflict) && !isRegionalOrCentralAdmin;
+  const hasStrictHolidayConflict = blockedDateConflicts.some(p => p.type === 'holiday');
+  const isBlockedByHolidayOrExam = Boolean(blockedDateConflict);
 
   useEffect(() => {
     setForceScheduleDespiteConflict(false);
@@ -606,6 +644,7 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
   };
 
   const handleAddRefereeQuick = (refName: string) => {
+    hasUserEditedRefereesRef.current = true;
     // Check if already in the list
     if (referees.includes(refName)) {
       toast('هذا الحكم مضاف بالفعل إلى الطاقم', { icon: 'ℹ️' });
@@ -644,12 +683,16 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
       return;
     }
 
-    // Block Tech Committee Head / non-Central Admins on Regional Holiday & Exam Dates
-    if (blockedDateConflict && !isRegionalOrCentralAdmin) {
-      const kindLabel = blockedDateConflict.type === 'exams' ? 'فترة الفروض والامتحانات' : 'عطلة مدرسية';
-      const cyclesLabel = matchCycles.map(c => EDUCATIONAL_CYCLE_LABELS[c] || c).join('، ');
+    // Strictly block ANY school holiday for ALL users; block exam dates for non-Central Admins
+    if (isBlockedByHolidayOrExam && blockedDateConflict) {
+      const holidayTitles = blockedDateConflicts
+        .filter(p => p.type === 'holiday')
+        .map(p => p.title)
+        .join(' و');
+      const kindLabel = hasStrictHolidayConflict ? 'عطلة مدرسية' : 'فترة الامتحانات';
+      const titleText = hasStrictHolidayConflict && holidayTitles ? holidayTitles : blockedDateConflict.title;
       toast.error(
-        `ممنوع برمجة المقابلة في تاريخ ${date}: يصادف ${kindLabel} (${blockedDateConflict.title}) المحددة لسلك ${cyclesLabel || 'المعني'}.`,
+        `ممنوع برمجة المقابلة في تاريخ ${date}: يصادف ${kindLabel} (${titleText}).`,
         { duration: 5000 }
       );
       return;
@@ -679,7 +722,50 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
       const resolvedHostSchoolId = venueMode === 'school' ? (hostSch?.id || hostSchoolId) : '';
       
       const selectedTourn = availableTournaments.find(t => t.id === tournamentId);
-      const cleanReferees = referees.map(r => r.trim()).filter(r => r !== '');
+      const stripTeacherTag = (val: string) =>
+        (val || '').replace(/\s*\(أستاذ\)\s*/g, '').replace(/\s+/g, ' ').trim();
+      const cleanReferees: string[] = Array.from(
+        new Set<string>(referees.map(r => stripTeacherTag(r)).filter(Boolean))
+      );
+      const cleanRefSet = new Set<string>(cleanReferees.map(r => normalizeArabicSearch(r)));
+      const userDirectory = allUsers.length > 0 ? allUsers : teachers;
+      const resolveStoredRefDisplay = (rawEntry: string): string => {
+        const clean = stripTeacherTag(rawEntry);
+        if (!clean) return '';
+        const normClean = normalizeArabicSearch(clean);
+        const refObj = allReferees.find(
+          r =>
+            r.id === clean ||
+            r.teacherId === clean ||
+            (r as any).userId === clean ||
+            (Array.isArray(r.aliasIds) && r.aliasIds.includes(clean)) ||
+            stripTeacherTag(r.fullName || '') === clean ||
+            (normClean && normalizeArabicSearch(stripTeacherTag(r.fullName || '')) === normClean)
+        );
+        if (refObj?.fullName) return stripTeacherTag(refObj.fullName);
+        const userObj = userDirectory.find(
+          u =>
+            u.id === clean ||
+            (Array.isArray(u.aliasIds) && u.aliasIds.includes(clean)) ||
+            stripTeacherTag(u.fullName || '') === clean ||
+            (normClean && normalizeArabicSearch(stripTeacherTag(u.fullName || '')) === normClean)
+        );
+        if (userObj?.fullName) return stripTeacherTag(userObj.fullName);
+        return clean;
+      };
+      const keepIfStillAssigned = (arr?: string[]): string[] => {
+        if (!Array.isArray(arr) || cleanReferees.length === 0) return [];
+        return arr
+          .map(v => String(v || '').trim())
+          .filter(raw => {
+            if (!raw) return false;
+            const resolved = resolveStoredRefDisplay(raw);
+            return cleanRefSet.has(normalizeArabicSearch(resolved)) || cleanRefSet.has(normalizeArabicSearch(stripTeacherTag(raw)));
+          });
+      };
+
+      const nextTableReferees = editingMatch ? keepIfStillAssigned(editingMatch.tableReferees) : [];
+      const nextFieldReferees = editingMatch ? keepIfStillAssigned(editingMatch.fieldReferees) : [];
       const normalizedDate = normalizeDateToYmd(date) || date;
 
       await onSave({
@@ -699,9 +785,12 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
         venueName: resolvedVenueName,
         hostSchoolId: resolvedHostSchoolId,
         referees: cleanReferees,
-        referee1Id: cleanReferees[0] || undefined,
-        referee2Id: cleanReferees[1] || undefined,
+        tableReferees: nextTableReferees,
+        fieldReferees: nextFieldReferees,
+        referee1Id: cleanReferees[0] || '',
+        referee2Id: cleanReferees[1] || '',
         status,
+        programApprovalStatus: editingMatch ? editingMatch.programApprovalStatus : 'pending',
         notes: notes.trim(),
         score1: editingMatch?.score1 ?? 0,
         score2: editingMatch?.score2 ?? 0,
@@ -1273,27 +1362,37 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
 
           {/* REGIONAL HOLIDAY / EXAM BLOCKED DATE ALERT */}
           {blockedDateConflict && (
-            <div className="rounded-2xl border-2 border-rose-300 bg-rose-50 p-3.5 space-y-1.5 text-xs animate-in fade-in duration-150">
+            <div className={`rounded-2xl border-2 p-3.5 space-y-1.5 text-xs animate-in fade-in duration-150 ${
+              hasStrictHolidayConflict
+                ? 'border-rose-300 bg-rose-50'
+                : 'border-blue-300 bg-blue-50'
+            }`}>
               <div className="flex items-start gap-2.5">
-                <Lock className="h-4 w-4 text-rose-600 shrink-0 mt-0.5" />
+                <Lock className={`h-4 w-4 shrink-0 mt-0.5 ${hasStrictHolidayConflict ? 'text-rose-600' : 'text-blue-600'}`} />
                 <div className="flex-1 space-y-1">
-                  <h4 className="font-black text-rose-950">
-                    {isBlockedByHolidayOrExam
-                      ? '⛔ تاريخ محظور: لا يمكن لرئيس اللجنة التقنية برمجة مقابلة في هذا التاريخ'
-                      : '⚠️ تنبيه إقليمي: هذا التاريخ يوافق فترة عطلة أو فروض مسجلة'}
+                  <h4 className={`font-black ${hasStrictHolidayConflict ? 'text-rose-950' : 'text-blue-950'}`}>
+                    {hasStrictHolidayConflict
+                      ? '⛔ عطلة مدرسية رسمية: لا يُسمح ببرمجة أي مباراة في هذا التاريخ'
+                      : '⛔ فترة امتحانات للسلك المعني: لا يُسمح ببرمجة بطولة هذا السلك في هذا التاريخ'}
                   </h4>
-                  <p className="text-[11px] font-bold text-rose-800 leading-relaxed">
-                    التاريخ <span className="font-mono font-black" dir="ltr">{date}</span> يندرج ضمن{' '}
-                    <strong>
-                      {blockedDateConflict.type === 'exams' ? 'فترة الفروض / الامتحانات' : 'عطلة مدرسية'} ({blockedDateConflict.title})
-                    </strong>{' '}
-                    ({blockedDateConflict.startDate} ← {blockedDateConflict.endDate}) للسلك التعليمي:{' '}
-                    <strong>
-                      {(blockedDateConflict.targetCycles || ['ALL'])
-                        .map(c => EDUCATIONAL_CYCLE_LABELS[c] || c)
-                        .join('، ')}
-                    </strong>.
-                  </p>
+                  <div className="space-y-1">
+                    {blockedDateConflicts.map(conflict => (
+                      <p key={conflict.id} className={`text-[11px] font-bold leading-relaxed ${
+                        conflict.type === 'holiday' ? 'text-rose-800' : 'text-blue-800'
+                      }`}>
+                        التاريخ <span className="font-mono font-black" dir="ltr">{date}</span> يندرج ضمن{' '}
+                        <strong>
+                          {conflict.type === 'exams' ? 'فترة الامتحانات' : 'عطلة مدرسية'} ({conflict.title})
+                        </strong>{' '}
+                        ({conflict.startDate === conflict.endDate ? conflict.startDate : `${conflict.startDate} ← ${conflict.endDate}`}) —{' '}
+                        <strong>
+                          {(conflict.targetCycles || ['ALL'])
+                            .map(c => EDUCATIONAL_CYCLE_LABELS[c] || c)
+                            .join('، ')}
+                        </strong>.
+                      </p>
+                    ))}
+                  </div>
                 </div>
               </div>
             </div>
@@ -1310,7 +1409,10 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
               </div>
               <button
                 type="button"
-                onClick={() => setReferees([...referees, ''])}
+                onClick={() => {
+                  hasUserEditedRefereesRef.current = true;
+                  setReferees([...referees, '']);
+                }}
                 className="text-[11px] font-bold text-blue-600 hover:text-blue-700 flex items-center gap-1 bg-white hover:bg-blue-50 border border-slate-200 px-2.5 py-1 rounded-lg transition-colors cursor-pointer shadow-2xs"
               >
                 <Plus className="h-3 w-3" />
@@ -1381,6 +1483,7 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
                     <select
                       value={allReferees.some(r => r.fullName === ref) ? ref : ''}
                       onChange={(e) => {
+                        hasUserEditedRefereesRef.current = true;
                         const val = e.target.value;
                         const newRefs = [...referees];
                         newRefs[idx] = val;
@@ -1414,6 +1517,7 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
                       type="text"
                       value={ref}
                       onChange={(e) => {
+                        hasUserEditedRefereesRef.current = true;
                         const newRefs = [...referees];
                         newRefs[idx] = e.target.value;
                         setReferees(newRefs);
@@ -1436,12 +1540,16 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
                     </a>
                   )}
 
-                  {referees.length > 1 && (
+                  {(referees.length > 1 || ref.trim() !== '') && (
                     <button
                       type="button"
                       onClick={() => {
-                        const newRefs = referees.filter((_, i) => i !== idx);
-                        setReferees(newRefs);
+                        hasUserEditedRefereesRef.current = true;
+                        if (referees.length > 1) {
+                          setReferees(referees.filter((_, i) => i !== idx));
+                        } else {
+                          setReferees(['']);
+                        }
                       }}
                       className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors cursor-pointer shrink-0"
                       title="حذف هذا الحكم"
@@ -1618,8 +1726,10 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
               >
                 {isSubmitting
                   ? 'جاري الحفظ...'
+                  : hasStrictHolidayConflict
+                  ? 'ممنوع البرمجة خلال العطلة المدرسية'
                   : isBlockedByHolidayOrExam
-                  ? 'ممنوع البرمجة في تاريخ العطلة / الفروض'
+                  ? 'ممنوع البرمجة في تاريخ الامتحانات'
                   : hasConflict
                   ? forceScheduleDespiteConflict
                     ? 'نعم، تثبيت البرمجة رغم التعارض'

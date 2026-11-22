@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { DataService, SPORTS_MAP, getAgeCategoriesForSeason, deduplicateById, getCategoryGenderLabel, isClubTournament, normalizeCategoryKey, getTournamentLevelAr, isTeacherLevelAllowedForTournament, getCustomCategoryName, getCustomCategoryDetails, isSchoolSectorAllowedForTournament, getTournamentEducationSectorsAr, normalizeTournamentEducationSectors, getSchoolEducationSector, schoolNamesMatch, normalizeCanonicalSportId, areSportIdsEquivalent, isAffiliationAllowedByDisplayConfig, resolveEffectiveAffiliationMode, getEffectiveConfirmedBranches, resolveEffectiveTeacherCadre } from '../lib/dataService';
+import { DataService, SPORTS_MAP, getAgeCategoriesForSeason, deduplicateById, getCategoryGenderLabel, isClubTournament, normalizeCategoryKey, getTournamentLevelAr, isTeacherLevelAllowedForTournament, parseTournamentAllowedLevels, getCustomCategoryName, getCustomCategoryDetails, isSchoolSectorAllowedForTournament, getTournamentEducationSectorsAr, normalizeTournamentEducationSectors, getSchoolEducationSector, schoolNamesMatch, normalizeCanonicalSportId, areSportIdsEquivalent, isAffiliationAllowedByDisplayConfig, resolveEffectiveAffiliationMode, getEffectiveConfirmedBranches, resolveEffectiveTeacherCadre, findMatchingSchoolForTeacher } from '../lib/dataService';
 import { Tournament, User, Student, School, Sport, Match, Directorate, AffiliationDisplayConfig } from '../types';
 import { CountdownTimer } from '../components/CountdownTimer';
 import * as XLSX from 'xlsx';
@@ -60,7 +60,7 @@ import toast from 'react-hot-toast';
 import { useRolePermissions } from '../hooks/useRolePermissions';
 
 export const Tournaments: React.FC = () => {
-  const { userProfile, impersonationScopedSportIds } = useAuth();
+  const { userProfile, impersonationScopedSportIds, isImpersonatingTeacher } = useAuth();
   const { canDo } = useRolePermissions();
   const [searchParams, setSearchParams] = useSearchParams();
   const urlTab = searchParams.get('tab') || searchParams.get('level');
@@ -156,18 +156,22 @@ export const Tournaments: React.FC = () => {
   }, [teachers, userProfile]);
 
   // Only CENTRAL_ADMIN and Technical Committee Heads can create, assign or delete tournaments
-  const isSuperAdmin = userProfile?.isSuperAdmin === true || currentTeacherProfile?.isSuperAdmin === true || userProfile?.role === 'SUPER_ADMIN';
-  const effectiveRole = currentTeacherProfile?.role || userProfile?.role;
+  // During teacher impersonation, never allow DB teacher record to re-elevate role/admin permissions
+  const isSuperAdmin = !isImpersonatingTeacher && (userProfile?.isSuperAdmin === true || currentTeacherProfile?.isSuperAdmin === true || userProfile?.role === 'SUPER_ADMIN');
+  const effectiveRole = isImpersonatingTeacher ? userProfile?.role : (currentTeacherProfile?.role || userProfile?.role);
   const isCentralAdmin = effectiveRole === 'CENTRAL_ADMIN' || isSuperAdmin;
   const isSportManager = effectiveRole === 'SPORT_MANAGER';
-  const isTechCommitteeHead =
-    userProfile?.isTechCommitteeHead === true ||
-    currentTeacherProfile?.isTechCommitteeHead === true ||
-    effectiveRole === 'TECH_HEAD' ||
-    (effectiveRole as string) === 'TECH_COMMITTEE_HEAD';
+  const isTechCommitteeHead = isImpersonatingTeacher
+    ? userProfile?.isTechCommitteeHead === true
+    : (
+        userProfile?.isTechCommitteeHead === true ||
+        currentTeacherProfile?.isTechCommitteeHead === true ||
+        effectiveRole === 'TECH_HEAD' ||
+        (effectiveRole as string) === 'TECH_COMMITTEE_HEAD'
+      );
   const isTeacherRole = effectiveRole === 'TEACHER' && !isTechCommitteeHead && !isCentralAdmin && !isSportManager;
 
-  const canManageAllLevels = isCentralAdmin || userProfile?.isSuperAdmin || isSportManager || isTechCommitteeHead;
+  const canManageAllLevels = isCentralAdmin || (!isImpersonatingTeacher && userProfile?.isSuperAdmin) || isSportManager || isTechCommitteeHead;
   const userSchoolId = userProfile?.schoolId || currentTeacherProfile?.schoolId;
   const userSchoolName = userProfile?.workLocation || currentTeacherProfile?.workLocation || userProfile?.schoolName;
 
@@ -861,14 +865,21 @@ export const Tournaments: React.FC = () => {
     }
   };
 
+  const mergedTeacherProfile = useMemo(() => {
+    if (!userProfile && !currentTeacherProfile) return null;
+    return {
+      ...currentTeacherProfile,
+      ...userProfile,
+      teachingCadre: userProfile?.teachingCadre || currentTeacherProfile?.teachingCadre,
+      workLocation: userProfile?.workLocation || currentTeacherProfile?.workLocation,
+      schoolName: userProfile?.schoolName || currentTeacherProfile?.schoolName,
+      schoolId: userProfile?.schoolId || currentTeacherProfile?.schoolId,
+    };
+  }, [userProfile, currentTeacherProfile]);
+
   const teacherSchoolObj = useMemo(() => {
-    const lookupName = userProfile?.workLocation || userProfile?.schoolName || currentTeacherProfile?.workLocation || currentTeacherProfile?.schoolName || '';
-    const lookupId = userProfile?.schoolId || currentTeacherProfile?.schoolId;
-    return schools.find(s =>
-      (lookupId && s.id === lookupId) ||
-      (lookupName && schoolNamesMatch(s.name, lookupName))
-    );
-  }, [schools, userProfile, currentTeacherProfile]);
+    return findMatchingSchoolForTeacher(schools, mergedTeacherProfile);
+  }, [schools, mergedTeacherProfile]);
 
   const canonicalTeacherSchoolId = teacherSchoolObj?.id || userProfile?.schoolId || currentTeacherProfile?.schoolId || teacherSchoolName;
   const resolvedTeacherSchoolName = teacherSchoolObj?.name || teacherSchoolName;
@@ -944,7 +955,7 @@ export const Tournaments: React.FC = () => {
     const seasonalCats = getAgeCategoriesForSeason(activeSeason);
 
     const teacherCadre = resolveEffectiveTeacherCadre(
-      userProfile || currentTeacherProfile,
+      mergedTeacherProfile,
       teacherSchoolObj
     );
 
@@ -961,7 +972,7 @@ export const Tournaments: React.FC = () => {
       // For teachers (non-admins), filter tournaments to ONLY those allowed for their teaching cadre and school education sector
       if (isTeacherRole && !isManagerOfSport) {
         sportTournaments = sportTournaments.filter(t => 
-          isTeacherLevelAllowedForTournament(teacherCadre, t.level) &&
+          isTeacherLevelAllowedForTournament(teacherCadre, t.level, t.ageCategory) &&
           (!teacherSchoolObj || isSchoolSectorAllowedForTournament(teacherSchoolObj, t))
         );
       }
@@ -1044,7 +1055,7 @@ export const Tournaments: React.FC = () => {
         isTeacherRole
       };
     });
-  }, [sportsConfig, tournaments, teachers, allStudents, confirmations, activeSeason, effectiveRole, userProfile, currentTeacherProfile, isTeacherRole, schools, teacherSchoolObj, canonicalTeacherSchoolId, resolvedTeacherSchoolName, affiliationDisplayConfig, impersonationScopedSportIds]);
+  }, [sportsConfig, tournaments, teachers, allStudents, confirmations, activeSeason, effectiveRole, userProfile, currentTeacherProfile, mergedTeacherProfile, isTeacherRole, schools, teacherSchoolObj, canonicalTeacherSchoolId, resolvedTeacherSchoolName, affiliationDisplayConfig, impersonationScopedSportIds]);
 
   // Filtered sports list (Always sorting programmed tournaments to the top)
   const filteredSports = useMemo(() => {
@@ -1083,42 +1094,46 @@ export const Tournaments: React.FC = () => {
   }, [sportsWithTournamentData, filterSport, filterStatus, search, isTeacherRole, resolvedTeacherSchoolName, teacherSchoolName, isSchoolConfirmed]);
 
   const handleOpenSportModal = (sport: Sport) => {
-    // 1. Get programmed tournaments for this sport
+    // 1. Get programmed active tournaments for this sport
     const sportTourns = tournaments.filter(t => 
       t.sportId === sport.id &&
+      t.status !== 'Draft' &&
+      (t as any).isActive !== false &&
       (!t.seasonId || t.seasonId === activeSeason) &&
       (!t.directorateId || (t.directorateId || 'taourirt') === (activeDirObj?.id || 'taourirt'))
     );
 
     // 2. Strict Cadre & Sector restriction for Teachers
     if (isTeacherRole && !canManageSport(sport.id)) {
-      const teacherSchoolId = userProfile?.schoolId || currentTeacherProfile?.schoolId;
-      const teacherSchoolLookupName = userProfile?.workLocation || userProfile?.schoolName || currentTeacherProfile?.workLocation || currentTeacherProfile?.schoolName;
-      const userSchool = schools.find(s => 
-        (teacherSchoolId && s.id === teacherSchoolId) || 
-        (teacherSchoolLookupName && schoolNamesMatch(s.name, teacherSchoolLookupName))
-      );
+      const userSchool = teacherSchoolObj || findMatchingSchoolForTeacher(schools, mergedTeacherProfile);
       const teacherCadre = resolveEffectiveTeacherCadre(
-        userProfile || currentTeacherProfile,
+        mergedTeacherProfile,
         userSchool
       );
 
       if (sportTourns.length > 0) {
         const isAnyLevelAllowed = sportTourns.some(t => 
-          isTeacherLevelAllowedForTournament(teacherCadre, t.level)
+          isTeacherLevelAllowedForTournament(teacherCadre, t.level, t.ageCategory)
         );
         const isAnySectorAllowed = !userSchool || sportTourns.some(t =>
           isSchoolSectorAllowedForTournament(userSchool, t)
         );
 
         if (!isAnyLevelAllowed) {
-          const levelsSet = new Set<string>();
+          const levelsSet = new Set<'Primary' | 'Middle' | 'High'>();
           sportTourns.forEach(t => {
-            if (t.level) {
-              t.level.split(',').forEach(l => levelsSet.add(l.trim()));
+            const parsed = parseTournamentAllowedLevels(t.level, t.ageCategory);
+            if (parsed === 'ALL') {
+              levelsSet.add('Primary');
+              levelsSet.add('Middle');
+              levelsSet.add('High');
+            } else {
+              parsed.forEach(l => levelsSet.add(l));
             }
           });
-          const allowedLevelsAr = getTournamentLevelAr(Array.from(levelsSet).join(','));
+          const allowedLevelsAr = levelsSet.size > 0
+            ? getTournamentLevelAr(Array.from(levelsSet).join(','))
+            : 'أسلاك أخرى';
 
           let cadreAr = 'السلك المسند لك';
           const cleanCadre = String(teacherCadre || '').toUpperCase();
@@ -1862,11 +1877,30 @@ export const Tournaments: React.FC = () => {
                                 تخصصك
                               </span>
                             )}
-                            {mainTourn?.level && (
-                              <span className="text-[9px] font-extrabold bg-blue-50 text-blue-800 px-1.5 py-0.2 rounded border border-blue-200 shadow-3xs">
-                                🎓 {getTournamentLevelAr(mainTourn.level)}
-                              </span>
-                            )}
+                            {(() => {
+                              const levelSet = new Set<'Primary' | 'Middle' | 'High'>();
+                              sportTournaments.forEach(t => {
+                                const parsed = parseTournamentAllowedLevels(t.level, t.ageCategory);
+                                if (parsed === 'ALL') {
+                                  levelSet.add('Primary');
+                                  levelSet.add('Middle');
+                                  levelSet.add('High');
+                                } else {
+                                  parsed.forEach(l => levelSet.add(l));
+                                }
+                              });
+                              const combinedLevel = levelSet.size === 3
+                                ? 'جميع الأسلاك'
+                                : levelSet.size > 0
+                                ? Array.from(levelSet).join(',')
+                                : (mainTourn?.level || '');
+                              if (!combinedLevel) return null;
+                              return (
+                                <span className="text-[9px] font-extrabold bg-blue-50 text-blue-800 px-1.5 py-0.2 rounded border border-blue-200 shadow-3xs">
+                                  🎓 {getTournamentLevelAr(combinedLevel)}
+                                </span>
+                              );
+                            })()}
                             {mainTourn && (
                               <span className={`text-[9px] font-extrabold px-1.5 py-0.2 rounded border shadow-3xs ${
                                 normalizeTournamentEducationSectors(mainTourn).length === 1 && normalizeTournamentEducationSectors(mainTourn)[0] === 'private'

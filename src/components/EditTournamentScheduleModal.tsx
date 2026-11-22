@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { Sport, Tournament } from '../types';
-import { DataService, SPORTS_MAP, normalizeTournamentEducationSectors } from '../lib/dataService';
+import { DataService, SPORTS_MAP, normalizeTournamentEducationSectors, parseTournamentAllowedLevels } from '../lib/dataService';
 import { X, Calendar, Clock, ShieldCheck, Check, MapPin, FileText, Activity, GraduationCap, Building2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -80,11 +80,21 @@ export const EditTournamentScheduleModal: React.FC<EditTournamentScheduleModalPr
         if (first.description) {
           setDescription(first.description);
         }
-        if (first.level) {
-          const lvls = first.level.split(',').map((l: string) => l.trim()).filter(Boolean) as ('Primary' | 'Middle' | 'High')[];
-          if (lvls.length > 0) setSelectedLevels(lvls);
+        const parsedLevelsSet = new Set<'Primary' | 'Middle' | 'High'>();
+        let sawAll = false;
+        sportTournaments.forEach(t => {
+          if (t.level && String(t.level).trim()) {
+            const parsed = parseTournamentAllowedLevels(t.level, t.ageCategory);
+            if (parsed === 'ALL') sawAll = true;
+            else parsed.forEach(l => parsedLevelsSet.add(l));
+          }
+        });
+        if (sawAll) {
+          setSelectedLevels(['Primary', 'Middle', 'High']);
+        } else if (parsedLevelsSet.size > 0) {
+          setSelectedLevels(Array.from(parsedLevelsSet));
         } else {
-          setSelectedLevels(['High']);
+          setSelectedLevels(['Middle', 'High']);
         }
         setSelectedEducationSectors(normalizeTournamentEducationSectors(first));
       }

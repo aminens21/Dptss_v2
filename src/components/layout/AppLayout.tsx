@@ -1891,7 +1891,7 @@ export const AppLayout: React.FC = () => {
                   👥 الفئات المستفيدة وصلاحيات الأدوار
                 </h4>
                 <ul className="space-y-1.5 text-[11px] font-semibold text-slate-600 dark:text-slate-300 list-disc pr-4">
-                  <li><strong>المسير المركزي / الإقليمي:</strong> الإشراف العام، إعداد المواسم والبطولات، تدبير المديريات، ضبط لائحة العطل وتواريخ الفروض، والاعتماد النهائي للنتائج.</li>
+                  <li><strong>المسير المركزي / الإقليمي:</strong> الإشراف العام، إعداد المواسم والبطولات، تدبير المديريات، ضبط لائحة العطل وتواريخ الامتحانات، والاعتماد النهائي للنتائج.</li>
                   <li><strong>رؤساء اللجن التقنية الإقليمية:</strong> إجراء القرعة الإلكترونية، برمجة المقابلات وفق الرزنامة المحمية، وتعيين طاقم التحكيم وتدقيق النتائج.</li>
                   <li><strong>أساتذة ومنسقو التربية البدنية:</strong> تأكيد مشاركة المؤسسات، تسجيل التلاميذ، إصدار لوائح المشاركة والصدريات الذكية، وإدخال النتائج المؤقتة.</li>
                   <li><strong>الحكام المعتمدون والتلاميذ والجمهور:</strong> متابعة التعيينات التحكيمية، جدول المقابلات والترتيب، والشواهد والملصقات.</li>
@@ -1910,7 +1910,7 @@ export const AppLayout: React.FC = () => {
                   </div>
                   <div className="p-2 rounded-xl bg-white dark:bg-slate-900 border border-indigo-100 dark:border-indigo-900/60">
                     <span className="font-black text-indigo-900 dark:text-indigo-300 block">🔀 القرعة الإلكترونية والبرمجة</span>
-                    <span className="text-slate-500 dark:text-slate-400">سحب المجموعات والإقصاء المباشر مع الحماية من التعارض وتواريخ العطل والفروض.</span>
+                    <span className="text-slate-500 dark:text-slate-400">سحب المجموعات والإقصاء المباشر مع الحماية من التعارض وتواريخ العطل والامتحانات.</span>
                   </div>
                   <div className="p-2 rounded-xl bg-white dark:bg-slate-900 border border-indigo-100 dark:border-indigo-900/60">
                     <span className="font-black text-indigo-900 dark:text-indigo-300 block">🏷️ الصدريات الذكية QR والماسح</span>

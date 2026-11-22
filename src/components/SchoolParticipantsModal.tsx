@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { School, Student, Tournament, Sport, SchoolTournamentConfirmation, User as UserType } from '../types';
-import { DataService, SPORTS_MAP, AGE_CATEGORIES, getCategoryGenderLabel, deduplicateById, normalizeCategoryKey, getEffectiveConfirmedBranches, formatBranchLabelAr, resolveSchoolCoach } from '../lib/dataService';
+import { DataService, SPORTS_MAP, AGE_CATEGORIES, getCategoryGenderLabel, deduplicateById, normalizeCategoryKey, getEffectiveConfirmedBranches, formatBranchLabelAr, resolveSchoolCoach, schoolNamesMatch, areSportIdsEquivalent } from '../lib/dataService';
 import { useNavigate } from 'react-router-dom';
 import * as XLSX from 'xlsx';
 import { cn } from '../lib/utils';
@@ -66,14 +66,11 @@ export const SchoolParticipantsModal: React.FC<SchoolParticipantsModalProps> = (
   const isUserBelongToSchool = useMemo(() => {
     if (!school || !userProfile) return false;
     if (!isTeacher) return true; // Admins / regional managers can manage
-    if (!userProfile.workLocation && !userProfile.schoolId) return false;
-    const cleanWorkLoc = (userProfile.workLocation || '').trim().toLowerCase();
-    const cleanSchoolName = (school.name || '').trim().toLowerCase();
+    const profileSchoolName = userProfile.workLocation || (userProfile as any).schoolName || '';
+    if (!profileSchoolName && !userProfile.schoolId) return false;
     return (
-      cleanSchoolName === cleanWorkLoc ||
-      cleanSchoolName.includes(cleanWorkLoc) ||
-      cleanWorkLoc.includes(cleanSchoolName) ||
-      (userProfile.schoolId && school.id === userProfile.schoolId)
+      (profileSchoolName && schoolNamesMatch(school.name || '', profileSchoolName)) ||
+      Boolean(userProfile.schoolId && school.id === userProfile.schoolId)
     );
   }, [school, userProfile, isTeacher]);
 
@@ -84,11 +81,10 @@ export const SchoolParticipantsModal: React.FC<SchoolParticipantsModalProps> = (
                               userProfile.role === 'PROVINCIAL_ADMIN';
     if (isPrivilegedAdmin) return true;
     
-    const cleanWorkLoc = (userProfile.workLocation || userProfile.schoolName || '').trim().toLowerCase();
-    const cleanSchoolName = (school.name || '').trim().toLowerCase();
+    const profileSchoolName = userProfile.workLocation || (userProfile as any).schoolName || '';
     return (
-      !!(cleanWorkLoc && (cleanSchoolName === cleanWorkLoc || cleanSchoolName.includes(cleanWorkLoc) || cleanWorkLoc.includes(cleanSchoolName))) ||
-      !!(userProfile.schoolId && school.id === userProfile.schoolId)
+      Boolean(profileSchoolName && schoolNamesMatch(school.name || '', profileSchoolName)) ||
+      Boolean(userProfile.schoolId && school.id === userProfile.schoolId)
     );
   }, [school, userProfile]);
 
@@ -213,10 +209,9 @@ export const SchoolParticipantsModal: React.FC<SchoolParticipantsModalProps> = (
   // Filter students belonging to this school
   const schoolStudents = useMemo(() => {
     if (!school) return [];
-    const targetName = (school.name || '').trim();
     return localStudents.filter(
-      s => (s.schoolId && s.schoolId === school.id) || 
-           (s.schoolName && s.schoolName.trim() === targetName)
+      s => (s.schoolId && s.schoolId === school.id) ||
+           (s.schoolName && schoolNamesMatch(s.schoolName, school.name || ''))
     );
   }, [localStudents, school?.id, school?.name]);
 
@@ -262,12 +257,14 @@ export const SchoolParticipantsModal: React.FC<SchoolParticipantsModalProps> = (
     };
 
     const isSportActiveOrProgrammed = (sId: string) => {
-      const hasActiveTourn = tournaments.some(t => t.sportId === sId && t.status !== 'Archived' && t.status !== 'Draft');
-      const sportDef = sportsConfig.find(s => s.id === sId);
+      const sportDef = sportsConfig.find(s => areSportIdsEquivalent(s.id, sId));
+      if (sportDef?.isDeleted) return false;
+      const hasActiveTourn = tournaments.some(
+        t => areSportIdsEquivalent(t.sportId, sId) && t.status !== 'Archived' && t.status !== 'Draft'
+      );
       if (hasActiveTourn) return true;
-      if (sportDef && sportDef.isProgrammed) return true;
-      if (tournaments.length === 0 && (!sportDef || sportDef.isProgrammed !== false)) return true;
-      return false;
+      if (sportDef) return sportDef.isProgrammed !== false;
+      return true;
     };
 
     // 1. Add exact branches from actual student registrations
@@ -303,18 +300,19 @@ export const SchoolParticipantsModal: React.FC<SchoolParticipantsModalProps> = (
     });
 
     // 2. Merge exact confirmed branches from Phase 1 confirmations
-    const targetSchoolNameLower = (school.name || '').trim().toLowerCase();
     const schoolConfirmations = confirmations.filter(c => {
       if (c.status !== 'confirmed') return false;
-      const cNameLower = (c.schoolName || '').trim().toLowerCase();
-      const isForSchool = (c.schoolId && (c.schoolId === school.id || c.schoolId.trim().toLowerCase() === targetSchoolNameLower)) ||
-                          (cNameLower.length > 0 && cNameLower === targetSchoolNameLower);
-      const isForActiveSeason = !c.seasonId || c.seasonId === activeSeason;
+      const isForSchool =
+        (c.schoolId && (c.schoolId === school.id || schoolNamesMatch(c.schoolId, school.name || ''))) ||
+        (c.schoolName && schoolNamesMatch(c.schoolName, school.name || ''));
+      const normConfSeason = (c.seasonId || '').replace(/-/g, '/').trim();
+      const normActiveSeason = (activeSeason || '').replace(/-/g, '/').trim();
+      const isForActiveSeason = !normConfSeason || !normActiveSeason || normConfSeason === normActiveSeason;
       return isForSchool && isForActiveSeason && isSportActiveOrProgrammed(c.sportId);
     });
 
     schoolConfirmations.forEach(conf => {
-      if (selectedSportFilter !== 'ALL' && conf.sportId !== selectedSportFilter) return;
+      if (selectedSportFilter !== 'ALL' && !areSportIdsEquivalent(conf.sportId, selectedSportFilter)) return;
       const effectiveBranches = getEffectiveConfirmedBranches(conf, true);
       if (effectiveBranches.length === 0) return;
 
@@ -372,32 +370,62 @@ export const SchoolParticipantsModal: React.FC<SchoolParticipantsModalProps> = (
 
   useEffect(() => {
     if (isOpen) {
+      let active = true;
       setSelectedSportFilter(sportId || 'ALL');
       setSelectedGroupId(null);
-      setLoadingTournaments(true);
-      
+      setLoadingTournaments(tournaments.length === 0);
+
+      // Fast direct fetch fallback so modal never hangs waiting on real-time snapshots
+      Promise.allSettled([
+        DataService.getTournaments(),
+        DataService.getSchoolConfirmations(),
+        DataService.getSportsConfig(),
+        DataService.getActiveSeason(),
+        DataService.getUsers()
+      ]).then(([tRes, cRes, sRes, seasonRes, uRes]) => {
+        if (!active) return;
+        if (tRes.status === 'fulfilled' && Array.isArray(tRes.value)) {
+          setTournaments(prev => (tRes.value.length > 0 || prev.length === 0 ? deduplicateById(tRes.value) : prev));
+        }
+        if (cRes.status === 'fulfilled' && Array.isArray(cRes.value)) {
+          setConfirmations(prev => (cRes.value.length > 0 || prev.length === 0 ? cRes.value : prev));
+        }
+        if (sRes.status === 'fulfilled' && Array.isArray(sRes.value)) {
+          setSportsConfig(prev => (sRes.value.length > 0 || prev.length === 0 ? sRes.value : prev));
+        }
+        if (seasonRes.status === 'fulfilled' && seasonRes.value) {
+          setActiveSeason(seasonRes.value);
+        }
+        if (uRes.status === 'fulfilled' && Array.isArray(uRes.value)) {
+          setUsersList(uRes.value);
+        }
+      }).finally(() => {
+        if (active) setLoadingTournaments(false);
+      });
+
+      const safetyTimer = setTimeout(() => {
+        if (active) setLoadingTournaments(false);
+      }, 2500);
+
       const unsubscribeTournaments = DataService.subscribeToTournaments((tList) => {
+        if (!active) return;
         setTournaments(deduplicateById(tList || []));
         setLoadingTournaments(false);
       });
 
       const unsubscribeConfirmations = DataService.subscribeToSchoolConfirmations((cList) => {
+        if (!active) return;
         setConfirmations(cList || []);
       });
 
       const unsubscribeSports = DataService.subscribeToSportsConfig((sList) => {
+        if (!active) return;
         setSportsConfig(sList || []);
       });
 
-      DataService.getActiveSeason().then(season => {
-        if (season) setActiveSeason(season);
-      });
-
-      DataService.getUsers().then(users => {
-        if (users) setUsersList(users);
-      }).catch(() => {});
-
       return () => {
+        active = false;
+        clearTimeout(safetyTimer);
         unsubscribeTournaments();
         unsubscribeConfirmations();
         unsubscribeSports();
@@ -685,7 +713,7 @@ export const SchoolParticipantsModal: React.FC<SchoolParticipantsModalProps> = (
                 </h3>
               </div>
 
-                {loadingTournaments ? (
+                {loadingTournaments && participatingGroups.length === 0 ? (
                   <div className="flex justify-center p-8">
                     <div className="h-6 w-6 animate-spin rounded-full border-2 border-blue-600 border-t-transparent"></div>
                   </div>
@@ -1098,7 +1126,7 @@ export const SchoolParticipantsModal: React.FC<SchoolParticipantsModalProps> = (
                                               type="button"
                                               onClick={() => {
                                                 onClose();
-                                                navigate(`/teams?sport=${selectedGroup.sportId}&school=${encodeURIComponent(school.name)}`);
+                                                navigate(`/teacher-teams?sport=${selectedGroup.sportId}&school=${encodeURIComponent(school.name)}`);
                                               }}
                                               className="mt-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black inline-flex items-center gap-1.5 cursor-pointer shadow-xs"
                                             >

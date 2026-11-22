@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { SchoolTournamentConfirmation } from '../types';
-import { DataService } from '../lib/dataService';
+import { DataService, schoolNamesMatch } from '../lib/dataService';
 import { normalizeArabicName } from '../lib/utils';
 
 export function useSchoolConfirmations(targetDirectorateId?: string) {
@@ -35,6 +35,7 @@ export function useSchoolConfirmations(targetDirectorateId?: string) {
     if ((c.schoolId || '').trim().toLowerCase() === cleanId) return true;
     if ((c.schoolName || '').trim().toLowerCase() === cleanId) return true;
     if (normId && c.schoolName && normalizeArabicName(c.schoolName) === normId) return true;
+    if (c.schoolName && schoolNamesMatch(c.schoolName, schoolIdentifier)) return true;
     return false;
   }, []);
 

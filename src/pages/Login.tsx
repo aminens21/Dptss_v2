@@ -45,7 +45,8 @@ import {
   Zap,
   Info,
   Menu,
-  MoreHorizontal
+  MoreHorizontal,
+  Undo2
 } from 'lucide-react';
 import {
   GoogleAuthProvider,
@@ -56,8 +57,8 @@ import {
 import { CommunicationWidget } from '../components/CommunicationWidget';
 import { doc, setDoc, getDoc, serverTimestamp, query, collection, where, getDocs } from 'firebase/firestore';
 import { auth, db } from '../firebase/config';
-import { User, Role, Directorate, School, Tournament, Match, Student, CrossCountryCategoryResult, AthleticsCategoryResult, AthleticsWinner, Sport, Referee, AffiliationDisplayConfig } from '../types';
-import { DataService, SPORTS_MAP, getAgeCategoriesForSeason, getCategoryYearsLabel, normalizeCategoryKey, normalizeTournamentAffiliation, resolveEffectiveAffiliationMode, isAffiliationAllowedByDisplayConfig } from '../lib/dataService';
+import { User, Role, Directorate, School, Tournament, Match, Student, CrossCountryCategoryResult, AthleticsCategoryResult, AthleticsWinner, Sport, Referee, AffiliationDisplayConfig, BlockedSchedulePeriod } from '../types';
+import { DataService, SPORTS_MAP, getAgeCategoriesForSeason, getCategoryYearsLabel, normalizeCategoryKey, normalizeTournamentAffiliation, resolveEffectiveAffiliationMode, isAffiliationAllowedByDisplayConfig, findAllBlockedPeriodsForDate, isMatchProgramPendingApproval } from '../lib/dataService';
 import { calculateTeamRankings, resolveRunnerParticipationType } from '../lib/crossCountryConfig';
 import { hasValidMatchTeams, formatTeamDisplayName, extractMatchGroupLabel, isPlaceholderTeamId, computeGroupStandings } from '../lib/drawTournamentUtils';
 import { resolveMatchAffiliation, resolveMatchRefereesInfo, getOrdinalRefLabel } from '../lib/programExportService';
@@ -114,6 +115,7 @@ export const Login: React.FC = () => {
   );
   const [referees, setReferees] = useState<Referee[]>([]);
   const [usersDirectory, setUsersDirectory] = useState<User[]>([]);
+  const [blockedPeriods, setBlockedPeriods] = useState<BlockedSchedulePeriod[]>([]);
   const [loadingData, setLoadingData] = useState(true);
 
   // Public Filters
@@ -405,7 +407,7 @@ export const Login: React.FC = () => {
         setActiveDirectorate(activeDir);
       }
 
-      const [dirs, schs, tours, mtchs, stds, ccRes, athRes, sps, refs, usrs] = await Promise.all([
+      const [dirs, schs, tours, mtchs, stds, ccRes, athRes, sps, refs, usrs, blkd] = await Promise.all([
         DataService.getDirectorates(),
         DataService.getSchools(effectiveDirId),
         DataService.getTournaments(effectiveDirId),
@@ -415,7 +417,8 @@ export const Login: React.FC = () => {
         DataService.getAthleticsResults(effectiveDirId),
         DataService.getSportsConfig(),
         DataService.getReferees().catch(() => [] as Referee[]),
-        DataService.getUsers().catch(() => [] as User[])
+        DataService.getUsers().catch(() => [] as User[]),
+        DataService.getBlockedScheduleDates(effectiveDirId).catch(() => [] as BlockedSchedulePeriod[])
       ]);
 
       setDirectorates(dirs || []);
@@ -424,6 +427,7 @@ export const Login: React.FC = () => {
       setSportsConfig(sps || []);
       setReferees(refs || []);
       setUsersDirectory(usrs || []);
+      setBlockedPeriods(blkd || []);
       setMatches(mtchs || []);
       setStudents(stds || []);
       setCrossCountryResults(ccRes || {});
@@ -466,12 +470,33 @@ export const Login: React.FC = () => {
     const unsubCcResults = DataService.subscribeCrossCountryResults((r) => setCrossCountryResults(r as Record<string, CrossCountryCategoryResult>));
     const unsubAthletics = DataService.subscribeAthleticsResults((ar) => setAthleticsResults(ar));
     const unsubAffiliationCfg = DataService.subscribeToAffiliationDisplayConfig((cfg) => setAffiliationDisplayConfig(cfg));
+    const unsubBlockedDates = DataService.subscribeToBlockedScheduleDates((periods) => setBlockedPeriods(periods));
 
     const handleRefreshPublicData = () => {
       loadAllData(activeDirIdRef.current);
     };
+    const handleRefreshRefereesAndUsers = () => {
+      Promise.all([
+        DataService.getReferees().catch(() => null),
+        DataService.getUsers().catch(() => null)
+      ]).then(([refs, usrs]) => {
+        if (refs) setReferees(refs);
+        if (usrs) setUsersDirectory(usrs);
+      });
+    };
+    const unsubReferees = DataService.subscribeToReferees(() => {
+      DataService.getReferees().then(setReferees).catch(() => {});
+    });
+    const unsubUsers = DataService.subscribeToUsers(() => {
+      DataService.getUsers().then(setUsersDirectory).catch(() => {});
+    });
+
     window.addEventListener('resultsChanged', handleRefreshPublicData);
     window.addEventListener('tournamentDataChanged', handleRefreshPublicData);
+    window.addEventListener('matchesDataChanged', handleRefreshRefereesAndUsers);
+    window.addEventListener('matchesUpdated', handleRefreshRefereesAndUsers);
+    window.addEventListener('refereesUpdated', handleRefreshRefereesAndUsers);
+    window.addEventListener('userDataChanged', handleRefreshRefereesAndUsers);
 
     return () => {
       unsubSchools();
@@ -480,8 +505,15 @@ export const Login: React.FC = () => {
       unsubCcResults();
       unsubAthletics();
       unsubAffiliationCfg();
+      unsubBlockedDates();
+      unsubReferees();
+      unsubUsers();
       window.removeEventListener('resultsChanged', handleRefreshPublicData);
       window.removeEventListener('tournamentDataChanged', handleRefreshPublicData);
+      window.removeEventListener('matchesDataChanged', handleRefreshRefereesAndUsers);
+      window.removeEventListener('matchesUpdated', handleRefreshRefereesAndUsers);
+      window.removeEventListener('refereesUpdated', handleRefreshRefereesAndUsers);
+      window.removeEventListener('userDataChanged', handleRefreshRefereesAndUsers);
     };
   }, []);
 
@@ -1506,6 +1538,9 @@ export const Login: React.FC = () => {
     const formatLocalYmd = (d: Date) =>
       `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     const todayYmd = formatLocalYmd(new Date());
+    const selectedDateBlocked = findAllBlockedPeriodsForDate(selectedDate, ['ALL'], blockedPeriods);
+    const selectedDateHolidays = selectedDateBlocked.filter(p => p.type === 'holiday');
+    const selectedDateExams = selectedDateBlocked.filter(p => p.type === 'exams');
 
     const handlePrevDay = () => {
       try {
@@ -1638,6 +1673,32 @@ export const Login: React.FC = () => {
                 </button>
               </div>
 
+              {/* Selected Date Holiday & Exam Banners (Mobile) */}
+              {selectedDateHolidays.length > 0 && (
+                <div className="p-2.5 rounded-2xl bg-red-100/90 dark:bg-red-950/60 border border-red-300 dark:border-red-800 text-red-900 dark:text-red-200 flex items-center justify-between gap-2 text-[11px] font-black">
+                  <span>🏖️ عطلة مدرسية: {selectedDateHolidays.map(h => h.title).join(' • ')}</span>
+                  <span className="text-[9.5px] bg-white/80 dark:bg-red-900/60 text-red-800 dark:text-red-200 px-2 py-0.5 rounded-full border border-red-200 dark:border-red-700 shrink-0">
+                    عطلة رسمية
+                  </span>
+                </div>
+              )}
+
+              {selectedDateExams.length > 0 && (
+                <div className="p-2.5 rounded-2xl bg-blue-100/90 dark:bg-blue-950/60 border border-blue-300 dark:border-blue-800 text-blue-900 dark:text-blue-200 space-y-1 text-[11px] font-black">
+                  <div className="flex items-center justify-between gap-2">
+                    <span>📝 أيام الامتحانات</span>
+                    <span className="text-[9.5px] bg-white/80 dark:bg-blue-900/60 text-blue-800 dark:text-blue-200 px-2 py-0.5 rounded-full border border-blue-200 dark:border-blue-700 shrink-0">
+                      تواريخ محمية
+                    </span>
+                  </div>
+                  {selectedDateExams.map(ex => (
+                    <div key={`mob-ex-${ex.id}`} className="text-[10.5px] font-bold text-blue-900 dark:text-blue-100 leading-snug">
+                      • {ex.title}
+                    </div>
+                  ))}
+                </div>
+              )}
+
               {/* Matches List for Selected Day */}
               <div className="space-y-2 max-h-56 overflow-y-auto pr-0.5">
                 {filteredMatches.length === 0 ? (
@@ -1671,14 +1732,28 @@ export const Login: React.FC = () => {
                     const sportInfo = SPORTS_MAP[m.sportId];
                     const genderLabel = m.gender === 'Female' ? 'إناث' : m.gender === 'Male' ? 'ذكور' : '';
                     const categoryGenderText = [m.ageCategory || m.category, genderLabel].filter(Boolean).join(' • ') || 'عامة';
+                    const isPendingProgramApproval = isMatchProgramPendingApproval(m);
 
                     return (
-                      <div key={m.id} className="p-2.5 bg-slate-50 dark:bg-slate-800 rounded-2xl space-y-1.5 border border-slate-200/80 dark:border-slate-700/60 shadow-xs hover:border-emerald-400 transition-all">
-                        <div className="flex items-center justify-between gap-1 text-[9px] font-black border-b border-slate-200/60 dark:border-slate-700/60 pb-1">
-                          <span className="flex items-center gap-1 text-emerald-700 dark:text-emerald-400 truncate">
+                      <div key={m.id} className={cn(
+                        "p-2.5 rounded-2xl space-y-1.5 border shadow-xs transition-all",
+                        isPendingProgramApproval
+                          ? "bg-slate-200/95 dark:bg-slate-800/95 border-slate-300 dark:border-slate-700"
+                          : "bg-slate-50 dark:bg-slate-800 border-slate-200/80 dark:border-slate-700/60 hover:border-emerald-400"
+                      )}>
+                        <div className="flex items-center justify-between gap-1 text-[9px] font-black border-b border-slate-300/60 dark:border-slate-700/60 pb-1">
+                          <span className={cn(
+                            "flex items-center gap-1 truncate",
+                            isPendingProgramApproval ? "text-slate-600 dark:text-slate-300 grayscale" : "text-emerald-700 dark:text-emerald-400"
+                          )}>
                             <span>{sportInfo?.icon || '⚽'}</span>
                             <span className="truncate">{m.sportName || sportInfo?.name || 'رياضة'}</span>
                           </span>
+                          {isPendingProgramApproval && (
+                            <span className="px-1.5 py-0.5 rounded-full bg-red-50 dark:bg-red-950/70 text-red-700 dark:text-red-300 border border-red-300 dark:border-red-700 text-[8.5px] font-black shrink-0">
+                              في انتظار المصادقة على البرنامج
+                            </span>
+                          )}
                           <span className={`px-2 py-0.5 rounded-full text-[9px] font-black shrink-0 ${
                             m.gender === 'Female'
                               ? 'bg-pink-100 text-pink-800 border border-pink-200 dark:bg-pink-950/80 dark:text-pink-300 dark:border-pink-800'
@@ -1711,15 +1786,13 @@ export const Login: React.FC = () => {
                           </span>
                         </div>
 
-                        {refInfo.hasReferees && (
-                          <div className="flex items-start gap-1 text-[9px] font-bold text-slate-600 dark:text-slate-300 pt-1 border-t border-slate-200/70 dark:border-slate-700/60">
-                            <ShieldCheck className="w-3 h-3 text-indigo-500 shrink-0 mt-0.5" />
-                            <span className="leading-snug">
-                              <span className="font-black text-indigo-700 dark:text-indigo-300">الحكام: </span>
-                              {refInfo.allRefs.join(' • ')}
-                            </span>
-                          </div>
-                        )}
+                        <div className="flex items-start gap-1 text-[9px] font-bold text-slate-600 dark:text-slate-300 pt-1 border-t border-slate-200/70 dark:border-slate-700/60">
+                          <ShieldCheck className="w-3 h-3 text-indigo-500 shrink-0 mt-0.5" />
+                          <span className="leading-snug">
+                            <span className="font-black text-indigo-700 dark:text-indigo-300">الحكام: </span>
+                            {refInfo.hasReferees ? refInfo.allRefs.join(' • ') : 'يعين لاحقاً'}
+                          </span>
+                        </div>
 
                         <div className="flex items-center justify-between text-[9px] text-slate-500 dark:text-slate-400 font-bold">
                           <span className="flex items-center gap-1 truncate"><MapPin className="w-2.5 h-2.5" /> {m.venueName || 'الملعب الرياضي'}</span>
@@ -1796,26 +1869,61 @@ export const Login: React.FC = () => {
                   const isSelected = selectedDate === cellYmd;
                   const dayMatchesCount = sportRelevantMatches.filter(m => safeDateCompare(m.date, cellYmd)).length;
                   const hasMatches = dayMatchesCount > 0;
+                  const dayBlocked = findAllBlockedPeriodsForDate(cellYmd, ['ALL'], blockedPeriods);
+                  const dayHolidays = dayBlocked.filter(p => p.type === 'holiday');
+                  const dayExams = dayBlocked.filter(p => p.type === 'exams');
+                  const isHoliday = dayHolidays.length > 0;
+                  const isExam = dayExams.length > 0;
+                  const holidayTitles = dayHolidays.map(h => h.title).join(' • ');
+                  const examTitles = dayExams.map(ex => ex.title).join(' • ');
+                  const nativeTitleParts: string[] = [];
+                  if (isHoliday) nativeTitleParts.push(`🏖️ عطلة مدرسية: ${holidayTitles}`);
+                  if (isExam) nativeTitleParts.push(`📝 أيام الامتحانات: ${examTitles}`);
+                  const dayCol = new Date(year, currentCalendarMonth.getMonth(), dayNum).getDay();
+                  const tooltipPosClass = dayCol === 0 ? 'right-0' : dayCol === 6 ? 'left-0' : 'left-1/2 -translate-x-1/2';
 
                   return (
                     <button
                       key={dayNum}
                       type="button"
+                      title={nativeTitleParts.length > 0 ? nativeTitleParts.join('\n') : undefined}
                       onClick={() => {
                         selectProgramDate(cellYmd);
                         setMobileProgramTab('daily');
                       }}
-                      className={`h-7 rounded-xl flex flex-col items-center justify-center relative font-bold text-[11px] transition-all cursor-pointer ${
-                        isSelected
+                      className={`group h-7 rounded-xl flex flex-col items-center justify-center relative font-bold text-[11px] transition-all cursor-pointer ${
+                        isSelected && isHoliday
+                          ? 'bg-red-600 text-white font-black shadow-md scale-105 ring-2 ring-red-400'
+                          : isSelected && isExam
+                          ? 'bg-blue-600 text-white font-black shadow-md scale-105 ring-2 ring-blue-400'
+                          : isSelected
                           ? 'bg-emerald-600 text-white font-black shadow-md scale-105 ring-2 ring-emerald-400'
+                          : isHoliday
+                          ? 'bg-red-100 dark:bg-red-950/60 text-red-800 dark:text-red-200 border border-red-300 dark:border-red-800 hover:bg-red-200/80 font-black'
+                          : isExam
+                          ? 'bg-blue-100 dark:bg-blue-950/60 text-blue-800 dark:text-blue-200 border border-blue-300 dark:border-blue-800 hover:bg-blue-200/80 font-black'
                           : hasMatches
                           ? 'bg-amber-100 dark:bg-amber-950/80 text-amber-950 dark:text-amber-200 border border-amber-300 dark:border-amber-700 font-black'
                           : 'hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300'
                       }`}
                     >
+                      {(isHoliday || isExam) && (
+                        <span className={`pointer-events-none opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100 transition-opacity duration-150 absolute bottom-full mb-1.5 ${tooltipPosClass} z-50 w-52 whitespace-normal text-right leading-snug ${isHoliday ? 'bg-red-700 border-red-400/50' : 'bg-blue-700 border-blue-400/50'} text-white text-[10px] font-black px-2.5 py-1.5 rounded-lg shadow-lg border space-y-1`}>
+                          {isHoliday && <span className="block">🏖️ {holidayTitles}</span>}
+                          {isExam && dayExams.map(ex => (
+                            <span key={`mob-tip-${ex.id}`} className="block">📝 {ex.title}</span>
+                          ))}
+                        </span>
+                      )}
                       <span>{dayNum}</span>
                       {hasMatches && !isSelected && (
                         <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 dark:bg-emerald-400 absolute bottom-0.5"></span>
+                      )}
+                      {!hasMatches && isHoliday && !isSelected && (
+                        <span className="w-1.5 h-1.5 rounded-full bg-red-500 dark:bg-red-400 absolute bottom-0.5"></span>
+                      )}
+                      {!hasMatches && !isHoliday && isExam && !isSelected && (
+                        <span className="w-1.5 h-1.5 rounded-full bg-blue-600 dark:bg-blue-400 absolute bottom-0.5"></span>
                       )}
                       {hasMatches && isSelected && (
                         <span className="w-1.5 h-1.5 rounded-full bg-amber-300 absolute bottom-0.5"></span>
@@ -1823,6 +1931,22 @@ export const Login: React.FC = () => {
                     </button>
                   );
                 })}
+              </div>
+
+              {/* Calendar Legend (Mobile) */}
+              <div className="pt-2 border-t border-slate-100 dark:border-slate-800 flex flex-wrap items-center gap-3 text-[10px] font-bold text-slate-500 dark:text-slate-400">
+                <span className="flex items-center gap-1.5 text-red-700 dark:text-red-300">
+                  <span className="w-2.5 h-2.5 rounded bg-red-100 border border-red-300 inline-block" />
+                  <span>عطلة مدرسية</span>
+                </span>
+                <span className="flex items-center gap-1.5 text-blue-700 dark:text-blue-300">
+                  <span className="w-2.5 h-2.5 rounded bg-blue-100 border border-blue-300 inline-block" />
+                  <span>أيام الامتحانات</span>
+                </span>
+                <span className="flex items-center gap-1.5 text-amber-800 dark:text-amber-300">
+                  <span className="w-2.5 h-2.5 rounded bg-amber-100 border border-amber-300 inline-block" />
+                  <span>يوم مباريات</span>
+                </span>
               </div>
 
               {/* Quick Jump Dates With Matches */}
@@ -1923,23 +2047,58 @@ export const Login: React.FC = () => {
               const isSelected = selectedDate === cellYmd;
               const dayMatchesCount = sportRelevantMatches.filter(m => safeDateCompare(m.date, cellYmd)).length;
               const hasMatches = dayMatchesCount > 0;
+              const dayBlocked = findAllBlockedPeriodsForDate(cellYmd, ['ALL'], blockedPeriods);
+              const dayHolidays = dayBlocked.filter(p => p.type === 'holiday');
+              const dayExams = dayBlocked.filter(p => p.type === 'exams');
+              const isHoliday = dayHolidays.length > 0;
+              const isExam = dayExams.length > 0;
+              const holidayTitles = dayHolidays.map(h => h.title).join(' • ');
+              const examTitles = dayExams.map(ex => ex.title).join(' • ');
+              const nativeTitleParts: string[] = [];
+              if (isHoliday) nativeTitleParts.push(`🏖️ عطلة مدرسية: ${holidayTitles}`);
+              if (isExam) nativeTitleParts.push(`📝 أيام الامتحانات: ${examTitles}`);
+              const dayCol = new Date(year, currentCalendarMonth.getMonth(), dayNum).getDay();
+              const tooltipPosClass = dayCol === 0 ? 'right-0' : dayCol === 6 ? 'left-0' : 'left-1/2 -translate-x-1/2';
 
               return (
                 <button
                   key={dayNum}
                   type="button"
+                  title={nativeTitleParts.length > 0 ? nativeTitleParts.join('\n') : undefined}
                   onClick={() => selectProgramDate(cellYmd)}
-                  className={`h-7 sm:h-8 rounded-xl flex flex-col items-center justify-center relative font-bold text-[11px] sm:text-xs transition-all cursor-pointer ${
-                    isSelected
+                  className={`group h-7 sm:h-8 rounded-xl flex flex-col items-center justify-center relative font-bold text-[11px] sm:text-xs transition-all cursor-pointer ${
+                    isSelected && isHoliday
+                      ? 'bg-red-600 text-white font-black shadow-md shadow-red-600/30 scale-105 ring-2 ring-red-400'
+                      : isSelected && isExam
+                      ? 'bg-blue-600 text-white font-black shadow-md shadow-blue-600/30 scale-105 ring-2 ring-blue-400'
+                      : isSelected
                       ? 'bg-emerald-600 text-white font-black shadow-md shadow-emerald-600/30 scale-105 ring-2 ring-emerald-400'
+                      : isHoliday
+                      ? 'bg-red-100 dark:bg-red-950/60 text-red-800 dark:text-red-200 border border-red-300 dark:border-red-800 hover:bg-red-200/80 font-black'
+                      : isExam
+                      ? 'bg-blue-100 dark:bg-blue-950/60 text-blue-800 dark:text-blue-200 border border-blue-300 dark:border-blue-800 hover:bg-blue-200/80 font-black'
                       : hasMatches
                       ? 'bg-amber-100 dark:bg-amber-950/80 text-amber-950 dark:text-amber-200 border border-amber-300 dark:border-amber-700 font-black'
                       : 'hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300'
                   }`}
                 >
+                  {(isHoliday || isExam) && (
+                    <span className={`pointer-events-none opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100 transition-opacity duration-150 absolute bottom-full mb-1.5 ${tooltipPosClass} z-50 w-56 sm:w-64 whitespace-normal text-right leading-snug ${isHoliday ? 'bg-red-700 border-red-400/50' : 'bg-blue-700 border-blue-400/50'} text-white text-[10px] font-black px-2.5 py-1.5 rounded-lg shadow-lg border space-y-1`}>
+                      {isHoliday && <span className="block">🏖️ {holidayTitles}</span>}
+                      {isExam && dayExams.map(ex => (
+                        <span key={`desk-tip-${ex.id}`} className="block">📝 {ex.title}</span>
+                      ))}
+                    </span>
+                  )}
                   <span>{dayNum}</span>
                   {hasMatches && !isSelected && (
                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 dark:bg-emerald-400 absolute bottom-0.5"></span>
+                  )}
+                  {!hasMatches && isHoliday && !isSelected && (
+                    <span className="w-1.5 h-1.5 rounded-full bg-red-500 dark:bg-red-400 absolute bottom-0.5"></span>
+                  )}
+                  {!hasMatches && !isHoliday && isExam && !isSelected && (
+                    <span className="w-1.5 h-1.5 rounded-full bg-blue-600 dark:bg-blue-400 absolute bottom-0.5"></span>
                   )}
                   {hasMatches && isSelected && (
                     <span className="w-1.5 h-1.5 rounded-full bg-amber-300 absolute bottom-0.5"></span>
@@ -1947,6 +2106,22 @@ export const Login: React.FC = () => {
                 </button>
               );
             })}
+          </div>
+
+          {/* Calendar Legend (Desktop) */}
+          <div className="pt-2 border-t border-slate-100 dark:border-slate-800 flex flex-wrap items-center justify-between gap-2 text-[10px] font-bold text-slate-500 dark:text-slate-400">
+            <span className="flex items-center gap-1.5 text-red-700 dark:text-red-300">
+              <span className="w-2.5 h-2.5 rounded bg-red-100 border border-red-300 inline-block" />
+              <span>عطلة مدرسية</span>
+            </span>
+            <span className="flex items-center gap-1.5 text-blue-700 dark:text-blue-300">
+              <span className="w-2.5 h-2.5 rounded bg-blue-100 border border-blue-300 inline-block" />
+              <span>أيام الامتحانات</span>
+            </span>
+            <span className="flex items-center gap-1.5 text-amber-800 dark:text-amber-300">
+              <span className="w-2.5 h-2.5 rounded bg-amber-100 border border-amber-300 inline-block" />
+              <span>يوم يتضمن مباريات</span>
+            </span>
           </div>
         </div>
 
@@ -1961,6 +2136,31 @@ export const Login: React.FC = () => {
               {filteredMatches.length} حدث/مباراة
             </span>
           </div>
+
+          {selectedDateHolidays.length > 0 && (
+            <div className="p-2.5 rounded-xl bg-red-100/90 dark:bg-red-950/60 border border-red-300 dark:border-red-800 text-red-900 dark:text-red-200 flex items-center justify-between gap-2 text-[11px] font-black">
+              <span>🏖️ عطلة مدرسية: {selectedDateHolidays.map(h => h.title).join(' • ')}</span>
+              <span className="text-[9.5px] bg-white/80 dark:bg-red-900/60 text-red-800 dark:text-red-200 px-2 py-0.5 rounded-full border border-red-200 dark:border-red-700 shrink-0">
+                عطلة رسمية
+              </span>
+            </div>
+          )}
+
+          {selectedDateExams.length > 0 && (
+            <div className="p-2.5 rounded-xl bg-blue-100/90 dark:bg-blue-950/60 border border-blue-300 dark:border-blue-800 text-blue-900 dark:text-blue-200 space-y-1 text-[11px] font-black">
+              <div className="flex items-center justify-between gap-2">
+                <span>📝 أيام الامتحانات</span>
+                <span className="text-[9.5px] bg-white/80 dark:bg-blue-900/60 text-blue-800 dark:text-blue-200 px-2 py-0.5 rounded-full border border-blue-200 dark:border-blue-700 shrink-0">
+                  تواريخ محمية
+                </span>
+              </div>
+              {selectedDateExams.map(ex => (
+                <div key={`desk-ex-${ex.id}`} className="text-[10.5px] font-bold text-blue-900 dark:text-blue-100 leading-snug">
+                  • {ex.title}
+                </div>
+              ))}
+            </div>
+          )}
 
           <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
             {filteredMatches.length === 0 ? (
@@ -1999,14 +2199,28 @@ export const Login: React.FC = () => {
                 const sportInfo = SPORTS_MAP[m.sportId];
                 const genderLabel = m.gender === 'Female' ? 'إناث' : m.gender === 'Male' ? 'ذكور' : '';
                 const categoryGenderText = [m.ageCategory || m.category, genderLabel].filter(Boolean).join(' • ') || 'عامة';
+                const isPendingProgramApproval = isMatchProgramPendingApproval(m);
 
                 return (
-                  <div key={m.id} className="p-2.5 bg-slate-50 dark:bg-slate-800 rounded-2xl space-y-1.5 border border-slate-200/80 dark:border-slate-700/60 hover:border-emerald-300 transition-all">
-                    <div className="flex items-center justify-between gap-1 text-[9px] font-black border-b border-slate-200/60 dark:border-slate-700/60 pb-1">
-                      <span className="flex items-center gap-1 text-emerald-700 dark:text-emerald-400 truncate">
+                  <div key={m.id} className={cn(
+                    "p-2.5 rounded-2xl space-y-1.5 border transition-all",
+                    isPendingProgramApproval
+                      ? "bg-slate-200/95 dark:bg-slate-800/95 border-slate-300 dark:border-slate-700"
+                      : "bg-slate-50 dark:bg-slate-800 border-slate-200/80 dark:border-slate-700/60 hover:border-emerald-300"
+                  )}>
+                    <div className="flex items-center justify-between gap-1 text-[9px] font-black border-b border-slate-300/60 dark:border-slate-700/60 pb-1">
+                      <span className={cn(
+                        "flex items-center gap-1 truncate",
+                        isPendingProgramApproval ? "text-slate-600 dark:text-slate-300 grayscale" : "text-emerald-700 dark:text-emerald-400"
+                      )}>
                         <span>{sportInfo?.icon || '⚽'}</span>
                         <span className="truncate">{m.sportName || sportInfo?.name || 'رياضة'}</span>
                       </span>
+                      {isPendingProgramApproval && (
+                        <span className="px-1.5 py-0.5 rounded-full bg-red-50 dark:bg-red-950/70 text-red-700 dark:text-red-300 border border-red-300 dark:border-red-700 text-[8.5px] font-black shrink-0">
+                          في انتظار المصادقة على البرنامج
+                        </span>
+                      )}
                       <span className={`px-2 py-0.5 rounded-full text-[9px] font-black shrink-0 ${
                         m.gender === 'Female'
                           ? 'bg-pink-100 text-pink-800 border border-pink-200 dark:bg-pink-950/80 dark:text-pink-300 dark:border-pink-800'
@@ -2039,15 +2253,13 @@ export const Login: React.FC = () => {
                       </span>
                     </div>
 
-                    {refInfo.hasReferees && (
-                      <div className="flex items-start gap-1 text-[9px] font-bold text-slate-600 dark:text-slate-300 pt-1 border-t border-slate-200/70 dark:border-slate-700/60">
-                        <ShieldCheck className="w-3 h-3 text-indigo-500 shrink-0 mt-0.5" />
-                        <span className="leading-snug">
-                          <span className="font-black text-indigo-700 dark:text-indigo-300">الحكام: </span>
-                          {refInfo.allRefs.join(' • ')}
-                        </span>
-                      </div>
-                    )}
+                    <div className="flex items-start gap-1 text-[9px] font-bold text-slate-600 dark:text-slate-300 pt-1 border-t border-slate-200/70 dark:border-slate-700/60">
+                      <ShieldCheck className="w-3 h-3 text-indigo-500 shrink-0 mt-0.5" />
+                      <span className="leading-snug">
+                        <span className="font-black text-indigo-700 dark:text-indigo-300">الحكام: </span>
+                        {refInfo.hasReferees ? refInfo.allRefs.join(' • ') : 'يعين لاحقاً'}
+                      </span>
+                    </div>
 
                     <div className="flex items-center justify-between text-[9px] text-slate-500 dark:text-slate-400">
                       <span className="flex items-center gap-1"><MapPin className="w-2.5 h-2.5" /> {m.venueName || 'الملعب'}</span>
@@ -3221,6 +3433,61 @@ export const Login: React.FC = () => {
                     <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-200 border border-emerald-200 dark:border-emerald-800">
                       {publicTabMatches.length} مباراة جاهزة
                     </span>
+                    {Boolean(
+                      userProfile?.role === 'CENTRAL_ADMIN' ||
+                      userProfile?.role === 'SUPER_ADMIN' ||
+                      userProfile?.isSuperAdmin === true ||
+                      isSuperAdminEmail(userProfile?.email || currentUser?.email)
+                    ) && publicTabMatches.length > 0 && (() => {
+                      const pendingBySport = new Map<string, { sportName: string; icon: string; ids: string[] }>();
+                      const approvedBySport = new Map<string, { sportName: string; icon: string; ids: string[] }>();
+                      publicTabMatches.forEach(m => {
+                        const sid = m.sportId || 'other';
+                        const sp = SPORTS_MAP[sid];
+                        const targetMap = isMatchProgramPendingApproval(m) ? pendingBySport : approvedBySport;
+                        const existing = targetMap.get(sid) || {
+                          sportName: m.sportName || sp?.name || sid,
+                          icon: sp?.icon || '🏆',
+                          ids: []
+                        };
+                        existing.ids.push(m.id);
+                        targetMap.set(sid, existing);
+                      });
+                      return (
+                        <>
+                          {Array.from(pendingBySport.entries()).map(([sid, grp]) => (
+                            <button
+                              key={`pub-approve-sport-${sid}`}
+                              type="button"
+                              onClick={async () => {
+                                const count = await DataService.approveMatchesProgramBatch(grp.ids, userProfile?.fullName || 'المسير المركزي');
+                                toast.success(`تمت المصادقة على برنامج ${grp.sportName} (${count} مباراة) بنجاح ✅`);
+                                await loadAllData(activeDirIdRef.current);
+                              }}
+                              className="px-2.5 py-1 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-black flex items-center gap-1 shadow-xs transition-colors cursor-pointer"
+                            >
+                              <CheckCircle2 className="w-3.5 h-3.5" />
+                              <span>{grp.icon} المصادقة على برنامج {grp.sportName} ({grp.ids.length})</span>
+                            </button>
+                          ))}
+                          {Array.from(approvedBySport.entries()).map(([sid, grp]) => (
+                            <button
+                              key={`pub-revert-sport-${sid}`}
+                              type="button"
+                              onClick={async () => {
+                                const count = await DataService.revertMatchesProgramBatch(grp.ids);
+                                toast.success(`تم التراجع عن مصادقة برنامج ${grp.sportName} (${count} مباراة) 🔄`);
+                                await loadAllData(activeDirIdRef.current);
+                              }}
+                              className="px-2.5 py-1 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-[10px] font-black flex items-center gap-1 shadow-xs transition-colors cursor-pointer"
+                            >
+                              <Undo2 className="w-3.5 h-3.5" />
+                              <span>{grp.icon} التراجع عن مصادقة {grp.sportName} ({grp.ids.length})</span>
+                            </button>
+                          ))}
+                        </>
+                      );
+                    })()}
                   </div>
 
                   <div className="flex items-center gap-1.5 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl text-[10px] font-black">
@@ -3357,15 +3624,38 @@ export const Login: React.FC = () => {
                       const categoryLabel = [m.ageCategory || m.category, genderLabel].filter(Boolean).join(' • ') || 'عامة';
                       const refInfo = resolveMatchRefereesInfo(m, referees, usersDirectory);
                       const hasCategorizedRefs = refInfo.tableRefs.length > 0 || refInfo.fieldRefs.length > 0;
+                      const isPendingProgramApproval = isMatchProgramPendingApproval(m);
+                      const isCentralAdminViewer = Boolean(
+                        userProfile?.role === 'CENTRAL_ADMIN' ||
+                        userProfile?.role === 'SUPER_ADMIN' ||
+                        userProfile?.isSuperAdmin === true ||
+                        isSuperAdminEmail(userProfile?.email || currentUser?.email)
+                      );
 
                       return (
-                        <div key={m.id} className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-sm hover:shadow-md space-y-3 transition-all">
-                          {/* Top Row: Sport, Category & Match Status */}
-                          <div className="flex items-center justify-between gap-2 text-[11px] font-bold text-slate-500 dark:text-slate-400 border-b border-slate-100 dark:border-slate-800 pb-2">
-                            <span className="flex items-center gap-1.5 text-emerald-700 dark:text-emerald-400 font-black truncate">
+                        <div
+                          key={m.id}
+                          className={cn(
+                            "rounded-2xl p-4 shadow-sm hover:shadow-md space-y-3 transition-all border",
+                            isPendingProgramApproval
+                              ? "bg-slate-200/95 dark:bg-slate-800/90 border-slate-300 dark:border-slate-700"
+                              : "bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800"
+                          )}
+                        >
+                          {/* Top Row: Sport, Pending Approval Notice (center), Category */}
+                          <div className="flex items-center justify-between gap-2 text-[11px] font-bold text-slate-500 dark:text-slate-400 border-b border-slate-300/80 dark:border-slate-700/80 pb-2">
+                            <span className={cn(
+                              "flex items-center gap-1.5 font-black truncate",
+                              isPendingProgramApproval ? "text-slate-600 dark:text-slate-300 grayscale" : "text-emerald-700 dark:text-emerald-400"
+                            )}>
                               <span>{sportInfo?.icon || '⚽'}</span>
                               <span>{m.sportName || sportInfo?.name || 'مباراة رياضية'}</span>
                             </span>
+                            {isPendingProgramApproval && (
+                              <span className="px-2.5 py-0.5 rounded-full bg-red-50 dark:bg-red-950/75 text-red-700 dark:text-red-300 border border-red-300 dark:border-red-700 text-[10px] font-black text-center">
+                                في انتظار المصادقة على البرنامج
+                              </span>
+                            )}
                             <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black shrink-0 ${
                               m.gender === 'Female'
                                 ? 'bg-pink-100 text-pink-800 border border-pink-200 dark:bg-pink-950/80 dark:text-pink-300 dark:border-pink-800'
@@ -3404,7 +3694,7 @@ export const Login: React.FC = () => {
                             }`}>
                               <div className="flex items-center gap-2.5 min-w-0">
                                 <span className={`w-6 h-6 rounded-lg text-white flex items-center justify-center text-[10px] font-black shrink-0 shadow-2xs ${
-                                  isT1Placeholder ? 'bg-indigo-500' : 'bg-emerald-600'
+                                  isPendingProgramApproval ? 'bg-slate-500' : isT1Placeholder ? 'bg-indigo-500' : 'bg-emerald-600'
                                 }`}>
                                   1
                                 </span>
@@ -3432,7 +3722,7 @@ export const Login: React.FC = () => {
                             }`}>
                               <div className="flex items-center gap-2.5 min-w-0">
                                 <span className={`w-6 h-6 rounded-lg text-white flex items-center justify-center text-[10px] font-black shrink-0 shadow-2xs ${
-                                  isT2Placeholder ? 'bg-indigo-500' : 'bg-indigo-600'
+                                  isPendingProgramApproval ? 'bg-slate-500' : isT2Placeholder ? 'bg-indigo-500' : 'bg-indigo-600'
                                 }`}>
                                   2
                                 </span>
@@ -3500,8 +3790,38 @@ export const Login: React.FC = () => {
                                 <ShieldCheck className="w-3 h-3 text-slate-400 shrink-0" />
                                 <span>الحكام:</span>
                               </span>
-                              <span className="font-bold text-slate-400 dark:text-slate-500">لم يحدد طاقم التحكيم بعد</span>
+                              <span className="font-bold text-slate-500 dark:text-slate-400">يعين لاحقاً</span>
                             </div>
+                          )}
+
+                          {isCentralAdminViewer && (
+                            isPendingProgramApproval ? (
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  await DataService.approveMatchProgram(m.id, userProfile?.fullName || 'المسير المركزي');
+                                  toast.success('تمت المصادقة على برمجة المباراة');
+                                  await loadAllData(activeDirIdRef.current);
+                                }}
+                                className="w-full py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                              >
+                                <CheckCircle2 className="w-3.5 h-3.5" />
+                                <span>المصادقة على البرنامج</span>
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  await DataService.revertMatchProgram(m.id);
+                                  toast.success('تم التراجع عن مصادقة برمجة المباراة 🔄');
+                                  await loadAllData(activeDirIdRef.current);
+                                }}
+                                className="w-full py-1.5 px-3 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-300 text-[11px] font-black flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                              >
+                                <Undo2 className="w-3.5 h-3.5" />
+                                <span>التراجع عن مصادقة البرنامج</span>
+                              </button>
+                            )
                           )}
 
                           {/* Footer: Venue, Date/Time & Status */}

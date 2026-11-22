@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { DataService, SPORTS_MAP } from '../lib/dataService';
+import { DataService, SPORTS_MAP, inferLevelFromSchoolName, findMatchingSchoolForTeacher, normalizeCadreToLevelKey } from '../lib/dataService';
 import { compressImageToBase64 } from '../lib/imageUtils';
 import { CameraCaptureModal } from './CameraCaptureModal';
 import { School, User } from '../types';
@@ -172,7 +172,15 @@ export const TeacherProfileModal: React.FC = () => {
       setSchoolAccessCodeInput('');
       setShowAccessCodeField(false);
       setLeaseNumber(userProfile.leaseNumber || '');
-      setTeachingCadre(userProfile.teachingCadre || 'HIGH');
+
+      const explicitCadre = normalizeCadreToLevelKey(userProfile.teachingCadre);
+      const matched = findMatchingSchoolForTeacher(schools, userProfile);
+      const schoolCadre = normalizeCadreToLevelKey(matched?.type);
+      const nameCadre = inferLevelFromSchoolName(userProfile.workLocation || userProfile.schoolName);
+      const resolvedKey = explicitCadre || schoolCadre || nameCadre;
+      const resolvedCode = resolvedKey === 'Primary' ? 'PRIMARY' : resolvedKey === 'Middle' ? 'MIDDLE' : 'HIGH';
+      setTeachingCadre(resolvedCode);
+
       const specs = Array.isArray(userProfile.refereeSpecialty)
         ? userProfile.refereeSpecialty
         : userProfile.refereeSpecialty
@@ -194,7 +202,7 @@ export const TeacherProfileModal: React.FC = () => {
       setTargetDirectoratePin('');
       setShowTargetPin(false);
     }
-  }, [userProfile, isProfileModalOpen]);
+  }, [userProfile, isProfileModalOpen, schools]);
 
   if (!isProfileModalOpen || !userProfile) return null;
 
@@ -279,8 +287,20 @@ export const TeacherProfileModal: React.FC = () => {
         updatedPendingTransfer = transferResult.transfer;
       }
 
-      const matchedSchool = schools.find(s => s.name === workLocation.trim());
+      const matchedSchool = findMatchingSchoolForTeacher(schools, {
+        workLocation: workLocation.trim(),
+        schoolName: workLocation.trim(),
+        teachingCadre
+      });
       const schoolId = matchedSchool ? matchedSchool.id : null;
+      const matchedTypeKey = normalizeCadreToLevelKey(matchedSchool?.type);
+      const effectiveCadreSave = matchedTypeKey === 'Primary'
+        ? 'PRIMARY'
+        : matchedTypeKey === 'Middle'
+        ? 'MIDDLE'
+        : matchedTypeKey === 'High'
+        ? 'HIGH'
+        : (teachingCadre as any) || 'HIGH';
 
       const cleanedDiplomas: Record<string, string> = {};
       (refereeSpecialty || []).forEach(sp => {
@@ -295,7 +315,7 @@ export const TeacherProfileModal: React.FC = () => {
         workLocation: workLocation.trim(),
         schoolId: schoolId || undefined,
         leaseNumber: leaseNumber.trim(),
-        teachingCadre: (teachingCadre as any) || 'HIGH',
+        teachingCadre: effectiveCadreSave,
         refereeSpecialty: refereeSpecialty || [],
         refereeDiplomas: cleanedDiplomas,
         refereeDiploma: summaryDiploma,

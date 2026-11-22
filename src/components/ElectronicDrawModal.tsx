@@ -34,8 +34,9 @@ import {
   Undo2
 } from 'lucide-react';
 import { Tournament, School, Team, Match, User, Venue, Sport, Referee, SchoolTournamentConfirmation, BlockedSchedulePeriod, DrawSystemType } from '../types';
-import { DataService, SPORTS_MAP, GENDER_MAP, deduplicateById, normalizeCategoryKey, getCustomCategoryName, doesConfirmationMatchBranch, EDUCATIONAL_CYCLE_LABELS, getMatchEducationalCycles, findBlockedPeriodForDate, normalizeArabicSearch, normalizeDateToYmd, schoolNamesMatch, normalizeTournamentAffiliation, normalizeSchoolCycleType } from '../lib/dataService';
+import { DataService, SPORTS_MAP, GENDER_MAP, deduplicateById, normalizeCategoryKey, getCustomCategoryName, doesConfirmationMatchBranch, EDUCATIONAL_CYCLE_LABELS, getMatchEducationalCycles, findBlockedPeriodForDate, findAllBlockedPeriodsForDate, normalizeArabicSearch, normalizeDateToYmd, schoolNamesMatch, normalizeTournamentAffiliation, normalizeSchoolCycleType } from '../lib/dataService';
 import { generateRoundRobinDrawMatches, generateKnockoutGroupsDrawMatches, isPlaceholderTeamId, hasValidMatchTeams, extractMatchGroupLabel } from '../lib/drawTournamentUtils';
+import { isOpaqueEntityId } from '../lib/programExportService';
 import { isSuperAdminEmail } from '../contexts/AuthContext';
 import {
   resolveHostSchoolForMatch,
@@ -228,6 +229,8 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
   const [generatedMatches, setGeneratedMatches] = useState<GeneratedDrawMatch[]>([]);
   const [matchHistory, setMatchHistory] = useState<GeneratedDrawMatch[][]>([]);
   const [savedMatchIds, setSavedMatchIds] = useState<string[]>([]);
+  const [savedByTempId, setSavedByTempId] = useState<Record<string, string>>({});
+  const [savingSingleMatchId, setSavingSingleMatchId] = useState<string | null>(null);
   const [isRevertingSave, setIsRevertingSave] = useState<boolean>(false);
   const [isSaving, setIsSaving] = useState<boolean>(false);
 
@@ -321,7 +324,7 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
           DataService.getStudents(),
           DataService.getVenues(),
           DataService.getReferees(),
-          DataService.getTeachers(),
+          DataService.getUsers(),
           DataService.getSchoolConfirmations(),
           DataService.getMatches()
         ]);
@@ -453,11 +456,12 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
     }
   }, [selectedTournamentId, confirmations, tournaments]);
 
-  // Combined Referees List (Official Referees + Qualified Teachers, strictly deduplicated by ID, no (أستاذ) suffix)
+  // Combined Referees List (Official Referees + Qualified Teachers & Tech Committee Heads, strictly deduplicated, no (أستاذ) suffix)
   const combinedRefereesList = useMemo(() => {
     const cleanRefName = (val?: string) => (val || '').replace(/\s*\(أستاذ\)\s*/g, '').replace(/\s+/g, ' ').trim();
     const list: {
       id: string;
+      aliasIds?: string[];
       name: string;
       fullName: string;
       phone?: string;
@@ -470,11 +474,15 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
     referees.forEach(r => {
       if (!r || !r.id || seenIds.has(r.id)) return;
       seenIds.add(r.id);
+      if (Array.isArray(r.aliasIds)) {
+        r.aliasIds.forEach(aid => seenIds.add(aid));
+      }
       const cleanFull = cleanRefName(r.fullName);
-      const specs = r.specialty || [];
+      const specs = Array.isArray(r.specialty) ? r.specialty : (r.specialty ? [r.specialty] : []);
       const specLabels = specs.map(s => SPORTS_MAP[s]?.name || s).join('، ');
       list.push({
         id: r.id,
+        aliasIds: r.aliasIds,
         name: cleanFull,
         fullName: cleanFull,
         phone: r.phone,
@@ -486,21 +494,38 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
 
     teachers.forEach(t => {
       if (!t || !t.id) return;
-      const specs = t.refereeSpecialty || [];
-      if (seenIds.has(t.id)) {
-        const existing = list.find(item => item.id === t.id);
-        if (existing) {
-          const merged = Array.from(new Set([...existing.specialtiesList, ...specs]));
-          existing.specialtiesList = merged;
-          existing.specialty = merged.map(s => SPORTS_MAP[s]?.name || s).join('، ');
+      const baseSpecs = Array.isArray(t.refereeSpecialty) ? t.refereeSpecialty : (t.refereeSpecialty ? [t.refereeSpecialty] : []);
+      const isQualifiedTechOrTeacher =
+        t.role === 'TEACHER' ||
+        baseSpecs.length > 0 ||
+        Boolean(t.isTechCommitteeHead || t.role === 'TECH_HEAD' || (t.role as string) === 'TECH_COMMITTEE_HEAD');
+      if (!isQualifiedTechOrTeacher) return;
+
+      const techSpecs = Array.isArray(t.techCommitteeSports) ? t.techCommitteeSports : [];
+      const specs = Array.from(new Set([...baseSpecs, ...(baseSpecs.length === 0 && t.isTechCommitteeHead ? techSpecs : [])].filter(Boolean)));
+      const tAliases = Array.isArray(t.aliasIds) ? t.aliasIds : [];
+      const existingMatch = list.find(
+        item =>
+          item.id === t.id ||
+          tAliases.includes(item.id) ||
+          (Array.isArray(item.aliasIds) && (item.aliasIds.includes(t.id) || tAliases.some(aid => item.aliasIds!.includes(aid))))
+      );
+      if (existingMatch || seenIds.has(t.id)) {
+        if (existingMatch) {
+          const merged = Array.from(new Set([...existingMatch.specialtiesList, ...specs]));
+          existingMatch.specialtiesList = merged;
+          existingMatch.specialty = merged.map(s => SPORTS_MAP[s]?.name || s).join('، ');
+          existingMatch.aliasIds = Array.from(new Set([...(existingMatch.aliasIds || []), t.id, ...tAliases]));
         }
         return;
       }
       seenIds.add(t.id);
+      tAliases.forEach(aid => seenIds.add(aid));
       const cleanFull = cleanRefName(t.fullName);
       const specLabels = specs.map(s => SPORTS_MAP[s]?.name || s).join('، ');
       list.push({
         id: t.id,
+        aliasIds: [t.id, ...tAliases],
         name: t.workLocation ? `${cleanFull} (${t.workLocation})` : cleanFull,
         fullName: cleanFull,
         phone: t.phone,
@@ -978,6 +1003,7 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
   const handleEnterManualProgramming = () => {
     setMatchHistory([]);
     setSavedMatchIds([]);
+    setSavedByTempId({});
     setByeTeams([]);
     if (allDrawTeams.length > 0) {
       setDrawnGroups([
@@ -1037,8 +1063,8 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
     return maxNum + 1;
   }, [selectedTournament, allExistingMatches, generatedMatches]);
 
-  // Add a single manually programmed match in Step 3
-  const handleAddManualMatch = () => {
+  // Add a single manually programmed match in Step 3 (and optionally publish it directly to the program)
+  const handleAddManualMatch = async (publishImmediately = false) => {
     if (!manualTeam1Id || !manualTeam2Id) {
       toast.error('يرجى اختيار الفريق الأول والفريق الثاني');
       return;
@@ -1051,6 +1077,21 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
     const t2 = manualAvailableTeams.find(t => t.id === manualTeam2Id);
     if (!t1 || !t2) {
       toast.error('تعذر العثور على بيانات أحد الفريقين المختارين');
+      return;
+    }
+
+    const targetManualDate = manualDate || new Date().toISOString().slice(0, 10);
+    const manualDateConflicts = findAllBlockedPeriodsForDate(
+      targetManualDate,
+      selectedTournament ? getMatchEducationalCycles({ team1Id: t1.id, team2Id: t2.id, ageCategory: selectedTournament.ageCategory, level: selectedTournament.level, tournamentId: selectedTournament.id }, schools, [selectedTournament]) : ['ALL'],
+      blockedPeriods
+    );
+    const manualStrictHoliday = manualDateConflicts.find(p => p.type === 'holiday');
+    const manualExamBlock = manualDateConflicts.find(p => p.type === 'exams');
+    if (manualStrictHoliday || manualExamBlock) {
+      const blockedItem = manualStrictHoliday || manualExamBlock!;
+      const kindLabel = blockedItem.type === 'holiday' ? 'عطلة مدرسية' : 'فترة الامتحانات للسلك المعني';
+      toast.error(`ممنوع برمجة المباراة في تاريخ ${targetManualDate}: يصادف ${kindLabel} (${blockedItem.title}).`);
       return;
     }
 
@@ -1094,7 +1135,12 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
     setManualTeam1Id('');
     setManualTeam2Id('');
     setManualMatchNumber('');
-    toast.success(`تمت إضافة المباراة رقم ${resolvedMatchNumber}: ${t1.name} ضد ${t2.name}`);
+
+    if (publishImmediately) {
+      await handleSaveSingleMatchToDatabase(newMatch);
+    } else {
+      toast.success(`تمت إضافة المباراة رقم ${resolvedMatchNumber}: ${t1.name} ضد ${t2.name}`);
+    }
   };
 
   const handleDeleteGeneratedMatch = (matchId: string) => {
@@ -1212,6 +1258,7 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
       setByeTeams(newByeTeams);
       setMatchHistory([]);
       setSavedMatchIds([]);
+      setSavedByTempId({});
       setShowManualBuilder(false);
       setStep3SchoolSearchQuery('');
       setGeneratedMatches(initializedMatches);
@@ -1247,9 +1294,18 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
   };
 
   const resolveRefCleanName = (refId: string) => {
-    if (!refId) return '';
-    const refObj = combinedRefereesList.find(r => r.id === refId);
-    return (refObj?.fullName || refObj?.name || '').replace(/\s*\(أستاذ\)\s*/g, '').trim();
+    const clean = (refId || '').replace(/\s*\(أستاذ\)\s*/g, '').trim();
+    if (!clean) return '';
+    const refObj = combinedRefereesList.find(
+      r =>
+        r.id === clean ||
+        (Array.isArray(r.aliasIds) && r.aliasIds.includes(clean)) ||
+        r.fullName === clean
+    );
+    if (refObj) {
+      return (refObj.fullName || refObj.name || '').replace(/\s*\(أستاذ\)\s*/g, '').trim();
+    }
+    return isOpaqueEntityId(clean) ? '' : clean;
   };
 
   const buildSyncedRefereeFields = (nextTableSlots: string[], nextFieldSlots: string[]) => {
@@ -1362,6 +1418,32 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
       return;
     }
 
+    if (bulkDate) {
+      const tournamentCycles = selectedTournament
+        ? getMatchEducationalCycles(
+            {
+              ageCategory: selectedTournament.ageCategory,
+              level: selectedTournament.level,
+              tournamentId: selectedTournament.id
+            },
+            schools,
+            [selectedTournament]
+          )
+        : (['ALL'] as string[]);
+      const bulkCycles = tournamentCycles.length > 0 ? tournamentCycles : (['ALL'] as string[]);
+      const bulkConflicts = findAllBlockedPeriodsForDate(bulkDate, bulkCycles, blockedPeriods);
+      const bulkHoliday = bulkConflicts.find(p => p.type === 'holiday');
+      if (bulkHoliday) {
+        toast.error(`ممنوع تعميم تاريخ ${bulkDate}: يصادف عطلة مدرسية (${bulkHoliday.title}).`);
+        return;
+      }
+      const bulkExam = bulkConflicts.find(p => p.type === 'exams');
+      if (bulkExam) {
+        toast.error(`ممنوع تعميم تاريخ ${bulkDate}: يصادف فترة الامتحانات للسلك المعني (${bulkExam.title}).`);
+        return;
+      }
+    }
+
     pushMatchHistorySnapshot(generatedMatches);
     setGeneratedMatches(prev =>
       prev.map(m => {
@@ -1435,7 +1517,45 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
       .filter((x): x is { match: GeneratedDrawMatch; period: BlockedSchedulePeriod } => Boolean(x.period));
   }, [generatedMatches, blockedPeriods, selectedTournament, schools]);
 
-  const hasBlockedMatchesRestriction = blockedGeneratedMatches.length > 0 && !isRegionalOrCentralAdmin;
+  const hasStrictHolidayMatches = blockedGeneratedMatches.some(x => x.period.type === 'holiday');
+  const hasBlockedMatchesRestriction = blockedGeneratedMatches.length > 0;
+
+  const selectedTournamentCycles = useMemo(() => {
+    if (!selectedTournament) return ['ALL'] as string[];
+    const cyc = getMatchEducationalCycles(
+      {
+        ageCategory: selectedTournament.ageCategory,
+        level: selectedTournament.level,
+        tournamentId: selectedTournament.id
+      },
+      schools,
+      [selectedTournament]
+    );
+    return cyc.length > 0 ? cyc : (['ALL'] as string[]);
+  }, [selectedTournament, schools]);
+
+  const bulkDateConflict = useMemo(() => {
+    if (!bulkDate || blockedPeriods.length === 0) return null;
+    return findBlockedPeriodForDate(bulkDate, selectedTournamentCycles, blockedPeriods);
+  }, [bulkDate, selectedTournamentCycles, blockedPeriods]);
+
+  const manualDateConflict = useMemo(() => {
+    if (!manualDate || blockedPeriods.length === 0) return null;
+    const manualCycles = selectedTournament
+      ? getMatchEducationalCycles(
+          {
+            team1Id: manualTeam1Id || undefined,
+            team2Id: manualTeam2Id || undefined,
+            ageCategory: selectedTournament.ageCategory,
+            level: selectedTournament.level,
+            tournamentId: selectedTournament.id
+          },
+          schools,
+          [selectedTournament]
+        )
+      : (['ALL'] as string[]);
+    return findBlockedPeriodForDate(manualDate, manualCycles.length > 0 ? manualCycles : selectedTournamentCycles, blockedPeriods);
+  }, [manualDate, manualTeam1Id, manualTeam2Id, selectedTournament, selectedTournamentCycles, schools, blockedPeriods]);
 
   const parseDrawTimeToMinutes = (timeStr?: string): number => {
     if (!timeStr) return 0;
@@ -1562,6 +1682,103 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
     });
   }, [bulkDate, bulkTime, bulkVenueMode, bulkHostSchoolId, bulkVenueName, allExistingMatches, schools, generatedMatches]);
 
+  const buildMatchPayloadFromGenerated = (
+    gm: GeneratedDrawMatch,
+    tempIdToFirestoreId: Record<string, string>
+  ): Omit<Match, 'id'> => {
+    const cleanTableRefs = (gm.tableRefereeIds || []).map(v => v.trim()).filter(Boolean);
+    const cleanFieldRefs = (gm.fieldRefereeIds || []).map(v => v.trim()).filter(Boolean);
+    const allRefs = Array.from(new Set([
+      ...cleanFieldRefs,
+      ...cleanTableRefs,
+      ...(gm.refereeIds || []),
+      ...(gm.refereeId ? [gm.refereeId] : [])
+    ].map(v => (v || '').trim()).filter(Boolean)));
+
+    const resolvedHost = gm.venueMode !== 'custom'
+      ? resolveHostSchoolForMatch({ hostSchoolId: gm.hostSchoolId, venueId: gm.venueId, venueName: gm.venueName }, schools)
+      : undefined;
+
+    return {
+      tournamentId: selectedTournament!.id,
+      sportId: selectedTournament!.sportId,
+      stage: gm.stage,
+      groupName: gm.groupName,
+      drawSystem: gm.drawSystem || drawSystem,
+      drawMatchNumber: gm.drawMatchNumber,
+      roundIndex: gm.roundIndex,
+      leg: gm.leg,
+      team1Id: gm.team1Id,
+      team1Name: gm.team1Name,
+      team2Id: gm.team2Id,
+      team2Name: gm.team2Name,
+      team1SourceMatchId: gm.team1SourceTempId ? tempIdToFirestoreId[gm.team1SourceTempId] : undefined,
+      team2SourceMatchId: gm.team2SourceTempId ? tempIdToFirestoreId[gm.team2SourceTempId] : undefined,
+      team1SourceMatchNumber: gm.team1SourceMatchNumber,
+      team2SourceMatchNumber: gm.team2SourceMatchNumber,
+      team1Placeholder: gm.team1Placeholder,
+      team2Placeholder: gm.team2Placeholder,
+      ageCategory: normalizeCategoryKey(selectedTournament!.ageCategory || ''),
+      gender: selectedTournament!.gender || 'Male',
+      affiliationType: normalizeTournamentAffiliation(selectedTournament!.affiliationType, selectedTournament!.name),
+      date: gm.date,
+      startTime: gm.time || '10:00',
+      hostSchoolId: resolvedHost?.id || '',
+      venueId: resolvedHost?.id || gm.venueId || 'default-venue',
+      venueName: resolvedHost?.name || gm.venueName,
+      referee1Id: allRefs[0] || '',
+      referee2Id: allRefs[1] || '',
+      referees: allRefs,
+      tableReferees: cleanTableRefs,
+      fieldReferees: cleanFieldRefs,
+      notes: gm.notes?.trim() || '',
+      status: 'Scheduled',
+      programApprovalStatus: 'pending',
+      updatedAt: new Date()
+    };
+  };
+
+  // Publish or update a single match directly into the program without waiting for the rest of the branch
+  const handleSaveSingleMatchToDatabase = async (gm: GeneratedDrawMatch) => {
+    if (!selectedTournament) {
+      toast.error('يرجى اختيار البطولة أولاً');
+      return;
+    }
+    const blockedPeriod = getBlockedConflictForMatch(gm);
+    if (blockedPeriod) {
+      const kindLabel = blockedPeriod.type === 'exams' ? 'فترة الامتحانات للسلك المعني' : 'عطلة مدرسية';
+      toast.error(`ممنوع وضع المباراة في البرنامج: تاريخ ${gm.date} يصادف ${kindLabel} (${blockedPeriod.title}).`);
+      return;
+    }
+
+    setSavingSingleMatchId(gm.id);
+    try {
+      const existingFirestoreId = savedByTempId[gm.id];
+      const payload = buildMatchPayloadFromGenerated(gm, savedByTempId);
+
+      if (existingFirestoreId) {
+        const { programApprovalStatus: _keepExistingStatus, ...updatePayload } = payload;
+        await DataService.updateMatch(existingFirestoreId, updatePayload);
+        toast.success(`تم تحديث المباراة رقم ${gm.drawMatchNumber || ''} في البرنامج بنجاح`);
+      } else {
+        const created = await DataService.addMatch(payload);
+        if (created?.id) {
+          setSavedByTempId(prev => ({ ...prev, [gm.id]: created.id }));
+          setSavedMatchIds(prev => (prev.includes(created.id) ? prev : [...prev, created.id]));
+          setAllExistingMatches(prev => [created, ...prev.filter(x => x.id !== created.id)]);
+        }
+        toast.success('تم وضع المباراة في البرنامج (في انتظار مصادقة المسير المركزي)');
+      }
+
+      if (onMatchesCreated) onMatchesCreated();
+    } catch (err) {
+      console.error('Failed to save single match:', err);
+      toast.error('حدث خطأ أثناء وضع المباراة في البرنامج');
+    } finally {
+      setSavingSingleMatchId(null);
+    }
+  };
+
   // Save all matches to database
   const handleSaveMatchesToDatabase = async () => {
     if (!selectedTournament) {
@@ -1572,11 +1789,11 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
       toast.error('لا توجد مباريات لحفظها');
       return;
     }
-    if (blockedGeneratedMatches.length > 0 && !isRegionalOrCentralAdmin) {
-      const first = blockedGeneratedMatches[0];
-      const kindLabel = first.period.type === 'exams' ? 'فترة الفروض والامتحانات' : 'عطلة مدرسية';
+    if (hasBlockedMatchesRestriction) {
+      const first = blockedGeneratedMatches.find(x => x.period.type === 'holiday') || blockedGeneratedMatches[0];
+      const kindLabel = first.period.type === 'exams' ? 'فترة الامتحانات' : 'عطلة مدرسية';
       toast.error(
-        `ممنوع حفظ البرمجة: مقابلة (${first.match.team1Name} ضد ${first.match.team2Name}) بتاريخ ${first.match.date} تصادف ${kindLabel} (${first.period.title}) للسلك المعني.`,
+        `ممنوع حفظ البرمجة: مقابلة (${first.match.team1Name} ضد ${first.match.team2Name}) بتاريخ ${first.match.date} تصادف ${kindLabel} (${first.period.title}).`,
         { duration: 6000 }
       );
       return;
@@ -1587,66 +1804,28 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
 
     try {
       const createdIds: string[] = [];
-      const tempIdToFirestoreId: Record<string, string> = {};
+      const tempIdToFirestoreId: Record<string, string> = { ...savedByTempId };
       for (const gm of generatedMatches) {
-        const cleanTableRefs = (gm.tableRefereeIds || []).filter(Boolean);
-        const cleanFieldRefs = (gm.fieldRefereeIds || []).filter(Boolean);
-        const allRefs = Array.from(new Set([
-          ...cleanFieldRefs,
-          ...cleanTableRefs,
-          ...(gm.refereeIds || []),
-          ...(gm.refereeId ? [gm.refereeId] : [])
-        ].filter(Boolean)));
+        const existingId = tempIdToFirestoreId[gm.id];
+        const payload = buildMatchPayloadFromGenerated(gm, tempIdToFirestoreId);
 
-        const resolvedHost = gm.venueMode !== 'custom'
-          ? resolveHostSchoolForMatch({ hostSchoolId: gm.hostSchoolId, venueId: gm.venueId, venueName: gm.venueName }, schools)
-          : undefined;
-
-        const created = await DataService.addMatch({
-          tournamentId: selectedTournament.id,
-          sportId: selectedTournament.sportId,
-          stage: gm.stage,
-          groupName: gm.groupName,
-          drawSystem: gm.drawSystem || drawSystem,
-          drawMatchNumber: gm.drawMatchNumber,
-          roundIndex: gm.roundIndex,
-          leg: gm.leg,
-          team1Id: gm.team1Id,
-          team1Name: gm.team1Name,
-          team2Id: gm.team2Id,
-          team2Name: gm.team2Name,
-          team1SourceMatchId: gm.team1SourceTempId ? tempIdToFirestoreId[gm.team1SourceTempId] : undefined,
-          team2SourceMatchId: gm.team2SourceTempId ? tempIdToFirestoreId[gm.team2SourceTempId] : undefined,
-          team1SourceMatchNumber: gm.team1SourceMatchNumber,
-          team2SourceMatchNumber: gm.team2SourceMatchNumber,
-          team1Placeholder: gm.team1Placeholder,
-          team2Placeholder: gm.team2Placeholder,
-          ageCategory: normalizeCategoryKey(selectedTournament.ageCategory || ''),
-          gender: selectedTournament.gender || 'Male',
-          affiliationType: normalizeTournamentAffiliation(selectedTournament.affiliationType, selectedTournament.name),
-          date: gm.date,
-          startTime: gm.time || '10:00',
-          hostSchoolId: resolvedHost?.id || '',
-          venueId: resolvedHost?.id || gm.venueId || 'default-venue',
-          venueName: resolvedHost?.name || gm.venueName,
-          referee1Id: allRefs[0] || undefined,
-          referee2Id: allRefs[1] || undefined,
-          referees: allRefs,
-          tableReferees: cleanTableRefs,
-          fieldReferees: cleanFieldRefs,
-          notes: gm.notes?.trim() || '',
-          status: 'Scheduled',
-          updatedAt: new Date()
-        });
-        if (created?.id) {
-          createdIds.push(created.id);
-          tempIdToFirestoreId[gm.id] = created.id;
+        if (existingId) {
+          const { programApprovalStatus: _keepExistingStatus, ...updatePayload } = payload;
+          await DataService.updateMatch(existingId, updatePayload);
+          createdIds.push(existingId);
+        } else {
+          const created = await DataService.addMatch(payload);
+          if (created?.id) {
+            createdIds.push(created.id);
+            tempIdToFirestoreId[gm.id] = created.id;
+          }
         }
       }
 
+      setSavedByTempId(tempIdToFirestoreId);
       setSavedMatchIds(createdIds);
       toast.dismiss(toastId);
-      toast.success('تم حفظ واعتماد جميع المباريات بنجاح! يمكنك الآن إرسال إشعارات الواتساب أو التراجع عن الحفظ للتعديل.');
+      toast.success('تم حفظ جميع المباريات في البرنامج (في انتظار مصادقة المسير المركزي)!');
       if (onMatchesCreated) onMatchesCreated();
       setStep(4);
     } catch (err) {
@@ -1673,6 +1852,7 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
       const savedSet = new Set(savedMatchIds);
       setAllExistingMatches(prev => prev.filter(m => !savedSet.has(m.id)));
       setSavedMatchIds([]);
+      setSavedByTempId({});
       if (onMatchesCreated) onMatchesCreated();
       toast.dismiss(toastId);
       toast.success('تم التراجع عن الحفظ بنجاح! يمكنك الآن تعديل المباريات أو المواعيد في المرحلة 3.');
@@ -1713,8 +1893,8 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
         'تاريخ الإجراء': m.date,
         'توقيت الانطلاق': m.time,
         'مكان الإجراء': m.venueName,
-        'حكام الطاولة': tableRefs.length > 0 ? tableRefs.join(' • ') : 'غير محدد',
-        'حكام الساحة': fieldRefs.length > 0 ? fieldRefs.join(' • ') : 'غير محدد'
+        'حكام الطاولة': tableRefs.length > 0 ? tableRefs.join(' • ') : 'يعين لاحقاً',
+        'حكام الساحة': fieldRefs.length > 0 ? fieldRefs.join(' • ') : 'يعين لاحقاً'
       };
     });
 
@@ -2764,8 +2944,19 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
                       type="date"
                       value={bulkDate}
                       onChange={(e) => setBulkDate(e.target.value)}
-                      className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-xl font-bold text-slate-800"
+                      className={`w-full px-2.5 py-1.5 bg-white border rounded-xl font-bold text-slate-800 ${
+                        bulkDateConflict
+                          ? bulkDateConflict.type === 'holiday'
+                            ? 'border-rose-500 ring-1 ring-rose-300 bg-rose-50/40'
+                            : 'border-blue-500 ring-1 ring-blue-300 bg-blue-50/40'
+                          : 'border-slate-200'
+                      }`}
                     />
+                    {bulkDateConflict && (
+                      <p className={`text-[10px] font-black mt-1 ${bulkDateConflict.type === 'holiday' ? 'text-rose-700' : 'text-blue-700'}`}>
+                        ⛔ {bulkDateConflict.type === 'holiday' ? 'عطلة مدرسية' : 'أيام الامتحانات'}: {bulkDateConflict.title}
+                      </p>
+                    )}
                   </div>
 
                   <div>
@@ -2871,38 +3062,52 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
                         </button>
                       </div>
                       <div className="space-y-1.5">
-                        {bulkTableRefereeIds.map((slotVal, sIdx) => (
-                          <div key={`bulk-table-slot-${sIdx}`} className="flex items-center gap-1.5">
-                            <span className="text-[10px] font-black text-sky-900 w-16 shrink-0">
-                              {getRefOrdinalLabel(sIdx)}:
-                            </span>
-                            <select
-                              value={slotVal}
-                              onChange={(e) => {
-                                const v = e.target.value;
-                                setBulkTableRefereeIds(prev => prev.map((x, i) => (i === sIdx ? v : x)));
-                              }}
-                              className="flex-1 min-w-0 px-2 py-1 bg-white border border-sky-200 rounded-lg font-bold text-slate-800 text-[10px] cursor-pointer"
-                            >
-                              <option value="">-- اختر {getRefOrdinalLabel(sIdx)} --</option>
-                              {activeRefereesList
-                                .filter(ref => ref.id === slotVal || (!bulkTableRefereeIds.includes(ref.id) && !bulkFieldRefereeIds.includes(ref.id)))
-                                .map((ref, rIdx) => (
-                                  <option key={`bulk-tbl-${sIdx}-${ref.id}-${rIdx}`} value={ref.id}>
-                                    {ref.name} {ref.specialty ? `[${ref.specialty}]` : ''}
-                                  </option>
-                                ))}
-                            </select>
-                            <button
-                              type="button"
-                              onClick={() => setBulkTableRefereeIds(prev => prev.filter((_, i) => i !== sIdx))}
-                              className="p-1 text-rose-500 hover:bg-rose-50 rounded-lg cursor-pointer shrink-0"
-                              title="حذف الحكم"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
-                        ))}
+                        {bulkTableRefereeIds.map((slotVal, sIdx) => {
+                          const isRegisteredRef = activeRefereesList.some(r => r.id === slotVal);
+                          const manualTextVal = slotVal && !isRegisteredRef && !isOpaqueEntityId(slotVal) ? slotVal : '';
+                          return (
+                            <div key={`bulk-table-slot-${sIdx}`} className="flex flex-wrap sm:flex-nowrap items-center gap-1.5">
+                              <span className="text-[10px] font-black text-sky-900 w-16 shrink-0">
+                                {getRefOrdinalLabel(sIdx)}:
+                              </span>
+                              <select
+                                value={isRegisteredRef ? slotVal : ''}
+                                onChange={(e) => {
+                                  const v = e.target.value;
+                                  setBulkTableRefereeIds(prev => prev.map((x, i) => (i === sIdx ? v : x)));
+                                }}
+                                className="flex-1 min-w-[120px] px-2 py-1 bg-white border border-sky-200 rounded-lg font-bold text-slate-800 text-[10px] cursor-pointer"
+                              >
+                                <option value="">-- اختر {getRefOrdinalLabel(sIdx)} --</option>
+                                {activeRefereesList
+                                  .filter(ref => ref.id === slotVal || (!bulkTableRefereeIds.includes(ref.id) && !bulkFieldRefereeIds.includes(ref.id)))
+                                  .map((ref, rIdx) => (
+                                    <option key={`bulk-tbl-${sIdx}-${ref.id}-${rIdx}`} value={ref.id}>
+                                      {ref.name} {ref.specialty ? `[${ref.specialty}]` : ''}
+                                    </option>
+                                  ))}
+                              </select>
+                              <input
+                                type="text"
+                                value={manualTextVal}
+                                onChange={(e) => {
+                                  const v = e.target.value;
+                                  setBulkTableRefereeIds(prev => prev.map((x, i) => (i === sIdx ? v : x)));
+                                }}
+                                placeholder="أو اكتب الاسم يدوياً..."
+                                className="w-full sm:w-32 px-2 py-1 bg-white border border-sky-200 rounded-lg font-bold text-slate-800 text-[10px] placeholder:text-slate-400"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => setBulkTableRefereeIds(prev => prev.filter((_, i) => i !== sIdx))}
+                                className="p-1 text-rose-500 hover:bg-rose-50 rounded-lg cursor-pointer shrink-0"
+                                title="حذف الحكم"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          );
+                        })}
                       </div>
                     </div>
 
@@ -2920,38 +3125,52 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
                         </button>
                       </div>
                       <div className="space-y-1.5">
-                        {bulkFieldRefereeIds.map((slotVal, sIdx) => (
-                          <div key={`bulk-field-slot-${sIdx}`} className="flex items-center gap-1.5">
-                            <span className="text-[10px] font-black text-amber-900 w-16 shrink-0">
-                              {getRefOrdinalLabel(sIdx)}:
-                            </span>
-                            <select
-                              value={slotVal}
-                              onChange={(e) => {
-                                const v = e.target.value;
-                                setBulkFieldRefereeIds(prev => prev.map((x, i) => (i === sIdx ? v : x)));
-                              }}
-                              className="flex-1 min-w-0 px-2 py-1 bg-white border border-amber-200 rounded-lg font-bold text-slate-800 text-[10px] cursor-pointer"
-                            >
-                              <option value="">-- اختر {getRefOrdinalLabel(sIdx)} --</option>
-                              {activeRefereesList
-                                .filter(ref => ref.id === slotVal || (!bulkTableRefereeIds.includes(ref.id) && !bulkFieldRefereeIds.includes(ref.id)))
-                                .map((ref, rIdx) => (
-                                  <option key={`bulk-fld-${sIdx}-${ref.id}-${rIdx}`} value={ref.id}>
-                                    {ref.name} {ref.specialty ? `[${ref.specialty}]` : ''}
-                                  </option>
-                                ))}
-                            </select>
-                            <button
-                              type="button"
-                              onClick={() => setBulkFieldRefereeIds(prev => prev.filter((_, i) => i !== sIdx))}
-                              className="p-1 text-rose-500 hover:bg-rose-50 rounded-lg cursor-pointer shrink-0"
-                              title="حذف الحكم"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
-                        ))}
+                        {bulkFieldRefereeIds.map((slotVal, sIdx) => {
+                          const isRegisteredRef = activeRefereesList.some(r => r.id === slotVal);
+                          const manualTextVal = slotVal && !isRegisteredRef && !isOpaqueEntityId(slotVal) ? slotVal : '';
+                          return (
+                            <div key={`bulk-field-slot-${sIdx}`} className="flex flex-wrap sm:flex-nowrap items-center gap-1.5">
+                              <span className="text-[10px] font-black text-amber-900 w-16 shrink-0">
+                                {getRefOrdinalLabel(sIdx)}:
+                              </span>
+                              <select
+                                value={isRegisteredRef ? slotVal : ''}
+                                onChange={(e) => {
+                                  const v = e.target.value;
+                                  setBulkFieldRefereeIds(prev => prev.map((x, i) => (i === sIdx ? v : x)));
+                                }}
+                                className="flex-1 min-w-[120px] px-2 py-1 bg-white border border-amber-200 rounded-lg font-bold text-slate-800 text-[10px] cursor-pointer"
+                              >
+                                <option value="">-- اختر {getRefOrdinalLabel(sIdx)} --</option>
+                                {activeRefereesList
+                                  .filter(ref => ref.id === slotVal || (!bulkTableRefereeIds.includes(ref.id) && !bulkFieldRefereeIds.includes(ref.id)))
+                                  .map((ref, rIdx) => (
+                                    <option key={`bulk-fld-${sIdx}-${ref.id}-${rIdx}`} value={ref.id}>
+                                      {ref.name} {ref.specialty ? `[${ref.specialty}]` : ''}
+                                    </option>
+                                  ))}
+                              </select>
+                              <input
+                                type="text"
+                                value={manualTextVal}
+                                onChange={(e) => {
+                                  const v = e.target.value;
+                                  setBulkFieldRefereeIds(prev => prev.map((x, i) => (i === sIdx ? v : x)));
+                                }}
+                                placeholder="أو اكتب الاسم يدوياً..."
+                                className="w-full sm:w-32 px-2 py-1 bg-white border border-amber-200 rounded-lg font-bold text-slate-800 text-[10px] placeholder:text-slate-400"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => setBulkFieldRefereeIds(prev => prev.filter((_, i) => i !== sIdx))}
+                                className="p-1 text-rose-500 hover:bg-rose-50 rounded-lg cursor-pointer shrink-0"
+                                title="حذف الحكم"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          );
+                        })}
                       </div>
                     </div>
                   </div>
@@ -3140,8 +3359,19 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
                           type="date"
                           value={manualDate}
                           onChange={(e) => setManualDate(e.target.value)}
-                          className="w-full px-2.5 py-1.5 bg-white border border-indigo-200 rounded-xl font-bold text-slate-800"
+                          className={`w-full px-2.5 py-1.5 bg-white border rounded-xl font-bold text-slate-800 ${
+                            manualDateConflict
+                              ? manualDateConflict.type === 'holiday'
+                                ? 'border-rose-500 ring-1 ring-rose-300 bg-rose-50/40'
+                                : 'border-blue-500 ring-1 ring-blue-300 bg-blue-50/40'
+                              : 'border-indigo-200'
+                          }`}
                         />
+                        {manualDateConflict && (
+                          <p className={`text-[10px] font-black mt-1 ${manualDateConflict.type === 'holiday' ? 'text-rose-700' : 'text-blue-700'}`}>
+                            ⛔ ممنوع البرمجة ({manualDateConflict.type === 'holiday' ? 'عطلة مدرسية' : 'أيام الامتحانات'}: {manualDateConflict.title})
+                          </p>
+                        )}
                       </div>
 
                       <div>
@@ -3254,15 +3484,26 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
                           className="w-full sm:w-56 px-2.5 py-1.5 bg-white border border-indigo-200 rounded-xl font-bold text-slate-800 text-[11px]"
                         />
                       </div>
-                      <button
-                        type="button"
-                        onClick={handleAddManualMatch}
-                        disabled={!manualTeam1Id || !manualTeam2Id}
-                        className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-black flex items-center gap-1.5 cursor-pointer disabled:opacity-50 shadow-xs"
-                      >
-                        <Plus className="w-4 h-4" />
-                        <span>إضافة المباراة إلى الجدول</span>
-                      </button>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleAddManualMatch(false)}
+                          disabled={!manualTeam1Id || !manualTeam2Id || Boolean(manualDateConflict)}
+                          className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-black flex items-center gap-1.5 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shadow-xs"
+                        >
+                          <Plus className="w-4 h-4" />
+                          <span>إضافة المباراة إلى الجدول</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleAddManualMatch(true)}
+                          disabled={!manualTeam1Id || !manualTeam2Id || Boolean(savingSingleMatchId) || Boolean(manualDateConflict)}
+                          className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-black flex items-center gap-1.5 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shadow-xs"
+                        >
+                          <Save className="w-4 h-4" />
+                          <span>إضافة ووضع في البرنامج مباشرة</span>
+                        </button>
+                      </div>
                     </div>
                   </div>
                 )}
@@ -3310,7 +3551,7 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
                             <span>
                               ⛔ التاريخ <span className="font-mono font-black" dir="ltr">{match.date}</span> محظور للسلك المعني:{' '}
                               <strong>
-                                {matchBlockedPeriod.type === 'exams' ? 'فروض / امتحانات' : 'عطلة مدرسية'} ({matchBlockedPeriod.title})
+                                {matchBlockedPeriod.type === 'exams' ? 'أيام الامتحانات' : 'عطلة مدرسية'} ({matchBlockedPeriod.title})
                               </strong>
                             </span>
                           </div>
@@ -3413,8 +3654,28 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
                                 ? 'bg-amber-100 text-amber-900 border border-amber-300' 
                                 : 'bg-slate-200 text-slate-600'
                             }`}>
-                              {assignedRefIds.length > 0 ? `${assignedRefIds.length} حكام معيّنون` : 'لم يعيّن حكام بعد'}
+                              {assignedRefIds.length > 0 ? `${assignedRefIds.length} حكام معيّنون` : 'يعين لاحقاً'}
                             </span>
+                            <button
+                              type="button"
+                              onClick={() => handleSaveSingleMatchToDatabase(match)}
+                              disabled={savingSingleMatchId === match.id || Boolean(matchBlockedPeriod)}
+                              className={`px-2.5 py-1 rounded-lg font-black text-[10px] flex items-center gap-1 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${
+                                savedByTempId[match.id]
+                                  ? 'bg-emerald-100 text-emerald-800 border border-emerald-300 hover:bg-emerald-200'
+                                  : 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-2xs'
+                              }`}
+                              title="وضع هذه المباراة في البرنامج فوراً دون انتظار برمجة باقي المباريات"
+                            >
+                              <Save className="w-3 h-3" />
+                              <span>
+                                {savingSingleMatchId === match.id
+                                  ? 'جاري الوضع...'
+                                  : savedByTempId[match.id]
+                                  ? '✓ في البرنامج (تحديث)'
+                                  : 'وضع في البرنامج'}
+                              </span>
+                            </button>
                             <button
                               type="button"
                               onClick={() => handleDeleteGeneratedMatch(match.id)}
@@ -3644,15 +3905,18 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
                                         })
                                       : '';
 
+                                    const isRegisteredSlotRef = activeRefereesList.some(r => r.id === slotRefId);
+                                    const manualSlotText = slotRefId && !isRegisteredSlotRef && !isOpaqueEntityId(slotRefId) ? slotRefId : '';
+
                                     return (
-                                      <div key={`${match.id}-${role}-slot-${slotIdx}`} className="flex items-center gap-1.5">
+                                      <div key={`${match.id}-${role}-slot-${slotIdx}`} className="flex flex-wrap sm:flex-nowrap items-center gap-1.5">
                                         <span className={`text-[10px] font-black w-16 shrink-0 ${accentStyle.label}`}>
                                           {ordLabel} -
                                         </span>
                                         <select
-                                          value={slotRefId}
+                                          value={isRegisteredSlotRef ? slotRefId : ''}
                                           onChange={(e) => handleSetMatchCategoryReferee(match.id, role, slotIdx, e.target.value)}
-                                          className={`flex-1 min-w-0 px-2 py-1 bg-white border rounded-lg font-bold text-slate-800 text-[10px] cursor-pointer ${accentStyle.selectBorder}`}
+                                          className={`flex-1 min-w-[120px] px-2 py-1 bg-white border rounded-lg font-bold text-slate-800 text-[10px] cursor-pointer ${accentStyle.selectBorder}`}
                                         >
                                           <option value="">-- اختر {ordLabel} ({currentSportName}) --</option>
                                           {activeRefereesList
@@ -3663,6 +3927,13 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
                                               </option>
                                             ))}
                                         </select>
+                                        <input
+                                          type="text"
+                                          value={manualSlotText}
+                                          onChange={(e) => handleSetMatchCategoryReferee(match.id, role, slotIdx, e.target.value)}
+                                          placeholder="أو اكتب الاسم يدوياً..."
+                                          className={`w-full sm:w-32 px-2 py-1 bg-white border rounded-lg font-bold text-slate-800 text-[10px] placeholder:text-slate-400 ${accentStyle.selectBorder}`}
+                                        />
 
                                         {displayName && (
                                           <a
@@ -3740,8 +4011,8 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
                   <Lock className="w-4 h-4 text-rose-600 shrink-0" />
                   <span>
                     {hasBlockedMatchesRestriction
-                      ? `⛔ توجد ${blockedGeneratedMatches.length} مقابلة مبرمجة في تواريخ عطل أو فروض محظورة للسلك المعني. يرجى تعديل تواريخها قبل الحفظ.`
-                      : `⚠️ تنبيه: توجد ${blockedGeneratedMatches.length} مقابلة تصادف تواريخ عطل أو فروض مسجلة في المنظومة.`}
+                      ? `⛔ توجد ${blockedGeneratedMatches.length} مقابلة مبرمجة في تواريخ عطل أو امتحانات محظورة للسلك المعني. يرجى تعديل تواريخها قبل الحفظ.`
+                      : `⚠️ تنبيه: توجد ${blockedGeneratedMatches.length} مقابلة تصادف تواريخ عطل أو امتحانات مسجلة في المنظومة.`}
                   </span>
                 </div>
               )}
@@ -3780,7 +4051,7 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
                     {isSaving
                       ? 'جاري الحفظ والاعتماد...'
                       : hasBlockedMatchesRestriction
-                      ? 'ممنوع الحفظ في تاريخ عطلة أو فروض'
+                      ? 'ممنوع الحفظ في تاريخ عطلة أو امتحانات'
                       : `حفظ واعتماد جدول المباريات والحكام (${generatedMatches.length} مباراة)`}
                   </span>
                 </button>

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { School, Student, User, Tournament } from '../types';
-import { DataService, validateBirthDateForCategory, normalizeCategoryKey, getCategoryGenderLabel, getCategoryYearsLabel, isSchoolLevelAllowedForTournament, getTournamentLevelAr, isTeacherLevelAllowedForTournament, isSchoolSectorAllowedForTournament, getTournamentEducationSectorsAr, getSchoolEducationSector, schoolNamesMatch, resolveEffectiveTeacherCadre, isCategoryAllowedForTeacherLevel } from '../lib/dataService';
+import { DataService, validateBirthDateForCategory, normalizeCategoryKey, getCategoryGenderLabel, getCategoryYearsLabel, isSchoolLevelAllowedForTournament, getTournamentLevelAr, isTeacherLevelAllowedForTournament, isSchoolSectorAllowedForTournament, getTournamentEducationSectorsAr, getSchoolEducationSector, schoolNamesMatch, resolveEffectiveTeacherCadre, isCategoryAllowedForTeacherLevel, findMatchingSchoolForTeacher } from '../lib/dataService';
 import { CROSS_COUNTRY_CATEGORIES, CrossCountryCategoryDef } from '../lib/crossCountryConfig';
 import { useAuth } from '../contexts/AuthContext';
 import * as XLSX from 'xlsx';
@@ -71,30 +71,37 @@ export const CrossCountryBulkRegisterModal: React.FC<CrossCountryBulkRegisterMod
 
   const teacherSchoolObj = useMemo(() => {
     const lookupName = preselectedSchoolName || userProfile?.workLocation || (userProfile as any)?.schoolName;
-    return schools.find(s =>
-      (preselectedSchoolId && s.id === preselectedSchoolId) ||
-      (userProfile?.schoolId && s.id === userProfile.schoolId) ||
-      (lookupName && schoolNamesMatch(s.name, lookupName))
-    );
+    return findMatchingSchoolForTeacher(schools, {
+      schoolId: preselectedSchoolId || userProfile?.schoolId,
+      workLocation: lookupName,
+      schoolName: lookupName,
+      teachingCadre: userProfile?.teachingCadre
+    });
   }, [schools, userProfile, preselectedSchoolId, preselectedSchoolName]);
 
   const effectiveTeacherCadre = useMemo(() => {
     return resolveEffectiveTeacherCadre(userProfile, teacherSchoolObj);
   }, [userProfile, teacherSchoolObj]);
 
+  const baseCcTourns = useMemo(() => {
+    if (!tournaments) return [];
+    return tournaments.filter(t => t.sportId === 'cross_country' && t.status !== 'Draft' && (t as any).isActive !== false);
+  }, [tournaments]);
+
   // Filter programmed cross-country tournaments (respecting teacher level & sector if teacher)
   const ccTourns = useMemo(() => {
-    if (!tournaments) return [];
-    const base = tournaments.filter(t => t.sportId === 'cross_country' && t.status !== 'Draft' && (t as any).isActive !== false);
-    if (!isTeacher) return base;
-    return base.filter(t =>
-      isTeacherLevelAllowedForTournament(effectiveTeacherCadre, t.level) &&
+    if (!isTeacher) return baseCcTourns;
+    return baseCcTourns.filter(t =>
+      isTeacherLevelAllowedForTournament(effectiveTeacherCadre, t.level, t.ageCategory) &&
       (!teacherSchoolObj || isSchoolSectorAllowedForTournament(teacherSchoolObj, t))
     );
-  }, [tournaments, isTeacher, effectiveTeacherCadre, teacherSchoolObj]);
+  }, [baseCcTourns, isTeacher, effectiveTeacherCadre, teacherSchoolObj]);
 
   // Filter categories based on programmed tournaments & teacher cadre
   const availableRaceCategories = useMemo(() => {
+    if (isTeacher && baseCcTourns.length > 0 && ccTourns.length === 0) {
+      return [];
+    }
     let cats = CROSS_COUNTRY_CATEGORIES;
     if (ccTourns.length > 0) {
       const matched = cats.filter(cat =>
@@ -107,15 +114,17 @@ export const CrossCountryBulkRegisterModal: React.FC<CrossCountryBulkRegisterMod
       if (matched.length > 0) cats = matched;
     }
     if (isTeacher && effectiveTeacherCadre) {
-      const levelMatched = cats.filter(cat => isCategoryAllowedForTeacherLevel(effectiveTeacherCadre, cat.category));
-      if (levelMatched.length > 0) cats = levelMatched;
+      return cats.filter(cat => isCategoryAllowedForTeacherLevel(effectiveTeacherCadre, cat.category));
     }
     return cats;
-  }, [ccTourns, isTeacher, effectiveTeacherCadre]);
+  }, [ccTourns, baseCcTourns.length, isTeacher, effectiveTeacherCadre]);
 
   const finalCategories = useMemo(() => {
+    if (isTeacher && baseCcTourns.length > 0 && ccTourns.length === 0) {
+      return [];
+    }
     return availableRaceCategories.length > 0 ? availableRaceCategories : CROSS_COUNTRY_CATEGORIES;
-  }, [availableRaceCategories]);
+  }, [availableRaceCategories, isTeacher, baseCcTourns.length, ccTourns.length]);
 
   // Selected race definition
   const [selectedRaceId, setSelectedRaceId] = useState<string>(initialCategoryDefId);

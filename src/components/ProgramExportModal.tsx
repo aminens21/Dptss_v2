@@ -675,7 +675,7 @@ export const ProgramExportModal: React.FC<ProgramExportModalProps> = ({
                           </span>
                         </td>
                         <td className="p-2 text-slate-600 truncate max-w-[150px]">{ev.venue}</td>
-                        <td className="p-2 text-slate-600 truncate max-w-[140px]">{ev.refereesText || '-'}</td>
+                        <td className="p-2 text-slate-600 truncate max-w-[140px]">{ev.refereesText || 'يعين لاحقاً'}</td>
                         {showNotesColumn && (
                           <td className="p-2 text-slate-600 truncate max-w-[140px]">{ev.notes?.trim() || '-'}</td>
                         )}

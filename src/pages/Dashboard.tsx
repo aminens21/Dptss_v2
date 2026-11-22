@@ -2,7 +2,7 @@ import React, { useEffect, useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { formatMatchDate, parseDateToTimestampMs } from '../lib/utils';
-import { DataService, SPORTS_MAP, deduplicateById, normalizeCategoryKey, getCategoryShortName, getCustomCategoryName, isTeacherLevelAllowedForTournament, isSchoolSectorAllowedForTournament, schoolNamesMatch, resolveEffectiveTeacherCadre } from '../lib/dataService';
+import { DataService, SPORTS_MAP, deduplicateById, normalizeCategoryKey, getCategoryShortName, getCustomCategoryName, isTeacherLevelAllowedForTournament, isSchoolSectorAllowedForTournament, schoolNamesMatch, resolveEffectiveTeacherCadre, findMatchingSchoolForTeacher } from '../lib/dataService';
 import { extractMatchGroupLabel } from '../lib/drawTournamentUtils';
 import { Match, Tournament, School, Venue, Referee, User } from '../types';
 import {
@@ -243,15 +243,6 @@ export const Dashboard: React.FC = () => {
           }
         });
 
-        items.forEach((item, idx) => {
-          if (itemToExistingIdMap.has(idx)) return;
-          const remaining = existingSportTournaments.find(existing => !matchedExistingIds.has(existing.id));
-          if (remaining) {
-            matchedExistingIds.add(remaining.id);
-            itemToExistingIdMap.set(idx, remaining.id);
-          }
-        });
-
         for (let idx = 0; idx < items.length; idx++) {
           const item = items[idx];
           const existingId = itemToExistingIdMap.get(idx);
@@ -263,6 +254,7 @@ export const Dashboard: React.FC = () => {
               endDate: item.endDate,
               registrationDeadline: item.registrationDeadline,
               level: item.level,
+              educationSectors: item.educationSectors,
               scope: item.scope,
               status: item.status,
               description: item.description,
@@ -305,12 +297,7 @@ export const Dashboard: React.FC = () => {
   };
 
   const teacherSchoolObj = useMemo(() => {
-    if (!userProfile) return undefined;
-    const lookupName = userProfile.workLocation || (userProfile as any).schoolName;
-    return schools.find(s =>
-      (userProfile.schoolId && s.id === userProfile.schoolId) ||
-      (lookupName && schoolNamesMatch(s.name, lookupName))
-    );
+    return findMatchingSchoolForTeacher(schools, userProfile);
   }, [schools, userProfile]);
 
   const effectiveTeacherCadre = useMemo(() => {
@@ -323,7 +310,7 @@ export const Dashboard: React.FC = () => {
     const active = tournaments.filter(t => t.status !== 'Draft' && (t as any).isActive !== false);
     if (!isPureTeacher) return active;
     return active.filter(t =>
-      isTeacherLevelAllowedForTournament(effectiveTeacherCadre, t.level) &&
+      isTeacherLevelAllowedForTournament(effectiveTeacherCadre, t.level, t.ageCategory) &&
       (!teacherSchoolObj || isSchoolSectorAllowedForTournament(teacherSchoolObj, t))
     );
   }, [tournaments, isPureTeacher, effectiveTeacherCadre, teacherSchoolObj]);
@@ -335,7 +322,7 @@ export const Dashboard: React.FC = () => {
         const explicitTourn = tournaments.find(t => t.id === m.tournamentId);
         if (explicitTourn) {
           return (
-            isTeacherLevelAllowedForTournament(effectiveTeacherCadre, explicitTourn.level) &&
+            isTeacherLevelAllowedForTournament(effectiveTeacherCadre, explicitTourn.level, explicitTourn.ageCategory) &&
             (!teacherSchoolObj || isSchoolSectorAllowedForTournament(teacherSchoolObj, explicitTourn))
           );
         }
