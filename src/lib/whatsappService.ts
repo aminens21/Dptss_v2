@@ -127,7 +127,7 @@ export const generateRefereeMatchNotificationMessage = (
 🆚 المواجهة: *${team1}* ضد *${team2}*
 📅 التاريخ: *${datePart}*
 ⏰ التوقيت: *${timePart}*
-📍 مكان الإجراء: *${venuePart}*
+📍 مركز التباري: *${venuePart}*
 
 المرجو الحضور قبل موعد انطلاق المباراة بـ 30 دقيقة لمعاينة الملعب وإعداد ورقة التحكيم. بالتوفيق في مهمتكم التحكيمية!`;
 };
@@ -265,7 +265,7 @@ export const generateTeamPrincipalMatchNotificationMessage = (
 🆚 ضد مؤسسة: *${opponent}*
 📅 التاريخ: *${datePart}*
 ⏰ التوقيت: *${timePart}*
-📍 مكان الإجراء: *${venuePart}*
+📍 مركز التباري: *${venuePart}*
 
 المرجو التفضل بتسهيل مشاركة التلميذات والتلاميذ والأستاذ(ة) المؤطر(ة). بالتوفيق!`;
 };
@@ -395,7 +395,7 @@ export const generateRefereeBroadcastDiffusionMessage = (
 🆚 المواجهة: *${team1}* ضد *${team2}*
 📅 التاريخ: *${datePart}*
 ⏰ التوقيت: *${timePart}*
-📍 مكان الإجراء: *${venuePart}*${assignmentBlock}${notesLine}
+📍 مركز التباري: *${venuePart}*${assignmentBlock}${notesLine}
 
 المرجو من السادة الحكام المعيّنين الحضور قبل موعد انطلاق المقابلة بـ 30 دقيقة لمعاينة الملعب وإعداد ورقة التحكيم. بالتوفيق في مهمتكم!`;
 };
@@ -419,7 +419,7 @@ export const generateUnifiedMatchDiffusionMessage = (params: WhatsAppMessagePara
 🆚 الفريقان المتنافسان: *${team1}* ضد *${team2}*
 📅 التاريخ: *${datePart}*
 ⏰ الساعة: *${timePart}*
-📍 مكان الإجراء: *${venuePart}*${notesLine}
+📍 مركز التباري: *${venuePart}*${notesLine}
 
 المرجو من السادة مديري المؤسسات التعليمية والأساتذة المؤطرين اتخاذ الترتيبات التنظيمية والتربوية اللازمة وتيسير حضور ومشاركة التلميذات والتلاميذ في الموعد المحدد. بالتوفيق للجميع!`;
 };
@@ -454,7 +454,7 @@ export const generateApprovedResultDiffusionMessage = (
     winnerLine = `\n🥇 المؤسسة الفائزة: *${team2}*`;
   }
 
-  const venuePart = params.venueName ? `\n📍 مكان الإجراء: ${params.venueName}` : '';
+  const venuePart = params.venueName ? `\n📍 مركز التباري: ${params.venueName}` : '';
   const datePart = params.dateStr ? `\n📅 التاريخ: ${params.dateStr}` : '';
   const approverLine = params.approvedByName
     ? `\n🛡️ المصادقة الرسمية: *${params.approvedByName}*`

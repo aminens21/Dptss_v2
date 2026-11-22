@@ -570,10 +570,12 @@ export const RefereeMatchesView: React.FC<RefereeMatchesViewProps> = ({
                             <strong className="font-bold text-slate-700">{tableRefs.join(' • ')}</strong>
                           </div>
                         )}
-                        {fieldRefs.length === 0 && tableRefs.length === 0 && extraOtherRefs.length > 0 && (
+                        {extraOtherRefs.length > 0 && (
                           <div className="flex items-center gap-1.5 flex-wrap">
-                            <UserCheck className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                            <span>طاقم التحكيم: <strong className="font-bold text-slate-700">{extraOtherRefs.join(' • ')}</strong></span>
+                            <span className="px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-800 text-[10px] font-black">
+                              {fieldRefs.length === 0 && tableRefs.length === 0 ? 'طاقم التحكيم' : 'حكام إضافيون'}
+                            </span>
+                            <strong className="font-bold text-slate-700">{extraOtherRefs.join(' • ')}</strong>
                           </div>
                         )}
                       </div>

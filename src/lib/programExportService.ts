@@ -263,6 +263,7 @@ export const OFFICIAL_PROPOSED_PROGRAM: Omit<CalendarExportEvent, 'sportName' | 
 export interface ResolvedMatchReferees {
   tableRefs: string[];
   fieldRefs: string[];
+  extraRefs: string[];
   allRefs: string[];
   hasReferees: boolean;
 }
@@ -381,9 +382,17 @@ export function resolveMatchRefereesInfo(
     return Array.isArray(r.aliasIds) && r.aliasIds.includes(targetId);
   };
 
-  const resolveSingle = (rawEntry?: string): string => {
+  const resolveSingle = (rawEntry?: string, fallbackName?: string): string => {
     const clean = stripTeacherTag(rawEntry || '');
-    if (!clean) return '';
+    const cleanFallback = stripTeacherTag(fallbackName || '');
+    if (!clean && !cleanFallback) return '';
+    if (!clean) {
+      if (excludeHeads && isRefereeTechCommitteeHead(cleanFallback, referees, users)) {
+        return '';
+      }
+      return isOpaqueEntityId(cleanFallback) ? '' : cleanFallback;
+    }
+
     if (excludeHeads && isRefereeTechCommitteeHead(clean, referees, users)) {
       return '';
     }
@@ -421,34 +430,58 @@ export function resolveMatchRefereesInfo(
       }
       return stripTeacherTag(userMatch.fullName);
     }
-    return isOpaqueEntityId(clean) ? '' : clean;
+
+    if (isOpaqueEntityId(clean)) {
+      if (cleanFallback && !isOpaqueEntityId(cleanFallback)) {
+        if (excludeHeads && isRefereeTechCommitteeHead(cleanFallback, referees, users)) {
+          return '';
+        }
+        return cleanFallback;
+      }
+      return '';
+    }
+    return clean;
   };
 
   const dedupePreserveOrder = (arr: string[]) => Array.from(new Set(arr.filter(Boolean)));
 
+  const rawTableIds = Array.isArray(m.tableReferees) ? m.tableReferees : [];
+  const rawTableNames = Array.isArray(m.tableRefereeNames) ? m.tableRefereeNames : [];
+  const tableLen = Math.max(rawTableIds.length, rawTableNames.length);
   const tableRefs = dedupePreserveOrder(
-    (Array.isArray(m.tableReferees) ? m.tableReferees : []).map(resolveSingle)
+    Array.from({ length: tableLen }, (_, idx) => resolveSingle(rawTableIds[idx], rawTableNames[idx]))
   );
+
+  const rawFieldIds = Array.isArray(m.fieldReferees) ? m.fieldReferees : [];
+  const rawFieldNames = Array.isArray(m.fieldRefereeNames) ? m.fieldRefereeNames : [];
+  const fieldLen = Math.max(rawFieldIds.length, rawFieldNames.length);
   const fieldRefs = dedupePreserveOrder(
-    (Array.isArray(m.fieldReferees) ? m.fieldReferees : []).map(resolveSingle)
+    Array.from({ length: fieldLen }, (_, idx) => resolveSingle(rawFieldIds[idx], rawFieldNames[idx]))
   );
   const categorizedSet = new Set([...tableRefs, ...fieldRefs]);
+  const categorizedNormSet = new Set(
+    [...tableRefs, ...fieldRefs].map(name => normalizeArabicName(name)).filter(Boolean)
+  );
 
   const legacyRefereeId = typeof (m as any).refereeId === 'string' ? (m as any).refereeId : '';
   const legacyRefereeIds = Array.isArray((m as any).refereeIds) ? (m as any).refereeIds : [];
+  const rawRefereeNames = Array.isArray(m.refereeNames) ? m.refereeNames : [];
+  const rawReferees = Array.isArray(m.referees) ? m.referees : [];
 
   const extraRefs = dedupePreserveOrder([
-    ...(Array.isArray(m.referees) ? m.referees : []).map(resolveSingle),
-    ...(m.referee1Id ? [resolveSingle(m.referee1Id)] : []),
-    ...(m.referee2Id ? [resolveSingle(m.referee2Id)] : []),
-    ...legacyRefereeIds.map(resolveSingle),
-    ...(legacyRefereeId ? [resolveSingle(legacyRefereeId)] : [])
-  ]).filter(name => !categorizedSet.has(name));
+    ...rawReferees.map((id, idx) => resolveSingle(id, rawRefereeNames[idx])),
+    ...(m.referee1Id ? [resolveSingle(m.referee1Id, (m as any).refereeName)] : []),
+    ...(m.referee2Id ? [resolveSingle(m.referee2Id, (m as any).referee2Name)] : []),
+    ...legacyRefereeIds.map((id, idx) => resolveSingle(id, rawRefereeNames[idx])),
+    ...(legacyRefereeId ? [resolveSingle(legacyRefereeId, (m as any).refereeName)] : [])
+  ]).filter(name => !categorizedSet.has(name) && !categorizedNormSet.has(normalizeArabicName(name)));
 
-  const allRefs = dedupePreserveOrder([...tableRefs, ...fieldRefs, ...extraRefs]);
+  const combinedFieldRefs = dedupePreserveOrder([...fieldRefs, ...extraRefs]);
+  const allRefs = dedupePreserveOrder([...tableRefs, ...combinedFieldRefs]);
   return {
     tableRefs,
-    fieldRefs,
+    fieldRefs: combinedFieldRefs,
+    extraRefs: [],
     allRefs,
     hasReferees: allRefs.length > 0
   };
@@ -518,7 +551,7 @@ export function buildAllCalendarEvents(
       const formattedTable = tableRefNames.map((name, i) => `${getOrdinalRefLabel(i)}: ${name}`).join(' • ');
       textParts.push(`حكام الطاولة (${formattedTable})`);
       htmlParts.push(
-        `<div><span style="font-weight: 800; color: #0369a1;">حكام الطاولة:</span> ${tableRefNames
+        `<div style="margin-bottom: 3px;"><span style="font-weight: 800; color: #0369a1;">حكام الطاولة:</span> ${tableRefNames
           .map((name, i) => `<span style="white-space: nowrap;">${getOrdinalRefLabel(i)}: <strong>${name}</strong></span>`)
           .join(' • ')}</div>`
       );
@@ -773,11 +806,11 @@ export function generateProgramHtml({
         <thead>
           <tr style="background-color: #1e3a8a; color: #ffffff;">
             <th style="border: 1px solid #0f172a; padding: 8px 4px; text-align: center; width: 4%; font-weight: bold;">ر.ت</th>
-            <th style="border: 1px solid #0f172a; padding: 8px 6px; text-align: center; width: 12%; font-weight: bold;">تاريخ الإجراء</th>
+            <th style="border: 1px solid #0f172a; padding: 8px 6px; text-align: center; width: 12%; font-weight: bold;">التاريخ</th>
             <th style="border: 1px solid #0f172a; padding: 8px 8px; text-align: right; width: ${hideSportColumn ? '30%' : '26%'}; font-weight: bold;">المقابلة (مؤسسة ضد مؤسسة)</th>
             ${!hideSportColumn ? `<th style="border: 1px solid #0f172a; padding: 8px 6px; text-align: center; width: 11%; font-weight: bold;">نوع الرياضة</th>` : ''}
             <th style="border: 1px solid #0f172a; padding: 8px 6px; text-align: center; width: 14%; font-weight: bold;">الفئة المستهدفة</th>
-            <th style="border: 1px solid #0f172a; padding: 8px 6px; text-align: right; width: ${hideSportColumn ? '20%' : '15%'}; font-weight: bold;">مكان الإجراء</th>
+            <th style="border: 1px solid #0f172a; padding: 8px 6px; text-align: right; width: ${hideSportColumn ? '20%' : '15%'}; font-weight: bold;">مركز التباري</th>
             <th style="border: 1px solid #0f172a; padding: 8px 6px; text-align: right; width: ${hideSportColumn ? '20%' : '14%'}; font-weight: bold;">الحكام</th>
             ${showNotesColumn ? `<th style="border: 1px solid #0f172a; padding: 8px 4px; text-align: center; width: 10%; font-weight: bold;">ملاحظات</th>` : ''}
           </tr>

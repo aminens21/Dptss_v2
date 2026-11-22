@@ -263,9 +263,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               role = 'CENTRAL_ADMIN';
             }
 
+            const mergedAliases = Array.from(
+              new Set(
+                [
+                  ...(Array.isArray(data.aliasIds) ? data.aliasIds : []),
+                  docId,
+                  user.uid
+                ].filter(Boolean) as string[]
+              )
+            );
+
             const profile: User = {
-              id: user.uid, // Migrate/link to the user's Auth uid
               ...data,
+              id: user.uid, // Migrate/link to the user's Auth uid without letting data.id overwrite it
+              aliasIds: mergedAliases,
               role,
               isSuperAdmin,
               directorateId: data.directorateId || managedDirectorate?.id || 'taourirt',

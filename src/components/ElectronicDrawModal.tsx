@@ -497,12 +497,19 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
       const baseSpecs = Array.isArray(t.refereeSpecialty) ? t.refereeSpecialty : (t.refereeSpecialty ? [t.refereeSpecialty] : []);
       const isQualifiedTechOrTeacher =
         t.role === 'TEACHER' ||
+        t.role === 'SPORT_MANAGER' ||
         baseSpecs.length > 0 ||
         Boolean(t.isTechCommitteeHead || t.role === 'TECH_HEAD' || (t.role as string) === 'TECH_COMMITTEE_HEAD');
       if (!isQualifiedTechOrTeacher) return;
 
       const techSpecs = Array.isArray(t.techCommitteeSports) ? t.techCommitteeSports : [];
-      const specs = Array.from(new Set([...baseSpecs, ...(baseSpecs.length === 0 && t.isTechCommitteeHead ? techSpecs : [])].filter(Boolean)));
+      const managerSpecs = t.sportId ? [t.sportId] : [];
+      const specs = Array.from(
+        new Set([
+          ...baseSpecs,
+          ...(baseSpecs.length === 0 && (t.isTechCommitteeHead || t.role === 'SPORT_MANAGER' || t.role === 'TECH_HEAD') ? [...techSpecs, ...managerSpecs] : [])
+        ].filter(Boolean))
+      );
       const tAliases = Array.isArray(t.aliasIds) ? t.aliasIds : [];
       const existingMatch = list.find(
         item =>
@@ -1686,14 +1693,57 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
     gm: GeneratedDrawMatch,
     tempIdToFirestoreId: Record<string, string>
   ): Omit<Match, 'id'> => {
-    const cleanTableRefs = (gm.tableRefereeIds || []).map(v => v.trim()).filter(Boolean);
-    const cleanFieldRefs = (gm.fieldRefereeIds || []).map(v => v.trim()).filter(Boolean);
+    const cleanTablePairs = (gm.tableRefereeIds || [])
+      .map((rawId, idx) => {
+        const id = (rawId || '').trim();
+        if (!id) return null;
+        const name = (
+          resolveRefCleanName(id) ||
+          (gm.tableRefereeNames?.[idx] || '')
+        ).replace(/\s*\(أستاذ\)\s*/g, '').trim();
+        return { id, name };
+      })
+      .filter((p): p is { id: string; name: string } => p !== null);
+
+    const cleanFieldPairs = (gm.fieldRefereeIds || [])
+      .map((rawId, idx) => {
+        const id = (rawId || '').trim();
+        if (!id) return null;
+        const name = (
+          resolveRefCleanName(id) ||
+          (gm.fieldRefereeNames?.[idx] || '')
+        ).replace(/\s*\(أستاذ\)\s*/g, '').trim();
+        return { id, name };
+      })
+      .filter((p): p is { id: string; name: string } => p !== null);
+
+    const cleanTableRefs = cleanTablePairs.map(p => p.id);
+    const cleanTableRefNames = cleanTablePairs.map(p => p.name);
+    const cleanFieldRefs = cleanFieldPairs.map(p => p.id);
+    const cleanFieldRefNames = cleanFieldPairs.map(p => p.name);
+
+    const refNameById = new Map<string, string>();
+    [...cleanFieldPairs, ...cleanTablePairs].forEach(p => {
+      if (p.id && p.name) refNameById.set(p.id, p.name);
+    });
+    (gm.refereeIds || []).forEach((rawId, idx) => {
+      const id = (rawId || '').trim();
+      if (!id || refNameById.has(id)) return;
+      const nm = (resolveRefCleanName(id) || (gm.refereeNames?.[idx] || '')).replace(/\s*\(أستاذ\)\s*/g, '').trim();
+      if (nm) refNameById.set(id, nm);
+    });
+    if (gm.refereeId && gm.refereeId.trim() && !refNameById.has(gm.refereeId.trim())) {
+      const nm = (resolveRefCleanName(gm.refereeId) || gm.refereeName || '').replace(/\s*\(أستاذ\)\s*/g, '').trim();
+      if (nm) refNameById.set(gm.refereeId.trim(), nm);
+    }
+
     const allRefs = Array.from(new Set([
       ...cleanFieldRefs,
       ...cleanTableRefs,
       ...(gm.refereeIds || []),
       ...(gm.refereeId ? [gm.refereeId] : [])
     ].map(v => (v || '').trim()).filter(Boolean)));
+    const allRefNames = allRefs.map(id => refNameById.get(id) || resolveRefCleanName(id) || '');
 
     const resolvedHost = gm.venueMode !== 'custom'
       ? resolveHostSchoolForMatch({ hostSchoolId: gm.hostSchoolId, venueId: gm.venueId, venueName: gm.venueName }, schools)
@@ -1729,8 +1779,11 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
       referee1Id: allRefs[0] || '',
       referee2Id: allRefs[1] || '',
       referees: allRefs,
+      refereeNames: allRefNames,
       tableReferees: cleanTableRefs,
+      tableRefereeNames: cleanTableRefNames,
       fieldReferees: cleanFieldRefs,
+      fieldRefereeNames: cleanFieldRefNames,
       notes: gm.notes?.trim() || '',
       status: 'Scheduled',
       programApprovalStatus: 'pending',
@@ -1890,9 +1943,9 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
         'المرحلة / الدور': m.stage,
         'الفريق الأول': m.team1Name,
         'الفريق الثاني': m.team2Name,
-        'تاريخ الإجراء': m.date,
+        'التاريخ': m.date,
         'توقيت الانطلاق': m.time,
-        'مكان الإجراء': m.venueName,
+        'مركز التباري': m.venueName,
         'حكام الطاولة': tableRefs.length > 0 ? tableRefs.join(' • ') : 'يعين لاحقاً',
         'حكام الساحة': fieldRefs.length > 0 ? fieldRefs.join(' • ') : 'يعين لاحقاً'
       };
@@ -2971,7 +3024,7 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
 
                   <div>
                     <div className="flex items-center justify-between mb-1">
-                      <label className="text-[10px] font-bold text-slate-600">مكان الإجراء الموحد:</label>
+                      <label className="text-[10px] font-bold text-slate-600">مركز التباري الموحد:</label>
                       <div className="inline-flex rounded-lg bg-white border border-slate-200 p-0.5 text-[9px] font-bold">
                         <button
                           type="button"

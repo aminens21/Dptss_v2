@@ -84,10 +84,18 @@ export const PublicResults: React.FC = () => {
 
     const unsubMatches = DataService.subscribeToMatches((m) => setMatches(m));
     const unsubReferees = DataService.subscribeToReferees(() => {
-      DataService.getReferees().then(setReferees).catch(() => {});
+      DataService.getReferees()
+        .then((res) => {
+          if (Array.isArray(res) && res.length > 0) setReferees(res);
+        })
+        .catch(() => {});
     });
     const unsubUsers = DataService.subscribeToUsers(() => {
-      DataService.getUsers().then(setUsersDirectory).catch(() => {});
+      DataService.getUsers()
+        .then((res) => {
+          if (Array.isArray(res) && res.length > 0) setUsersDirectory(res);
+        })
+        .catch(() => {});
     });
 
     window.addEventListener('athleticsResultsUpdated', handleResultsUpdate);

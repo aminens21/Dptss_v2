@@ -1,4 +1,4 @@
-import { Tournament, Match, School, Venue, User, Referee, Student, Sport, AppNotification, RoleSidebarPermissions, Directorate, DirectorateTransferRequest, SUPER_ADMIN_EMAILS, CrossCountryCategoryResult, PodiumWinner, CustomAgeCategory, AthleticsCategoryResult, AthleticsWinner, SchoolTournamentConfirmation, SchoolWithdrawalRecord, InternalMessage, CommunicationRecipientCategory, BlockedSchedulePeriod, EducationalCycleKey, AffiliationDisplayMode, AffiliationDisplayConfig } from '../types';
+import { Tournament, Match, School, Venue, User, Referee, Student, Sport, AppNotification, RoleSidebarPermissions, Directorate, DirectorateTransferRequest, SUPER_ADMIN_EMAILS, CrossCountryCategoryResult, PodiumWinner, CustomAgeCategory, AthleticsCategoryResult, AthleticsWinner, SchoolTournamentConfirmation, SchoolWithdrawalRecord, InternalMessage, CommunicationRecipientCategory, BlockedSchedulePeriod, EducationalCycleKey, AffiliationDisplayMode, AffiliationDisplayConfig, AdministrativeCadre } from '../types';
 import { INITIAL_TOURNAMENTS, INITIAL_SCHOOLS, INITIAL_VENUES, INITIAL_DIRECTORATES } from './initialData';
 import { db } from '../firebase/config';
 import {
@@ -542,7 +542,8 @@ const STORAGE_KEYS = {
   VENUES: 'taourirt_venues_data',
   DIRECTORATES: 'app_directorates_data',
   CONFIRMATIONS: 'app_school_confirmations',
-  WITHDRAWALS: 'app_school_tournament_withdrawals'
+  WITHDRAWALS: 'app_school_tournament_withdrawals',
+  ADMINISTRATIVE_CADRES: 'taourirt_administrative_cadres'
 };
 
 // Helper to deduplicate any array of objects by id
@@ -589,11 +590,20 @@ export function normalizeMatchRecord(m: Match): Match {
     ...(Array.isArray(m.referees)
       ? { referees: m.referees.map(r => String(r || '').trim()).filter(Boolean) }
       : {}),
+    ...(Array.isArray(m.refereeNames)
+      ? { refereeNames: m.refereeNames.map(r => String(r || '').trim()).filter(Boolean) }
+      : {}),
     ...(Array.isArray(m.tableReferees)
       ? { tableReferees: m.tableReferees.map(r => String(r || '').trim()).filter(Boolean) }
       : {}),
+    ...(Array.isArray(m.tableRefereeNames)
+      ? { tableRefereeNames: m.tableRefereeNames.map(r => String(r || '').trim()).filter(Boolean) }
+      : {}),
     ...(Array.isArray(m.fieldReferees)
       ? { fieldReferees: m.fieldReferees.map(r => String(r || '').trim()).filter(Boolean) }
+      : {}),
+    ...(Array.isArray(m.fieldRefereeNames)
+      ? { fieldRefereeNames: m.fieldRefereeNames.map(r => String(r || '').trim()).filter(Boolean) }
       : {})
   };
 }
@@ -3283,6 +3293,74 @@ export const DataService = {
     return allMatches.filter(m => (m.directorateId || 'taourirt') === activeDirId);
   },
 
+  async resolveRefereeNamesList(ids: string[], providedNames?: string[]): Promise<string[]> {
+    const cleanIds = (Array.isArray(ids) ? ids : []).map(v => String(v || '').trim()).filter(Boolean);
+    if (cleanIds.length === 0) return [];
+
+    const stripTag = (s?: string) => (s || '').replace(/\s*\(أستاذ\)\s*/g, '').replace(/\s+/g, ' ').trim();
+    const looksLikeOpaqueId = (v: string): boolean => {
+      if (!v) return false;
+      if (/^(ref[-_]|usr[-_]|mgr[-_]|teacher[-_]|demo[-_]|sch[-_]|ven[-_]|mat[-_]|tourn[-_])/i.test(v)) return true;
+      if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v)) return true;
+      if (/^[A-Za-z0-9_-]{16,}$/.test(v) && !/\s/.test(v)) return true;
+      if (/^[A-Za-z0-9_-]{12,}$/.test(v) && /[A-Za-z]/.test(v) && /\d/.test(v)) return true;
+      return false;
+    };
+
+    const cachedPeople: any[] = [
+      ...getLocal<any>('taourirt_referees_data', []),
+      ...getLocal<any>('referees', []),
+      ...(Array.isArray(inMemoryCollectionCache['local_registered_users']) ? inMemoryCollectionCache['local_registered_users'] : []),
+      ...getLocal<any>('local_registered_users', [])
+    ];
+    try {
+      const demoRaw = localStorage.getItem('demo_user_profile');
+      if (demoRaw) {
+        const parsed = JSON.parse(demoRaw);
+        if (parsed && parsed.id) cachedPeople.push(parsed);
+      }
+    } catch {}
+
+    const findNameInPool = (id: string, pool: any[]): string => {
+      const match = pool.find(p => {
+        if (!p) return false;
+        if (p.id === id || p.uid === id || p.teacherId === id || p.userId === id) return true;
+        if (Array.isArray(p.aliasIds) && p.aliasIds.includes(id)) return true;
+        if (p.email && String(p.email).trim().toLowerCase() === id.toLowerCase()) return true;
+        return false;
+      });
+      return match?.fullName ? stripTag(match.fullName) : '';
+    };
+
+    const preliminary = cleanIds.map((id, idx) => {
+      const prov = stripTag(providedNames?.[idx]);
+      if (prov && !looksLikeOpaqueId(prov)) return prov;
+      const fromCache = findNameInPool(id, cachedPeople);
+      if (fromCache) return fromCache;
+      return looksLikeOpaqueId(id) ? '' : stripTag(id);
+    });
+
+    const hasUnresolvedId = cleanIds.some((id, idx) => !preliminary[idx] && looksLikeOpaqueId(id));
+    if (!hasUnresolvedId) {
+      return preliminary;
+    }
+
+    try {
+      const [allRefs, allUsers] = await Promise.all([
+        this.getReferees().catch(() => [] as Referee[]),
+        this.getUsers().catch(() => [] as User[])
+      ]);
+      const fullPool = [...allRefs, ...allUsers, ...cachedPeople];
+      return cleanIds.map((id, idx) => {
+        if (preliminary[idx]) return preliminary[idx];
+        const resolved = findNameInPool(id, fullPool);
+        return resolved || (looksLikeOpaqueId(id) ? '' : stripTag(id));
+      });
+    } catch {
+      return preliminary;
+    }
+  },
+
   async addMatch(match: Omit<Match, 'id'>): Promise<Match> {
     const activeDirId = this.getActiveDirectorateId() || 'taourirt';
     const docRef = doc(collection(db, 'matches'));
@@ -3329,9 +3407,37 @@ export const DataService = {
       resolvedMatchNumber = maxExisting + 1;
     }
 
+    const cleanFieldRefs = Array.isArray(match.fieldReferees)
+      ? match.fieldReferees.map(r => String(r || '').trim()).filter(Boolean)
+      : undefined;
+    const cleanTableRefs = Array.isArray(match.tableReferees)
+      ? match.tableReferees.map(r => String(r || '').trim()).filter(Boolean)
+      : undefined;
+    const cleanReferees = Array.isArray(match.referees)
+      ? match.referees.map(r => String(r || '').trim()).filter(Boolean)
+      : undefined;
+
+    const [resolvedFieldNames, resolvedTableNames, resolvedAllNames] = await Promise.all([
+      cleanFieldRefs && cleanFieldRefs.length > 0
+        ? this.resolveRefereeNamesList(cleanFieldRefs, match.fieldRefereeNames)
+        : Promise.resolve(undefined),
+      cleanTableRefs && cleanTableRefs.length > 0
+        ? this.resolveRefereeNamesList(cleanTableRefs, match.tableRefereeNames)
+        : Promise.resolve(undefined),
+      cleanReferees && cleanReferees.length > 0
+        ? this.resolveRefereeNamesList(cleanReferees, match.refereeNames)
+        : Promise.resolve(undefined)
+    ]);
+
     const normalizedDate = normalizeDateToYmd(match.date);
     const matchWithDir = {
       ...match,
+      ...(cleanFieldRefs ? { fieldReferees: cleanFieldRefs } : {}),
+      ...(cleanTableRefs ? { tableReferees: cleanTableRefs } : {}),
+      ...(cleanReferees ? { referees: cleanReferees } : {}),
+      ...(resolvedFieldNames && resolvedFieldNames.length > 0 ? { fieldRefereeNames: resolvedFieldNames } : {}),
+      ...(resolvedTableNames && resolvedTableNames.length > 0 ? { tableRefereeNames: resolvedTableNames } : {}),
+      ...(resolvedAllNames && resolvedAllNames.length > 0 ? { refereeNames: resolvedAllNames } : {}),
       ...(resolvedAgeCat ? { ageCategory: resolvedAgeCat } : {}),
       ...(resolvedGender ? { gender: resolvedGender } : {}),
       affiliationType: resolvedAff,
@@ -3391,6 +3497,30 @@ export const DataService = {
       ? matchData.fieldReferees.map(r => String(r || '').trim()).filter(Boolean)
       : undefined;
 
+    const [resolvedFieldNames, resolvedTableNames, resolvedAllNames, resolvedRef1Arr, resolvedRef2Arr] =
+      hasAnyRefereeUpdate
+        ? await Promise.all([
+            cleanFieldRefs && cleanFieldRefs.length > 0
+              ? this.resolveRefereeNamesList(cleanFieldRefs, matchData.fieldRefereeNames)
+              : Promise.resolve([] as string[]),
+            cleanTableRefs && cleanTableRefs.length > 0
+              ? this.resolveRefereeNamesList(cleanTableRefs, matchData.tableRefereeNames)
+              : Promise.resolve([] as string[]),
+            cleanReferees && cleanReferees.length > 0
+              ? this.resolveRefereeNamesList(cleanReferees, matchData.refereeNames)
+              : Promise.resolve([] as string[]),
+            cleanRef1
+              ? this.resolveRefereeNamesList([cleanRef1], (matchData as any).refereeName ? [(matchData as any).refereeName] : undefined)
+              : Promise.resolve([] as string[]),
+            cleanRef2
+              ? this.resolveRefereeNamesList([cleanRef2], (matchData as any).referee2Name ? [(matchData as any).referee2Name] : undefined)
+              : Promise.resolve([] as string[])
+          ])
+        : [[], [], [], [], []];
+
+    const resolvedRef1Name = resolvedRef1Arr[0] || (resolvedAllNames[0] || '') || undefined;
+    const resolvedRef2Name = resolvedRef2Arr[0] || (resolvedAllNames[1] || '') || undefined;
+
     const normalizedPatch: Partial<Match> & Record<string, any> = {
       ...matchData,
       ...(matchData.date !== undefined ? { date: normalizeDateToYmd(matchData.date) } : {}),
@@ -3402,7 +3532,12 @@ export const DataService = {
       ...(hasAnyRefereeUpdate
         ? {
             refereeId: cleanRef1 || (cleanReferees && cleanReferees[0]) || undefined,
-            refereeIds: cleanReferees !== undefined ? cleanReferees : undefined
+            refereeIds: cleanReferees !== undefined ? cleanReferees : undefined,
+            ...(resolvedRef1Name ? { refereeName: resolvedRef1Name } : {}),
+            ...(resolvedRef2Name ? { referee2Name: resolvedRef2Name } : {}),
+            ...(cleanReferees !== undefined ? { refereeNames: resolvedAllNames } : {}),
+            ...(cleanTableRefs !== undefined ? { tableRefereeNames: resolvedTableNames } : {}),
+            ...(cleanFieldRefs !== undefined ? { fieldRefereeNames: resolvedFieldNames } : {})
           }
         : {})
     };
@@ -3413,13 +3548,13 @@ export const DataService = {
           if (m.id !== matchId) return m;
           const merged = { ...m, ...normalizedPatch } as any;
           if (hasAnyRefereeUpdate) {
-            delete merged.refereeName;
-            delete merged.referee2Name;
-            delete merged.refereeNames;
+            if (!resolvedRef1Name) delete merged.refereeName;
+            if (!resolvedRef2Name) delete merged.referee2Name;
+            if (cleanReferees !== undefined && resolvedAllNames.length === 0) delete merged.refereeNames;
+            if (cleanTableRefs !== undefined && resolvedTableNames.length === 0) delete merged.tableRefereeNames;
+            if (cleanFieldRefs !== undefined && resolvedFieldNames.length === 0) delete merged.fieldRefereeNames;
             delete merged.tableRefereeIds;
             delete merged.fieldRefereeIds;
-            delete merged.tableRefereeNames;
-            delete merged.fieldRefereeNames;
           }
           return normalizeMatchRecord(merged);
         })
@@ -3441,16 +3576,21 @@ export const DataService = {
         cleanData.refereeId = syncedPrimary ? syncedPrimary : deleteField();
         if (cleanReferees !== undefined) {
           cleanData.refereeIds = cleanReferees;
+          cleanData.refereeNames = resolvedAllNames.length > 0 ? resolvedAllNames : deleteField();
         } else if (!syncedPrimary) {
           cleanData.refereeIds = deleteField();
+          cleanData.refereeNames = deleteField();
         }
-        cleanData.refereeName = deleteField();
-        cleanData.referee2Name = deleteField();
-        cleanData.refereeNames = deleteField();
+        if (cleanTableRefs !== undefined) {
+          cleanData.tableRefereeNames = resolvedTableNames.length > 0 ? resolvedTableNames : deleteField();
+        }
+        if (cleanFieldRefs !== undefined) {
+          cleanData.fieldRefereeNames = resolvedFieldNames.length > 0 ? resolvedFieldNames : deleteField();
+        }
+        cleanData.refereeName = resolvedRef1Name ? resolvedRef1Name : deleteField();
+        cleanData.referee2Name = resolvedRef2Name ? resolvedRef2Name : deleteField();
         cleanData.tableRefereeIds = deleteField();
         cleanData.fieldRefereeIds = deleteField();
-        cleanData.tableRefereeNames = deleteField();
-        cleanData.fieldRefereeNames = deleteField();
       }
       await setDoc(doc(db, 'matches', matchId), {
         ...cleanData,
@@ -4839,17 +4979,25 @@ export const DataService = {
       .filter(t => {
         if (!t || !t.id || isRecentlyDeleted('referees', t.id)) return false;
         const hasSpecs = Array.isArray(t.refereeSpecialty) ? t.refereeSpecialty.length > 0 : !!t.refereeSpecialty;
-        const isHeadWithSpecs = Boolean(
-          t.isTechCommitteeHead &&
-            (hasSpecs || (Array.isArray(t.techCommitteeSports) && t.techCommitteeSports.length > 0))
+        const isTechRole = Boolean(
+          t.isTechCommitteeHead ||
+            t.role === 'TECH_HEAD' ||
+            (t.role as string) === 'TECH_COMMITTEE_HEAD' ||
+            t.role === 'SPORT_MANAGER'
         );
-        return hasSpecs || isHeadWithSpecs;
+        const hasTechSports =
+          (Array.isArray(t.techCommitteeSports) && t.techCommitteeSports.length > 0) ||
+          Boolean(t.sportId);
+        return hasSpecs || isTechRole || hasTechSports;
       })
       .map(t => {
         const baseSpecs = Array.isArray(t.refereeSpecialty)
           ? t.refereeSpecialty
           : (t.refereeSpecialty ? [t.refereeSpecialty] : []);
-        const techSpecs = Array.isArray(t.techCommitteeSports) ? t.techCommitteeSports : [];
+        const techSpecs = [
+          ...(Array.isArray(t.techCommitteeSports) ? t.techCommitteeSports : []),
+          ...(t.sportId ? [t.sportId] : [])
+        ];
         const combinedSpecs = Array.from(new Set([...baseSpecs, ...(baseSpecs.length === 0 ? techSpecs : [])].filter(Boolean)));
         return {
           id: t.id,
@@ -5328,9 +5476,9 @@ export const DataService = {
       const cleanName = u.fullName ? normalizeArabicName(u.fullName) : '';
 
       for (const [k, existing] of usersMap.entries()) {
-        const aliasHit =
-          (u.id && Array.isArray(existing.aliasIds) && existing.aliasIds.includes(u.id)) ||
-          (Array.isArray(u.aliasIds) && u.aliasIds.includes(existing.id));
+        const existingAliasSet = new Set([existing.id, ...(Array.isArray(existing.aliasIds) ? existing.aliasIds : [])].filter(Boolean));
+        const incomingIds = [u.id, u.uid, u.teacherId, ...(Array.isArray(u.aliasIds) ? u.aliasIds : [])].filter(Boolean);
+        const aliasHit = incomingIds.some((id: string) => existingAliasSet.has(id));
         if (
           k === u.id || existing.id === u.id || aliasHit ||
           (cleanEmail && existing.email && isFlexibleEmailMatch(existing.email, cleanEmail)) ||
@@ -5356,7 +5504,7 @@ export const DataService = {
           const docId = d.id;
           if (isRecentlyDeleted('users', docId)) return;
           const data = d.data() as any;
-          const matchedKey = findMatchingKey({ id: docId, ...data });
+          const matchedKey = findMatchingKey({ ...data, id: docId });
 
           if (matchedKey) {
             const existing = usersMap.get(matchedKey)!;
@@ -5364,7 +5512,7 @@ export const DataService = {
             const dataPhoto = typeof data.photoUrl === 'string' ? data.photoUrl.trim() : '';
             const existingPhoto = typeof existing.photoUrl === 'string' ? existing.photoUrl.trim() : '';
             const mergedPhoto = preferData ? (dataPhoto || existingPhoto) : (existingPhoto || dataPhoto);
-            const mergedAliases = collectUserAliases(existing, { id: docId, ...data });
+            const mergedAliases = collectUserAliases(existing, { ...data, id: docId });
             const merged: User = {
               ...existing,
               ...data,
@@ -5391,8 +5539,9 @@ export const DataService = {
             }
           } else {
             usersMap.set(docId, {
+              ...data,
               id: docId,
-              aliasIds: collectUserAliases({ id: docId, ...data }),
+              aliasIds: collectUserAliases({ ...data, id: docId }),
               fullName: data.fullName || data.name || 'أستاذ',
               email: data.email || '',
               role: data.role || 'TEACHER',
@@ -5403,8 +5552,7 @@ export const DataService = {
               isTechCommitteeHead: !!data.isTechCommitteeHead,
               techCommitteeSports: Array.isArray(data.techCommitteeSports) ? data.techCommitteeSports : [],
               isTechCommitteeMember: !!data.isTechCommitteeMember,
-              techCommitteeSportsMemberOf: Array.isArray(data.techCommitteeSportsMemberOf) ? data.techCommitteeSportsMemberOf : [],
-              ...data
+              techCommitteeSportsMemberOf: Array.isArray(data.techCommitteeSportsMemberOf) ? data.techCommitteeSportsMemberOf : []
             });
           }
         });
@@ -5425,9 +5573,11 @@ export const DataService = {
             if (firestoreSucceeded && !firestoreWasEmpty && !(uid && isPendingWrite('users', uid))) return;
 
             const matchedKey = findMatchingKey(u);
+            const resolvedId = u.id || matchedKey || u.email || u.leaseNumber;
             const userObj: User = {
-              id: u.id || matchedKey || u.email || u.leaseNumber,
-              aliasIds: collectUserAliases(u),
+              ...u,
+              id: resolvedId,
+              aliasIds: collectUserAliases(u, { id: resolvedId }),
               fullName: u.fullName || u.name || 'أستاذ',
               email: u.email || '',
               role: u.role || 'TEACHER',
@@ -5438,8 +5588,7 @@ export const DataService = {
               isTechCommitteeHead: !!u.isTechCommitteeHead,
               techCommitteeSports: Array.isArray(u.techCommitteeSports) ? u.techCommitteeSports : [],
               isTechCommitteeMember: !!u.isTechCommitteeMember,
-              techCommitteeSportsMemberOf: Array.isArray(u.techCommitteeSportsMemberOf) ? u.techCommitteeSportsMemberOf : [],
-              ...u
+              techCommitteeSportsMemberOf: Array.isArray(u.techCommitteeSportsMemberOf) ? u.techCommitteeSportsMemberOf : []
             };
 
             if (matchedKey) {
@@ -5450,6 +5599,7 @@ export const DataService = {
               const merged: User = {
                 ...existing,
                 ...(preferNew ? userObj : {}),
+                id: preferNew ? userObj.id : existing.id,
                 aliasIds: collectUserAliases(existing, userObj),
                 workLocation: preferNew ? (u.workLocation || existing.workLocation) : (existing.workLocation || u.workLocation),
                 schoolId: preferNew ? (u.schoolId || existing.schoolId) : (existing.schoolId || u.schoolId),
@@ -5560,12 +5710,23 @@ export const DataService = {
 
       let mergedPrimary: User = { ...primaryUser } as User;
       const idsToDelete: string[] = [];
+      const collectedAliases = new Set<string>([
+        ...(primaryId ? [primaryId] : []),
+        ...(Array.isArray(primaryUser.aliasIds) ? primaryUser.aliasIds : [])
+      ].filter(Boolean) as string[]);
 
       duplicates.forEach(dup => {
+        if (dup.id) collectedAliases.add(dup.id);
+        if (Array.isArray(dup.aliasIds)) {
+          dup.aliasIds.forEach(aid => {
+            if (aid) collectedAliases.add(aid);
+          });
+        }
         // Merge missing fields from duplicate into primary user
         mergedPrimary = {
           ...dup,
           ...mergedPrimary,
+          aliasIds: Array.from(collectedAliases),
           workLocation: primaryUser.workLocation || dup.workLocation || '',
           schoolId: primaryUser.schoolId || dup.schoolId || '',
           leaseNumber: primaryUser.leaseNumber || dup.leaseNumber || '',
@@ -5579,6 +5740,7 @@ export const DataService = {
           idsToDelete.push(dup.id);
         }
       });
+      mergedPrimary.aliasIds = Array.from(collectedAliases);
 
       // Delete duplicates from local cache and Firestore
       for (const dupId of idsToDelete) {
@@ -10658,6 +10820,299 @@ export const DataService = {
     } catch (e) {
       console.warn('saveAffiliationDisplayConfig saved locally; Firestore sync pending:', e);
     }
+  },
+
+  // --- ADMINISTRATIVE CADRES (الأطر الإدارية: المفتشون، رئيس مكتب التربية البدنية، إلخ) ---
+  getDefaultAdministrativeCadres(directorateId?: string): AdministrativeCadre[] {
+    const dirId = directorateId && directorateId !== 'all' ? directorateId : (this.getActiveDirectorateId() || 'taourirt');
+    const normalizedDir = dirId === 'all' ? 'taourirt' : dirId;
+    return [
+      {
+        id: `default_admin_cadre_amin_${normalizedDir}`,
+        fullName: 'أمين سنوسي',
+        leaseNumber: '',
+        cadre: 'مفتش',
+        phone: '',
+        email: 'aminens21@gmail.com',
+        category: 'INSPECTOR',
+        directorateId: normalizedDir,
+        isDefault: true
+      },
+      {
+        id: `default_admin_cadre_meqnou_${normalizedDir}`,
+        fullName: 'نور الدين مقتل',
+        leaseNumber: '',
+        cadre: 'مفتش',
+        phone: '',
+        email: 'meqnou@gmail.com',
+        category: 'INSPECTOR',
+        directorateId: normalizedDir,
+        isDefault: true
+      },
+      {
+        id: `default_admin_cadre_office_head_${normalizedDir}`,
+        fullName: 'رئيس مكتب التربية البدنية',
+        leaseNumber: '',
+        cadre: 'رئيس مكتب التربية البدنية',
+        phone: '',
+        email: '',
+        category: 'OFFICE_HEAD',
+        directorateId: normalizedDir,
+        isDefault: true
+      }
+    ];
+  },
+
+  _resolveAdminCadreCategory(cadre?: string, explicitCategory?: AdministrativeCadre['category']): AdministrativeCadre['category'] {
+    if (explicitCategory) return explicitCategory;
+    const raw = (cadre || '').trim();
+    if (raw.includes('مفتش')) return 'INSPECTOR';
+    if (raw.includes('رئيس مكتب') || raw.includes('التربية البدنية')) return 'OFFICE_HEAD';
+    return 'OTHER';
+  },
+
+  _mergeAdministrativeCadres(records: AdministrativeCadre[], directorateId?: string): AdministrativeCadre[] {
+    const activeDirId = directorateId || this.getActiveDirectorateId() || 'taourirt';
+    const effectiveDir = activeDirId === 'all' ? 'taourirt' : activeDirId;
+    const defaults = this.getDefaultAdministrativeCadres(effectiveDir);
+
+    const byId = new Map<string, AdministrativeCadre>();
+    defaults.forEach(def => {
+      if (!isRecentlyDeleted('administrative_cadres', def.id)) {
+        byId.set(def.id, def);
+      }
+    });
+
+    records.forEach(rec => {
+      if (!rec || !rec.id) return;
+      const recDir = rec.directorateId || 'taourirt';
+      if (activeDirId !== 'all' && recDir !== activeDirId) return;
+      if (rec.isDeleted || isRecentlyDeleted('administrative_cadres', rec.id)) {
+        byId.delete(rec.id);
+        return;
+      }
+      const prev = byId.get(rec.id);
+      byId.set(rec.id, {
+        ...prev,
+        ...rec,
+        category: this._resolveAdminCadreCategory(rec.cadre, rec.category || prev?.category),
+        directorateId: recDir
+      });
+    });
+
+    return Array.from(byId.values());
+  },
+
+  async getAdministrativeCadres(directorateId?: string): Promise<AdministrativeCadre[]> {
+    const activeDirId = directorateId || this.getActiveDirectorateId() || 'taourirt';
+    const localList = getLocal<AdministrativeCadre>(STORAGE_KEYS.ADMINISTRATIVE_CADRES, []);
+
+    try {
+      const snap = await getDocs(collection(db, 'administrative_cadres'));
+      const cloudList = snap.empty
+        ? []
+        : snap.docs.map(d => ({ id: d.id, ...(d.data() as any) } as AdministrativeCadre));
+
+      const cloudIds = new Set(cloudList.map(c => c.id));
+      const pendingLocal = localList.filter(
+        c => c && c.id && (isPendingWrite('administrative_cadres', c.id) || !cloudIds.has(c.id))
+      );
+
+      // Deduplicate preferring pending local writes, otherwise cloud docs
+      const mergedRawMap = new Map<string, AdministrativeCadre>();
+      cloudList.forEach(c => {
+        if (c?.id) mergedRawMap.set(c.id, c);
+      });
+      pendingLocal.forEach(c => {
+        if (c?.id && isPendingWrite('administrative_cadres', c.id)) {
+          mergedRawMap.set(c.id, c);
+        }
+      });
+
+      const mergedAllRaw = Array.from(mergedRawMap.values());
+      if (mergedAllRaw.length > 0) {
+        setLocal(STORAGE_KEYS.ADMINISTRATIVE_CADRES, mergedAllRaw);
+      }
+      return this._mergeAdministrativeCadres(mergedAllRaw, activeDirId);
+    } catch (e) {
+      console.warn('Could not fetch administrative_cadres from Firestore, using local cache + defaults:', e);
+      return this._mergeAdministrativeCadres(localList, activeDirId);
+    }
+  },
+
+  async addAdministrativeCadre(cadre: Omit<AdministrativeCadre, 'id'>): Promise<AdministrativeCadre> {
+    const activeDirId = cadre.directorateId || this.getActiveDirectorateId() || 'taourirt';
+    const effectiveDir = activeDirId === 'all' ? 'taourirt' : activeDirId;
+    const docRef = doc(collection(db, 'administrative_cadres'));
+    const realId = docRef.id;
+
+    const record: AdministrativeCadre = {
+      ...cadre,
+      id: realId,
+      fullName: (cadre.fullName || '').trim(),
+      leaseNumber: (cadre.leaseNumber || '').trim(),
+      cadre: (cadre.cadre || '').trim() || 'إطار إداري',
+      phone: (cadre.phone || '').trim(),
+      email: (cadre.email || '').trim().toLowerCase(),
+      category: this._resolveAdminCadreCategory(cadre.cadre, cadre.category),
+      directorateId: effectiveDir,
+      isDefault: false,
+      isDeleted: false,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+
+    const localList = getLocal<AdministrativeCadre>(STORAGE_KEYS.ADMINISTRATIVE_CADRES, []);
+    setLocal(STORAGE_KEYS.ADMINISTRATIVE_CADRES, deduplicateById([record, ...localList]));
+    markPendingWrite('administrative_cadres', realId);
+
+    try {
+      await setDoc(docRef, stripUndefinedDeep({
+        ...record,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      }));
+      clearPendingWrite('administrative_cadres', realId);
+    } catch (e) {
+      console.warn('Administrative cadre saved locally; Firestore sync pending:', e);
+    }
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('administrativeCadresUpdated'));
+    }
+    return record;
+  },
+
+  async updateAdministrativeCadre(id: string, data: Partial<AdministrativeCadre>): Promise<AdministrativeCadre> {
+    const activeDirId = data.directorateId || this.getActiveDirectorateId() || 'taourirt';
+    const effectiveDir = activeDirId === 'all' ? 'taourirt' : activeDirId;
+    const localList = getLocal<AdministrativeCadre>(STORAGE_KEYS.ADMINISTRATIVE_CADRES, []);
+    const defaultItem = this.getDefaultAdministrativeCadres(effectiveDir).find(d => d.id === id);
+    const existingItem = localList.find(c => c.id === id) || defaultItem;
+
+    const nextCadreTitle = data.cadre !== undefined ? data.cadre.trim() : (existingItem?.cadre || 'إطار إداري');
+    const updatedRecord: AdministrativeCadre = {
+      ...existingItem,
+      ...data,
+      id,
+      fullName: (data.fullName !== undefined ? data.fullName : existingItem?.fullName || '').trim(),
+      leaseNumber: (data.leaseNumber !== undefined ? data.leaseNumber : existingItem?.leaseNumber || '').trim(),
+      cadre: nextCadreTitle,
+      phone: (data.phone !== undefined ? data.phone : existingItem?.phone || '').trim(),
+      email: (data.email !== undefined ? data.email : existingItem?.email || '').trim().toLowerCase(),
+      category: this._resolveAdminCadreCategory(nextCadreTitle, data.category),
+      directorateId: existingItem?.directorateId || effectiveDir,
+      isDeleted: false,
+      updatedAt: new Date().toISOString()
+    };
+
+    const nextLocal = [updatedRecord, ...localList.filter(c => c.id !== id)];
+    setLocal(STORAGE_KEYS.ADMINISTRATIVE_CADRES, deduplicateById(nextLocal));
+    markPendingWrite('administrative_cadres', id);
+
+    try {
+      await setDoc(doc(db, 'administrative_cadres', id), stripUndefinedDeep({
+        ...updatedRecord,
+        updatedAt: serverTimestamp()
+      }), { merge: true });
+      clearPendingWrite('administrative_cadres', id);
+    } catch (e) {
+      console.warn('Administrative cadre update saved locally; Firestore sync pending:', e);
+    }
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('administrativeCadresUpdated'));
+    }
+    return updatedRecord;
+  },
+
+  async deleteAdministrativeCadre(id: string): Promise<void> {
+    markRecentlyDeleted('administrative_cadres', id);
+    const localList = getLocal<AdministrativeCadre>(STORAGE_KEYS.ADMINISTRATIVE_CADRES, []);
+    const isDefaultId = id.startsWith('default_admin_cadre_');
+
+    if (isDefaultId) {
+      const tombstone: AdministrativeCadre = {
+        id,
+        fullName: '',
+        cadre: '',
+        directorateId: this.getActiveDirectorateId() || 'taourirt',
+        isDefault: true,
+        isDeleted: true,
+        updatedAt: new Date().toISOString()
+      };
+      setLocal(STORAGE_KEYS.ADMINISTRATIVE_CADRES, [tombstone, ...localList.filter(c => c.id !== id)]);
+      try {
+        await setDoc(doc(db, 'administrative_cadres', id), {
+          ...tombstone,
+          updatedAt: serverTimestamp()
+        }, { merge: true });
+      } catch (e) {
+        console.warn('Default administrative cadre tombstone saved locally:', e);
+      }
+    } else {
+      setLocal(STORAGE_KEYS.ADMINISTRATIVE_CADRES, localList.filter(c => c.id !== id));
+      try {
+        await deleteDoc(doc(db, 'administrative_cadres', id));
+      } catch (e) {
+        console.warn('Administrative cadre deleted locally:', e);
+      }
+    }
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('administrativeCadresUpdated'));
+    }
+  },
+
+  subscribeToAdministrativeCadres(
+    callback: (cadres: AdministrativeCadre[]) => void,
+    directorateId?: string
+  ): () => void {
+    const effectiveDir = directorateId || this.getActiveDirectorateId() || 'taourirt';
+    const emitLocal = () => {
+      const localList = getLocal<AdministrativeCadre>(STORAGE_KEYS.ADMINISTRATIVE_CADRES, []);
+      callback(this._mergeAdministrativeCadres(localList, effectiveDir));
+    };
+
+    const handleLocalUpdate = () => emitLocal();
+    window.addEventListener('administrativeCadresUpdated', handleLocalUpdate);
+    window.addEventListener('directorateChanged', handleLocalUpdate);
+
+    if (isCloudSyncPaused()) {
+      emitLocal();
+      return () => {
+        window.removeEventListener('administrativeCadresUpdated', handleLocalUpdate);
+        window.removeEventListener('directorateChanged', handleLocalUpdate);
+      };
+    }
+
+    const unsub = onSnapshot(
+      collection(db, 'administrative_cadres'),
+      (snap) => {
+        const cloudList = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) } as AdministrativeCadre));
+        const localList = getLocal<AdministrativeCadre>(STORAGE_KEYS.ADMINISTRATIVE_CADRES, []);
+        const pendingLocal = localList.filter(c => c && c.id && isPendingWrite('administrative_cadres', c.id));
+        const map = new Map<string, AdministrativeCadre>();
+        cloudList.forEach(c => { if (c?.id) map.set(c.id, c); });
+        pendingLocal.forEach(c => { if (c?.id) map.set(c.id, c); });
+        const rawAll = Array.from(map.values());
+        if (rawAll.length > 0) {
+          setLocal(STORAGE_KEYS.ADMINISTRATIVE_CADRES, rawAll);
+        }
+        callback(this._mergeAdministrativeCadres(rawAll, effectiveDir));
+      },
+      () => {
+        emitLocal();
+      }
+    );
+
+    return () => {
+      window.removeEventListener('administrativeCadresUpdated', handleLocalUpdate);
+      window.removeEventListener('directorateChanged', handleLocalUpdate);
+      try {
+        unsub();
+      } catch {}
+    };
   }
 };
 

@@ -91,6 +91,10 @@ service cloud.firestore {
       allow read, write: if true;
     }
 
+    match /administrative_cadres/{document=**} {
+      allow read, write: if true;
+    }
+
     match /test/{document=**} {
       allow read, write: if true;
     }

@@ -485,10 +485,18 @@ export const Login: React.FC = () => {
       });
     };
     const unsubReferees = DataService.subscribeToReferees(() => {
-      DataService.getReferees().then(setReferees).catch(() => {});
+      DataService.getReferees()
+        .then((res) => {
+          if (Array.isArray(res) && res.length > 0) setReferees(res);
+        })
+        .catch(() => {});
     });
     const unsubUsers = DataService.subscribeToUsers(() => {
-      DataService.getUsers().then(setUsersDirectory).catch(() => {});
+      DataService.getUsers()
+        .then((res) => {
+          if (Array.isArray(res) && res.length > 0) setUsersDirectory(res);
+        })
+        .catch(() => {});
     });
 
     window.addEventListener('resultsChanged', handleRefreshPublicData);
@@ -1146,7 +1154,7 @@ export const Login: React.FC = () => {
         const dateB = normalizeDateToYmd(b.date) || '9999-12-31';
         return dateA.localeCompare(dateB);
       });
-  }, [matches, tournaments, schools, selectedDate, filterMatchesByDate, selectedSport, selectedAffiliation, selectedCategory, selectedGender, searchQuery]);
+  }, [matches, activeTournaments, tournaments, sportsConfig, affiliationDisplayConfig, schools, selectedDate, filterMatchesByDate, selectedSport, selectedAffiliation, selectedCategory, selectedGender, searchQuery]);
 
   const publicTabGroupStandings = useMemo(() => {
     if (selectedSport === 'ALL' || selectedSport === 'cross_country' || selectedSport === 'athletics') {
@@ -3953,7 +3961,7 @@ export const Login: React.FC = () => {
               <p><strong className="font-black">الرياضة:</strong> {selectedTournamentDetail.sportName || 'عامة'}</p>
               <p><strong className="font-black">المستوى:</strong> {selectedTournamentDetail.level || 'إقليمية'}</p>
               <p><strong className="font-black">الفئة العمرية:</strong> {selectedTournamentDetail.category || 'جميع الفئات'}</p>
-              <p><strong className="font-black">تاريخ الإجراء:</strong> {selectedTournamentDetail.startDate || '2026'}</p>
+              <p><strong className="font-black">التاريخ:</strong> {selectedTournamentDetail.startDate || '2026'}</p>
               <p><strong className="font-black">المكان:</strong> {selectedTournamentDetail.venue || 'المديرية'}</p>
             </div>
 

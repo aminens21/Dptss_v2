@@ -320,8 +320,11 @@ export interface Match {
   referee1Id?: string;
   referee2Id?: string;
   referees?: string[]; // Array to support more than 2 referees
+  refereeNames?: string[]; // Cached clean display names aligned with referees
   tableReferees?: string[]; // حكام الطاولة (الأول، الثاني، ...)
+  tableRefereeNames?: string[]; // Cached clean display names aligned with tableReferees
   fieldReferees?: string[]; // حكام الساحة (الأول، الثاني، ...)
+  fieldRefereeNames?: string[]; // Cached clean display names aligned with fieldReferees
   status: 'Scheduled' | 'Ongoing' | 'Completed' | 'Postponed' | 'Cancelled';
   score1?: number;
   score2?: number;
@@ -530,4 +533,18 @@ export interface AthleticsCategoryResult {
   updatedAt?: any;
 }
 
-
+export interface AdministrativeCadre {
+  id: string;
+  fullName: string; // الاسم والنسب
+  leaseNumber?: string; // رقم التأجير
+  cadre: string; // الإطار (مفتش، رئيس مكتب التربية البدنية، إلخ)
+  phone?: string; // رقم الهاتف
+  email?: string; // البريد الإلكتروني
+  category?: 'INSPECTOR' | 'OFFICE_HEAD' | 'OTHER';
+  directorateId?: string;
+  isDefault?: boolean;
+  isDeleted?: boolean;
+  createdAt?: any;
+  updatedAt?: any;
+  createdBy?: string;
+}

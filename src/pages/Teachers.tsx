@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { DataService, SPORTS_MAP } from '../lib/dataService';
-import { User, Student, School } from '../types';
+import { User, Student, School, AdministrativeCadre } from '../types';
 import { fixTeacherFieldJumble, formatMoroccanPhone } from '../lib/utils';
 import { TeacherDetailModal } from '../components/TeacherDetailModal';
 import { EditTeacherRoleModal } from '../components/EditTeacherRoleModal';
@@ -35,7 +35,11 @@ import {
   Download,
   Upload,
   FileSpreadsheet,
-  LogIn
+  LogIn,
+  Briefcase,
+  ShieldCheck,
+  X,
+  Save
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -182,6 +186,35 @@ export const Teachers: React.FC = () => {
   const [isDeleting, setIsDeleting] = useState(false);
   const [showDeleteAllModal, setShowDeleteAllModal] = useState(false);
   const [isDeletingAll, setIsDeletingAll] = useState(false);
+
+  // Administrative Cadres Sub-Section State (الأطر الإدارية)
+  const [activeSection, setActiveSection] = useState<'PEDAGOGICAL' | 'ADMIN'>(() =>
+    searchParams.get('section') === 'admin' || searchParams.get('tab') === 'admin' ? 'ADMIN' : 'PEDAGOGICAL'
+  );
+  const [adminCadres, setAdminCadres] = useState<AdministrativeCadre[]>(() =>
+    DataService.getDefaultAdministrativeCadres()
+  );
+  const [adminLoading, setAdminLoading] = useState(false);
+  const [adminSearchTerm, setAdminSearchTerm] = useState('');
+  const [adminCategoryFilter, setAdminCategoryFilter] = useState<'ALL' | 'INSPECTOR' | 'OFFICE_HEAD' | 'OTHER'>('ALL');
+  const [isAdminCadreModalOpen, setIsAdminCadreModalOpen] = useState(false);
+  const [editingAdminCadre, setEditingAdminCadre] = useState<AdministrativeCadre | null>(null);
+  const [adminForm, setAdminForm] = useState<{
+    fullName: string;
+    leaseNumber: string;
+    cadre: string;
+    phone: string;
+    email: string;
+  }>({
+    fullName: '',
+    leaseNumber: '',
+    cadre: 'مفتش',
+    phone: '',
+    email: ''
+  });
+  const [isSavingAdminCadre, setIsSavingAdminCadre] = useState(false);
+  const [adminCadreToDelete, setAdminCadreToDelete] = useState<AdministrativeCadre | null>(null);
+  const [isDeletingAdminCadre, setIsDeletingAdminCadre] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -436,7 +469,19 @@ export const Teachers: React.FC = () => {
   }, [cadreQuery]);
 
   useEffect(() => {
+    const tabParam = searchParams.get('section') || searchParams.get('tab');
+    if (tabParam === 'admin') {
+      setActiveSection('ADMIN');
+    } else if (tabParam === 'pedagogical') {
+      setActiveSection('PEDAGOGICAL');
+    }
+  }, [searchParams]);
+
+  useEffect(() => {
     loadTeachersAndStudents();
+    const unsubAdminCadres = DataService.subscribeToAdministrativeCadres((cadres) => {
+      setAdminCadres(cadres);
+    });
     const handleDirChange = () => {
       loadTeachersAndStudents();
     };
@@ -447,6 +492,7 @@ export const Teachers: React.FC = () => {
     window.addEventListener('userDataChanged', handleProfileChange);
     window.addEventListener('teacherProfileUpdated', handleProfileChange);
     return () => {
+      unsubAdminCadres();
       window.removeEventListener('directorateChanged', handleDirChange);
       window.removeEventListener('userDataChanged', handleProfileChange);
       window.removeEventListener('teacherProfileUpdated', handleProfileChange);
@@ -455,15 +501,17 @@ export const Teachers: React.FC = () => {
 
   const loadTeachersAndStudents = async () => {
     setLoading(true);
+    setAdminLoading(true);
     try {
       const activeDirId = DataService.getActiveDirectorateId();
-      const [teachersData, studentsData, schoolsData, activeDir, logos, curSeason] = await Promise.all([
+      const [teachersData, studentsData, schoolsData, activeDir, logos, curSeason, cadresData] = await Promise.all([
         DataService.getTeachers(),
         DataService.getStudents(),
         DataService.getSchools(),
         DataService.getActiveDirectorate(),
         DataService.getOfficialLogos(),
-        DataService.getActiveSeason()
+        DataService.getActiveSeason(),
+        DataService.getAdministrativeCadres(activeDirId).catch(() => DataService.getDefaultAdministrativeCadres(activeDirId))
       ]);
       const dirTeachers = teachersData.filter(t => (t.directorateId || 'taourirt') === activeDirId);
       const dirStudents = studentsData.filter(st => (st.directorateId || 'taourirt') === activeDirId);
@@ -472,6 +520,7 @@ export const Teachers: React.FC = () => {
       setTeachers(dirTeachers);
       setStudents(dirStudents);
       setSchools(dirSchools);
+      setAdminCadres(cadresData);
       if (activeDir) setActiveDirObj(activeDir);
       if (logos) setOfficialLogos(logos);
       if (curSeason) setActiveSeason(curSeason);
@@ -480,6 +529,135 @@ export const Teachers: React.FC = () => {
       toast.error('حدث خطأ أثناء تحميل قائمة الأساتذة');
     } finally {
       setLoading(false);
+      setAdminLoading(false);
+    }
+  };
+
+  const handleOpenAddAdminCadre = () => {
+    if (!isOrigCentralAdmin) {
+      toast.error('إضافة الأطر الإدارية مخولة للمشرف المركزي فقط');
+      return;
+    }
+    setEditingAdminCadre(null);
+    setAdminForm({
+      fullName: '',
+      leaseNumber: '',
+      cadre: 'مفتش',
+      phone: '',
+      email: ''
+    });
+    setIsAdminCadreModalOpen(true);
+  };
+
+  const handleOpenEditAdminCadre = (cadreItem: AdministrativeCadre) => {
+    if (!isOrigCentralAdmin) return;
+    setEditingAdminCadre(cadreItem);
+    setAdminForm({
+      fullName: cadreItem.fullName || '',
+      leaseNumber: cadreItem.leaseNumber || '',
+      cadre: cadreItem.cadre || 'مفتش',
+      phone: cadreItem.phone || '',
+      email: cadreItem.email || ''
+    });
+    setIsAdminCadreModalOpen(true);
+  };
+
+  const handleSaveAdminCadre = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!isOrigCentralAdmin) {
+      toast.error('إضافة وتعديل الأطر الإدارية مخولة للمشرف المركزي فقط');
+      return;
+    }
+    const cleanName = adminForm.fullName.trim();
+    const cleanCadre = adminForm.cadre.trim();
+    if (!cleanName) {
+      toast.error('يرجى إدخال الاسم والنسب');
+      return;
+    }
+    if (!cleanCadre) {
+      toast.error('يرجى تحديد الإطار');
+      return;
+    }
+
+    setIsSavingAdminCadre(true);
+    try {
+      const activeDirId = DataService.getActiveDirectorateId() || 'taourirt';
+      if (editingAdminCadre) {
+        const updated = await DataService.updateAdministrativeCadre(editingAdminCadre.id, {
+          fullName: cleanName,
+          leaseNumber: adminForm.leaseNumber.trim(),
+          cadre: cleanCadre,
+          phone: adminForm.phone.trim(),
+          email: adminForm.email.trim().toLowerCase(),
+          directorateId: editingAdminCadre.directorateId || activeDirId
+        });
+        setAdminCadres(prev => prev.map(c => (c.id === updated.id ? updated : c)));
+        toast.success(`تم تحديث بيانات ${cleanName} بنجاح`);
+      } else {
+        const created = await DataService.addAdministrativeCadre({
+          fullName: cleanName,
+          leaseNumber: adminForm.leaseNumber.trim(),
+          cadre: cleanCadre,
+          phone: adminForm.phone.trim(),
+          email: adminForm.email.trim().toLowerCase(),
+          directorateId: activeDirId,
+          createdBy: effectiveAdminProfile?.email || effectiveAdminProfile?.fullName || 'المشرف المركزي'
+        });
+        setAdminCadres(prev => [created, ...prev.filter(c => c.id !== created.id)]);
+        toast.success(`تمت إضافة ${cleanName} إلى الأطر الإدارية بنجاح`);
+      }
+      setIsAdminCadreModalOpen(false);
+      setEditingAdminCadre(null);
+    } catch (error) {
+      console.error('Error saving administrative cadre:', error);
+      toast.error('تعذر حفظ بيانات الإطار الإداري');
+    } finally {
+      setIsSavingAdminCadre(false);
+    }
+  };
+
+  const handleConfirmDeleteAdminCadre = async () => {
+    if (!adminCadreToDelete || !isOrigCentralAdmin) return;
+    setIsDeletingAdminCadre(true);
+    try {
+      await DataService.deleteAdministrativeCadre(adminCadreToDelete.id);
+      setAdminCadres(prev => prev.filter(c => c.id !== adminCadreToDelete.id));
+      toast.success(`تم حذف ${adminCadreToDelete.fullName} من لائحة الأطر الإدارية`);
+      setAdminCadreToDelete(null);
+    } catch (error) {
+      console.error('Error deleting administrative cadre:', error);
+      toast.error('حدث خطأ أثناء الحذف');
+    } finally {
+      setIsDeletingAdminCadre(false);
+    }
+  };
+
+  const handleExportAdminCadres = () => {
+    try {
+      const exportRows = filteredAdminCadres.map((item, idx) => ({
+        'رقم': idx + 1,
+        'الاسم والنسب': item.fullName,
+        'الإطار': item.cadre,
+        'رقم التأجير': item.leaseNumber || '',
+        'رقم الهاتف': item.phone || '',
+        'البريد الإلكتروني': item.email || ''
+      }));
+      const ws = XLSX.utils.json_to_sheet(exportRows);
+      ws['!cols'] = [
+        { wch: 8 },
+        { wch: 28 },
+        { wch: 26 },
+        { wch: 16 },
+        { wch: 18 },
+        { wch: 30 }
+      ];
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'الأطر الإدارية');
+      XLSX.writeFile(wb, `لائحة_الأطر_الإدارية_${activeDirObj?.name || 'تاوريرت'}.xlsx`);
+      toast.success('تم تصدير لائحة الأطر الإدارية إلى ملف Excel بنجاح.');
+    } catch (err) {
+      console.error('Error exporting admin cadres:', err);
+      toast.error('حدث خطأ أثناء التصدير');
     }
   };
 
@@ -592,6 +770,28 @@ export const Teachers: React.FC = () => {
   const completedProfiles = teachers.filter(t => t.workLocation && t.leaseNumber).length;
   const incompleteProfiles = totalTeachers - completedProfiles;
 
+  const filteredAdminCadres = adminCadres.filter((item) => {
+    const q = adminSearchTerm.trim().toLowerCase();
+    const matchesSearch =
+      !q ||
+      (item.fullName || '').toLowerCase().includes(q) ||
+      (item.cadre || '').toLowerCase().includes(q) ||
+      (item.leaseNumber || '').toLowerCase().includes(q) ||
+      (item.phone || '').toLowerCase().includes(q) ||
+      (item.email || '').toLowerCase().includes(q);
+
+    const cat = item.category || (item.cadre?.includes('مفتش') ? 'INSPECTOR' : item.cadre?.includes('رئيس مكتب') ? 'OFFICE_HEAD' : 'OTHER');
+    const matchesCategory = adminCategoryFilter === 'ALL' || cat === adminCategoryFilter;
+    return matchesSearch && matchesCategory;
+  });
+
+  const inspectorCadres = filteredAdminCadres.filter(
+    (c) => (c.category || (c.cadre?.includes('مفتش') ? 'INSPECTOR' : 'OTHER')) === 'INSPECTOR'
+  );
+  const officeAndOtherCadres = filteredAdminCadres.filter(
+    (c) => (c.category || (c.cadre?.includes('مفتش') ? 'INSPECTOR' : 'OTHER')) !== 'INSPECTOR'
+  );
+
   // Filter students for the selected teacher modal
   const teacherStudents = selectedTeacherModal
     ? students.filter(s => s.schoolName === selectedTeacherModal.workLocation)
@@ -620,98 +820,480 @@ export const Teachers: React.FC = () => {
         className="hidden"
       />
 
-      {/* Header and Quick Stats */}
+      {/* Header and Sub-Section Switcher */}
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
         <div className="min-w-0">
           <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
-            <GraduationCap className="h-6 w-6 text-blue-600 shrink-0" />
-            <span>لائحة الأطر التربوية</span>
+            {activeSection === 'ADMIN' ? (
+              <Briefcase className="h-6 w-6 text-slate-800 shrink-0" />
+            ) : (
+              <GraduationCap className="h-6 w-6 text-blue-600 shrink-0" />
+            )}
+            <span>{activeSection === 'ADMIN' ? 'لائحة الأطر الإدارية' : 'لائحة الأطر التربوية'}</span>
           </h2>
           <p className="text-xs text-slate-500 mt-1">
-            إدارة ومتابعة ملفات أساتذة التربية البدنية والرياضية المسجلين بالمديرية. اضغط على أي أستاذ لعرض بطاقته التفصيلية.
+            {activeSection === 'ADMIN'
+              ? 'إدارة ومتابعة المفتشين التربويين ورئيس مكتب التربية البدنية والأطر الإدارية بالمديرية.'
+              : 'إدارة ومتابعة ملفات أساتذة التربية البدنية والرياضية المسجلين بالمديرية. اضغط على أي أستاذ لعرض بطاقته التفصيلية.'}
           </p>
         </div>
-        <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-stretch sm:items-center gap-2 w-full lg:w-auto">
-          {/* Download Blank Template Button */}
-          <button
-            onClick={handleDownloadExcelTemplate}
-            className="flex items-center justify-center gap-1.5 px-2.5 sm:px-3.5 py-2 bg-emerald-50 border border-emerald-300 hover:bg-emerald-100 text-emerald-800 rounded-xl text-[11px] sm:text-xs font-black transition-all shadow-3xs cursor-pointer text-center"
-            title="تحميل نموذج إكسيل فارغ لتعبئة بيانات الأطر التربوية"
-          >
-            <Download className="h-3.5 w-3.5 shrink-0" />
-            <span>تحميل نموذج Excel فارغ</span>
-          </button>
 
-          {/* Import from Excel Button */}
-          {(userProfile?.role === 'CENTRAL_ADMIN' || userProfile?.role === 'SPORT_MANAGER') && (
+        {activeSection === 'PEDAGOGICAL' ? (
+          <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-stretch sm:items-center gap-2 w-full lg:w-auto">
+            {/* Download Blank Template Button */}
             <button
-              onClick={() => fileInputRef.current?.click()}
-              className="flex items-center justify-center gap-1.5 px-2.5 sm:px-3.5 py-2 bg-indigo-50 border border-indigo-300 hover:bg-indigo-100 text-indigo-800 rounded-xl text-[11px] sm:text-xs font-black transition-all shadow-3xs cursor-pointer text-center"
-              title="استيراد وتعبئة لائحة الأساتذة من ملف إكسيل (الأعمدة B إلى G)"
+              onClick={handleDownloadExcelTemplate}
+              className="flex items-center justify-center gap-1.5 px-2.5 sm:px-3.5 py-2 bg-emerald-50 border border-emerald-300 hover:bg-emerald-100 text-emerald-800 rounded-xl text-[11px] sm:text-xs font-black transition-all shadow-3xs cursor-pointer text-center whitespace-nowrap shrink-0"
+              title="تحميل نموذج إكسيل فارغ لتعبئة بيانات الأطر التربوية"
             >
-              <Upload className="h-3.5 w-3.5 shrink-0" />
-              <span>استيراد من Excel</span>
+              <Download className="h-3.5 w-3.5 shrink-0" />
+              <span>تحميل نموذج Excel فارغ</span>
             </button>
-          )}
 
-          {/* Export to Excel Button */}
-          <button
-            onClick={handleExportCurrentTeachers}
-            className="flex items-center justify-center gap-1.5 px-2.5 sm:px-3.5 py-2 bg-slate-50 border border-slate-300 hover:bg-slate-100 text-slate-700 rounded-xl text-[11px] sm:text-xs font-black transition-all shadow-3xs cursor-pointer text-center"
-            title="تصدير اللائحة الحالية للأساتذة إلى ملف إكسيل"
-          >
-            <FileSpreadsheet className="h-3.5 w-3.5 shrink-0" />
-            <span>تصدير إلى Excel</span>
-          </button>
+            {/* Import from Excel Button */}
+            {(userProfile?.role === 'CENTRAL_ADMIN' || userProfile?.role === 'SPORT_MANAGER') && (
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                className="flex items-center justify-center gap-1.5 px-2.5 sm:px-3.5 py-2 bg-indigo-50 border border-indigo-300 hover:bg-indigo-100 text-indigo-800 rounded-xl text-[11px] sm:text-xs font-black transition-all shadow-3xs cursor-pointer text-center whitespace-nowrap shrink-0"
+                title="استيراد وتعبئة لائحة الأساتذة من ملف إكسيل (الأعمدة B إلى G)"
+              >
+                <Upload className="h-3.5 w-3.5 shrink-0" />
+                <span>استيراد من Excel</span>
+              </button>
+            )}
 
-          {/* Add New Teacher / Authorize Email Button */}
-          {(userProfile?.role === 'CENTRAL_ADMIN' || userProfile?.role === 'SPORT_MANAGER') && (
+            {/* Export to Excel Button */}
+            <button
+              onClick={handleExportCurrentTeachers}
+              className="flex items-center justify-center gap-1.5 px-2.5 sm:px-3.5 py-2 bg-slate-50 border border-slate-300 hover:bg-slate-100 text-slate-700 rounded-xl text-[11px] sm:text-xs font-black transition-all shadow-3xs cursor-pointer text-center whitespace-nowrap shrink-0"
+              title="تصدير اللائحة الحالية للأساتذة إلى ملف إكسيل"
+            >
+              <FileSpreadsheet className="h-3.5 w-3.5 shrink-0" />
+              <span>تصدير إلى Excel</span>
+            </button>
+
+            {/* Add New Teacher / Authorize Email Button */}
+            {(userProfile?.role === 'CENTRAL_ADMIN' || userProfile?.role === 'SPORT_MANAGER') && (
+              <button
+                onClick={() => {
+                  setSelectedTeacherForEdit(null);
+                  setIsEditRoleModalOpen(true);
+                }}
+                className="flex items-center justify-center gap-1.5 px-2.5 sm:px-3.5 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white rounded-xl text-[11px] sm:text-xs font-black transition-all shadow-sm hover:shadow-md cursor-pointer text-center whitespace-nowrap shrink-0"
+                title="إضافة أستاذ جديد واعتماد بريده الإلكتروني للدخول عبر Google"
+              >
+                <UserPlus className="h-4 w-4 shrink-0" />
+                <span>إضافة أستاذ جديد (اعتماد بريد)</span>
+              </button>
+            )}
+
+            {/* Print Badges Button */}
             <button
               onClick={() => {
-                setSelectedTeacherForEdit(null);
-                setIsEditRoleModalOpen(true);
+                setPreselectedTeacherId(undefined);
+                setIsBadgesModalOpen(true);
               }}
-              className="flex items-center justify-center gap-1.5 px-2.5 sm:px-3.5 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white rounded-xl text-[11px] sm:text-xs font-black transition-all shadow-sm hover:shadow-md cursor-pointer text-center"
-              title="إضافة أستاذ جديد واعتماد بريده الإلكتروني للدخول عبر Google"
+              className="col-span-2 sm:col-span-1 flex items-center justify-center gap-2 px-3 sm:px-3.5 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl text-[11px] sm:text-xs font-black transition-all shadow-sm hover:shadow-md cursor-pointer text-center whitespace-nowrap shrink-0"
+              title="إنشاء وطباعة شارات وبادجات الأساتذة (8 في الورقة A4)"
             >
-              <UserPlus className="h-4 w-4 shrink-0" />
-              <span>إضافة أستاذ جديد (اعتماد بريد)</span>
+              <span className="text-sm shrink-0">🪪</span>
+              <span>إنشاء شارات وبادجات الأساتذة (A4)</span>
             </button>
-          )}
 
-          {/* Print Badges Button */}
-          <button
-            onClick={() => {
-              setPreselectedTeacherId(undefined);
-              setIsBadgesModalOpen(true);
-            }}
-            className="col-span-2 sm:col-span-1 flex items-center justify-center gap-2 px-3 sm:px-3.5 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl text-[11px] sm:text-xs font-black transition-all shadow-sm hover:shadow-md cursor-pointer text-center"
-            title="إنشاء وطباعة شارات وبادجات الأساتذة (8 في الورقة A4)"
-          >
-            <span className="text-sm shrink-0">🪪</span>
-            <span>إنشاء شارات وبادجات الأساتذة (A4)</span>
-          </button>
-
-          <button
-            onClick={loadTeachersAndStudents}
-            className="flex items-center justify-center gap-1.5 px-2.5 sm:px-3 py-2 border border-slate-200 hover:bg-slate-50 rounded-xl text-[11px] sm:text-xs font-semibold text-slate-600 cursor-pointer transition-all bg-white shadow-3xs text-center"
-          >
-            <RefreshCw className="h-3.5 w-3.5 shrink-0" />
-            <span>تحديث القائمة</span>
-          </button>
-
-          {userProfile?.role === 'CENTRAL_ADMIN' && teachers.length > 0 && (
             <button
-              onClick={() => setShowDeleteAllModal(true)}
-              className="flex items-center justify-center gap-1.5 px-2.5 sm:px-3 py-2 bg-red-50 border border-red-200 hover:bg-red-100 rounded-xl text-[11px] sm:text-xs font-bold text-red-600 transition-all shadow-3xs cursor-pointer text-center"
-              title="حذف جميع حسابات الأطر التربوية في هذه المديرية"
+              onClick={loadTeachersAndStudents}
+              className="flex items-center justify-center gap-1.5 px-2.5 sm:px-3 py-2 border border-slate-200 hover:bg-slate-50 rounded-xl text-[11px] sm:text-xs font-semibold text-slate-600 cursor-pointer transition-all bg-white shadow-3xs text-center whitespace-nowrap shrink-0"
             >
-              <Trash2 className="h-3.5 w-3.5 shrink-0" />
-              <span>حذف الكل</span>
+              <RefreshCw className="h-3.5 w-3.5 shrink-0" />
+              <span>تحديث القائمة</span>
             </button>
+
+            {userProfile?.role === 'CENTRAL_ADMIN' && teachers.length > 0 && (
+              <button
+                onClick={() => setShowDeleteAllModal(true)}
+                className="flex items-center justify-center gap-1.5 px-2.5 sm:px-3 py-2 bg-red-50 border border-red-200 hover:bg-red-100 rounded-xl text-[11px] sm:text-xs font-bold text-red-600 transition-all shadow-3xs cursor-pointer text-center whitespace-nowrap shrink-0"
+                title="حذف جميع حسابات الأطر التربوية في هذه المديرية"
+              >
+                <Trash2 className="h-3.5 w-3.5 shrink-0" />
+                <span>حذف الكل</span>
+              </button>
+            )}
+          </div>
+        ) : (
+          <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto">
+            {isOrigCentralAdmin && (
+              <button
+                type="button"
+                onClick={handleOpenAddAdminCadre}
+                className="flex items-center justify-center gap-2 px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold transition-colors cursor-pointer whitespace-nowrap shrink-0"
+              >
+                <UserPlus className="h-4 w-4 shrink-0" />
+                <span>إضافة إطار إداري</span>
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={handleExportAdminCadres}
+              className="flex items-center justify-center gap-1.5 px-3.5 py-2 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-xl text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap shrink-0"
+            >
+              <FileSpreadsheet className="h-4 w-4 shrink-0 text-slate-500" />
+              <span>تصدير إلى Excel</span>
+            </button>
+            <button
+              type="button"
+              onClick={loadTeachersAndStudents}
+              className="flex items-center justify-center gap-1.5 px-3.5 py-2 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-xl text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap shrink-0"
+            >
+              <RefreshCw className="h-3.5 w-3.5 shrink-0 text-slate-500" />
+              <span>تحديث القائمة</span>
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Sub-navigation Switcher: الأطر التربوية / الأطر الإدارية */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="inline-flex items-center gap-1 p-1 bg-slate-100 border border-slate-200 rounded-xl">
+          <button
+            type="button"
+            onClick={() => {
+              setActiveSection('PEDAGOGICAL');
+              const nextParams = new URLSearchParams(searchParams);
+              nextParams.delete('section');
+              nextParams.delete('tab');
+              setSearchParams(nextParams);
+            }}
+            className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+              activeSection === 'PEDAGOGICAL'
+                ? 'bg-white text-slate-900 shadow-xs'
+                : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            <GraduationCap className="h-4 w-4 shrink-0" />
+            <span>الأطر التربوية</span>
+            <span className="font-mono tabular-nums text-[11px] text-slate-500">({teachers.length})</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setActiveSection('ADMIN');
+              const nextParams = new URLSearchParams(searchParams);
+              nextParams.set('section', 'admin');
+              setSearchParams(nextParams);
+            }}
+            className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+              activeSection === 'ADMIN'
+                ? 'bg-white text-slate-900 shadow-xs'
+                : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            <Briefcase className="h-4 w-4 shrink-0" />
+            <span>الأطر الإدارية</span>
+            <span className="font-mono tabular-nums text-[11px] text-slate-500">({adminCadres.length})</span>
+          </button>
+        </div>
+
+        {activeSection === 'ADMIN' && (
+          <div className="text-xs text-slate-500 flex items-center gap-2">
+            <span>المفتشون ومكتب التربية البدنية</span>
+            <span aria-hidden="true">·</span>
+            <span className="font-mono tabular-nums">{adminCadres.length} مسجل</span>
+          </div>
+        )}
+      </div>
+
+      {activeSection === 'ADMIN' ? (
+        <div className="space-y-5">
+          {/* Search & Category Filter Toolbar */}
+          <div className="bg-white p-4 rounded-xl border border-slate-200 flex flex-col md:flex-row gap-3 items-stretch md:items-center justify-between">
+            <div className="relative w-full md:w-80">
+              <span className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
+                <Search className="h-4 w-4 text-slate-400" />
+              </span>
+              <input
+                type="text"
+                className="w-full text-xs pr-9 pl-3 py-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:bg-white focus:ring-2 focus:ring-slate-900/10 focus:border-slate-400 transition-colors placeholder:text-slate-400"
+                placeholder="بحث بالاسم والنسب، رقم التأجير، الإطار، الهاتف..."
+                value={adminSearchTerm}
+                onChange={(e) => setAdminSearchTerm(e.target.value)}
+              />
+            </div>
+
+            <div className="flex flex-wrap items-center gap-1 p-1 bg-slate-100 rounded-lg">
+              {[
+                { id: 'ALL' as const, label: 'الكل', count: adminCadres.length },
+                {
+                  id: 'INSPECTOR' as const,
+                  label: 'المفتشون',
+                  count: adminCadres.filter(c => (c.category || (c.cadre?.includes('مفتش') ? 'INSPECTOR' : 'OTHER')) === 'INSPECTOR').length
+                },
+                {
+                  id: 'OFFICE_HEAD' as const,
+                  label: 'رئيس مكتب التربية البدنية',
+                  count: adminCadres.filter(c => (c.category || (c.cadre?.includes('رئيس مكتب') ? 'OFFICE_HEAD' : 'OTHER')) === 'OFFICE_HEAD').length
+                },
+                {
+                  id: 'OTHER' as const,
+                  label: 'أطر أخرى',
+                  count: adminCadres.filter(c => (c.category || (c.cadre?.includes('مفتش') ? 'INSPECTOR' : c.cadre?.includes('رئيس مكتب') ? 'OFFICE_HEAD' : 'OTHER')) === 'OTHER').length
+                }
+              ].map((tab) => (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => setAdminCategoryFilter(tab.id)}
+                  className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-colors cursor-pointer whitespace-nowrap shrink-0 inline-flex items-center gap-1.5 ${
+                    adminCategoryFilter === tab.id
+                      ? 'bg-white text-slate-900 shadow-2xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  <span>{tab.label}</span>
+                  <span className="font-mono tabular-nums text-[11px] text-slate-400">{tab.count}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {adminLoading ? (
+            <div className="bg-white rounded-xl border border-slate-200 p-12 flex flex-col items-center justify-center gap-3">
+              <div className="h-7 w-7 animate-spin rounded-full border-3 border-slate-800 border-t-transparent" />
+              <p className="text-xs text-slate-500 font-medium">جاري تحميل لائحة الأطر الإدارية...</p>
+            </div>
+          ) : filteredAdminCadres.length === 0 ? (
+            <div className="bg-white rounded-xl border border-slate-200 p-12 text-center space-y-3">
+              <p className="text-slate-700 text-sm font-semibold">لا توجد بيانات تطابق معايير البحث الحالية.</p>
+              <div className="flex items-center justify-center gap-2">
+                {(adminSearchTerm || adminCategoryFilter !== 'ALL') && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAdminSearchTerm('');
+                      setAdminCategoryFilter('ALL');
+                    }}
+                    className="px-3.5 py-2 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors cursor-pointer whitespace-nowrap"
+                  >
+                    إعادة تعيين البحث
+                  </button>
+                )}
+                {isOrigCentralAdmin && (
+                  <button
+                    type="button"
+                    onClick={handleOpenAddAdminCadre}
+                    className="px-4 py-2 text-xs font-bold text-white bg-slate-900 hover:bg-slate-800 rounded-lg transition-colors cursor-pointer whitespace-nowrap inline-flex items-center gap-1.5"
+                  >
+                    <UserPlus className="h-3.5 w-3.5" />
+                    <span>إضافة إطار إداري</span>
+                  </button>
+                )}
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-6">
+              {[
+                {
+                  key: 'inspectors',
+                  title: 'المفتشون التربويون',
+                  subtitle: 'المفتشون المكلفون بتأطير ومواكبة مادة التربية البدنية والرياضية',
+                  items: inspectorCadres
+                },
+                {
+                  key: 'office',
+                  title: 'مكتب التربية البدنية والأطر الإدارية',
+                  subtitle: 'رئيس مكتب التربية البدنية والأطر الإدارية المكلفة بالتدبير الرياضي بالمديرية',
+                  items: officeAndOtherCadres
+                }
+              ]
+                .filter((group) => group.items.length > 0)
+                .map((group) => (
+                  <div key={group.key} className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+                    <div className="px-5 py-3.5 bg-slate-50/70 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2">
+                      <div>
+                        <h3 className="text-sm font-bold text-slate-900">{group.title}</h3>
+                        <p className="text-xs text-slate-500 mt-0.5">{group.subtitle}</p>
+                      </div>
+                      <span className="text-xs font-mono tabular-nums text-slate-500">
+                        {group.items.length} إطار
+                      </span>
+                    </div>
+
+                    {/* Desktop High-Density Table */}
+                    <div className="hidden md:block overflow-x-auto">
+                      <table className="w-full text-right border-collapse">
+                        <thead>
+                          <tr className="border-b border-slate-200 text-[11px] font-semibold text-slate-500 bg-white">
+                            <th className="px-5 py-3">الاسم والنسب</th>
+                            <th className="px-5 py-3">الإطار</th>
+                            <th className="px-5 py-3">رقم التأجير</th>
+                            <th className="px-5 py-3">رقم الهاتف</th>
+                            <th className="px-5 py-3">البريد الإلكتروني</th>
+                            {isOrigCentralAdmin && <th className="px-5 py-3 text-center">الإجراءات</th>}
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 text-xs">
+                          {group.items.map((item) => {
+                            const formattedPhone = formatMoroccanPhone(item.phone);
+                            return (
+                              <tr key={item.id} className="hover:bg-slate-50/80 transition-colors">
+                                <td className="px-5 py-3.5">
+                                  <div className="flex items-center gap-3">
+                                    <div className="w-8 h-8 rounded-full bg-slate-100 border border-slate-200 text-slate-700 flex items-center justify-center font-bold text-xs shrink-0">
+                                      {(item.fullName || 'إ').trim().charAt(0)}
+                                    </div>
+                                    <span className="font-bold text-slate-900">{item.fullName}</span>
+                                  </div>
+                                </td>
+                                <td className="px-5 py-3.5 text-slate-700 font-medium">
+                                  {item.cadre}
+                                </td>
+                                <td className="px-5 py-3.5">
+                                  {item.leaseNumber ? (
+                                    <span className="font-mono tabular-nums font-semibold text-slate-800" dir="ltr">
+                                      {item.leaseNumber}
+                                    </span>
+                                  ) : (
+                                    <span className="text-slate-400">—</span>
+                                  )}
+                                </td>
+                                <td className="px-5 py-3.5">
+                                  {formattedPhone ? (
+                                    <a
+                                      href={`tel:${formattedPhone}`}
+                                      className="font-mono tabular-nums font-semibold text-slate-800 hover:text-slate-950 hover:underline"
+                                      dir="ltr"
+                                    >
+                                      {formattedPhone}
+                                    </a>
+                                  ) : (
+                                    <span className="text-slate-400">—</span>
+                                  )}
+                                </td>
+                                <td className="px-5 py-3.5">
+                                  {item.email ? (
+                                    <div className="flex items-center gap-2">
+                                      <a
+                                        href={`mailto:${item.email}`}
+                                        className="font-mono text-slate-700 hover:text-slate-950 hover:underline truncate max-w-[220px]"
+                                        dir="ltr"
+                                      >
+                                        {item.email}
+                                      </a>
+                                      <button
+                                        type="button"
+                                        onClick={(e) => handleCopy(e, item.email || '', `admin-email-${item.id}`)}
+                                        className="p-1 text-slate-400 hover:text-slate-700 rounded transition-colors cursor-pointer"
+                                        title="نسخ البريد الإلكتروني"
+                                      >
+                                        {copiedId === `admin-email-${item.id}` ? (
+                                          <Check className="h-3.5 w-3.5 text-emerald-600" />
+                                        ) : (
+                                          <Copy className="h-3.5 w-3.5" />
+                                        )}
+                                      </button>
+                                    </div>
+                                  ) : (
+                                    <span className="text-slate-400">—</span>
+                                  )}
+                                </td>
+                                {isOrigCentralAdmin && (
+                                  <td className="px-5 py-3.5 text-center">
+                                    <div className="inline-flex items-center justify-center gap-1.5">
+                                      <button
+                                        type="button"
+                                        onClick={() => handleOpenEditAdminCadre(item)}
+                                        className="p-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg border border-slate-200 transition-colors cursor-pointer"
+                                        title="تعديل البيانات"
+                                      >
+                                        <Pencil className="h-3.5 w-3.5" />
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => setAdminCadreToDelete(item)}
+                                        className="p-2 text-red-600 hover:text-red-700 hover:bg-red-50 rounded-lg border border-red-200 transition-colors cursor-pointer"
+                                        title="حذف"
+                                      >
+                                        <Trash2 className="h-3.5 w-3.5" />
+                                      </button>
+                                    </div>
+                                  </td>
+                                )}
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    {/* Mobile List View */}
+                    <div className="md:hidden divide-y divide-slate-100">
+                      {group.items.map((item) => {
+                        const formattedPhone = formatMoroccanPhone(item.phone);
+                        return (
+                          <div key={`m-${item.id}`} className="p-4 space-y-2.5">
+                            <div className="flex items-start justify-between gap-2">
+                              <div>
+                                <p className="text-sm font-bold text-slate-900">{item.fullName}</p>
+                                <p className="text-xs text-slate-600 mt-0.5">{item.cadre}</p>
+                              </div>
+                              {isOrigCentralAdmin && (
+                                <div className="flex items-center gap-1.5 shrink-0">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleOpenEditAdminCadre(item)}
+                                    className="p-2 text-slate-600 hover:text-slate-900 bg-slate-50 border border-slate-200 rounded-lg cursor-pointer"
+                                    title="تعديل"
+                                  >
+                                    <Pencil className="h-3.5 w-3.5" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setAdminCadreToDelete(item)}
+                                    className="p-2 text-red-600 bg-red-50 border border-red-200 rounded-lg cursor-pointer"
+                                    title="حذف"
+                                  >
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-600 pt-1">
+                              <span>
+                                رقم التأجير:{' '}
+                                <span className="font-mono tabular-nums text-slate-900" dir="ltr">
+                                  {item.leaseNumber || '—'}
+                                </span>
+                              </span>
+                              <span aria-hidden="true" className="text-slate-300">·</span>
+                              <span>
+                                الهاتف:{' '}
+                                {formattedPhone ? (
+                                  <a href={`tel:${formattedPhone}`} className="font-mono tabular-nums text-slate-900 underline" dir="ltr">
+                                    {formattedPhone}
+                                  </a>
+                                ) : (
+                                  '—'
+                                )}
+                              </span>
+                            </div>
+                            {item.email && (
+                              <div className="text-xs text-slate-600">
+                                البريد:{' '}
+                                <a href={`mailto:${item.email}`} className="font-mono text-slate-900 hover:underline" dir="ltr">
+                                  {item.email}
+                                </a>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+            </div>
           )}
         </div>
-      </div>
+      ) : (
+        <>
 
       {/* Stats Cards Dashboard Section */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -1277,6 +1859,153 @@ export const Teachers: React.FC = () => {
             })}
           </div>
         </div>
+      )}
+        </>
+      )}
+
+      {/* Add / Edit Administrative Cadre Modal */}
+      {isAdminCadreModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-900/50 flex items-center justify-center p-4" dir="rtl">
+          <div className="bg-white rounded-2xl border border-slate-200 w-full max-w-lg overflow-hidden shadow-xl">
+            <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between bg-slate-50/70">
+              <div className="flex items-center gap-2.5">
+                <ShieldCheck className="h-5 w-5 text-slate-800 shrink-0" />
+                <h3 className="text-base font-bold text-slate-900">
+                  {editingAdminCadre ? 'تعديل بيانات الإطار الإداري' : 'إضافة إطار إداري جديد'}
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsAdminCadreModalOpen(false)}
+                className="p-1.5 text-slate-400 hover:text-slate-700 rounded-lg hover:bg-slate-200/60 transition-colors cursor-pointer"
+                aria-label="إغلاق"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveAdminCadre} className="p-6 space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                  الاسم والنسب <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={adminForm.fullName}
+                  onChange={(e) => setAdminForm((prev) => ({ ...prev, fullName: e.target.value }))}
+                  placeholder="مثال: أمين سنوسي"
+                  className="w-full px-3.5 py-2.5 text-sm bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900/15 focus:border-slate-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                  رقم التأجير
+                </label>
+                <input
+                  type="text"
+                  dir="ltr"
+                  value={adminForm.leaseNumber}
+                  onChange={(e) => setAdminForm((prev) => ({ ...prev, leaseNumber: e.target.value }))}
+                  placeholder="مثال: 1234567"
+                  className="w-full px-3.5 py-2.5 text-sm font-mono tabular-nums bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900/15 focus:border-slate-500 text-right"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                  الإطار <span className="text-red-500">*</span>
+                </label>
+                <div className="flex flex-wrap gap-1.5 mb-2">
+                  {['مفتش', 'رئيس مكتب التربية البدنية', 'إطار إداري'].map((preset) => (
+                    <button
+                      key={preset}
+                      type="button"
+                      onClick={() => setAdminForm((prev) => ({ ...prev, cadre: preset }))}
+                      className={`px-3 py-1.5 text-xs font-semibold rounded-lg border transition-colors cursor-pointer whitespace-nowrap ${
+                        adminForm.cadre.trim() === preset
+                          ? 'bg-slate-900 text-white border-slate-900'
+                          : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                      }`}
+                    >
+                      {preset}
+                    </button>
+                  ))}
+                </div>
+                <input
+                  type="text"
+                  required
+                  value={adminForm.cadre}
+                  onChange={(e) => setAdminForm((prev) => ({ ...prev, cadre: e.target.value }))}
+                  placeholder="مفتش / رئيس مكتب التربية البدنية..."
+                  className="w-full px-3.5 py-2.5 text-sm bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900/15 focus:border-slate-500"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                    رقم الهاتف
+                  </label>
+                  <input
+                    type="tel"
+                    dir="ltr"
+                    value={adminForm.phone}
+                    onChange={(e) => setAdminForm((prev) => ({ ...prev, phone: e.target.value }))}
+                    placeholder="0661234567"
+                    className="w-full px-3.5 py-2.5 text-sm font-mono tabular-nums bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900/15 focus:border-slate-500 text-right"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                    البريد الإلكتروني
+                  </label>
+                  <input
+                    type="email"
+                    dir="ltr"
+                    value={adminForm.email}
+                    onChange={(e) => setAdminForm((prev) => ({ ...prev, email: e.target.value }))}
+                    placeholder="example@gmail.com"
+                    className="w-full px-3.5 py-2.5 text-sm font-mono bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900/15 focus:border-slate-500 text-right"
+                  />
+                </div>
+              </div>
+
+              <div className="pt-3 border-t border-slate-100 flex items-center justify-end gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => setIsAdminCadreModalOpen(false)}
+                  className="px-4 py-2 text-xs font-semibold text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg transition-colors cursor-pointer"
+                >
+                  إلغاء
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingAdminCadre}
+                  className="px-5 py-2 text-xs font-bold text-white bg-slate-900 hover:bg-slate-800 rounded-lg transition-colors cursor-pointer inline-flex items-center gap-1.5 disabled:opacity-60"
+                >
+                  <Save className="h-3.5 w-3.5" />
+                  <span>{isSavingAdminCadre ? 'جاري الحفظ...' : editingAdminCadre ? 'حفظ التعديلات' : 'حفظ الإطار الإداري'}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Confirm Delete Administrative Cadre Modal */}
+      {adminCadreToDelete && (
+        <ConfirmDeleteModal
+          isOpen={true}
+          onClose={() => setAdminCadreToDelete(null)}
+          onConfirm={handleConfirmDeleteAdminCadre}
+          title="حذف إطار إداري"
+          message={`هل أنت متأكد من رغبتك في حذف ${adminCadreToDelete.fullName} من لائحة الأطر الإدارية؟`}
+          itemName={adminCadreToDelete.fullName}
+          isDeleting={isDeletingAdminCadre}
+        />
       )}
 
       {/* Teacher Detail Modal */}
