@@ -25,6 +25,7 @@ export interface CalendarExportEvent {
   venue: string;
   category?: string;
   gender?: string;
+  matchNumber?: number;
   organizer?: string;
   coordinator?: string;
   referees?: string[];
@@ -580,6 +581,7 @@ export function buildAllCalendarEvents(
       venue: resolvedVenueName,
       category: m.ageCategory || parentT?.ageCategory || (m.stage ? `دور ${m.stage}` : 'مباراة رسمية'),
       gender: m.gender || parentT?.gender || 'Male',
+      matchNumber: m.drawMatchNumber,
       organizer: 'لجنة التحكيم والبرمجة بالمديرية',
       referees: uniqueRefs,
       tableReferees: tableRefNames,
@@ -729,15 +731,17 @@ export function generateProgramHtml({
 
   const hideSportColumn = !isAllSports && selectedSportIds.length === 1;
   const showNotesColumn = filtered.some(ev => Boolean(ev.notes && ev.notes.trim().length > 0));
-  const totalColumns = 6 + (hideSportColumn ? 0 : 1) + (showNotesColumn ? 1 : 0);
+  const totalColumns = 7 + (hideSportColumn ? 0 : 1) + (showNotesColumn ? 1 : 0);
 
   const rowsHtml = filtered.length > 0 ? filtered.map((ev, index) => {
     const targetCategoryDisplay = formatTargetCategoryWithGender(ev.category, ev.gender);
+    const matchNumDisplay = ev.matchNumber ? String(ev.matchNumber) : String(index + 1);
 
     return `
       <tr style="background-color: ${index % 2 === 0 ? '#ffffff' : '#f8fafc'};">
         <td style="border: 1px solid #cbd5e1; padding: 7px 5px; text-align: center; font-weight: bold; font-size: 11px;">${index + 1}</td>
         <td style="border: 1px solid #cbd5e1; padding: 7px 8px; text-align: center; white-space: nowrap; font-weight: bold; color: #1e3a8a; font-size: 11px;">${ev.date}${ev.time ? `<div style="font-size: 9.5px; color: #475569; margin-top: 2px;">${ev.time}</div>` : ''}</td>
+        <td style="border: 1px solid #cbd5e1; padding: 7px 6px; text-align: center; font-weight: bold; color: #0284c7; font-size: 11px;">${matchNumDisplay}</td>
         <td style="border: 1px solid #cbd5e1; padding: 7px 8px; font-weight: bold; color: #0f172a; font-size: 11px;">${ev.title}</td>
         ${!hideSportColumn ? `<td style="border: 1px solid #cbd5e1; padding: 7px 6px; text-align: center; font-size: 11px; font-weight: bold; color: #334155;">${ev.sportName}</td>` : ''}
         <td style="border: 1px solid #cbd5e1; padding: 7px 6px; text-align: center; font-weight: bold; font-size: 10.5px; color: #334155;">${targetCategoryDisplay}</td>
@@ -806,12 +810,13 @@ export function generateProgramHtml({
         <thead>
           <tr style="background-color: #1e3a8a; color: #ffffff;">
             <th style="border: 1px solid #0f172a; padding: 8px 4px; text-align: center; width: 4%; font-weight: bold;">ر.ت</th>
-            <th style="border: 1px solid #0f172a; padding: 8px 6px; text-align: center; width: 12%; font-weight: bold;">التاريخ</th>
-            <th style="border: 1px solid #0f172a; padding: 8px 8px; text-align: right; width: ${hideSportColumn ? '30%' : '26%'}; font-weight: bold;">المقابلة (مؤسسة ضد مؤسسة)</th>
-            ${!hideSportColumn ? `<th style="border: 1px solid #0f172a; padding: 8px 6px; text-align: center; width: 11%; font-weight: bold;">نوع الرياضة</th>` : ''}
-            <th style="border: 1px solid #0f172a; padding: 8px 6px; text-align: center; width: 14%; font-weight: bold;">الفئة المستهدفة</th>
-            <th style="border: 1px solid #0f172a; padding: 8px 6px; text-align: right; width: ${hideSportColumn ? '20%' : '15%'}; font-weight: bold;">مركز التباري</th>
-            <th style="border: 1px solid #0f172a; padding: 8px 6px; text-align: right; width: ${hideSportColumn ? '20%' : '14%'}; font-weight: bold;">الحكام</th>
+            <th style="border: 1px solid #0f172a; padding: 8px 6px; text-align: center; width: 13%; font-weight: bold;">التاريخ والتوقيت</th>
+            <th style="border: 1px solid #0f172a; padding: 8px 6px; text-align: center; width: 8%; font-weight: bold;">رقم المقابلة</th>
+            <th style="border: 1px solid #0f172a; padding: 8px 8px; text-align: right; width: ${hideSportColumn ? '26%' : '22%'}; font-weight: bold;">المقابلة</th>
+            ${!hideSportColumn ? `<th style="border: 1px solid #0f172a; padding: 8px 6px; text-align: center; width: 10%; font-weight: bold;">نوع الرياضة</th>` : ''}
+            <th style="border: 1px solid #0f172a; padding: 8px 6px; text-align: center; width: 13%; font-weight: bold;">الفئة المعنية</th>
+            <th style="border: 1px solid #0f172a; padding: 8px 6px; text-align: right; width: ${hideSportColumn ? '18%' : '14%'}; font-weight: bold;">مركز التباري</th>
+            <th style="border: 1px solid #0f172a; padding: 8px 6px; text-align: right; width: ${hideSportColumn ? '16%' : '12%'}; font-weight: bold;">الحكام</th>
             ${showNotesColumn ? `<th style="border: 1px solid #0f172a; padding: 8px 4px; text-align: center; width: 10%; font-weight: bold;">ملاحظات</th>` : ''}
           </tr>
         </thead>
