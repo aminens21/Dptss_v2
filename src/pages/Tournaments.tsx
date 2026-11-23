@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { DataService, SPORTS_MAP, getAgeCategoriesForSeason, deduplicateById, getCategoryGenderLabel, isClubTournament, normalizeCategoryKey, getTournamentLevelAr, isTeacherLevelAllowedForTournament, parseTournamentAllowedLevels, getCustomCategoryName, getCustomCategoryDetails, isSchoolSectorAllowedForTournament, getTournamentEducationSectorsAr, normalizeTournamentEducationSectors, getSchoolEducationSector, schoolNamesMatch, normalizeCanonicalSportId, areSportIdsEquivalent, isAffiliationAllowedByDisplayConfig, resolveEffectiveAffiliationMode, getEffectiveConfirmedBranches, resolveEffectiveTeacherCadre, findMatchingSchoolForTeacher } from '../lib/dataService';
+import { DataService, SPORTS_MAP, getAgeCategoriesForSeason, deduplicateById, getCategoryGenderLabel, isClubTournament, normalizeCategoryKey, getTournamentLevelAr, isTeacherLevelAllowedForTournament, isCrossCountryU15OpenToPrimary, parseTournamentAllowedLevels, getCustomCategoryName, getCustomCategoryDetails, isSchoolSectorAllowedForTournament, getTournamentEducationSectorsAr, normalizeTournamentEducationSectors, getSchoolEducationSector, schoolNamesMatch, normalizeCanonicalSportId, areSportIdsEquivalent, isAffiliationAllowedByDisplayConfig, resolveEffectiveAffiliationMode, getEffectiveConfirmedBranches, resolveEffectiveTeacherCadre, findMatchingSchoolForTeacher, isTrackOrCrossCountrySport } from '../lib/dataService';
 import { Tournament, User, Student, School, Sport, Match, Directorate, AffiliationDisplayConfig } from '../types';
 import { CountdownTimer } from '../components/CountdownTimer';
 import * as XLSX from 'xlsx';
@@ -213,6 +213,8 @@ export const Tournaments: React.FC = () => {
 
   // Helper to format category for badges elegantly in Arabic
   const formatCategoryBadge = (catId: string, sportTournaments: Tournament[] = [], sportId?: string) => {
+    const isCC = isTrackOrCrossCountrySport(sportId);
+
     // 1. Check custom age category details configured in settings first!
     const customDetails = getCustomCategoryDetails(catId, sportId, sportsConfig);
     if (customDetails && customDetails.name) {
@@ -232,41 +234,77 @@ export const Tournaments: React.FC = () => {
     const hasFemale = catTournaments.some(t => t.gender === 'Female' || t.gender === 'Mixed');
 
     // Custom age categories fallback
-    if (!['U12', 'U15', 'U18', 'U20'].includes(norm)) {
+    if (!['U12', 'U15', 'U17', 'U18', 'U20'].includes(norm)) {
       const customName = getCustomCategoryName(catId, sportId, sportsConfig);
       return { label: customName || catId, years: '' };
     }
 
-    if (norm === 'U12') {
-      const label = (hasFemale && !hasMale) ? 'برعمات' : (hasFemale && hasMale) ? 'براعم / برعمات' : 'براعم';
-      return {
-        label,
-        years: `مواليد ${startYear - 11} وما بعد`
-      };
+    if (isCC) {
+      if (norm === 'U12') {
+        const label = (hasFemale && !hasMale) ? 'برعمات' : (hasFemale && hasMale) ? 'براعم / برعمات' : 'براعم';
+        return {
+          label,
+          years: `مواليد ${startYear - 12} وما بعد`
+        };
+      }
+      if (norm === 'U15') {
+        const label = (hasFemale && !hasMale) ? 'صغيرات' : (hasFemale && hasMale) ? 'صغار / صغيرات' : 'صغار';
+        return {
+          label,
+          years: `مواليد ${startYear - 14}-${startYear - 13}`
+        };
+      }
+      if (norm === 'U18') {
+        const label = (hasFemale && !hasMale) ? 'فتيات' : (hasFemale && hasMale) ? 'فتيان / فتيات' : 'فتيان';
+        return {
+          label,
+          years: `مواليد ${startYear - 16}-${startYear - 15}`
+        };
+      }
+      if (norm === 'U20') {
+        const label = (hasFemale && !hasMale) ? 'شابات' : (hasFemale && hasMale) ? 'شبان / شابات' : 'شبان';
+        return {
+          label,
+          years: `مواليد ${startYear - 18}-${startYear - 17}`
+        };
+      }
+    } else {
+      if (norm === 'U12') {
+        return {
+          label: 'أقل من 12 سنة (U12)',
+          years: `مواليد ${startYear - 9}/${startYear - 10}/${startYear - 11}`
+        };
+      }
+      if (norm === 'U15') {
+        return {
+          label: 'أقل من 15 سنة (U15)',
+          years: `مواليد ${startYear - 12}/${startYear - 13}/${startYear - 14}`
+        };
+      }
+      if (norm === 'U17') {
+        return {
+          label: 'أقل من 17 سنة (U17)',
+          years: `مواليد ${startYear - 14}/${startYear - 15}/${startYear - 16}`
+        };
+      }
+      if (norm === 'U18') {
+        return {
+          label: 'أقل من 18 سنة (U18)',
+          years: `مواليد ${startYear - 15}/${startYear - 16}/${startYear - 17}`
+        };
+      }
+      if (norm === 'U20') {
+        return {
+          label: `مواليد ${startYear - 17} وما بعد`,
+          years: ''
+        };
+      }
     }
-    if (norm === 'U15') {
-      const label = (hasFemale && !hasMale) ? 'صغيرات' : (hasFemale && hasMale) ? 'صغار / صغيرات' : 'صغار';
-      return {
-        label,
-        years: `مواليد ${startYear - 14}/${startYear - 13}/${startYear - 12}`
-      };
-    }
-    if (norm === 'U18') {
-      const label = (hasFemale && !hasMale) ? 'فتيات' : (hasFemale && hasMale) ? 'فتيان / فتيات' : 'فتيان';
-      return {
-        label,
-        years: `مواليد ${startYear - 17}/${startYear - 16}/${startYear - 15}`
-      };
-    }
-    if (norm === 'U20') {
-      const label = (hasFemale && !hasMale) ? 'شابات' : (hasFemale && hasMale) ? 'شبان / شابات' : 'شبان';
-      return {
-        label,
-        years: `مواليد ${startYear - 17} وما بعد`
-      };
-    }
+
     if (/^CAT_/i.test(catId) || /^cat_/i.test(catId)) {
-      return { label: 'الصغار والصغيرات', years: `مواليد ${startYear - 14}/${startYear - 13}/${startYear - 12}` };
+      return isCC
+        ? { label: 'الصغار والصغيرات', years: `مواليد ${startYear - 14}-${startYear - 13}` }
+        : { label: 'أقل من 15 سنة (U15)', years: `مواليد ${startYear - 12}/${startYear - 13}/${startYear - 14}` };
     }
     return { label: catId, years: '' };
   };
@@ -952,7 +990,6 @@ export const Tournaments: React.FC = () => {
 
   // Group tournaments by sport & check programming status
   const sportsWithTournamentData = useMemo(() => {
-    const seasonalCats = getAgeCategoriesForSeason(activeSeason);
 
     const teacherCadre = resolveEffectiveTeacherCadre(
       mergedTeacherProfile,
@@ -971,8 +1008,12 @@ export const Tournaments: React.FC = () => {
 
       // For teachers (non-admins), filter tournaments to ONLY those allowed for their teaching cadre and school education sector
       if (isTeacherRole && !isManagerOfSport) {
-        sportTournaments = sportTournaments.filter(t => 
-          isTeacherLevelAllowedForTournament(teacherCadre, t.level, t.ageCategory) &&
+        const rawSportTourns = sportTournaments;
+        sportTournaments = rawSportTourns.filter(t => 
+          (
+            isTeacherLevelAllowedForTournament(teacherCadre, t.level, t.ageCategory, t.sportId || sport.id) ||
+            (teacherCadre === 'Primary' && isCrossCountryU15OpenToPrimary(t, rawSportTourns))
+          ) &&
           (!teacherSchoolObj || isSchoolSectorAllowedForTournament(teacherSchoolObj, t))
         );
       }
@@ -1000,7 +1041,7 @@ export const Tournaments: React.FC = () => {
           ? tournCats
           : ((sport.ageCategories && sport.ageCategories.length > 0)
             ? sport.ageCategories
-            : seasonalCats.map(c => c.id));
+            : getAgeCategoriesForSeason(activeSeason, undefined, sport.id).map(c => c.id));
       }
 
       // Active (non-withdrawn, display-allowed) students in this sport across all schools
@@ -1113,7 +1154,7 @@ export const Tournaments: React.FC = () => {
 
       if (sportTourns.length > 0) {
         const isAnyLevelAllowed = sportTourns.some(t => 
-          isTeacherLevelAllowedForTournament(teacherCadre, t.level, t.ageCategory)
+          isTeacherLevelAllowedForTournament(teacherCadre, t.level, t.ageCategory, t.sportId || sport.id)
         );
         const isAnySectorAllowed = !userSchool || sportTourns.some(t =>
           isSchoolSectorAllowedForTournament(userSchool, t)
@@ -1122,7 +1163,7 @@ export const Tournaments: React.FC = () => {
         if (!isAnyLevelAllowed) {
           const levelsSet = new Set<'Primary' | 'Middle' | 'High'>();
           sportTourns.forEach(t => {
-            const parsed = parseTournamentAllowedLevels(t.level, t.ageCategory);
+            const parsed = parseTournamentAllowedLevels(t.level, t.ageCategory, t.sportId || sport.id);
             if (parsed === 'ALL') {
               levelsSet.add('Primary');
               levelsSet.add('Middle');
@@ -1880,7 +1921,7 @@ export const Tournaments: React.FC = () => {
                             {(() => {
                               const levelSet = new Set<'Primary' | 'Middle' | 'High'>();
                               sportTournaments.forEach(t => {
-                                const parsed = parseTournamentAllowedLevels(t.level, t.ageCategory);
+                                const parsed = parseTournamentAllowedLevels(t.level, t.ageCategory, t.sportId || sport.id);
                                 if (parsed === 'ALL') {
                                   levelSet.add('Primary');
                                   levelSet.add('Middle');

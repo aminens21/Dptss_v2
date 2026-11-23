@@ -903,6 +903,7 @@ export const BASE_SPORTS: Record<string, { name: string; icon: string }> = {
   chess: { name: 'الشطرنج', icon: '♟️' },
   boxing: { name: 'الملاكمة', icon: '🥊' },
   judo: { name: 'الجيدو', icon: '🥋' },
+  weightlifting: { name: 'رفع الأثقال', icon: '🏋️' },
   karate: { name: 'الكراطي', icon: '🥋' },
   rugby: { name: 'الركبي', icon: '🏉' },
   futsal: { name: 'فوتسال (داخل القاعة)', icon: '⚽' },
@@ -930,14 +931,19 @@ export function getDefaultTeamAgeCategories(season: string): CustomAgeCategory[]
   const startYear = match ? parseInt(match[1], 10) : 2026;
   return [
     {
+      id: 'U12',
+      name: 'أقل من 12 سنة (U12)',
+      yearsExpression: `${startYear - 9}/${startYear - 10}/${startYear - 11}`
+    },
+    {
       id: 'U15',
-      name: 'الصغار والصغيرات',
-      yearsExpression: `${startYear - 14}/${startYear - 13}/${startYear - 12}`
+      name: 'أقل من 15 سنة (U15)',
+      yearsExpression: `${startYear - 12}/${startYear - 13}/${startYear - 14}`
     },
     {
       id: 'U18',
-      name: 'الفتيان والفتيات',
-      yearsExpression: `${startYear - 17}/${startYear - 16}/${startYear - 15}`
+      name: 'أقل من 18 سنة (U18)',
+      yearsExpression: `${startYear - 15}/${startYear - 16}/${startYear - 17}`
     }
   ];
 }
@@ -1062,18 +1068,19 @@ export interface OfficialLogos {
   frmssLogoHeight?: number;
 }
 
-const isCc = (val?: string | boolean): boolean => {
+export function isTrackOrCrossCountrySport(val?: string | boolean | null): boolean {
   if (typeof val === 'boolean') return val;
   if (typeof val === 'string') {
-    const s = val.toLowerCase();
-    return s.includes('cross') || s.includes('عدو') || s.includes('athlet') || s.includes('ألعاب القوى') || s.includes('العاب القوى');
+    const s = val.toLowerCase().trim();
+    return s === 'cross_country' || s === 'athletics' || s === 'track_field' || s.includes('cross') || s.includes('عدو') || s.includes('athlet') || s.includes('ألعاب القوى') || s.includes('العاب القوى');
   }
   return false;
-};
+}
+
+const isCc = isTrackOrCrossCountrySport;
 
 const parseYearsExpression = (expr: string): number[] => {
   if (!expr) return [];
-  // Check for "وما بعد" or "و ما بعد" or "+"
   const isPost = expr.includes('بعد') || expr.includes('>') || expr.includes('+');
   const yearsMatched = Array.from(expr.matchAll(/(\d{4})/g)).map(m => parseInt(m[1], 10));
   
@@ -1085,10 +1092,85 @@ const parseYearsExpression = (expr: string): number[] => {
   return yearsMatched;
 };
 
+function sanitizeCustomCategoryForSport(
+  cat: CustomAgeCategory,
+  sportId?: string,
+  season: string = '2026/2027'
+): CustomAgeCategory | null {
+  if (!cat || !cat.name || /^CAT_/i.test(cat.name)) return null;
+  const cleanId = normalizeCategoryKey(cat.id || cat.name);
+  const match = season.match(/(\d{4})/);
+  const startYear = match ? parseInt(match[1], 10) : 2026;
+
+  // Never allow U17 on team sports or Cross Country / Athletics
+  if (cleanId === 'U17' && sportId && (isTeamSport(sportId) || isTrackOrCrossCountrySport(sportId))) {
+    return null;
+  }
+
+  const isLegacyGenericArabic = /^(?:البراعم(?:\s+والبرعمات)?|البرعمات|الصغار(?:\s+والصغيرات)?|الصغيرات|الفتيان(?:\s+والفتيات)?|الفتيات|الشبان(?:\s+والشابات)?|الشابات)$/i.test(
+    cat.name.trim()
+  );
+
+  if (sportId && isTrackOrCrossCountrySport(sportId)) {
+    if (cleanId === 'U12') {
+      return { ...cat, id: 'U12', name: 'البراعم والبرعمات', yearsExpression: `${startYear - 12} وما بعد` };
+    }
+    if (cleanId === 'U15') {
+      return { ...cat, id: 'U15', name: 'الصغار والصغيرات', yearsExpression: `${startYear - 14}-${startYear - 13}` };
+    }
+    if (cleanId === 'U18') {
+      return { ...cat, id: 'U18', name: 'الفتيان والفتيات', yearsExpression: `${startYear - 16}-${startYear - 15}` };
+    }
+    if (cleanId === 'U20') {
+      return { ...cat, id: 'U20', name: 'الشبان والشابات', yearsExpression: `${startYear - 18}-${startYear - 17}` };
+    }
+  } else if (sportId && isTeamSport(sportId)) {
+    if (cleanId === 'U12' && (isLegacyGenericArabic || cat.name.includes('U12'))) {
+      return {
+        ...cat,
+        id: 'U12',
+        name: 'أقل من 12 سنة (U12)',
+        yearsExpression: cat.yearsExpression && !cat.yearsExpression.includes('2014') ? cat.yearsExpression : `${startYear - 9}/${startYear - 10}/${startYear - 11}`
+      };
+    }
+    if (cleanId === 'U15' && (isLegacyGenericArabic || cat.name.includes('U15'))) {
+      return {
+        ...cat,
+        id: 'U15',
+        name: 'أقل من 15 سنة (U15)',
+        yearsExpression: cat.yearsExpression || `${startYear - 12}/${startYear - 13}/${startYear - 14}`
+      };
+    }
+    if (cleanId === 'U18' && (isLegacyGenericArabic || cat.name.includes('U18'))) {
+      return {
+        ...cat,
+        id: 'U18',
+        name: 'أقل من 18 سنة (U18)',
+        yearsExpression: cat.yearsExpression || `${startYear - 15}/${startYear - 16}/${startYear - 17}`
+      };
+    }
+  } else if (sportId) {
+    if (isLegacyGenericArabic) {
+      if (cleanId === 'U12') return { ...cat, id: 'U12', name: 'أقل من 12 سنة (U12)', yearsExpression: `${startYear - 9}/${startYear - 10}/${startYear - 11}` };
+      if (cleanId === 'U15') return { ...cat, id: 'U15', name: 'أقل من 15 سنة (U15)', yearsExpression: `${startYear - 12}/${startYear - 13}/${startYear - 14}` };
+      if (cleanId === 'U17') return { ...cat, id: 'U17', name: 'أقل من 17 سنة (U17)', yearsExpression: `${startYear - 14}/${startYear - 15}/${startYear - 16}` };
+      if (cleanId === 'U18') return { ...cat, id: 'U18', name: 'أقل من 18 سنة (U18)', yearsExpression: `${startYear - 15}/${startYear - 16}/${startYear - 17}` };
+      if (cleanId === 'U20') return { ...cat, id: 'U20', name: `مواليد ${startYear - 17} وما بعد`, yearsExpression: `${startYear - 17} وما بعد` };
+    }
+  }
+
+  return {
+    ...cat,
+    id: cleanId || cat.id,
+    name: /^CAT_/i.test(cat.name) ? cleanId : cat.name
+  };
+}
+
 export const getAgeCategoriesForSeason = (season: string, gender?: 'Male' | 'Female', sportIdOrIsCc?: string | boolean) => {
   const match = season.match(/(\d{4})/);
   const startYear = match ? parseInt(match[1], 10) : 2026;
-  const isCrossCountry = isCc(sportIdOrIsCc);
+  const isCrossCountryOrAthletics = isTrackOrCrossCountrySport(sportIdOrIsCc);
+  const isTeam = typeof sportIdOrIsCc === 'string' && isTeamSport(sportIdOrIsCc);
 
   // Check if we have dynamic custom age categories configured for this sport
   if (typeof sportIdOrIsCc === 'string') {
@@ -1096,38 +1178,38 @@ export const getAgeCategoriesForSeason = (season: string, gender?: 'Male' | 'Fem
       const localSports = JSON.parse(localStorage.getItem('taourirt_sports_config') || '[]');
       const foundSport = localSports.find((s: any) => s.id === sportIdOrIsCc);
       if (foundSport && foundSport.customAgeCategories && foundSport.customAgeCategories.length > 0) {
-        return foundSport.customAgeCategories
-          .filter((cat: any) => cat && cat.name && !/^CAT_/i.test(cat.name))
-          .map((cat: any) => {
+        const sanitized = foundSport.customAgeCategories
+          .map((cat: any) => sanitizeCustomCategoryForSport(cat, sportIdOrIsCc, season))
+          .filter((cat: any): cat is CustomAgeCategory => Boolean(cat));
+        if (sanitized.length > 0) {
+          return sanitized.map((cat: CustomAgeCategory) => {
             const cleanId = normalizeCategoryKey(cat.id || cat.name);
-            const cleanName = (/^CAT_/i.test(cat.name) || /^cat_/i.test(cat.name))
-              ? (cleanId === 'U12' ? 'البراعم' : cleanId === 'U18' ? 'الفتيان' : cleanId === 'U20' ? 'الشبان' : 'الصغار')
-              : cat.name;
             const years = parseYearsExpression(cat.yearsExpression);
             return {
               id: cleanId,
-              name: `${cleanName}${cat.yearsExpression ? ` - ${cat.yearsExpression}` : ''}`,
-              shortName: cleanName,
+              name: `${cat.name}${cat.yearsExpression ? ` - مواليد ${cat.yearsExpression}` : ''}`,
+              shortName: cat.name,
               years
             };
           });
+        }
       }
     } catch (e) {
       console.warn("Error loading custom age categories in getAgeCategoriesForSeason:", e);
     }
   }
 
-  const u12Label = gender === 'Female' ? 'البرعمات (إناث)' : gender === 'Male' ? 'البراعم (ذكور)' : 'البراعم والبرعمات';
-  const u15Label = gender === 'Female' ? 'الصغيرات (إناث)' : gender === 'Male' ? 'الصغار (ذكور)' : 'الصغار والصغيرات';
-  const u18Label = gender === 'Female' ? 'الفتيات (إناث)' : gender === 'Male' ? 'الفتيان (ذكور)' : 'الفتيان والفتيات';
-  const u20Label = gender === 'Female' ? 'الشابات (إناث)' : gender === 'Male' ? 'الشبان (ذكور)' : 'الشبان والشابات';
+  if (isCrossCountryOrAthletics) {
+    // العدو الريفي وألعاب القوى:
+    // البراعم والبرعمات: مواليد 2014 وما بعد (...../2016/2015/2014)
+    // الصغار والصغيرات: مواليد 2012-2013
+    // الفتيان والفتيات: مواليد 2010-2011
+    // الشبان والشابات: مواليد 2008-2009
+    const u12Label = gender === 'Female' ? 'البرعمات (إناث)' : gender === 'Male' ? 'البراعم (ذكور)' : 'البراعم والبرعمات';
+    const u15Label = gender === 'Female' ? 'الصغيرات (إناث)' : gender === 'Male' ? 'الصغار (ذكور)' : 'الصغار والصغيرات';
+    const u18Label = gender === 'Female' ? 'الفتيات (إناث)' : gender === 'Male' ? 'الفتيان (ذكور)' : 'الفتيان والفتيات';
+    const u20Label = gender === 'Female' ? 'الشابات (إناث)' : gender === 'Male' ? 'الشبان (ذكور)' : 'الشبان والشابات';
 
-  if (isCrossCountry) {
-    // Cross Country 2026/2027:
-    // U12: البراعم والبرعمات (مواليد 2014 وما بعد) -> startYear - 12
-    // U15: الصغار والصغيرات (مواليد 2013/2012) -> [startYear - 14, startYear - 13]
-    // U18: الفتيان والفتيات (مواليد 2011/2010) -> [startYear - 16, startYear - 15]
-    // U20: الشبان والشابات (مواليد 2009/2008) -> [startYear - 18, startYear - 17]
     return [
       { 
         id: 'U12', 
@@ -1137,69 +1219,88 @@ export const getAgeCategoriesForSeason = (season: string, gender?: 'Male' | 'Fem
       },
       { 
         id: 'U15', 
-        name: `${u15Label} - مواليد ${startYear - 13}/${startYear - 14}`, 
+        name: `${u15Label} - مواليد ${startYear - 14}-${startYear - 13}`, 
         shortName: u15Label, 
         years: [startYear - 14, startYear - 13] 
       },
       { 
         id: 'U18', 
-        name: `${u18Label} - مواليد ${startYear - 15}/${startYear - 16}`, 
+        name: `${u18Label} - مواليد ${startYear - 16}-${startYear - 15}`, 
         shortName: u18Label, 
         years: [startYear - 16, startYear - 15] 
       },
       { 
         id: 'U20', 
-        name: `${u20Label} - مواليد ${startYear - 17}/${startYear - 18}`, 
+        name: `${u20Label} - مواليد ${startYear - 18}-${startYear - 17}`, 
         shortName: u20Label, 
         years: [startYear - 18, startYear - 17] 
       }
     ];
-  } else if (typeof sportIdOrIsCc === 'string' && isTeamSport(sportIdOrIsCc)) {
-    // Team sports default: U15 and U18 only
-    // 2026/2027: U15 = 2012/2013/2014, U18 = 2009/2010/2011
-    // Subsequent seasons shift birth years dynamically
+  }
+
+  const gTag = gender === 'Female' ? ' إناث' : gender === 'Male' ? ' ذكور' : '';
+  const u12TeamLabel = `أقل من 12 سنة (U12${gTag})`;
+  const u15TeamLabel = `أقل من 15 سنة (U15${gTag})`;
+  const u17Label = `أقل من 17 سنة (U17${gTag})`;
+  const u18TeamLabel = `أقل من 18 سنة (U18${gTag})`;
+  const u20Label = gender === 'Female' ? `مواليد ${startYear - 17} وما بعد (إناث)` : gender === 'Male' ? `مواليد ${startYear - 17} وما بعد (ذكور)` : `مواليد ${startYear - 17} وما بعد`;
+
+  if (isTeam) {
+    // الألعاب الجماعية: U12 و U15 و U18 فقط (بدون U17)
+    // U12: 2017/2016/2015
+    // U15: 2014/2013/2012
+    // U18: 2011/2010/2009
     return [
       { 
+        id: 'U12', 
+        name: `${u12TeamLabel} - مواليد ${startYear - 9}/${startYear - 10}/${startYear - 11}`, 
+        shortName: u12TeamLabel, 
+        years: [startYear - 11, startYear - 10, startYear - 9] 
+      },
+      { 
         id: 'U15', 
-        name: `${u15Label} - مواليد ${startYear - 14}/${startYear - 13}/${startYear - 12}`, 
-        shortName: u15Label, 
+        name: `${u15TeamLabel} - مواليد ${startYear - 12}/${startYear - 13}/${startYear - 14}`, 
+        shortName: u15TeamLabel, 
         years: [startYear - 14, startYear - 13, startYear - 12] 
       },
       { 
         id: 'U18', 
-        name: `${u18Label} - مواليد ${startYear - 17}/${startYear - 16}/${startYear - 15}`, 
-        shortName: u18Label, 
+        name: `${u18TeamLabel} - مواليد ${startYear - 15}/${startYear - 16}/${startYear - 17}`, 
+        shortName: u18TeamLabel, 
         years: [startYear - 17, startYear - 16, startYear - 15] 
       }
     ];
   } else {
-    // Other individual sports:
-    // U12: مواليد 2015 وما بعد
-    // U15: مواليد 2012/2013/2014
-    // U18: مواليد 2009/2010/2011
-    // U20: مواليد 2009 وما بعد
+    // رياضات أخرى (رفع الأثقال، الجيدو، الكراطي، الملاكمة، البادمنتون، كرة الطاولة، الشطرنج...):
+    // تشمل U17 (2012/2011/2010) بالإضافة إلى U12 و U15 و U18 و (2009 وما بعد)
     return [
       { 
         id: 'U12', 
-        name: `${u12Label} - مواليد ${startYear - 11} وما بعد`, 
-        shortName: u12Label, 
-        years: Array.from({ length: 15 }, (_, i) => startYear - 11 + i)
+        name: `${u12TeamLabel} - مواليد ${startYear - 9}/${startYear - 10}/${startYear - 11}`, 
+        shortName: u12TeamLabel, 
+        years: [startYear - 11, startYear - 10, startYear - 9] 
       },
       { 
         id: 'U15', 
-        name: `${u15Label} - مواليد ${startYear - 14}/${startYear - 13}/${startYear - 12}`, 
-        shortName: u15Label, 
+        name: `${u15TeamLabel} - مواليد ${startYear - 12}/${startYear - 13}/${startYear - 14}`, 
+        shortName: u15TeamLabel, 
         years: [startYear - 14, startYear - 13, startYear - 12] 
       },
       { 
+        id: 'U17', 
+        name: `${u17Label} - مواليد ${startYear - 14}/${startYear - 15}/${startYear - 16}`, 
+        shortName: u17Label, 
+        years: [startYear - 16, startYear - 15, startYear - 14] 
+      },
+      { 
         id: 'U18', 
-        name: `${u18Label} - مواليد ${startYear - 17}/${startYear - 16}/${startYear - 15}`, 
-        shortName: u18Label, 
+        name: `${u18TeamLabel} - مواليد ${startYear - 15}/${startYear - 16}/${startYear - 17}`, 
+        shortName: u18TeamLabel, 
         years: [startYear - 17, startYear - 16, startYear - 15] 
       },
       { 
         id: 'U20', 
-        name: `${u20Label} - مواليد ${startYear - 17} وما بعد`, 
+        name: u20Label, 
         shortName: u20Label, 
         years: Array.from({ length: 15 }, (_, i) => startYear - 17 + i)
       }
@@ -1210,19 +1311,19 @@ export const getAgeCategoriesForSeason = (season: string, gender?: 'Male' | 'Fem
 export function normalizeCategoryKey(catStr: any): string {
   if (!catStr) return 'U15';
   
-  // Convert to string safely to avoid .trim() errors if catStr is not a string primitive
   const s = String(catStr).trim();
   const upper = s.toUpperCase();
   
-  if (upper.includes('U12') || upper.includes('براعم') || upper.includes('برعمات')) return 'U12';
-  if (upper.includes('U15') || upper.includes('صغار') || upper.includes('صغيرات')) return 'U15';
-  if (upper.includes('U18') || upper.includes('فتيان') || upper.includes('فتيات')) return 'U18';
-  if (upper.includes('U20') || upper.includes('شبان') || upper.includes('شابات')) return 'U20';
-  if (upper === 'U12' || upper === 'U15' || upper === 'U18' || upper === 'U20') return upper;
+  if (upper.includes('U12') || upper.includes('أقل من 12') || upper.includes('اقل من 12') || upper.includes('براعم') || upper.includes('برعمات')) return 'U12';
+  if (upper.includes('U17') || upper.includes('أقل من 17') || upper.includes('اقل من 17')) return 'U17';
+  if (upper.includes('U15') || upper.includes('أقل من 15') || upper.includes('اقل من 15') || upper.includes('صغار') || upper.includes('صغيرات')) return 'U15';
+  if (upper.includes('U18') || upper.includes('أقل من 18') || upper.includes('اقل من 18') || upper.includes('فتيان') || upper.includes('فتيات')) return 'U18';
+  if (upper.includes('U20') || upper.includes('شبان') || upper.includes('شابات') || upper.includes('2009 وما بعد')) return 'U20';
+  if (upper === 'U12' || upper === 'U15' || upper === 'U17' || upper === 'U18' || upper === 'U20') return upper;
   
-  // Purge any technical auto-generated category hash (e.g. CAT_1793910455460_TEFB or cat_...)
   if (/^CAT_/i.test(s) || /^cat_/i.test(s) || s.length > 8) {
     if (s.includes('12')) return 'U12';
+    if (s.includes('17')) return 'U17';
     if (s.includes('18')) return 'U18';
     if (s.includes('20')) return 'U20';
     return 'U15';
@@ -1240,35 +1341,48 @@ export function getCategoryYearsLabel(catId: any, season: string = '2026/2027', 
     if (parts.length > 1) {
       return parts[1];
     }
+    return matched.name;
   }
   return normKey;
 }
 
-export function getCategoryShortName(category: any, gender?: string): string {
+export function getCategoryShortName(category: any, gender?: string, sportIdOrIsCc?: string | boolean): string {
   if (!category || typeof category !== 'string') return category || '';
   const normKey = normalizeCategoryKey(category);
-  if (normKey === 'U12') {
-    if (gender === 'Female' || gender === 'إناث') return 'البرعمات';
-    if (gender === 'Male' || gender === 'ذكور') return 'البراعم';
-    return 'البراعم والبرعمات';
+  const isCC = isTrackOrCrossCountrySport(sportIdOrIsCc);
+
+  if (isCC) {
+    if (normKey === 'U12') {
+      if (gender === 'Female' || gender === 'إناث') return 'البرعمات';
+      if (gender === 'Male' || gender === 'ذكور') return 'البراعم';
+      return 'البراعم والبرعمات';
+    }
+    if (normKey === 'U15') {
+      if (gender === 'Female' || gender === 'إناث') return 'الصغيرات';
+      if (gender === 'Male' || gender === 'ذكور') return 'الصغار';
+      return 'الصغار والصغيرات';
+    }
+    if (normKey === 'U18') {
+      if (gender === 'Female' || gender === 'إناث') return 'الفتيات';
+      if (gender === 'Male' || gender === 'ذكور') return 'الفتيان';
+      return 'الفتيان والفتيات';
+    }
+    if (normKey === 'U20') {
+      if (gender === 'Female' || gender === 'إناث') return 'الشابات';
+      if (gender === 'Male' || gender === 'ذكور') return 'الشبان';
+      return 'الشبان والشابات';
+    }
+  } else {
+    const gSuffix = (gender === 'Female' || gender === 'إناث') ? ' إناث' : (gender === 'Male' || gender === 'ذكور') ? ' ذكور' : '';
+    if (normKey === 'U12') return gSuffix ? `U12${gSuffix}` : 'أقل من 12 سنة (U12)';
+    if (normKey === 'U15') return gSuffix ? `U15${gSuffix}` : 'أقل من 15 سنة (U15)';
+    if (normKey === 'U17') return gSuffix ? `U17${gSuffix}` : 'أقل من 17 سنة (U17)';
+    if (normKey === 'U18') return gSuffix ? `U18${gSuffix}` : 'أقل من 18 سنة (U18)';
+    if (normKey === 'U20') return gSuffix ? `مواليد 2009 وما بعد (${gSuffix.trim()})` : 'مواليد 2009 وما بعد';
   }
-  if (normKey === 'U15') {
-    if (gender === 'Female' || gender === 'إناث') return 'الصغيرات';
-    if (gender === 'Male' || gender === 'ذكور') return 'الصغار';
-    return 'الصغار والصغيرات';
-  }
-  if (normKey === 'U18') {
-    if (gender === 'Female' || gender === 'إناث') return 'الفتيات';
-    if (gender === 'Male' || gender === 'ذكور') return 'الفتيان';
-    return 'الفتيان والفتيات';
-  }
-  if (normKey === 'U20') {
-    if (gender === 'Female' || gender === 'إناث') return 'الشابات';
-    if (gender === 'Male' || gender === 'ذكور') return 'الشبان';
-    return 'الشبان والشابات';
-  }
+
   if (/^CAT_/i.test(category) || /^cat_/i.test(category)) {
-    return 'الصغار والصغيرات';
+    return isCC ? 'الصغار والصغيرات' : 'U15';
   }
   return category;
 }
@@ -1306,11 +1420,13 @@ export function getCustomCategoryDetails(
             c.name.trim() === catId.trim() ||
             (c.id && catId && normalizeCategoryKey(c.id) === normalizeCategoryKey(catId) && normalizeCategoryKey(catId) !== 'U15')
           ) {
+            const sanitized = sanitizeCustomCategoryForSport(c, sportId || sport.id);
+            if (!sanitized) continue;
             return {
-              id: c.id || catId,
-              name: c.name,
-              yearsExpression: c.yearsExpression,
-              studentLimit: c.studentLimit
+              id: sanitized.id || catId,
+              name: sanitized.name,
+              yearsExpression: sanitized.yearsExpression,
+              studentLimit: (sanitized as any).studentLimit ?? c.studentLimit
             };
           }
         }
@@ -1327,8 +1443,8 @@ export function getCustomCategoryName(catId: string, sportId?: string, sportsCon
   if (custom && custom.name) {
     return custom.name;
   }
-  if (['U12', 'U15', 'U18', 'U20'].includes(normalizeCategoryKey(catId))) {
-    return getCategoryShortName(catId);
+  if (['U12', 'U15', 'U17', 'U18', 'U20'].includes(normalizeCategoryKey(catId))) {
+    return getCategoryShortName(catId, undefined, sportId);
   }
   return catId;
 }
@@ -1468,11 +1584,17 @@ export function findMatchingSchoolForTeacher(
   return undefined;
 }
 
-function getAllowedLevelsForAgeCategory(ageCategory?: string): Set<'Primary' | 'Middle' | 'High'> | null {
+function getAllowedLevelsForAgeCategory(
+  ageCategory?: string,
+  sportId?: string | null
+): Set<'Primary' | 'Middle' | 'High'> | null {
   if (!ageCategory) return null;
   const normCat = normalizeCategoryKey(ageCategory);
   if (normCat === 'U12') return new Set(['Primary']);
-  if (normCat === 'U15') return new Set(['Middle']);
+  if (normCat === 'U15') {
+    return sportId === 'cross_country' ? new Set(['Primary', 'Middle']) : new Set(['Middle']);
+  }
+  if (normCat === 'U17') return new Set(['Middle', 'High']);
   if (normCat === 'U18') return new Set(['Middle', 'High']);
   if (normCat === 'U20') return new Set(['High']);
   return null;
@@ -1480,9 +1602,10 @@ function getAllowedLevelsForAgeCategory(ageCategory?: string): Set<'Primary' | '
 
 export function parseTournamentAllowedLevels(
   tournamentLevel?: string,
-  ageCategory?: string
+  ageCategory?: string,
+  sportId?: string | null
 ): Set<'Primary' | 'Middle' | 'High'> | 'ALL' {
-  const catAllowed = getAllowedLevelsForAgeCategory(ageCategory);
+  const catAllowed = getAllowedLevelsForAgeCategory(ageCategory, sportId);
 
   const raw = String(tournamentLevel || '').trim();
   const isExplicitAll =
@@ -1514,9 +1637,10 @@ export function parseTournamentAllowedLevels(
 export function isSchoolLevelAllowedForTournament(
   schoolType: string,
   tournamentLevel?: string,
-  ageCategory?: string
+  ageCategory?: string,
+  sportId?: string | null
 ): boolean {
-  const allowedLevels = parseTournamentAllowedLevels(tournamentLevel, ageCategory);
+  const allowedLevels = parseTournamentAllowedLevels(tournamentLevel, ageCategory, sportId);
   if (allowedLevels === 'ALL') return true;
 
   const schoolLevelKey = normalizeCadreToLevelKey(schoolType) || inferLevelFromSchoolName(schoolType);
@@ -1528,9 +1652,10 @@ export function isSchoolLevelAllowedForTournament(
 export function isTeacherLevelAllowedForTournament(
   teachingCadre?: string,
   tournamentLevel?: string,
-  ageCategory?: string
+  ageCategory?: string,
+  sportId?: string | null
 ): boolean {
-  const allowedLevels = parseTournamentAllowedLevels(tournamentLevel, ageCategory);
+  const allowedLevels = parseTournamentAllowedLevels(tournamentLevel, ageCategory, sportId);
   if (allowedLevels === 'ALL') return true;
   if (!teachingCadre) return true; // Flexible fallback when no cadre/school can be determined
 
@@ -1540,26 +1665,51 @@ export function isTeacherLevelAllowedForTournament(
   return allowedLevels.has(teacherLevelKey);
 }
 
+export function isCrossCountryU15OpenToPrimary(
+  tournament: Pick<Tournament, 'sportId' | 'level' | 'ageCategory'>,
+  sportTournaments: Pick<Tournament, 'sportId' | 'level' | 'ageCategory' | 'status'>[]
+): boolean {
+  if (tournament.sportId !== 'cross_country') return false;
+  if (normalizeCategoryKey(tournament.ageCategory) !== 'U15') return false;
+  const raw = String(tournament.level || '').trim();
+  if (!raw || raw.includes('جميع') || raw.toUpperCase() === 'ALL') return true;
+  const tokens = raw
+    .split(/[,،/|]+/)
+    .map(x => normalizeCadreToLevelKey(x.trim()))
+    .filter((x): x is 'Primary' | 'Middle' | 'High' => Boolean(x));
+  if (tokens.includes('Primary')) return true;
+  const primaryAllowedInCc = sportTournaments.some(
+    other =>
+      other.sportId === 'cross_country' &&
+      other.status !== 'Draft' &&
+      isTeacherLevelAllowedForTournament('Primary', other.level, other.ageCategory, 'cross_country')
+  );
+  return primaryAllowedInCc && tokens.length === 1 && tokens[0] === 'Middle';
+}
+
 export function getCategoryLevel(categoryId: string): 'Primary' | 'Middle' | 'High' | 'Other' {
   const norm = normalizeCategoryKey(categoryId);
   if (norm === 'U12') return 'Primary';
   if (norm === 'U15') return 'Middle';
-  if (norm === 'U18' || norm === 'U20') return 'High';
+  if (norm === 'U17' || norm === 'U18' || norm === 'U20') return 'High';
   return 'Other';
 }
 
 export function isCategoryAllowedForTeacherLevel(
   cadreOrLevel?: string | null,
-  categoryId?: string | null
+  categoryId?: string | null,
+  sportId?: string | null
 ): boolean {
   const levelKey = normalizeCadreToLevelKey(cadreOrLevel) || inferLevelFromSchoolName(cadreOrLevel);
   if (!levelKey) return true;
   const normCat = normalizeCategoryKey(categoryId || '');
-  if (!normCat || !['U12', 'U15', 'U18', 'U20'].includes(normCat)) return true;
+  if (!normCat || !['U12', 'U15', 'U17', 'U18', 'U20'].includes(normCat)) return true;
 
-  if (levelKey === 'Primary') return normCat === 'U12';
-  if (levelKey === 'Middle') return normCat === 'U15' || normCat === 'U18';
-  if (levelKey === 'High') return normCat === 'U18' || normCat === 'U20';
+  if (levelKey === 'Primary') {
+    return sportId === 'cross_country' ? (normCat === 'U12' || normCat === 'U15') : normCat === 'U12';
+  }
+  if (levelKey === 'Middle') return normCat === 'U15' || normCat === 'U17' || normCat === 'U18';
+  if (levelKey === 'High') return normCat === 'U17' || normCat === 'U18' || normCat === 'U20';
   return true;
 }
 
@@ -1620,7 +1770,7 @@ export function getTournamentEducationSectorsAr(sectors?: ('public' | 'private')
 export function isSchoolEligibleForTournament(params: {
   school?: School | null;
   teachingCadre?: string;
-  tournament?: Pick<Tournament, 'level' | 'educationSectors'> | null;
+  tournament?: (Pick<Tournament, 'level' | 'educationSectors'> & { ageCategory?: string; sportId?: string }) | null;
 }): boolean {
   const { school, teachingCadre, tournament } = params;
   if (!tournament) return true;
@@ -1628,11 +1778,11 @@ export function isSchoolEligibleForTournament(params: {
     return false;
   }
   if (school?.type) {
-    if (!isSchoolLevelAllowedForTournament(school.type, tournament.level)) {
+    if (!isSchoolLevelAllowedForTournament(school.type, tournament.level, tournament.ageCategory, tournament.sportId)) {
       return false;
     }
   } else if (teachingCadre) {
-    if (!isTeacherLevelAllowedForTournament(teachingCadre, tournament.level)) {
+    if (!isTeacherLevelAllowedForTournament(teachingCadre, tournament.level, tournament.ageCategory, tournament.sportId)) {
       return false;
     }
   }
@@ -2068,35 +2218,54 @@ export function getCategoryGenderLabel(category: any, gender?: string, season: s
   const normKey = normalizeCategoryKey(category);
   const yearsMatch = (season || '').match(/\d{4}/g);
   const startYear = yearsMatch && yearsMatch.length > 0 ? parseInt(yearsMatch[0], 10) : 2026;
-  const isCrossCountry = isCc(sportIdOrIsCc);
+  const isCrossCountryOrAthletics = isTrackOrCrossCountrySport(sportIdOrIsCc);
 
-  const u12Years = isCrossCountry ? ` - مواليد ${startYear - 12} وما بعد` : ` - مواليد ${startYear - 11} وما بعد`;
-  const u15Years = isCrossCountry ? ` - مواليد ${startYear - 13}/${startYear - 14}` : ` - مواليد ${startYear - 14}/${startYear - 13}/${startYear - 12}`;
-  const u18Years = isCrossCountry ? ` - مواليد ${startYear - 15}/${startYear - 16}` : ` - مواليد ${startYear - 17}/${startYear - 16}/${startYear - 15}`;
-  const u20Years = isCrossCountry ? ` - مواليد ${startYear - 17}/${startYear - 18}` : ` - مواليد ${startYear - 17} وما بعد`;
+  if (isCrossCountryOrAthletics) {
+    const u12Years = ` - مواليد ${startYear - 12} وما بعد`;
+    const u15Years = ` - مواليد ${startYear - 14}-${startYear - 13}`;
+    const u18Years = ` - مواليد ${startYear - 16}-${startYear - 15}`;
+    const u20Years = ` - مواليد ${startYear - 18}-${startYear - 17}`;
 
-  if (normKey === 'U12') {
-    if (gender === 'Female' || gender === 'إناث') return `البرعمات (إناث)${u12Years}`;
-    if (gender === 'Male' || gender === 'ذكور') return `البراعم (ذكور)${u12Years}`;
-    return `البراعم والبرعمات${u12Years}`;
+    if (normKey === 'U12') {
+      if (gender === 'Female' || gender === 'إناث') return `البرعمات (إناث)${u12Years}`;
+      if (gender === 'Male' || gender === 'ذكور') return `البراعم (ذكور)${u12Years}`;
+      return `البراعم والبرعمات${u12Years}`;
+    }
+    if (normKey === 'U15') {
+      if (gender === 'Female' || gender === 'إناث') return `الصغيرات (إناث)${u15Years}`;
+      if (gender === 'Male' || gender === 'ذكور') return `الصغار (ذكور)${u15Years}`;
+      return `الصغار والصغيرات${u15Years}`;
+    }
+    if (normKey === 'U18') {
+      if (gender === 'Female' || gender === 'إناث') return `الفتيات (إناث)${u18Years}`;
+      if (gender === 'Male' || gender === 'ذكور') return `الفتيان (ذكور)${u18Years}`;
+      return `الفتيان والفتيات${u18Years}`;
+    }
+    if (normKey === 'U20') {
+      if (gender === 'Female' || gender === 'إناث') return `الشابات (إناث)${u20Years}`;
+      if (gender === 'Male' || gender === 'ذكور') return `الشبان (ذكور)${u20Years}`;
+      return `الشبان والشابات${u20Years}`;
+    }
+    if (/^CAT_/i.test(category) || /^cat_/i.test(category)) {
+      return `الصغار والصغيرات${u15Years}`;
+    }
+    return category;
   }
-  if (normKey === 'U15') {
-    if (gender === 'Female' || gender === 'إناث') return `الصغيرات (إناث)${u15Years}`;
-    if (gender === 'Male' || gender === 'ذكور') return `الصغار (ذكور)${u15Years}`;
-    return `الصغار والصغيرات${u15Years}`;
-  }
-  if (normKey === 'U18') {
-    if (gender === 'Female' || gender === 'إناث') return `الفتيات (إناث)${u18Years}`;
-    if (gender === 'Male' || gender === 'ذكور') return `الفتيان (ذكور)${u18Years}`;
-    return `الفتيان والفتيات${u18Years}`;
-  }
-  if (normKey === 'U20') {
-    if (gender === 'Female' || gender === 'إناث') return `الشابات (إناث)${u20Years}`;
-    if (gender === 'Male' || gender === 'ذكور') return `الشبان (ذكور)${u20Years}`;
-    return `الشبان والشابات${u20Years}`;
-  }
+
+  const gSuffix = (gender === 'Female' || gender === 'إناث') ? ' إناث' : (gender === 'Male' || gender === 'ذكور') ? ' ذكور' : '';
+  const u12Years = ` - مواليد ${startYear - 9}/${startYear - 10}/${startYear - 11}`;
+  const u15Years = ` - مواليد ${startYear - 12}/${startYear - 13}/${startYear - 14}`;
+  const u17Years = ` - مواليد ${startYear - 14}/${startYear - 15}/${startYear - 16}`;
+  const u18Years = ` - مواليد ${startYear - 15}/${startYear - 16}/${startYear - 17}`;
+  const u20Years = `مواليد ${startYear - 17} وما بعد${gSuffix ? ` (${gSuffix.trim()})` : ''}`;
+
+  if (normKey === 'U12') return `أقل من 12 سنة (U12${gSuffix})${u12Years}`;
+  if (normKey === 'U15') return `أقل من 15 سنة (U15${gSuffix})${u15Years}`;
+  if (normKey === 'U17') return `أقل من 17 سنة (U17${gSuffix})${u17Years}`;
+  if (normKey === 'U18') return `أقل من 18 سنة (U18${gSuffix})${u18Years}`;
+  if (normKey === 'U20') return u20Years;
   if (/^CAT_/i.test(category) || /^cat_/i.test(category)) {
-    return `الصغار والصغيرات${u15Years}`;
+    return `أقل من 15 سنة (U15${gSuffix})${u15Years}`;
   }
   return category;
 }
@@ -2126,15 +2295,17 @@ export function validateBirthDateForCategory(
   }
 
   const normCat = normalizeCategoryKey(category);
-  const isCrossCountry = isCc(sportIdOrIsCc);
+  const isCrossCountryOrAthletics = isTrackOrCrossCountrySport(sportIdOrIsCc);
   const cats = getAgeCategoriesForSeason(season, gender as any, sportIdOrIsCc);
   const catDef = cats.find(c => normalizeCategoryKey(c.id) === normCat);
-  const catLabel = getCategoryShortName(normCat, gender) || normCat;
+  const catLabel = getCategoryShortName(normCat, gender, sportIdOrIsCc) || normCat;
+  const match = (season || '').match(/(\d{4})/);
+  const startYear = match ? parseInt(match[1], 10) : 2026;
 
   if (catDef) {
-    if (normCat === 'U12') {
-      const minYear = catDef.years[0];
-      const expected = isCrossCountry ? `مواليد سنة 2014 وما بعد` : `مواليد سنة 2015 وما بعد`;
+    if (normCat === 'U12' && isCrossCountryOrAthletics) {
+      const minYear = catDef.years[0] ?? (startYear - 12);
+      const expected = `مواليد سنة ${minYear} وما بعد`;
       if (birthYear < minYear) {
         return {
           isValid: false,
@@ -2147,9 +2318,9 @@ export function validateBirthDateForCategory(
       return { isValid: true, birthYear, expectedYearsText: expected, categoryLabel: catLabel };
     }
 
-    if (normCat === 'U20' && !isCrossCountry) {
-      const minYear = catDef.years[0];
-      const expected = `مواليد سنة 2009 وما بعد`;
+    if (normCat === 'U20' && !isCrossCountryOrAthletics) {
+      const minYear = catDef.years[0] ?? (startYear - 17);
+      const expected = `مواليد سنة ${minYear} وما بعد`;
       if (birthYear < minYear) {
         return {
           isValid: false,
@@ -2163,7 +2334,7 @@ export function validateBirthDateForCategory(
     }
 
     const allowed = catDef.years;
-    const expected = `مواليد السنوات التالية: ${allowed.join(' / ')}`;
+    const expected = `مواليد السنوات التالية: ${[...allowed].sort((a, b) => b - a).join(' / ')}`;
     if (!allowed.includes(birthYear)) {
       return {
         isValid: false,
@@ -2947,7 +3118,7 @@ export const DataService = {
           sportName: sportLabel,
           ageCategory: normCat,
           gender: refTourn.gender,
-          level: refTourn.level || (normCat === 'U12' ? 'Primary' : normCat === 'U15' ? 'Middle' : (normCat === 'U18' || normCat === 'U20') ? 'High' : 'Middle,High'),
+          level: refTourn.level || (normCat === 'U12' ? 'Primary' : normCat === 'U15' ? (sportId === 'cross_country' ? 'Primary,Middle' : 'Middle') : (normCat === 'U18' || normCat === 'U20') ? 'High' : 'Middle,High'),
           scope: refTourn.scope || 'Provincial',
           affiliationType: 'club_affiliated',
           targetAffiliations: ['club_affiliated'],
@@ -6410,7 +6581,13 @@ export const DataService = {
       fetchedSports = Array.from(map.values());
     }
 
-    const allCategoryIds = getAgeCategoriesForSeason('2026/2027').map(c => c.id);
+    const getDefaultCatIdsForSport = (sId: string): string[] => {
+      if (isTeamSport(sId)) return ['U12', 'U15', 'U18'];
+      if (isTrackOrCrossCountrySport(sId)) return ['U12', 'U15', 'U18', 'U20'];
+      if (sId === 'judo' || sId === 'weightlifting' || sId === 'karate') return ['U15', 'U17', 'U18', 'U20'];
+      if (sId === 'boxing') return ['U17', 'U18', 'U20'];
+      return ['U12', 'U15', 'U17', 'U18', 'U20'];
+    };
 
     // 1. Merge default base sports
     const mergedBase: Sport[] = Object.entries(BASE_SPORTS).map(([id, s]) => {
@@ -6445,7 +6622,7 @@ export const DataService = {
         name: s.name,
         icon: s.icon,
         description: `منافسات ${s.name} الإقليمية`,
-        ageCategories: allCategoryIds,
+        ageCategories: getDefaultCatIdsForSport(id),
         studentLimit: 0,
         athleticsSpecialties: []
       };
@@ -6466,7 +6643,7 @@ export const DataService = {
           name: cleanName || 'رياضة جديدة',
           icon: item.icon || '🏆',
           description: item.description || `منافسات ${cleanName || 'رياضة جديدة'} المدرسية`,
-          ageCategories: item.ageCategories || allCategoryIds,
+          ageCategories: item.ageCategories || getDefaultCatIdsForSport(item.id),
           studentLimit: item.studentLimit !== undefined ? item.studentLimit : 0,
           athleticsSpecialties: item.athleticsSpecialties || [],
           isCustom: true
@@ -6474,23 +6651,27 @@ export const DataService = {
       });
 
     const allSports: Sport[] = deduplicateById<Sport>([...mergedBase, ...customSports]).map(s => {
-      const rawCats = (Array.isArray(s.ageCategories) ? s.ageCategories : allCategoryIds) as string[];
+      const sportDefaultCats = getDefaultCatIdsForSport(s.id);
+      const isTeam = isTeamSport(s.id);
+      const isCC = isTrackOrCrossCountrySport(s.id);
+      const rawCats = (Array.isArray(s.ageCategories) ? s.ageCategories : sportDefaultCats) as string[];
+      const allowedPool = isTeam
+        ? ['U12', 'U15', 'U18']
+        : isCC
+        ? ['U12', 'U15', 'U18', 'U20']
+        : ['U12', 'U15', 'U17', 'U18', 'U20'];
       
-      // Clean raw categories from any technical strings like CAT_1793910455460_TEFB or cat_...
+      // Clean raw categories from technical hashes and enforce sport-type separation (no U17 in team sports)
       const normalizedCats = Array.from(new Set(
         rawCats
           .map(c => normalizeCategoryKey(c))
-          .filter(c => !/^CAT_/i.test(c) && !/^cat_/i.test(c) && ['U12', 'U15', 'U18', 'U20'].includes(c))
+          .filter(c => !/^CAT_/i.test(c) && !/^cat_/i.test(c) && allowedPool.includes(c))
       ));
-      const validCats = normalizedCats.length > 0 ? normalizedCats : ['U12', 'U15', 'U18', 'U20'];
+      const validCats = normalizedCats.length > 0 ? normalizedCats : sportDefaultCats;
 
       const cleanedCustom = (s.customAgeCategories || [])
-        .filter(cat => cat && cat.name && !/^CAT_/i.test(cat.name))
-        .map(cat => ({
-          ...cat,
-          id: cat.id || cat.name,
-          name: cat.name
-        }));
+        .map(cat => sanitizeCustomCategoryForSport(cat, s.id))
+        .filter((cat): cat is CustomAgeCategory => Boolean(cat));
 
       // Clean category student limits keys
       const cleanCategoryLimits: Record<string, number> = {};
@@ -6498,7 +6679,7 @@ export const DataService = {
         Object.entries(s.categoryStudentLimits).forEach(([k, v]) => {
           if (!/^CAT_/i.test(k) && !/^cat_/i.test(k)) {
             const cleanKey = normalizeCategoryKey(k);
-            if (['U12', 'U15', 'U18', 'U20'].includes(cleanKey)) {
+            if (allowedPool.includes(cleanKey)) {
               cleanCategoryLimits[cleanKey] = v;
             }
           }
@@ -7852,6 +8033,7 @@ export const DataService = {
     allowedSportIds?: string[] | null;
     sportId?: string;
     tournamentId?: string;
+    gender?: string;
   } = {}): Promise<{ resetMatchesCount: number; resetCrossCountry: boolean; resetAthletics: boolean }> {
     const activeDirId = this.getActiveDirectorateId();
     const effectiveDirId = (!activeDirId || activeDirId === 'all') ? 'taourirt' : activeDirId;
@@ -7864,6 +8046,7 @@ export const DataService = {
     }
     const sportId = options.sportId ? String(options.sportId).trim() : undefined;
     const tournamentId = options.tournamentId ? String(options.tournamentId).trim() : undefined;
+    const genderFilter = options.gender && options.gender !== 'ALL' ? String(options.gender).trim() : undefined;
 
     let cachedSports = getLocal<Sport>('taourirt_sports_config', []);
     if (cachedSports.length === 0) {
@@ -7897,7 +8080,7 @@ export const DataService = {
     }
 
     const effectiveSportScope = sportId || targetTournamentObj?.sportId;
-    const hasExplicitScopeFilter = Boolean(sportId || tournamentId);
+    const hasExplicitScopeFilter = Boolean(sportId || tournamentId || genderFilter);
     const matchesToInspect = await this.getMatches();
     const targetMatchIds = new Set<string>();
 
@@ -7915,6 +8098,11 @@ export const DataService = {
           (m.gender === targetTournamentObj.gender || targetTournamentObj.gender === 'Mixed') &&
           ((m as any).affiliationType || 'non_club') === (targetTournamentObj.affiliationType || 'non_club');
         if (!directMatch && !metaMatch) {
+          return;
+        }
+      }
+      if (genderFilter && genderFilter !== 'Mixed') {
+        if (m.gender !== genderFilter && m.gender !== 'Mixed') {
           return;
         }
       }
@@ -8138,6 +8326,10 @@ export const DataService = {
     allowedSportIds?: string[] | null;
     sportId?: string;
     tournamentId?: string;
+    affiliationType?: 'non_club' | 'club_affiliated' | 'open';
+    ageCategory?: string;
+    gender?: string;
+    matchIds?: string[];
   } = {}): Promise<{ deletedMatchesCount: number }> {
     const activeDirId = this.getActiveDirectorateId();
     const { allowedSportIds } = options;
@@ -8149,6 +8341,12 @@ export const DataService = {
     }
     const sportId = options.sportId ? String(options.sportId).trim() : undefined;
     const tournamentId = options.tournamentId ? String(options.tournamentId).trim() : undefined;
+    const affiliationFilter = options.affiliationType;
+    const ageCategoryFilter = options.ageCategory ? normalizeCategoryKey(options.ageCategory) : undefined;
+    const genderFilter = options.gender && options.gender !== 'ALL' ? String(options.gender).trim() : undefined;
+    const explicitMatchIds = Array.isArray(options.matchIds) && options.matchIds.length > 0
+      ? new Set(options.matchIds.filter(Boolean))
+      : null;
 
     let cachedSports = getLocal<Sport>('taourirt_sports_config', []);
     if (cachedSports.length === 0) {
@@ -8162,9 +8360,13 @@ export const DataService = {
 
     const allTourns = await this.getTournaments();
     const tournamentSportMap = new Map<string, string>();
+    const tournamentByIdMap = new Map<string, Tournament>();
     allTourns.forEach(t => {
-      if (t && t.id && t.sportId) {
-        tournamentSportMap.set(t.id, t.sportId);
+      if (t && t.id) {
+        tournamentByIdMap.set(t.id, t);
+        if (t.sportId) {
+          tournamentSportMap.set(t.id, t.sportId);
+        }
       }
     });
 
@@ -8191,6 +8393,9 @@ export const DataService = {
 
     matchesToInspect.forEach(m => {
       if (!m || !m.id) return;
+      if (explicitMatchIds && !explicitMatchIds.has(m.id)) {
+        return;
+      }
       if (!doesMatchMatchSportScope(m, allowedSet, effectiveSportScope, tournamentSportMap, cachedSports)) {
         return;
       }
@@ -8204,6 +8409,26 @@ export const DataService = {
           (m.gender === targetTournamentObj.gender || targetTournamentObj.gender === 'Mixed') &&
           ((m as any).affiliationType || 'non_club') === (targetTournamentObj.affiliationType || 'non_club');
         if (!directMatch && !metaMatch) {
+          return;
+        }
+      }
+      if (affiliationFilter) {
+        const parentT = m.tournamentId ? tournamentByIdMap.get(m.tournamentId) : undefined;
+        const resolvedAff =
+          m.affiliationType ||
+          (parentT ? normalizeTournamentAffiliation(parentT.affiliationType, parentT.name) : undefined) ||
+          'non_club';
+        if (resolvedAff !== affiliationFilter) {
+          return;
+        }
+      }
+      if (ageCategoryFilter) {
+        if (normalizeCategoryKey(m.ageCategory || '') !== ageCategoryFilter) {
+          return;
+        }
+      }
+      if (genderFilter && genderFilter !== 'Mixed') {
+        if (m.gender !== genderFilter && m.gender !== 'Mixed') {
           return;
         }
       }
@@ -11220,10 +11445,20 @@ export function getGenderSpecificCategoryTitle(
 ): string {
   const norm = normalizeCategoryKey(category);
   const isFem = gender === 'Female';
-  if (norm === 'U12') return isFem ? 'البرعمات (U12 إناث)' : 'البراعم (U12 ذكور)';
-  if (norm === 'U15') return isFem ? 'الصغيرات (U15 إناث)' : 'الصغار (U15 ذكور)';
-  if (norm === 'U18') return isFem ? 'الفتيات (U18 إناث)' : 'الفتيان (U18 ذكور)';
-  if (norm === 'U20') return isFem ? 'الشابات (U20 إناث)' : 'الشبان (U20 ذكور)';
+  const isCC = isTrackOrCrossCountrySport(sportId);
+
+  if (isCC) {
+    if (norm === 'U12') return isFem ? 'البرعمات (إناث)' : 'البراعم (ذكور)';
+    if (norm === 'U15') return isFem ? 'الصغيرات (إناث)' : 'الصغار (ذكور)';
+    if (norm === 'U18') return isFem ? 'الفتيات (إناث)' : 'الفتيان (ذكور)';
+    if (norm === 'U20') return isFem ? 'الشابات (إناث)' : 'الشبان (ذكور)';
+  } else {
+    if (norm === 'U12') return isFem ? 'U12 إناث (أقل من 12 سنة)' : 'U12 ذكور (أقل من 12 سنة)';
+    if (norm === 'U15') return isFem ? 'U15 إناث (أقل من 15 سنة)' : 'U15 ذكور (أقل من 15 سنة)';
+    if (norm === 'U17') return isFem ? 'U17 إناث (أقل من 17 سنة)' : 'U17 ذكور (أقل من 17 سنة)';
+    if (norm === 'U18') return isFem ? 'U18 إناث (أقل من 18 سنة)' : 'U18 ذكور (أقل من 18 سنة)';
+    if (norm === 'U20') return isFem ? 'مواليد 2009 وما بعد (إناث)' : 'مواليد 2009 وما بعد (ذكور)';
+  }
 
   const rawCustom = getCustomCategoryName(norm, sportId) || norm;
   const separated = rawCustom

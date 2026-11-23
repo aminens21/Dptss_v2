@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Sport, Student, School, Tournament } from '../types';
-import { DataService, getAgeCategoriesForSeason, SPORTS_MAP, getCategoryGenderLabel, validateBirthDateForCategory, normalizeCategoryKey, isSchoolLevelAllowedForTournament, getTournamentLevelAr, isTeacherLevelAllowedForTournament, isSchoolSectorAllowedForTournament, getTournamentEducationSectorsAr, getSchoolEducationSector, schoolNamesMatch, resolveEffectiveTeacherCadre, isCategoryAllowedForTeacherLevel } from '../lib/dataService';
+import { DataService, getAgeCategoriesForSeason, SPORTS_MAP, getCategoryGenderLabel, validateBirthDateForCategory, normalizeCategoryKey, isSchoolLevelAllowedForTournament, getTournamentLevelAr, isTeacherLevelAllowedForTournament, isCrossCountryU15OpenToPrimary, isSchoolSectorAllowedForTournament, getTournamentEducationSectorsAr, getSchoolEducationSector, schoolNamesMatch, resolveEffectiveTeacherCadre, isCategoryAllowedForTeacherLevel, isTrackOrCrossCountrySport, isTeamSport } from '../lib/dataService';
 import { AthleticsService } from '../lib/athleticsService';
 import { useAuth } from '../contexts/AuthContext';
 import { X, GraduationCap, User, Calendar, Upload, AlertCircle, Lock, ShieldCheck, CheckCircle2, Camera } from 'lucide-react';
@@ -171,9 +171,9 @@ export const RegisterStudentModal: React.FC<RegisterStudentModalProps> = ({
     // If not a teacher, show everything
     if (userProfile?.role !== 'TEACHER' || !effectiveTeacherCadre) return baseCategories;
 
-    // Filter categories based on teacher cadre (Middle includes both U15 and U18)
-    return baseCategories.filter(catId => isCategoryAllowedForTeacherLevel(effectiveTeacherCadre, catId));
-  }, [baseCategories, userProfile?.role, effectiveTeacherCadre]);
+    // Filter categories based on teacher cadre (Middle includes both U15 and U18; Primary includes U12 and U15 in cross_country)
+    return baseCategories.filter(catId => isCategoryAllowedForTeacherLevel(effectiveTeacherCadre, catId, sport?.id));
+  }, [baseCategories, userProfile?.role, effectiveTeacherCadre, sport?.id]);
 
   const availableAthleticsDisciplines = useMemo(() => {
     if (sport?.id !== 'athletics') return [];
@@ -191,20 +191,6 @@ export const RegisterStudentModal: React.FC<RegisterStudentModalProps> = ({
     const year = parseInt(parts[0], 10);
     if (isNaN(year) || year < 1990 || year > 2030) return;
 
-    const match = currentSeason.match(/(\d{4})/);
-    const startYear = match ? parseInt(match[1], 10) : 2026;
-
-    let detectedCatId = '';
-    if (year >= startYear - 11) {
-      detectedCatId = 'U12';
-    } else if (year >= startYear - 14 && year <= startYear - 12) {
-      detectedCatId = 'U15';
-    } else if (year >= startYear - 17 && year <= startYear - 15) {
-      detectedCatId = 'U18';
-    } else {
-      detectedCatId = 'U20';
-    }
-
     if (preselectedCategory) {
       // Keep category strictly locked to the preselected tournament category, but validate and warn if birth date is outside allowed range
       const validation = validateBirthDateForCategory(newDate, preselectedCategory, currentSeason, gender, sport?.id);
@@ -214,8 +200,63 @@ export const RegisterStudentModal: React.FC<RegisterStudentModalProps> = ({
       return;
     }
 
-    if (detectedCatId) {
+    // Preserve currently selected category if it already matches the entered birth year (handles U17 overlap cleanly)
+    if (category && availableCategories.includes(category)) {
+      const currentValidation = validateBirthDateForCategory(newDate, category, currentSeason, gender, sport?.id);
+      if (currentValidation.isValid) {
+        return;
+      }
+    }
+
+    const match = currentSeason.match(/(\d{4})/);
+    const startYear = match ? parseInt(match[1], 10) : 2026;
+
+    const isCC = isTrackOrCrossCountrySport(sport?.id);
+    const isTeam = isTeamSport(sport?.id);
+    let detectedCatId = '';
+    if (isCC) {
+      if (year >= startYear - 12) {
+        detectedCatId = 'U12';
+      } else if (year >= startYear - 14 && year <= startYear - 13) {
+        detectedCatId = 'U15';
+      } else if (year >= startYear - 16 && year <= startYear - 15) {
+        detectedCatId = 'U18';
+      } else {
+        detectedCatId = 'U20';
+      }
+    } else if (isTeam) {
+      if (year >= startYear - 11 && year <= startYear - 9) {
+        detectedCatId = 'U12';
+      } else if (year >= startYear - 14 && year <= startYear - 12) {
+        detectedCatId = 'U15';
+      } else if (year >= startYear - 17 && year <= startYear - 15) {
+        detectedCatId = 'U18';
+      }
+    } else {
+      if (year >= startYear - 11 && year <= startYear - 9) {
+        detectedCatId = 'U12';
+      } else if (year >= startYear - 14 && year <= startYear - 12) {
+        detectedCatId = 'U15';
+      } else if (year >= startYear - 16 && year <= startYear - 14 && availableCategories.includes('U17')) {
+        detectedCatId = 'U17';
+      } else if (year >= startYear - 17 && year <= startYear - 15) {
+        detectedCatId = 'U18';
+      } else if (year >= startYear - 17) {
+        detectedCatId = 'U20';
+      }
+    }
+
+    if (detectedCatId && availableCategories.includes(detectedCatId)) {
       setCategory(detectedCatId);
+    } else if (detectedCatId) {
+      const matchingAvailable = availableCategories.find(catId =>
+        validateBirthDateForCategory(newDate, catId, currentSeason, gender, sport?.id).isValid
+      );
+      if (matchingAvailable) {
+        setCategory(matchingAvailable);
+      } else {
+        setCategory(detectedCatId);
+      }
     }
   };
 
@@ -329,7 +370,16 @@ export const RegisterStudentModal: React.FC<RegisterStudentModalProps> = ({
           ((t.affiliationType || 'non_club') === affiliationType || t.affiliationType === 'open')
         );
         if (relevantTournament) {
-          const isAllowed = isSchoolLevelAllowedForTournament(activeSchoolObj.type, relevantTournament.level);
+          const ccSportTourns = tournaments.filter(t => t.sportId === 'cross_country' && t.status !== 'Draft' && (t as any).isActive !== false);
+          const resolvedCadre = resolveEffectiveTeacherCadre(userProfile, activeSchoolObj);
+          const isAllowed =
+            isSchoolLevelAllowedForTournament(
+              activeSchoolObj.type,
+              relevantTournament.level,
+              relevantTournament.ageCategory || normCategory,
+              relevantTournament.sportId || sport.id
+            ) ||
+            isCrossCountryU15OpenToPrimary(relevantTournament, ccSportTourns);
           if (!isAllowed) {
             toast.error(`عذراً، السلك التعليمي لمؤسسة "${activeSchoolObj.name}" (${activeSchoolObj.type}) غير مسموح له بالمشاركة في هذه البطولة المخصصة لـ (${getTournamentLevelAr(relevantTournament.level)})`);
             setIsSubmitting(false);
@@ -337,8 +387,11 @@ export const RegisterStudentModal: React.FC<RegisterStudentModalProps> = ({
           }
 
           // Check teacher cadre (extra safety)
-          const resolvedCadre = resolveEffectiveTeacherCadre(userProfile, activeSchoolObj);
-          if (resolvedCadre && !isTeacherLevelAllowedForTournament(resolvedCadre, relevantTournament.level, relevantTournament.ageCategory)) {
+          if (
+            resolvedCadre &&
+            !isTeacherLevelAllowedForTournament(resolvedCadre, relevantTournament.level, relevantTournament.ageCategory || normCategory, relevantTournament.sportId || sport.id) &&
+            !(resolvedCadre === 'Primary' && isCrossCountryU15OpenToPrimary(relevantTournament, ccSportTourns))
+          ) {
             const cadreAr = resolvedCadre === 'Primary' ? 'ابتدائي' : resolvedCadre === 'Middle' ? 'إعدادي' : 'تأهيلي';
             toast.error(`عذراً، بصفتك أستاذ سلك (${cadreAr})، لا يمكنك التسجيل في بطولة مخصصة لـ (${getTournamentLevelAr(relevantTournament.level)})`);
             setIsSubmitting(false);
@@ -454,7 +507,7 @@ export const RegisterStudentModal: React.FC<RegisterStudentModalProps> = ({
                   <strong className="text-emerald-800 dark:text-emerald-300">
                     {preselectedGender ? (gender === 'Male' ? 'ذكور 👦' : 'إناث 👧') : ''}
                     {preselectedGender && preselectedCategory ? ' • ' : ''}
-                    {preselectedCategory ? `فئة ${getCategoryGenderLabel(category, gender, currentSeason)} 🏅` : ''}
+                    {preselectedCategory ? `فئة ${getCategoryGenderLabel(category, gender, currentSeason, sport?.id)} 🏅` : ''}
                     {(preselectedGender || preselectedCategory) && preselectedAffiliation ? ' • ' : ''}
                     {preselectedAffiliation ? (affiliationType === 'club_affiliated' ? 'منتمين للأندية 🟡' : 'لا منتمين (مدرسي) ⚪') : ''}
                   </strong>
@@ -663,7 +716,7 @@ export const RegisterStudentModal: React.FC<RegisterStudentModalProps> = ({
                   <span className={gender === 'Male' ? 'text-blue-600' : 'text-pink-600'}>✓</span>
                   <span>
                     {preselectedCategory ? 'فئة التلميذ(ة) المقفلة بالبطولة:' : (gender === 'Male' ? 'تمت إحالة التلميذ مباشرة لفئة:' : 'تمت إحالة التلميذة مباشرة لفئة:')}{' '}
-                    <strong className="underline">{getCategoryGenderLabel(category, gender, currentSeason)}</strong>
+                    <strong className="underline">{getCategoryGenderLabel(category, gender, currentSeason, sport?.id)}</strong>
                   </span>
                 </div>
               )}
@@ -693,7 +746,7 @@ export const RegisterStudentModal: React.FC<RegisterStudentModalProps> = ({
               <div className="w-full text-xs px-3.5 py-2.5 bg-slate-100/90 border border-slate-200 rounded-xl text-slate-800 font-bold flex items-center justify-between cursor-not-allowed select-none">
                 <span className="flex items-center gap-2">
                   <span>🏅</span>
-                  <span className="font-extrabold text-blue-950">{getCategoryGenderLabel(category, gender, currentSeason)}</span>
+                  <span className="font-extrabold text-blue-950">{getCategoryGenderLabel(category, gender, currentSeason, sport?.id)}</span>
                 </span>
                 <span className="text-[10px] text-slate-400 font-bold flex items-center gap-1">
                   <Lock className="w-3 h-3" /> مقفل

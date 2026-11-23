@@ -58,7 +58,7 @@ import { CommunicationWidget } from '../components/CommunicationWidget';
 import { doc, setDoc, getDoc, serverTimestamp, query, collection, where, getDocs } from 'firebase/firestore';
 import { auth, db } from '../firebase/config';
 import { User, Role, Directorate, School, Tournament, Match, Student, CrossCountryCategoryResult, AthleticsCategoryResult, AthleticsWinner, Sport, Referee, AffiliationDisplayConfig, BlockedSchedulePeriod } from '../types';
-import { DataService, SPORTS_MAP, getAgeCategoriesForSeason, getCategoryYearsLabel, normalizeCategoryKey, normalizeTournamentAffiliation, resolveEffectiveAffiliationMode, isAffiliationAllowedByDisplayConfig, findAllBlockedPeriodsForDate, isMatchProgramPendingApproval } from '../lib/dataService';
+import { DataService, SPORTS_MAP, getAgeCategoriesForSeason, getCategoryYearsLabel, normalizeCategoryKey, normalizeTournamentAffiliation, resolveEffectiveAffiliationMode, isAffiliationAllowedByDisplayConfig, findAllBlockedPeriodsForDate, isMatchProgramPendingApproval, isTrackOrCrossCountrySport } from '../lib/dataService';
 import { calculateTeamRankings, resolveRunnerParticipationType } from '../lib/crossCountryConfig';
 import { hasValidMatchTeams, formatTeamDisplayName, extractMatchGroupLabel, isPlaceholderTeamId, computeGroupStandings } from '../lib/drawTournamentUtils';
 import { resolveMatchAffiliation, resolveMatchRefereesInfo, getOrdinalRefLabel } from '../lib/programExportService';
@@ -1342,22 +1342,31 @@ export const Login: React.FC = () => {
       const normCat = normalizeCategoryKey(cat);
       const isFem = gender === 'Female';
       const isMixed = gender === 'Mixed';
+      const isCC = isTrackOrCrossCountrySport(sportId);
+      const genderLabel = isFem ? 'إناث' : isMixed ? 'مختلط' : 'ذكور';
 
-      if (normCat === 'U12') {
-        return isMixed ? 'براعم وبرعمات U12' : isFem ? 'برعمات U12' : 'براعم U12';
-      }
-      if (normCat === 'U15') {
-        return isMixed ? 'صغار وصغيرات U15' : isFem ? 'صغيرات U15' : 'صغار U15';
-      }
-      if (normCat === 'U18') {
-        return isMixed ? 'فتيان وفتيات U18' : isFem ? 'فتيات U18' : 'فتيان U18';
-      }
-      if (normCat === 'U20') {
-        return isMixed ? 'شبان وشابات U20' : isFem ? 'شابات U20' : 'شبان U20';
+      if (isCC) {
+        if (normCat === 'U12') {
+          return isMixed ? 'براعم وبرعمات' : isFem ? 'برعمات' : 'براعم';
+        }
+        if (normCat === 'U15') {
+          return isMixed ? 'صغار وصغيرات' : isFem ? 'صغيرات' : 'صغار';
+        }
+        if (normCat === 'U18') {
+          return isMixed ? 'فتيان وفتيات' : isFem ? 'فتيات' : 'فتيان';
+        }
+        if (normCat === 'U20') {
+          return isMixed ? 'شبان وشابات' : isFem ? 'شابات' : 'شبان';
+        }
+      } else {
+        if (normCat === 'U12') return `U12 ${genderLabel}`;
+        if (normCat === 'U15') return `U15 ${genderLabel}`;
+        if (normCat === 'U17') return `U17 ${genderLabel}`;
+        if (normCat === 'U18') return `U18 ${genderLabel}`;
+        if (normCat === 'U20') return `2009 وما بعد (${genderLabel})`;
       }
 
       const customName = DataService.getCustomCategoryName(cat, sportId, sportsConfig);
-      const genderLabel = isFem ? 'إناث' : isMixed ? 'مختلط' : 'ذكور';
       return customName !== cat ? `${customName} ${genderLabel} (${cat})` : `${cat} ${genderLabel}`;
     };
 
@@ -1461,7 +1470,7 @@ export const Login: React.FC = () => {
         { id: 'ALL_ALL', cat: 'ALL', gender: 'ALL', label: 'جميع الفئات المبرمجة 🌟' }
       ];
       
-      const catOrder: Record<string, number> = { 'U12': 1, 'U15': 2, 'U18': 3, 'U20': 4 };
+      const catOrder: Record<string, number> = { 'U12': 1, 'U15': 2, 'U17': 3, 'U18': 4, 'U20': 5 };
       const sortedKeys = uniqueCats.sort((a, b) => {
         const catA = a.split('__')[0];
         const catB = b.split('__')[0];

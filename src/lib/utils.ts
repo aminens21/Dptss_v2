@@ -224,14 +224,19 @@ export function fixTeacherFieldJumble(user: any): any {
   let rawPhone = user.phone;
   let rawCadre = String(user.teachingCadre || user.cadre || '').trim();
 
-  // Helper to check if string looks like a SOM/PPR lease number (e.g. 1280856, 1176420, FB93905)
+  const normalizeDigits = (v: string) =>
+    v.replace(/[٠-٩]/g, d => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d))).replace(/\.0$/, '').trim();
+
+  leaseNumber = normalizeDigits(leaseNumber).replace(/^(?:som|ppr)\s*[:\-]?\s*/i, '').trim();
+
+  // Helper to check if string looks like a SOM/PPR lease number (e.g. 1280856, 1982424, FB93905)
   function isLeaseLike(v: string) {
     if (!v) return false;
-    const clean = String(v).trim();
-    if (clean.includes('@')) return false;
+    const clean = normalizeDigits(String(v)).replace(/\s+/g, '');
+    if (!clean || clean.includes('@')) return false;
     if (isPhoneLike(clean)) return false;
-    // SOM / PPR: numeric (5-8 digits) or alpha+numeric code (e.g. FB93905, Fb65233)
-    return /^[a-zA-Z]{0,3}\d{4,8}$/.test(clean);
+    // SOM / PPR: numeric (4-10 digits) or alpha+numeric code (e.g. FB93905, Fb65233)
+    return /^[a-zA-Z]{0,4}\d{4,10}$/.test(clean);
   }
 
   // Gather all available values
@@ -239,20 +244,34 @@ export function fixTeacherFieldJumble(user: any): any {
     .map(f => (f !== undefined && f !== null ? String(f).trim() : ''))
     .filter(Boolean);
 
-  // 1. Detect Real Email
-  const realEmail = values.find(v => v.includes('@') || v.includes('gmail') || v.includes('hotmail') || v.includes('yahoo') || v.endsWith('.com') || v.endsWith('.fr') || v.endsWith('.ma'));
+  // 1. Detect Real Email (prefer explicit email field if already valid)
+  const isEmailLike = (v: string) =>
+    v.includes('@') || v.includes('gmail') || v.includes('hotmail') || v.includes('yahoo') || v.endsWith('.com') || v.endsWith('.fr') || v.endsWith('.ma');
+  const realEmail = (email && isEmailLike(email) ? email : '') || values.find(isEmailLike);
 
-  // 2. Detect Real Phone
-  const rawPhoneFound = values.find(v => v !== realEmail && isPhoneLike(v));
+  // 2. Detect Real Phone (prefer explicit rawPhone if already phone-like)
+  const rawPhoneStr = rawPhone !== undefined && rawPhone !== null ? String(rawPhone).trim() : '';
+  const rawPhoneFound =
+    (rawPhoneStr && rawPhoneStr !== realEmail && isPhoneLike(rawPhoneStr) ? rawPhoneStr : '') ||
+    values.find(v => v !== realEmail && isPhoneLike(v));
   const realPhone = rawPhoneFound ? formatMoroccanPhone(rawPhoneFound) : '';
 
-  // 3. Detect Real Lease Number
-  const realLease = values.find(v => v !== realEmail && v !== rawPhoneFound && isLeaseLike(v));
+  // 3. Detect Real Lease Number (prefer explicit leaseNumber if already lease-like)
+  const realLeaseRaw =
+    (leaseNumber && leaseNumber !== realEmail && leaseNumber !== rawPhoneFound && isLeaseLike(leaseNumber) ? leaseNumber : '') ||
+    values.find(v => v !== realEmail && v !== rawPhoneFound && isLeaseLike(v));
+  const realLease = realLeaseRaw ? normalizeDigits(realLeaseRaw).replace(/\s+/g, '') : '';
 
-  // 4. Detect Real School Location: text containing school terms or Arabic text
-  const realSchool = values.find(v => v !== realEmail && v !== rawPhoneFound && v !== realLease && (
-    v.includes('اع') || v.includes('ث') || v.includes('مدرسة') || v.includes('مدرسه') || v.includes('م.م') || v.includes('مجموع') || v.includes('إعداد') || v.includes('تأهيل') || v.includes('ابتدائ') || v.includes('مؤسس') || v.includes('ثانوية') || /[\u0600-\u06FF]/.test(v)
-  ));
+  // 4. Detect Real School Location: prefer explicit workLocation if school-like/Arabic and not email/phone/lease
+  const isSchoolText = (v: string) =>
+    Boolean(v) &&
+    v !== realEmail &&
+    v !== rawPhoneFound &&
+    v !== realLeaseRaw &&
+    !isPhoneLike(v) &&
+    !isLeaseLike(v) &&
+    (v.includes('اع') || v.includes('ث') || v.includes('مدرسة') || v.includes('مدرسه') || v.includes('م.م') || v.includes('مجموع') || v.includes('إعداد') || v.includes('تأهيل') || v.includes('ابتدائ') || v.includes('مؤسس') || v.includes('ثانوية') || /[\u0600-\u06FF]/.test(v));
+  const realSchool = (isSchoolText(workLocation) ? workLocation : '') || values.find(isSchoolText);
 
   // 5. Detect Real Cadre cleanly without falsely forcing HIGH on unknown/Primary teachers
   const normOrigCadre = String(user.teachingCadre || '').trim().toUpperCase();

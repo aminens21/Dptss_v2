@@ -15,7 +15,8 @@ import {
   normalizeCategoryKey,
   resolveSchoolCoach,
   schoolNamesMatch,
-  normalizeArabicMatchText
+  normalizeArabicMatchText,
+  isTrackOrCrossCountrySport
 } from './dataService';
 import { prepareFontEmbedCss } from './fontExportHelper';
 
@@ -91,13 +92,27 @@ export function canUserDownloadTournamentTablePdf(
  * Formats a concise gender-category badge such as "الفتيان (U18)" or "الصغيرات (U15)"
  * matching the official table format requested by the user.
  */
-export function formatCompactCategoryGender(category: string, gender: 'Male' | 'Female'): string {
+export function formatCompactCategoryGender(
+  category: string,
+  gender: 'Male' | 'Female',
+  sportId?: string
+): string {
   const norm = normalizeCategoryKey(category);
   const isFem = gender === 'Female';
-  if (norm === 'U12') return isFem ? 'البرعمات (U12)' : 'البراعم (U12)';
-  if (norm === 'U15') return isFem ? 'الصغيرات (U15)' : 'الصغار (U15)';
-  if (norm === 'U18') return isFem ? 'الفتيات (U18)' : 'الفتيان (U18)';
-  if (norm === 'U20') return isFem ? 'الشابات (U20)' : 'الشبان (U20)';
+  const isCC = isTrackOrCrossCountrySport(sportId);
+
+  if (isCC) {
+    if (norm === 'U12') return isFem ? 'البرعمات' : 'البراعم';
+    if (norm === 'U15') return isFem ? 'الصغيرات' : 'الصغار';
+    if (norm === 'U18') return isFem ? 'الفتيات' : 'الفتيان';
+    if (norm === 'U20') return isFem ? 'الشابات' : 'الشبان';
+  } else {
+    if (norm === 'U12') return isFem ? 'U12 إناث' : 'U12 ذكور';
+    if (norm === 'U15') return isFem ? 'U15 إناث' : 'U15 ذكور';
+    if (norm === 'U17') return isFem ? 'U17 إناث' : 'U17 ذكور';
+    if (norm === 'U18') return isFem ? 'U18 إناث' : 'U18 ذكور';
+    if (norm === 'U20') return isFem ? '2009 وما بعد إناث' : '2009 وما بعد ذكور';
+  }
   return isFem ? `${norm} إناث` : `${norm} ذكور`;
 }
 
@@ -134,7 +149,7 @@ export function buildParticipationTableRows(params: {
   const targetCat = ageCategory && ageCategory !== 'ALL' ? normalizeCategoryKey(ageCategory) : 'ALL';
   const targetGen = gender && gender !== 'ALL' && gender !== 'Both' && gender !== 'Mixed' ? gender : 'ALL';
 
-  const catOrder = ['U12', 'U15', 'U18', 'U20', 'OPEN'];
+  const catOrder = ['U12', 'U15', 'U17', 'U18', 'U20', 'OPEN'];
 
   const resolveSchoolMeta = (rawSchoolId?: string, rawSchoolName?: string) => {
     const matched = schools.find(
@@ -199,7 +214,7 @@ export function buildParticipationTableRows(params: {
           category: sCat,
           gender: sGen,
           affiliationType: sAff,
-          label: formatCompactCategoryGender(sCat, sGen)
+          label: formatCompactCategoryGender(sCat, sGen, sportId)
         });
       }
     });
@@ -241,7 +256,7 @@ export function buildParticipationTableRows(params: {
             category: normCat,
             gender: br.gender,
             affiliationType: br.affiliationType,
-            label: formatCompactCategoryGender(normCat, br.gender)
+            label: formatCompactCategoryGender(normCat, br.gender, sportId)
           });
         }
       });
@@ -461,7 +476,7 @@ export function formatTournamentRedBannerTitle(params: {
   }
   if (params.category && params.category !== 'ALL') {
     if (params.gender === 'Male' || params.gender === 'Female') {
-      parts.push(formatCompactCategoryGender(params.category, params.gender));
+      parts.push(formatCompactCategoryGender(params.category, params.gender, params.sportId));
     } else {
       parts.push(normalizeCategoryKey(params.category));
     }

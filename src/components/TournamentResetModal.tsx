@@ -88,6 +88,7 @@ export const TournamentResetModal: React.FC<TournamentResetModalProps> = ({
 
   const [selectedSportId, setSelectedSportId] = useState<string>('');
   const [selectedTournamentId, setSelectedTournamentId] = useState<string>('ALL');
+  const [selectedGenderFilter, setSelectedGenderFilter] = useState<'ALL' | 'Male' | 'Female'>('ALL');
   const [pendingConfirm, setPendingConfirm] = useState<ResetActionKind | null>(null);
   const [isExecuting, setIsExecuting] = useState(false);
 
@@ -102,10 +103,12 @@ export const TournamentResetModal: React.FC<TournamentResetModalProps> = ({
       if (!stillValid) {
         setSelectedSportId(availableSports[0].id);
         setSelectedTournamentId('ALL');
+        setSelectedGenderFilter('ALL');
       }
     } else {
       setSelectedSportId('');
       setSelectedTournamentId('ALL');
+      setSelectedGenderFilter('ALL');
     }
   }, [isOpen, availableSports]);
 
@@ -145,24 +148,32 @@ export const TournamentResetModal: React.FC<TournamentResetModalProps> = ({
       });
   }, [tournaments, selectedSportId, sportsConfig]);
 
-  // Matches matching the selected sport & optional branch in Section 2
+  // Matches matching the selected sport, optional branch, and optional gender in Section 2
   const specificTargetMatches = useMemo(() => {
     if (!selectedSportId) return [];
-    if (selectedTournamentId === 'ALL') {
-      return scopedMatches.filter(m => doesMatchBelongToSport(m, selectedSportId));
-    }
-    const targetTourn = sportBranchTournaments.find(t => t.id === selectedTournamentId);
+    const targetTourn = selectedTournamentId !== 'ALL'
+      ? sportBranchTournaments.find(t => t.id === selectedTournamentId)
+      : undefined;
+
     return scopedMatches.filter(m => {
-      if (m.tournamentId === selectedTournamentId) return true;
-      if (!targetTourn) return false;
-      return (
-        doesMatchBelongToSport(m, targetTourn.sportId) &&
-        normalizeCategoryKey(m.ageCategory) === normalizeCategoryKey(targetTourn.ageCategory) &&
-        (m.gender === targetTourn.gender || targetTourn.gender === 'Mixed') &&
-        ((m as any).affiliationType || 'non_club') === (targetTourn.affiliationType || 'non_club')
-      );
+      if (!doesMatchBelongToSport(m, selectedSportId)) return false;
+      if (selectedTournamentId !== 'ALL') {
+        const directMatch = m.tournamentId === selectedTournamentId;
+        const metaMatch =
+          !m.tournamentId &&
+          targetTourn &&
+          doesMatchBelongToSport(m, targetTourn.sportId) &&
+          normalizeCategoryKey(m.ageCategory) === normalizeCategoryKey(targetTourn.ageCategory) &&
+          (m.gender === targetTourn.gender || targetTourn.gender === 'Mixed') &&
+          ((m as any).affiliationType || 'non_club') === (targetTourn.affiliationType || 'non_club');
+        if (!directMatch && !metaMatch) return false;
+      }
+      if (selectedGenderFilter !== 'ALL' && m.gender !== selectedGenderFilter && m.gender !== 'Mixed') {
+        return false;
+      }
+      return true;
     });
-  }, [scopedMatches, selectedSportId, selectedTournamentId, sportBranchTournaments, tournamentSportMap, sportsConfig]);
+  }, [scopedMatches, selectedSportId, selectedTournamentId, selectedGenderFilter, sportBranchTournaments, tournamentSportMap, sportsConfig]);
 
   const specificScoredCount = useMemo(() => {
     return specificTargetMatches.filter(
@@ -226,7 +237,8 @@ export const TournamentResetModal: React.FC<TournamentResetModalProps> = ({
         const res = await DataService.resetMatchResultsByScope({
           allowedSportIds: scopeIds,
           sportId: cleanSportId,
-          tournamentId: selectedTournamentId !== 'ALL' ? selectedTournamentId : undefined
+          tournamentId: selectedTournamentId !== 'ALL' ? selectedTournamentId : undefined,
+          gender: selectedGenderFilter !== 'ALL' ? selectedGenderFilter : undefined
         });
         await onResetComplete();
         const sportLabel =
@@ -251,7 +263,8 @@ export const TournamentResetModal: React.FC<TournamentResetModalProps> = ({
         const res = await DataService.clearScheduledMatchesByScope({
           allowedSportIds: scopeIds,
           sportId: cleanSportId,
-          tournamentId: selectedTournamentId !== 'ALL' ? selectedTournamentId : undefined
+          tournamentId: selectedTournamentId !== 'ALL' ? selectedTournamentId : undefined,
+          gender: selectedGenderFilter !== 'ALL' ? selectedGenderFilter : undefined
         });
         await onResetComplete();
         const sportLabel =
@@ -461,15 +474,15 @@ export const TournamentResetModal: React.FC<TournamentResetModalProps> = ({
                   </span>
                   <div>
                     <h3 className="text-sm font-black text-slate-900">
-                      2. حذف نتائج بطولة معينة
+                      2. حذف نتائج أو برمجة فرع معين (وشجرة مقابلاته)
                     </h3>
                     <p className="text-xs text-slate-600">
-                      اختر الرياضة (والفرع إذا أردت) لحذف نتائجها فقط دون المساس بالبطولات الأخرى.
+                      اختر الرياضة والفرع والجنس لمسح نتائجه أو مسح برمجته وشجرة مقابلاته وإعادة برمجته من جديد دون المساس بباقي الفروع.
                     </p>
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
                   <div>
                     <label className="block text-[11px] font-bold text-slate-700 mb-1">
                       البطولة / الرياضة:
@@ -479,6 +492,7 @@ export const TournamentResetModal: React.FC<TournamentResetModalProps> = ({
                       onChange={e => {
                         setSelectedSportId(e.target.value);
                         setSelectedTournamentId('ALL');
+                        setSelectedGenderFilter('ALL');
                         setPendingConfirm(null);
                       }}
                       className="w-full text-xs font-bold rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -513,6 +527,24 @@ export const TournamentResetModal: React.FC<TournamentResetModalProps> = ({
                       ))}
                     </select>
                   </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                      الجنس (اختياري):
+                    </label>
+                    <select
+                      value={selectedGenderFilter}
+                      onChange={e => {
+                        setSelectedGenderFilter(e.target.value as 'ALL' | 'Male' | 'Female');
+                        setPendingConfirm(null);
+                      }}
+                      className="w-full text-xs font-bold rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                      <option value="ALL">الكل (ذكور وإناث)</option>
+                      <option value="Male">👦 ذكور فقط</option>
+                      <option value="Female">👧 إناث فقط</option>
+                    </select>
+                  </div>
                 </div>
 
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-1">
@@ -537,7 +569,7 @@ export const TournamentResetModal: React.FC<TournamentResetModalProps> = ({
                       className="px-3.5 py-2 rounded-xl text-xs font-black bg-blue-600 hover:bg-blue-700 text-white shadow-xs transition-all cursor-pointer shrink-0 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
                     >
                       <RotateCcw className="w-3.5 h-3.5" />
-                      <span>حذف نتائج هذه البطولة</span>
+                      <span>حذف نتائج هذا الفرع</span>
                     </button>
 
                     {selectedSportId !== 'cross_country' && selectedSportId !== 'athletics' && (
@@ -548,7 +580,7 @@ export const TournamentResetModal: React.FC<TournamentResetModalProps> = ({
                         className="px-3.5 py-2 rounded-xl text-xs font-black bg-rose-600 hover:bg-rose-700 text-white shadow-xs transition-all cursor-pointer shrink-0 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
                       >
                         <CalendarX2 className="w-3.5 h-3.5" />
-                        <span>حذف مباريات هذا الفرع</span>
+                        <span>مسح برمجة هذا الفرع وشجرة مقابلاته</span>
                       </button>
                     )}
                   </div>
@@ -564,12 +596,14 @@ export const TournamentResetModal: React.FC<TournamentResetModalProps> = ({
                           sportBranchTournaments.find(t => t.id === selectedTournamentId)?.name || ''
                         })`
                       : ''
+                  }${
+                    selectedGenderFilter === 'Male' ? ' — ذكور' : selectedGenderFilter === 'Female' ? ' — إناث' : ''
                   } فقط دون المساس بباقي الرياضات؟`
                 )}
 
                 {renderConfirmBar(
                   'SPECIFIC_TOURNAMENT_MATCHES',
-                  `تحذير: سيتم حذف جميع المباريات المبرمجة (${specificTargetMatches.length} مباراة) الخاصة بـ «${
+                  `تحذير: سيتم مسح جميع المباريات المبرمجة وشجرة المواجهات (${specificTargetMatches.length} مباراة) الخاصة بـ «${
                     availableSports.find(s => s.id === selectedSportId)?.name || selectedSportId
                   }»${
                     selectedTournamentId !== 'ALL'
@@ -577,7 +611,9 @@ export const TournamentResetModal: React.FC<TournamentResetModalProps> = ({
                           sportBranchTournaments.find(t => t.id === selectedTournamentId)?.name || ''
                         })`
                       : ''
-                  } نهائياً. هل تريد المتابعة؟`
+                  }${
+                    selectedGenderFilter === 'Male' ? ' — ذكور' : selectedGenderFilter === 'Female' ? ' — إناث' : ''
+                  } نهائياً لإعادة برمجتها من جديد. هل تريد المتابعة؟`
                 )}
               </div>
 

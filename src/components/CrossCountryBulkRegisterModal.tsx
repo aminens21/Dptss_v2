@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { School, Student, User, Tournament } from '../types';
-import { DataService, validateBirthDateForCategory, normalizeCategoryKey, getCategoryGenderLabel, getCategoryYearsLabel, isSchoolLevelAllowedForTournament, getTournamentLevelAr, isTeacherLevelAllowedForTournament, isSchoolSectorAllowedForTournament, getTournamentEducationSectorsAr, getSchoolEducationSector, schoolNamesMatch, resolveEffectiveTeacherCadre, isCategoryAllowedForTeacherLevel, findMatchingSchoolForTeacher } from '../lib/dataService';
+import { DataService, validateBirthDateForCategory, normalizeCategoryKey, getCategoryGenderLabel, getCategoryYearsLabel, isSchoolLevelAllowedForTournament, getTournamentLevelAr, isTeacherLevelAllowedForTournament, isCrossCountryU15OpenToPrimary, isSchoolSectorAllowedForTournament, getTournamentEducationSectorsAr, getSchoolEducationSector, schoolNamesMatch, resolveEffectiveTeacherCadre, isCategoryAllowedForTeacherLevel, findMatchingSchoolForTeacher } from '../lib/dataService';
 import { CROSS_COUNTRY_CATEGORIES, CrossCountryCategoryDef } from '../lib/crossCountryConfig';
 import { useAuth } from '../contexts/AuthContext';
 import * as XLSX from 'xlsx';
@@ -92,7 +92,10 @@ export const CrossCountryBulkRegisterModal: React.FC<CrossCountryBulkRegisterMod
   const ccTourns = useMemo(() => {
     if (!isTeacher) return baseCcTourns;
     return baseCcTourns.filter(t =>
-      isTeacherLevelAllowedForTournament(effectiveTeacherCadre, t.level, t.ageCategory) &&
+      (
+        isTeacherLevelAllowedForTournament(effectiveTeacherCadre, t.level, t.ageCategory, t.sportId || 'cross_country') ||
+        (effectiveTeacherCadre === 'Primary' && isCrossCountryU15OpenToPrimary(t, baseCcTourns))
+      ) &&
       (!teacherSchoolObj || isSchoolSectorAllowedForTournament(teacherSchoolObj, t))
     );
   }, [baseCcTourns, isTeacher, effectiveTeacherCadre, teacherSchoolObj]);
@@ -106,7 +109,11 @@ export const CrossCountryBulkRegisterModal: React.FC<CrossCountryBulkRegisterMod
     if (ccTourns.length > 0) {
       const matched = cats.filter(cat =>
         ccTourns.some(t => {
-          const matchesCategory = normalizeCategoryKey(t.ageCategory) === normalizeCategoryKey(cat.category);
+          const rawAge = String(t.ageCategory || '');
+          const matchesCategory =
+            rawAge.includes('جميع الفئات') ||
+            normalizeCategoryKey(rawAge) === 'OPEN' ||
+            normalizeCategoryKey(rawAge) === normalizeCategoryKey(cat.category);
           const matchesGender = (t.gender as string) === 'Both' || t.gender === 'Mixed' || t.gender === cat.gender;
           return matchesCategory && matchesGender;
         })
@@ -114,7 +121,7 @@ export const CrossCountryBulkRegisterModal: React.FC<CrossCountryBulkRegisterMod
       if (matched.length > 0) cats = matched;
     }
     if (isTeacher && effectiveTeacherCadre) {
-      return cats.filter(cat => isCategoryAllowedForTeacherLevel(effectiveTeacherCadre, cat.category));
+      return cats.filter(cat => isCategoryAllowedForTeacherLevel(effectiveTeacherCadre, cat.category, 'cross_country'));
     }
     return cats;
   }, [ccTourns, baseCcTourns.length, isTeacher, effectiveTeacherCadre]);
@@ -944,7 +951,14 @@ export const CrossCountryBulkRegisterModal: React.FC<CrossCountryBulkRegisterMod
         );
         if (relevantTournament) {
           if (relevantTournament.level) {
-            const isAllowed = isSchoolLevelAllowedForTournament(activeSchoolObj.type, relevantTournament.level);
+            const isAllowed =
+              isSchoolLevelAllowedForTournament(
+                activeSchoolObj.type,
+                relevantTournament.level,
+                relevantTournament.ageCategory || activeRaceDef.category,
+                relevantTournament.sportId || 'cross_country'
+              ) ||
+              (effectiveTeacherCadre === 'Primary' && isCrossCountryU15OpenToPrimary(relevantTournament, baseCcTourns));
             if (!isAllowed) {
               toast.error(`عذراً، السلك التعليمي لمؤسسة "${activeSchoolObj.name}" (${activeSchoolObj.type}) غير مسموح له بالمشاركة في هذه البطولة المخصصة لـ (${getTournamentLevelAr(relevantTournament.level)})`);
               setIsSubmitting(false);

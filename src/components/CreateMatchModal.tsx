@@ -920,18 +920,15 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
                   الفئة العمرية <span className="text-red-500">*</span>
                 </label>
                 <select
-                  value={ageCategory}
+                  value={normalizeCategoryKey(ageCategory)}
                   onChange={(e) => setAgeCategory(e.target.value)}
                   className="w-full text-xs rounded-lg border border-slate-200 px-3 py-2 text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 font-bold cursor-pointer"
                 >
-                  {getAgeCategoriesForSeason(currentSeason).map(cat => (
-                    <option key={cat.id} value={cat.shortName}>
+                  {getAgeCategoriesForSeason(currentSeason, undefined, currentSport).map(cat => (
+                    <option key={cat.id} value={cat.id}>
                       {cat.name}
                     </option>
                   ))}
-                  <option value="U17 (15-17 سنة)">U17 (15-17 سنة)</option>
-                  <option value="U15 (13-15 سنة)">U15 (13-15 سنة)</option>
-                  <option value="U13 (11-13 سنة)">U13 (11-13 سنة)</option>
                 </select>
               </div>
 

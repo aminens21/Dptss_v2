@@ -339,6 +339,49 @@ export const openWhatsApp = (phone: string, message: string): void => {
   window.open(url, '_blank', 'noopener,noreferrer');
 };
 
+/**
+ * Generates an official WhatsApp message addressed directly to a PE teacher containing their school's security code
+ */
+export const generateTeacherSecurityCodeWhatsAppMessage = (params: {
+  teacherName?: string;
+  schoolName: string;
+  accessCode: string;
+}): string => {
+  const cleanTeacher = (params.teacherName || '').trim();
+  const greeting = cleanTeacher
+    ? `السلام عليكم ورحمة الله وبركاته،\nالأستاذ(ة) الفاضل(ة) *${cleanTeacher}*،`
+    : `السلام عليكم ورحمة الله وبركاته،\nالأستاذ(ة) الفاضل(ة) مؤطر(ة) مؤسسة *${params.schoolName}*،`;
+
+  return `${greeting}
+
+إليكم *رمز الأمان (PIN Code)* الخاص بمؤسستكم (*${params.schoolName}*) لتفعيل حسابكم والولوج الآمن إلى منصة البطولة الإقليمية المدرسية:
+
+🔐 *رمز الأمان الخاص بالمؤسسة:* [ *${params.accessCode}* ]
+
+يرجى إدخال هذا الرمز عند استكمال ملفكم الشخصي أو تفعيل مهام تأطير فرق المؤسسة بالمنصة.
+
+مع خالص التقدير والتحية.`;
+};
+
+/**
+ * Generates an official WhatsApp message addressed to the school principal containing their school's security code
+ */
+export const generatePrincipalSecurityCodeWhatsAppMessage = (params: {
+  schoolName: string;
+  accessCode: string;
+}): string => {
+  return `السلام عليكم ورحمة الله وبركاته،
+السيد(ة) مدير(ة) مؤسسة *${params.schoolName}*،
+
+إليكم الرمز السري للأمان (Access Code) الخاص بمؤسستكم لتفعيل حسابات الأساتذة في منصة البطولة الإقليمية المدرسية:
+
+*الرمز السري الخاص بمؤسستكم: [ ${params.accessCode} ]*
+
+يرجى تسليم هذا الرمز لأساتذة التربية البدنية العاملين بالمؤسسة لتمكينهم من استكمال ملفاتهم الشخصية والتسجيل الآمن بالمنصة.
+
+مع خالص التقدير والتحية.`;
+};
+
 export interface MatchDiffusionStakeholder {
   id: string;
   name: string;

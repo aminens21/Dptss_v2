@@ -6,7 +6,7 @@ export const SPORTS_CONFIG: Sport[] = [
     name: 'كرة القدم',
     icon: '⚽',
     description: 'منافسات كرة القدم المدرسية (ذكور وإناث)',
-    ageCategories: ['U12', 'U15', 'U18', 'U20'],
+    ageCategories: ['U12', 'U15', 'U18'],
     studentLimit: 14,
     isProgrammed: true
   },
@@ -15,7 +15,7 @@ export const SPORTS_CONFIG: Sport[] = [
     name: 'فوتسال (داخل القاعة)',
     icon: '⚽',
     description: 'منافسات كرة القدم داخل القاعة',
-    ageCategories: ['U12', 'U15', 'U18', 'U20'],
+    ageCategories: ['U12', 'U15', 'U18'],
     studentLimit: 12,
     isProgrammed: true
   },
@@ -24,7 +24,7 @@ export const SPORTS_CONFIG: Sport[] = [
     name: 'كرة السلة 5 ضد 5',
     icon: '🏀',
     description: 'منافسات كرة السلة التقليدية 5 ضد 5',
-    ageCategories: ['U15', 'U18', 'U20'],
+    ageCategories: ['U12', 'U15', 'U18'],
     studentLimit: 12,
     isProgrammed: true
   },
@@ -33,7 +33,7 @@ export const SPORTS_CONFIG: Sport[] = [
     name: 'كرة السلة 3 ضد 3',
     icon: '🏀',
     description: 'منافسات كرة السلة الثلاثية 3 ضد 3',
-    ageCategories: ['U12', 'U15', 'U18', 'U20'],
+    ageCategories: ['U12', 'U15', 'U18'],
     studentLimit: 5,
     isProgrammed: true
   },
@@ -42,7 +42,7 @@ export const SPORTS_CONFIG: Sport[] = [
     name: 'الكرة الطائرة',
     icon: '🏐',
     description: 'منافسات الكرة الطائرة المدرسية',
-    ageCategories: ['U15', 'U18', 'U20'],
+    ageCategories: ['U12', 'U15', 'U18'],
     studentLimit: 12,
     isProgrammed: true
   },
@@ -51,7 +51,7 @@ export const SPORTS_CONFIG: Sport[] = [
     name: 'الكرة الطائرة مختلطة',
     icon: '🏐',
     description: 'منافسات الكرة الطائرة المختلطة',
-    ageCategories: ['U15', 'U18', 'U20'],
+    ageCategories: ['U12', 'U15', 'U18'],
     studentLimit: 12,
     isProgrammed: true
   },
@@ -60,7 +60,7 @@ export const SPORTS_CONFIG: Sport[] = [
     name: 'الكرة الطائرة الشاطئية',
     icon: '🏖️',
     description: 'منافسات الكرة الطائرة الشاطئية الثنائية',
-    ageCategories: ['U15', 'U18', 'U20'],
+    ageCategories: ['U12', 'U15', 'U18'],
     studentLimit: 4,
     isProgrammed: true
   },
@@ -69,7 +69,7 @@ export const SPORTS_CONFIG: Sport[] = [
     name: 'كرة اليد',
     icon: '🤾',
     description: 'منافسات كرة اليد المدرسية',
-    ageCategories: ['U15', 'U18', 'U20'],
+    ageCategories: ['U12', 'U15', 'U18'],
     studentLimit: 14,
     isProgrammed: true
   },
@@ -78,7 +78,7 @@ export const SPORTS_CONFIG: Sport[] = [
     name: 'كرة اليد الشاطئية',
     icon: '🏖️',
     description: 'منافسات كرة اليد الشاطئية',
-    ageCategories: ['U15', 'U18', 'U20'],
+    ageCategories: ['U12', 'U15', 'U18'],
     studentLimit: 8,
     isProgrammed: true
   },
@@ -114,7 +114,7 @@ export const SPORTS_CONFIG: Sport[] = [
     name: 'البادمنتون',
     icon: '🏸',
     description: 'منافسات البادمنتون (كرة الريشة) فردي وزوجي',
-    ageCategories: ['U12', 'U15', 'U18', 'U20'],
+    ageCategories: ['U12', 'U15', 'U17', 'U18', 'U20'],
     studentLimit: 6,
     isProgrammed: true
   },
@@ -123,7 +123,7 @@ export const SPORTS_CONFIG: Sport[] = [
     name: 'كرة الطاولة',
     icon: '🏓',
     description: 'منافسات تنس الطاولة المدرسية',
-    ageCategories: ['U12', 'U15', 'U18', 'U20'],
+    ageCategories: ['U12', 'U15', 'U17', 'U18', 'U20'],
     studentLimit: 6,
     isProgrammed: true
   },
@@ -132,7 +132,7 @@ export const SPORTS_CONFIG: Sport[] = [
     name: 'الشطرنج',
     icon: '♟️',
     description: 'منافسات الشطرنج المدرسي',
-    ageCategories: ['U12', 'U15', 'U18', 'U20'],
+    ageCategories: ['U12', 'U15', 'U17', 'U18', 'U20'],
     studentLimit: 6,
     isProgrammed: true
   },
@@ -141,7 +141,16 @@ export const SPORTS_CONFIG: Sport[] = [
     name: 'الجيدو',
     icon: '🥋',
     description: 'منافسات الجيدو المدرسية حسب الأوزان',
-    ageCategories: ['U15', 'U18', 'U20'],
+    ageCategories: ['U15', 'U17', 'U18', 'U20'],
+    studentLimit: 8,
+    isProgrammed: true
+  },
+  {
+    id: 'weightlifting',
+    name: 'رفع الأثقال',
+    icon: '🏋️',
+    description: 'منافسات رفع الأثقال المدرسية حسب الفئات والأوزان',
+    ageCategories: ['U15', 'U17', 'U18', 'U20'],
     studentLimit: 8,
     isProgrammed: true
   },
@@ -150,7 +159,7 @@ export const SPORTS_CONFIG: Sport[] = [
     name: 'الكراطي',
     icon: '🥋',
     description: 'منافسات الكراطي (كاتا وكوميتي)',
-    ageCategories: ['U15', 'U18', 'U20'],
+    ageCategories: ['U15', 'U17', 'U18', 'U20'],
     studentLimit: 8,
     isProgrammed: true
   },
@@ -159,7 +168,7 @@ export const SPORTS_CONFIG: Sport[] = [
     name: 'الملاكمة',
     icon: '🥊',
     description: 'منافسات الملاكمة المدرسية',
-    ageCategories: ['U18', 'U20'],
+    ageCategories: ['U17', 'U18', 'U20'],
     studentLimit: 6,
     isProgrammed: true
   },
@@ -168,7 +177,7 @@ export const SPORTS_CONFIG: Sport[] = [
     name: 'الركبي',
     icon: '🏉',
     description: 'منافسات الركبي السباعي المدرسي',
-    ageCategories: ['U15', 'U18', 'U20'],
+    ageCategories: ['U12', 'U15', 'U18'],
     studentLimit: 12,
     isProgrammed: true
   }

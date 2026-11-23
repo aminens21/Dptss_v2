@@ -1,8 +1,21 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { DataService, SPORTS_MAP, GENDER_MAP, areSportIdsEquivalent, deduplicateById } from '../lib/dataService';
-import { User, Sport, Tournament, Match } from '../types';
+import {
+  DataService,
+  SPORTS_MAP,
+  GENDER_MAP,
+  areSportIdsEquivalent,
+  deduplicateById,
+  findMatchingSchoolForTeacher,
+  resolveEffectiveTeacherCadre,
+  isTeacherLevelAllowedForTournament,
+  isCrossCountryU15OpenToPrimary,
+  isSchoolSectorAllowedForTournament,
+  isAffiliationAllowedByDisplayConfig,
+  isClubTournament
+} from '../lib/dataService';
+import { User, Sport, Tournament, Match, School, AffiliationDisplayConfig } from '../types';
 import {
   ShieldCheck,
   Search,
@@ -74,6 +87,10 @@ export const TechCommitteeHeads: React.FC = () => {
   const [sportsConfig, setSportsConfig] = useState<Sport[]>([]);
   const [tournaments, setTournaments] = useState<Tournament[]>([]);
   const [matches, setMatches] = useState<Match[]>([]);
+  const [schools, setSchools] = useState<School[]>([]);
+  const [affiliationDisplayConfig, setAffiliationDisplayConfig] = useState<AffiliationDisplayConfig>(
+    () => DataService.getAffiliationDisplayConfigSync()
+  );
 
   const effectiveSportsMap = useMemo(() => {
     const map: Record<string, { name: string; icon: string }> = { ...SPORTS_MAP };
@@ -112,21 +129,29 @@ export const TechCommitteeHeads: React.FC = () => {
     setLoading(true);
     try {
       const activeDirId = DataService.getActiveDirectorateId() || 'taourirt';
-      const [allTeachers, allSports, allTournaments, allMatches] = await Promise.all([
+      const [allTeachers, allSports, allTournaments, allMatches, allSchools, activeSeason, affConfig] = await Promise.all([
         DataService.getTeachers(),
         DataService.getSportsConfig(),
         DataService.getTournaments().catch(() => [] as Tournament[]),
-        DataService.getMatches().catch(() => [] as Match[])
+        DataService.getMatches().catch(() => [] as Match[]),
+        DataService.getSchools().catch(() => [] as School[]),
+        DataService.getActiveSeason().catch(() => ''),
+        DataService.getAffiliationDisplayConfig().catch(() => DataService.getAffiliationDisplayConfigSync())
       ]);
       const dirTeachers = allTeachers.filter(t => (t.directorateId || 'taourirt') === activeDirId);
       const dirTournaments = deduplicateById(allTournaments).filter(t =>
-        (t.directorateId || 'taourirt') === activeDirId && t.status !== 'Draft' && (t as any).isActive !== false
+        (t.directorateId || 'taourirt') === activeDirId &&
+        t.status !== 'Draft' &&
+        (t as any).isActive !== false &&
+        (!activeSeason || !t.seasonId || t.seasonId === activeSeason)
       );
       const dirMatches = allMatches.filter(m => !m.directorateId || m.directorateId === activeDirId);
       setTeachers(dirTeachers);
       setSportsConfig(allSports);
       setTournaments(dirTournaments);
       setMatches(dirMatches);
+      setSchools(allSchools.filter(s => !s.directorateId || s.directorateId === activeDirId));
+      setAffiliationDisplayConfig(affConfig);
     } catch (error) {
       console.error('Error loading teachers data:', error);
       toast.error('حدث خطأ أثناء تحميل البيانات');
@@ -173,19 +198,87 @@ export const TechCommitteeHeads: React.FC = () => {
     }
   };
 
-  // Tech committee heads list
+  // Detect if viewer is a pure Primary-level teacher (not Central Admin / Tech Head)
+  const teacherSchoolObj = useMemo(() => {
+    return findMatchingSchoolForTeacher(schools, userProfile);
+  }, [schools, userProfile]);
+
+  const effectiveTeacherCadre = useMemo(() => {
+    return resolveEffectiveTeacherCadre(userProfile, teacherSchoolObj);
+  }, [userProfile, teacherSchoolObj]);
+
+  const isPrimaryTeacher = useMemo(() => {
+    if (!userProfile || userProfile.role !== 'TEACHER') return false;
+    if (isCentralAdmin) return false;
+    const isSelfHead = Boolean(
+      userProfile.isTechCommitteeHead ||
+      (userProfile.role as string) === 'TECH_HEAD' ||
+      (userProfile.role as string) === 'TECH_COMMITTEE_HEAD'
+    );
+    if (isSelfHead) return false;
+    return effectiveTeacherCadre === 'Primary';
+  }, [userProfile, isCentralAdmin, effectiveTeacherCadre]);
+
+  // Regional school championships that Primary teachers are eligible to participate in
+  const primaryEligibleTournaments = useMemo(() => {
+    if (!isPrimaryTeacher) return tournaments;
+    return tournaments.filter(t => {
+      const tAff = t.affiliationType || (isClubTournament(t) ? 'club_affiliated' : 'non_club');
+      if (!isAffiliationAllowedByDisplayConfig(tAff, affiliationDisplayConfig, t.sportId)) return false;
+      const levelOk =
+        isTeacherLevelAllowedForTournament('Primary', t.level, t.ageCategory, t.sportId) ||
+        isCrossCountryU15OpenToPrimary(t, tournaments);
+      if (!levelOk) return false;
+      if (teacherSchoolObj && !isSchoolSectorAllowedForTournament(teacherSchoolObj, t)) return false;
+      return true;
+    });
+  }, [isPrimaryTeacher, tournaments, affiliationDisplayConfig, teacherSchoolObj]);
+
+  const doesHeadOverseeTournament = (head: User, t: Tournament): boolean => {
+    const headSports = Array.from(new Set([
+      ...(head.techCommitteeSports || []),
+      ...(head.sportId ? [head.sportId] : [])
+    ].filter(Boolean)));
+    const sportMatch = headSports.some(sk => areSportIdsEquivalent(t.sportId, sk, sportsConfig));
+    const emailMatch = Boolean(t.managerEmail && head.email && t.managerEmail.toLowerCase() === head.email.toLowerCase());
+    const nameMatch = Boolean(t.managerName && head.fullName && t.managerName.trim() === head.fullName.trim());
+    return sportMatch || emailMatch || nameMatch;
+  };
+
+  const getVisibleTournamentsForHead = (head: User): Tournament[] => {
+    const pool = isPrimaryTeacher ? primaryEligibleTournaments : tournaments;
+    return pool.filter(t => doesHeadOverseeTournament(head, t));
+  };
+
+  const getVisibleSportKeysForHead = (head: User): string[] => {
+    const rawKeys = head.techCommitteeSports || [];
+    if (!isPrimaryTeacher) return rawKeys;
+    const eligibleFromAssigned = rawKeys.filter(sk =>
+      primaryEligibleTournaments.some(t => areSportIdsEquivalent(t.sportId, sk, sportsConfig))
+    );
+    if (eligibleFromAssigned.length > 0) return eligibleFromAssigned;
+    return Array.from(new Set(getVisibleTournamentsForHead(head).map(t => t.sportId).filter(Boolean)));
+  };
+
+  // Tech committee heads list (scoped for Primary teachers to their eligible championships only)
   const heads = teachers.filter(t => t.isTechCommitteeHead);
+  const scopedHeads = useMemo(() => {
+    if (!isPrimaryTeacher) return heads;
+    return heads.filter(h => getVisibleTournamentsForHead(h).length > 0);
+  }, [heads, isPrimaryTeacher, primaryEligibleTournaments, sportsConfig]);
 
   // Filtered heads based on search term
-  const filteredHeads = heads.filter(h => {
+  const filteredHeads = scopedHeads.filter(h => {
+    const visibleSports = getVisibleSportKeysForHead(h);
+    const q = searchTerm.toLowerCase();
     const matchesSearch =
-      h.fullName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      h.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (h.workLocation && h.workLocation.toLowerCase().includes(searchTerm.toLowerCase())) ||
-      (h.techCommitteeSports && h.techCommitteeSports.some(s => {
+      h.fullName.toLowerCase().includes(q) ||
+      h.email.toLowerCase().includes(q) ||
+      (h.workLocation && h.workLocation.toLowerCase().includes(q)) ||
+      visibleSports.some(s => {
         const sportInfo = effectiveSportsMap[s];
-        return sportInfo && sportInfo.name.toLowerCase().includes(searchTerm.toLowerCase());
-      }));
+        return sportInfo && sportInfo.name.toLowerCase().includes(q);
+      });
     return matchesSearch;
   });
 
@@ -358,8 +451,15 @@ export const TechCommitteeHeads: React.FC = () => {
   }, [assignableTeachers, headTeacherSearch]);
 
   // Statistics
-  const totalHeads = heads.length;
-  const uniqueSportsCount = new Set(heads.flatMap(h => h.techCommitteeSports || [])).size;
+  const totalHeads = scopedHeads.length;
+  const displayedSportsEntries = useMemo(() => {
+    const entries = Object.entries(effectiveSportsMap);
+    if (!isPrimaryTeacher) return entries;
+    return entries.filter(([sportKey]) =>
+      primaryEligibleTournaments.some(t => areSportIdsEquivalent(t.sportId, sportKey, sportsConfig))
+    );
+  }, [effectiveSportsMap, isPrimaryTeacher, primaryEligibleTournaments, sportsConfig]);
+  const uniqueSportsCount = new Set(scopedHeads.flatMap(h => getVisibleSportKeysForHead(h))).size;
 
   // Detect signed-in Technical Committee Head (including Central Admin impersonation mode)
   const currentHeadProfile = useMemo(() => {
@@ -670,11 +770,22 @@ export const TechCommitteeHeads: React.FC = () => {
         </div>
       )}
 
+      {isPrimaryTeacher && (
+        <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 flex items-center gap-2.5 text-xs text-blue-900 font-semibold shadow-3xs">
+          <ShieldCheck className="h-4.5 w-4.5 text-blue-600 shrink-0" />
+          <span>
+            تُعرض لك حصرياً اللجان ورؤساء اللجن التقنية المشرفون على البطولات الإقليمية المدرسية المفتوحة لمؤسسات <strong className="font-black">التعليم الابتدائي</strong> والمعنيّون بالمشاركة فيها.
+          </span>
+        </div>
+      )}
+
       {/* Stats Cards Dashboard Section */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs flex items-center justify-between">
           <div>
-            <p className="text-[10px] text-slate-400 font-bold uppercase mb-1">إجمالي رؤساء اللجن التقنية</p>
+            <p className="text-[10px] text-slate-400 font-bold uppercase mb-1">
+              {isPrimaryTeacher ? 'رؤساء اللجن المعنيين ببطولات الابتدائي' : 'إجمالي رؤساء اللجن التقنية'}
+            </p>
             <h3 className="text-2xl font-black text-slate-800">{totalHeads}</h3>
           </div>
           <span className="p-2.5 bg-blue-50 text-blue-600 rounded-lg">
@@ -685,7 +796,7 @@ export const TechCommitteeHeads: React.FC = () => {
         <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs flex items-center justify-between">
           <div>
             <p className="text-[10px] text-slate-400 font-bold uppercase mb-1">تخصصات رياضية مغطاة برئيس لجنة</p>
-            <h3 className="text-2xl font-black text-emerald-600">{uniqueSportsCount} / {Object.keys(effectiveSportsMap).length}</h3>
+            <h3 className="text-2xl font-black text-emerald-600">{uniqueSportsCount} / {displayedSportsEntries.length}</h3>
           </div>
           <span className="p-2.5 bg-emerald-50 text-emerald-600 rounded-lg">
             <Trophy className="h-5.5 w-5.5" />
@@ -727,7 +838,11 @@ export const TechCommitteeHeads: React.FC = () => {
         ) : filteredHeads.length === 0 ? (
           <div className="bg-white rounded-xl border border-slate-200 p-12 text-center space-y-2">
             <AlertCircle className="h-8 w-8 text-slate-300 mx-auto" />
-            <p className="text-slate-500 text-xs font-semibold">لا يوجد أي رئيس لجنة تقنية معين حالياً يطابق تصفيتك.</p>
+            <p className="text-slate-500 text-xs font-semibold">
+              {isPrimaryTeacher && !searchTerm.trim()
+                ? 'لا يوجد رؤساء لجن تقنية معينون حالياً للبطولات الإقليمية المدرسية الخاصة بالسلك الابتدائي.'
+                : 'لا يوجد أي رئيس لجنة تقنية معين حالياً يطابق تصفيتك.'}
+            </p>
             {isCentralAdmin && (
               <button
                 onClick={handleOpenAssignModal}
@@ -740,7 +855,7 @@ export const TechCommitteeHeads: React.FC = () => {
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
             {filteredHeads.map((head) => {
-              const headSportKeys = head.techCommitteeSports || [];
+              const headSportKeys = getVisibleSportKeysForHead(head);
               const headMembers = teachers.filter(
                 t =>
                   t.isTechCommitteeMember &&
@@ -838,7 +953,7 @@ export const TechCommitteeHeads: React.FC = () => {
 
                       {/* Assigned Championships for this Head */}
                       {(() => {
-                        const headTournaments = getTournamentsForHead(head);
+                        const headTournaments = getVisibleTournamentsForHead(head);
                         return (
                           <div className="pt-2 border-t border-slate-100">
                             <p className="text-[11px] text-slate-500 font-bold mb-1.5 flex items-center gap-1">
@@ -968,8 +1083,13 @@ export const TechCommitteeHeads: React.FC = () => {
         </div>
 
         <div className="p-4 md:p-6 space-y-6">
+          {displayedSportsEntries.length === 0 ? (
+            <div className="text-center py-8 text-xs font-semibold text-slate-500 bg-slate-50 rounded-xl border border-dashed border-slate-200">
+              لا توجد لجان تقنية مبرمجة حالياً للبطولات الخاصة بالسلك الابتدائي.
+            </div>
+          ) : (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {Object.entries(effectiveSportsMap).map(([sportKey, sportInfo]) => {
+            {displayedSportsEntries.map(([sportKey, sportInfo]) => {
               const info = sportInfo as { name: string; icon: string };
               // Members of this specific sport committee
               const committeeMembers = teachers.filter(t => 
@@ -1130,6 +1250,7 @@ export const TechCommitteeHeads: React.FC = () => {
               );
             })}
           </div>
+          )}
         </div>
       </div>
 
@@ -1518,12 +1639,12 @@ export const TechCommitteeHeads: React.FC = () => {
             </div>
 
             <div className="p-4 sm:p-5 overflow-y-auto flex-1 space-y-4 bg-slate-50/60">
-              {(viewingMembersHead.techCommitteeSports || []).length === 0 ? (
+              {getVisibleSportKeysForHead(viewingMembersHead).length === 0 ? (
                 <div className="text-center py-8 bg-white rounded-2xl border border-slate-200 text-xs text-slate-500">
                   لم يتم إسناد أي صنف رياضي لهذا الرئيس بعد.
                 </div>
               ) : (
-                (viewingMembersHead.techCommitteeSports || []).map(sportKey => {
+                getVisibleSportKeysForHead(viewingMembersHead).map(sportKey => {
                   const sportInfo = effectiveSportsMap[sportKey] || { name: sportKey, icon: '🏆' };
                   const sportMembers = teachers.filter(
                     t =>

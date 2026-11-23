@@ -191,7 +191,12 @@ function sanitizeEmail(raw: any): string {
 
 function sanitizeLeaseNumber(raw: any): string {
   if (raw === undefined || raw === null) return '';
-  const str = String(raw).trim();
+  const str = String(raw)
+    .replace(/[٠-٩]/g, d => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)))
+    .trim()
+    .replace(/\.0$/, '')
+    .replace(/^(?:som|ppr)\s*[:\-]?\s*/i, '')
+    .trim();
   if (!str) return '';
   if (
     str.includes('لم يستلم') ||
@@ -204,11 +209,7 @@ function sanitizeLeaseNumber(raw: any): string {
   ) {
     return '';
   }
-  const compact = str.replace(/[\s\-_.]/g, '');
-  if (/^[a-zA-Z]{0,3}\d{4,10}$/.test(compact)) {
-    return compact;
-  }
-  return '';
+  return str;
 }
 
 function parseTeachingCadre(rawCadre: string, schoolName: string): 'PRIMARY' | 'MIDDLE' | 'HIGH' {
@@ -346,6 +347,7 @@ function extractCategoriesFromSegment(
 
   if (/u\s*12/i.test(seg) || /(براعم|برعمات|البراعم|البرعمات)/.test(seg)) found.add('U12');
   if (/u\s*15/i.test(seg) || /(صغار|صغيرات|الصغار|الصغيرات)/.test(seg)) found.add('U15');
+  if (/u\s*17/i.test(seg) || /أقل من 17|اقل من 17/.test(seg)) found.add('U17');
   if (/u\s*18/i.test(seg) || /(فتيان|فتيات|الفتيان|الفتيات)/.test(seg)) found.add('U18');
   if (/u\s*20/i.test(seg) || /(شبان|شابات|الشبان|الشابات|كبار|كبيرات)/.test(seg)) found.add('U20');
 
@@ -590,7 +592,7 @@ export async function parseTeachersAndParticipationsWorkbook(file: File): Promis
 
     const baseOffset = foundName >= 0 ? foundName : 0;
     nameCol = foundName >= 0 ? foundName : baseOffset;
-    schoolCol = foundSchool >= 0 ? foundSchool : baseOffset + 1;
+    schoolCol = foundSchool >= 0 ? foundSchool : (baseOffset > 0 ? baseOffset - 1 : 1);
     cadreCol = foundCadre >= 0 ? foundCadre : baseOffset + 2;
     emailCol = foundEmail >= 0 ? foundEmail : baseOffset + 3;
     leaseCol = foundLease >= 0 ? foundLease : baseOffset + 4;
@@ -1390,14 +1392,29 @@ export async function executeAdditiveExcelImport(
     let existingIdx = -1;
     if (row.leaseNumber && userIdxByLease.has(row.leaseNumber)) {
       existingIdx = userIdxByLease.get(row.leaseNumber)!;
-    } else if (row.email && userIdxByEmail.has(row.email.toLowerCase())) {
+    }
+    if (existingIdx === -1 && row.email && userIdxByEmail.has(row.email.toLowerCase())) {
       existingIdx = userIdxByEmail.get(row.email.toLowerCase())!;
-    } else if (normTeacherName && normSchool && userIdxByNameAndSchool.has(`${normTeacherName}__${normSchool}`)) {
+    }
+    if (existingIdx === -1 && normTeacherName && normSchool && userIdxByNameAndSchool.has(`${normTeacherName}__${normSchool}`)) {
       existingIdx = userIdxByNameAndSchool.get(`${normTeacherName}__${normSchool}`)!;
-    } else if (row.email) {
+    }
+    if (existingIdx === -1 && row.email) {
       existingIdx = workingUsers.findIndex(
         u => u && u.email && !u.email.endsWith('@taourirt-sports.ma') && isFlexibleEmailMatch(u.email, row.email)
       );
+    }
+    if (existingIdx === -1 && normTeacherName && normTeacherName.length >= 5) {
+      const nameMatches = workingUsers
+        .map((u, idx) => ({ u, idx }))
+        .filter(({ u }) => u && u.fullName && normalizeArabicName(u.fullName) === normTeacherName);
+      if (nameMatches.length > 0) {
+        const sameDirMissingLease = nameMatches.find(
+          ({ u }) => (u.directorateId || 'taourirt') === effectiveDirId && (!u.leaseNumber || !u.leaseNumber.trim())
+        );
+        const sameDir = nameMatches.find(({ u }) => (u.directorateId || 'taourirt') === effectiveDirId);
+        existingIdx = (sameDirMissingLease || sameDir || nameMatches[0]).idx;
+      }
     }
 
     if (existingIdx >= 0) {
@@ -1418,7 +1435,7 @@ export async function executeAdditiveExcelImport(
           row.email && hasSyntheticEmail
             ? row.email
             : prev.email || row.email || `${safeUserId}@taourirt-sports.ma`,
-        leaseNumber: prev.leaseNumber || row.leaseNumber || '',
+        leaseNumber: row.leaseNumber || prev.leaseNumber || '',
         phone: prev.phone || row.phone || '',
         workLocation: row.schoolName || prev.workLocation || '',
         schoolId: prev.schoolId || linkedSchool?.id || undefined,
@@ -1597,7 +1614,7 @@ export async function executeAdditiveExcelImport(
               branch.category === 'U12'
                 ? 'Primary'
                 : branch.category === 'U15'
-                ? 'Middle'
+                ? (branch.sportId === 'cross_country' ? 'Primary,Middle' : 'Middle')
                 : branch.category === 'U18' || branch.category === 'U20'
                 ? 'High'
                 : 'Middle,High';

@@ -1,6 +1,11 @@
 import React from 'react';
-import { User, Student } from '../types';
+import { User, Student, School } from '../types';
 import { SPORTS_MAP } from '../lib/dataService';
+import {
+  getWhatsAppUrl,
+  isValidPhoneNumber,
+  generateTeacherSecurityCodeWhatsAppMessage
+} from '../lib/whatsappService';
 import {
   X,
   User as UserIcon,
@@ -18,7 +23,9 @@ import {
   Copy,
   Check,
   Pencil,
-  LogIn
+  LogIn,
+  KeyRound,
+  MessageCircle
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -27,6 +34,8 @@ interface TeacherDetailModalProps {
   onClose: () => void;
   teacher: User | null;
   teacherStudents?: Student[];
+  matchedSchool?: School | null;
+  canSendSecurityCode?: boolean;
   onEditRole?: (teacher: User) => void;
   onImpersonateTeacher?: (teacher: User) => void;
 }
@@ -36,10 +45,17 @@ export const TeacherDetailModal: React.FC<TeacherDetailModalProps> = ({
   onClose,
   teacher,
   teacherStudents = [],
+  matchedSchool,
+  canSendSecurityCode = false,
   onEditRole,
   onImpersonateTeacher
 }) => {
   const [copiedField, setCopiedField] = React.useState<string | null>(null);
+  const [customPhone, setCustomPhone] = React.useState<string>('');
+
+  React.useEffect(() => {
+    setCustomPhone(teacher?.phone || '');
+  }, [teacher?.id, teacher?.phone]);
 
   if (!isOpen || !teacher) return null;
 
@@ -217,6 +233,80 @@ export const TeacherDetailModal: React.FC<TeacherDetailModalProps> = ({
               </div>
             </div>
           </div>
+
+          {/* Direct Security Code WhatsApp Card (Privileged Admins) */}
+          {canSendSecurityCode && matchedSchool?.accessCode && (() => {
+            const targetPhone = customPhone.trim() || teacher.phone || '';
+            const hasPhone = isValidPhoneNumber(targetPhone);
+            const waMessage = generateTeacherSecurityCodeWhatsAppMessage({
+              teacherName: teacher.fullName,
+              schoolName: matchedSchool.name,
+              accessCode: matchedSchool.accessCode
+            });
+            const waUrl = getWhatsAppUrl(targetPhone, waMessage);
+
+            return (
+              <div className="bg-emerald-50/70 p-4 rounded-2xl border border-emerald-200 shadow-3xs space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-emerald-200/70">
+                  <div className="flex items-center gap-2">
+                    <div className="p-1.5 rounded-lg bg-emerald-600 text-white">
+                      <KeyRound className="h-4 w-4" />
+                    </div>
+                    <div>
+                      <h4 className="text-xs font-black text-emerald-950">
+                        رمز الأمان الخاص بالمؤسسة ({matchedSchool.name})
+                      </h4>
+                      <p className="text-[10px] text-emerald-800 font-semibold">
+                        إرسال رمز الأمان مباشرة للأستاذ(ة) المعني(ة) عبر الواتساب
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1.5 bg-white px-2.5 py-1 rounded-xl border border-emerald-200">
+                    <span className="font-mono font-black text-sm text-emerald-900 tracking-wider">
+                      {matchedSchool.accessCode}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => handleCopy(matchedSchool.accessCode || '', 'رمز الأمان')}
+                      className="p-1 text-emerald-700 hover:bg-emerald-50 rounded-md transition-colors cursor-pointer"
+                      title="نسخ رمز الأمان"
+                    >
+                      {copiedField === 'رمز الأمان' ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                  <div className="flex-1">
+                    <input
+                      type="tel"
+                      dir="ltr"
+                      value={customPhone}
+                      onChange={e => setCustomPhone(e.target.value)}
+                      placeholder="رقم الواتساب (مثال: 0661234567)"
+                      className="w-full px-3 py-2 text-xs font-mono font-bold bg-white border border-emerald-200 rounded-xl text-right focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    />
+                  </div>
+                  <a
+                    href={waUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={() => {
+                      toast.success(
+                        hasPhone
+                          ? `تم فتح واتساب لإرسال رمز الأمان مباشرة إلى ${teacher.fullName}`
+                          : 'تم فتح واتساب مع الرسالة الجاهزة — اختر جهة الاتصال للإرسال'
+                      );
+                    }}
+                    className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black shadow-xs transition-all cursor-pointer whitespace-nowrap"
+                  >
+                    <MessageCircle className="h-4 w-4 shrink-0" />
+                    <span>{hasPhone ? 'إرسال رمز الأمان عبر واتساب' : 'فتح واتساب واختيار جهة الاتصال'}</span>
+                  </a>
+                </div>
+              </div>
+            );
+          })()}
 
           {/* Sports Specialties & Roles */}
           <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-3xs space-y-3">

@@ -227,7 +227,7 @@ const SportAgeCategoriesManager: React.FC<{
               if (isTeamSport(sportId)) {
                 const defaultCats = getDefaultTeamAgeCategories(currentSeason);
                 onChange(defaultCats);
-                toast.success('تم توليد فئات الألعاب الجماعية الافتراضية (U15 و U18) بنجاح');
+                toast.success('تم توليد فئات الألعاب الجماعية الافتراضية (U12 و U15 و U18) بنجاح');
               } else {
                 // Prepopulate with dynamic defaults based on season
                 const dynCats = getAgeCategoriesForSeason(currentSeason, undefined, sportId);
@@ -245,7 +245,7 @@ const SportAgeCategoriesManager: React.FC<{
             }}
             className="text-[11px] font-bold text-blue-600 hover:underline cursor-pointer bg-blue-50/50 hover:bg-blue-50 px-3 py-1.5 rounded-xl border border-blue-100"
           >
-            {isTeamSport(sportId) ? '⚡ توليد فئات الألعاب الجماعية الافتراضية (U15 و U18)' : '⚡ توليد الفئات الافتراضية للتخصيص'}
+            {isTeamSport(sportId) ? '⚡ توليد فئات الألعاب الجماعية الافتراضية (U12 و U15 و U18)' : '⚡ توليد الفئات الافتراضية للتخصيص'}
           </button>
         </div>
       ) : (

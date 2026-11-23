@@ -2,7 +2,7 @@ import React, { useEffect, useState, useMemo } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import clsx from 'clsx';
 import { useAuth, isSuperAdminEmail } from '../contexts/AuthContext';
-import { DataService, SPORTS_MAP, GENDER_MAP, deduplicateById, AGE_CATEGORIES, isClubTournament, getAgeCategoriesForSeason, normalizeCategoryKey, getCustomCategoryName, getCustomCategoryDetails, canUserApproveSportResult, canUserEnterMatchScore, isUserTechHeadForSport, normalizeCanonicalSportId, areSportIdsEquivalent, normalizeArabicMatchText, isAffiliationAllowedByDisplayConfig, normalizeTournamentAffiliation, resolveEffectiveTeacherCadre, isTeacherLevelAllowedForTournament, isSchoolSectorAllowedForTournament, schoolNamesMatch, getMatchEducationalCycles, findAllBlockedPeriodsForDate, isMatchProgramPendingApproval } from '../lib/dataService';
+import { DataService, SPORTS_MAP, GENDER_MAP, deduplicateById, AGE_CATEGORIES, isClubTournament, getAgeCategoriesForSeason, normalizeCategoryKey, getCustomCategoryName, getCustomCategoryDetails, canUserApproveSportResult, canUserEnterMatchScore, isUserTechHeadForSport, normalizeCanonicalSportId, areSportIdsEquivalent, normalizeArabicMatchText, isAffiliationAllowedByDisplayConfig, normalizeTournamentAffiliation, resolveEffectiveTeacherCadre, isTeacherLevelAllowedForTournament, isSchoolSectorAllowedForTournament, schoolNamesMatch, getMatchEducationalCycles, findAllBlockedPeriodsForDate, isMatchProgramPendingApproval, isTrackOrCrossCountrySport } from '../lib/dataService';
 import { formatTeamDisplayName, hasValidMatchTeams } from '../lib/drawTournamentUtils';
 import { Match, School, Venue, Tournament, Sport, Student, User, Referee, AffiliationDisplayConfig } from '../types';
 import { CountdownTimer } from '../components/CountdownTimer';
@@ -39,7 +39,8 @@ import {
   LayoutGrid,
   Table as TableIcon,
   Shuffle,
-  Undo2
+  Undo2,
+  RotateCcw
 } from 'lucide-react';
 import { CreateMatchModal } from '../components/CreateMatchModal';
 import { ScoreModal } from '../components/ScoreModal';
@@ -58,6 +59,7 @@ import { cn, formatMatchDate } from '../lib/utils';
 import { resolveHostSchoolForMatch } from '../lib/whatsappService';
 import { resolveMatchRefereesInfo, isOpaqueEntityId } from '../lib/programExportService';
 import { MatchBroadcastDiffusionModal, MatchBroadcastDiffusionTarget } from '../components/MatchBroadcastDiffusionModal';
+import { TournamentResetModal } from '../components/TournamentResetModal';
 import toast from 'react-hot-toast';
 
 export const Matches: React.FC = () => {
@@ -118,6 +120,7 @@ export const Matches: React.FC = () => {
 
   // Selected sport for detailed results modal (Level 2 & 3)
   const [selectedSportForResults, setSelectedSportForResults] = useState<Sport | null>(null);
+  const [isResetModalOpen, setIsResetModalOpen] = useState(false);
   const [isResultsModalOpen, setIsResultsModalOpen] = useState(false);
   const [isDrawModalOpen, setIsDrawModalOpen] = useState(false);
   const [selectedSportForDraw, setSelectedSportForDraw] = useState<string | undefined>(undefined);
@@ -668,6 +671,7 @@ export const Matches: React.FC = () => {
 
   // Helper to format category for badges elegantly in Arabic
   const formatCategoryBadge = (catId: string, sportTournaments: Tournament[] = [], sportId?: string) => {
+    const isCC = isTrackOrCrossCountrySport(sportId);
     const customDetails = getCustomCategoryDetails(catId, sportId, sportsConfig);
     if (customDetails && customDetails.name) {
       return {
@@ -684,34 +688,67 @@ export const Matches: React.FC = () => {
     const catTournaments = sportTournaments.filter(t => t.ageCategory === catId || normalizeCategoryKey(t.ageCategory) === norm);
     const hasMale = catTournaments.some(t => t.gender === 'Male' || t.gender === 'Mixed');
     const hasFemale = catTournaments.some(t => t.gender === 'Female' || t.gender === 'Mixed');
-    
-    if (norm === 'U12') {
-      const label = (hasFemale && !hasMale) ? 'برعمات' : (hasFemale && hasMale) ? 'براعم / برعمات' : 'براعم';
-      return {
-        label,
-        years: `مواليد ${startYear - 11} وما بعد`
-      };
-    }
-    if (norm === 'U15') {
-      const label = (hasFemale && !hasMale) ? 'صغيرات' : (hasFemale && hasMale) ? 'صغار / صغيرات' : 'صغار';
-      return {
-        label,
-        years: `مواليد ${startYear - 14}/${startYear - 13}/${startYear - 12}`
-      };
-    }
-    if (norm === 'U18') {
-      const label = (hasFemale && !hasMale) ? 'فتيات' : (hasFemale && hasMale) ? 'فتيان / فتيات' : 'فتيان';
-      return {
-        label,
-        years: `مواليد ${startYear - 17}/${startYear - 16}/${startYear - 15}`
-      };
-    }
-    if (norm === 'U20') {
-      const label = (hasFemale && !hasMale) ? 'شابات' : (hasFemale && hasMale) ? 'شبان / شابات' : 'شبان';
-      return {
-        label,
-        years: `مواليد ${startYear - 17} وما بعد`
-      };
+
+    if (isCC) {
+      if (norm === 'U12') {
+        const label = (hasFemale && !hasMale) ? 'برعمات' : (hasFemale && hasMale) ? 'براعم / برعمات' : 'براعم';
+        return {
+          label,
+          years: `مواليد ${startYear - 12} وما بعد`
+        };
+      }
+      if (norm === 'U15') {
+        const label = (hasFemale && !hasMale) ? 'صغيرات' : (hasFemale && hasMale) ? 'صغار / صغيرات' : 'صغار';
+        return {
+          label,
+          years: `مواليد ${startYear - 14}-${startYear - 13}`
+        };
+      }
+      if (norm === 'U18') {
+        const label = (hasFemale && !hasMale) ? 'فتيات' : (hasFemale && hasMale) ? 'فتيان / فتيات' : 'فتيان';
+        return {
+          label,
+          years: `مواليد ${startYear - 16}-${startYear - 15}`
+        };
+      }
+      if (norm === 'U20') {
+        const label = (hasFemale && !hasMale) ? 'شابات' : (hasFemale && hasMale) ? 'شبان / شابات' : 'شبان';
+        return {
+          label,
+          years: `مواليد ${startYear - 18}-${startYear - 17}`
+        };
+      }
+    } else {
+      if (norm === 'U12') {
+        return {
+          label: 'أقل من 12 سنة (U12)',
+          years: `مواليد ${startYear - 9}/${startYear - 10}/${startYear - 11}`
+        };
+      }
+      if (norm === 'U15') {
+        return {
+          label: 'أقل من 15 سنة (U15)',
+          years: `مواليد ${startYear - 12}/${startYear - 13}/${startYear - 14}`
+        };
+      }
+      if (norm === 'U17') {
+        return {
+          label: 'أقل من 17 سنة (U17)',
+          years: `مواليد ${startYear - 14}/${startYear - 15}/${startYear - 16}`
+        };
+      }
+      if (norm === 'U18') {
+        return {
+          label: 'أقل من 18 سنة (U18)',
+          years: `مواليد ${startYear - 15}/${startYear - 16}/${startYear - 17}`
+        };
+      }
+      if (norm === 'U20') {
+        return {
+          label: `مواليد ${startYear - 17} وما بعد`,
+          years: ''
+        };
+      }
     }
     return { label: catId, years: '' };
   };
@@ -719,7 +756,6 @@ export const Matches: React.FC = () => {
   // Group sports with match metrics & tournaments
   const sportsData = useMemo(() => {
     const activeDirId = DataService.getActiveDirectorateId() || 'taourirt';
-    const seasonalCats = getAgeCategoriesForSeason(activeSeason);
 
     return sportsConfig.map(sport => {
       let sportTournaments = tournaments.filter(t => {
@@ -737,7 +773,7 @@ export const Matches: React.FC = () => {
       // For regular teachers, scope tournaments to their educational cycle & school sector
       if (isTeacher && !canManageSport(sport.id)) {
         sportTournaments = sportTournaments.filter(t =>
-          isTeacherLevelAllowedForTournament(effectiveTeacherCadre, t.level) &&
+          isTeacherLevelAllowedForTournament(effectiveTeacherCadre, t.level, t.ageCategory, t.sportId || sport.id) &&
           (!teacherSchoolObj || isSchoolSectorAllowedForTournament(teacherSchoolObj, t))
         );
       }
@@ -899,7 +935,7 @@ export const Matches: React.FC = () => {
           ? tournCats
           : ((sport.ageCategories && sport.ageCategories.length > 0)
             ? sport.ageCategories
-            : seasonalCats.map(c => c.id));
+            : getAgeCategoriesForSeason(activeSeason, undefined, sport.id).map(c => c.id));
       }
 
       const registeredCount = students.filter(s => s.sportId === sport.id).length;
@@ -1208,6 +1244,18 @@ export const Matches: React.FC = () => {
                 <Plus className="h-4 w-4 shrink-0" />
                 <span>برمجة مباراة جديدة</span>
               </button>
+
+              {(isCentralAdmin || (isTechCommitteeHead && techCommitteeAllowedSports && techCommitteeAllowedSports.length > 0)) && (
+                <button
+                  type="button"
+                  onClick={() => setIsResetModalOpen(true)}
+                  className="inline-flex items-center justify-center gap-1.5 rounded-2xl bg-rose-600 hover:bg-rose-700 px-3 py-2 text-[11px] sm:text-xs font-black text-white shadow-xs transition-colors cursor-pointer text-center"
+                  title="مسح برمجة فرع أو شجرة مقابلات لإعادة برمجتها من جديد"
+                >
+                  <RotateCcw className="h-3.5 w-3.5 shrink-0" />
+                  <span>مسح برمجة فرع</span>
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -2215,6 +2263,12 @@ export const Matches: React.FC = () => {
         onDeleteTournament={(tourn) => {
           setTournamentToDelete(tourn);
         }}
+        onBranchProgramCleared={loadData}
+        onOpenElectronicDraw={(sportId) => {
+          setIsResultsModalOpen(false);
+          setSelectedSportForDraw(sportId);
+          setIsDrawModalOpen(true);
+        }}
       />
 
       {/* CREATE / EDIT MATCH MODAL */}
@@ -2445,6 +2499,18 @@ export const Matches: React.FC = () => {
         currentUser={effectiveUserProfile}
         initialSportId={selectedSportForDraw}
         onMatchesCreated={loadData}
+      />
+
+      {/* Branch / Tournament Reset Modal (Central Admin + Technical Committee Head scoped) */}
+      <TournamentResetModal
+        isOpen={isResetModalOpen}
+        onClose={() => setIsResetModalOpen(false)}
+        sportsConfig={sportsConfig}
+        tournaments={tournaments}
+        matches={matches}
+        isCentralAdmin={isCentralAdmin}
+        allowedSportIds={techCommitteeAllowedSports}
+        onResetComplete={loadData}
       />
     </div>
   );

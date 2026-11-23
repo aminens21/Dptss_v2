@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { Tournament, Student, School, User, Sport, AffiliationDisplayConfig } from '../types';
-import { DataService, SPORTS_MAP, getAgeCategoriesForSeason, validateBirthDateForCategory, resolveSchoolCoach, schoolNamesMatch, resolveEffectiveAffiliationMode, isAffiliationAllowedByDisplayConfig, normalizeCategoryKey, resolveEffectiveTeacherCadre, isTeacherLevelAllowedForTournament, isCategoryAllowedForTeacherLevel, isSchoolSectorAllowedForTournament, findMatchingSchoolForTeacher, parseTournamentAllowedLevels, getTournamentLevelAr } from '../lib/dataService';
+import { DataService, SPORTS_MAP, getAgeCategoriesForSeason, validateBirthDateForCategory, resolveSchoolCoach, schoolNamesMatch, resolveEffectiveAffiliationMode, isAffiliationAllowedByDisplayConfig, normalizeCategoryKey, resolveEffectiveTeacherCadre, isTeacherLevelAllowedForTournament, isCategoryAllowedForTeacherLevel, isCrossCountryU15OpenToPrimary, isSchoolSectorAllowedForTournament, findMatchingSchoolForTeacher, parseTournamentAllowedLevels, getTournamentLevelAr } from '../lib/dataService';
 import { canUserDownloadTournamentTablePdf, buildParticipationTableRows, downloadTournamentParticipationTablePdf, formatTournamentRedBannerTitle } from '../lib/tournamentTablePdfService';
 import { useAuth } from '../contexts/AuthContext';
 import { useRolePermissions } from '../hooks/useRolePermissions';
@@ -111,7 +111,10 @@ export const CrossCountryChampionshipModal: React.FC<CrossCountryChampionshipMod
   const ccTournaments = useMemo(() => {
     if (isTeacherRole && !canManage) {
       return baseCcTournaments.filter(t =>
-        isTeacherLevelAllowedForTournament(effectiveTeacherCadre, t.level, t.ageCategory) &&
+        (
+          isTeacherLevelAllowedForTournament(effectiveTeacherCadre, t.level, t.ageCategory, t.sportId || 'cross_country') ||
+          (effectiveTeacherCadre === 'Primary' && isCrossCountryU15OpenToPrimary(t, baseCcTournaments))
+        ) &&
         (!teacherSchoolObj || isSchoolSectorAllowedForTournament(teacherSchoolObj, t))
       );
     }
@@ -127,7 +130,7 @@ export const CrossCountryChampionshipModal: React.FC<CrossCountryChampionshipMod
     if (isOpen && !isTeacherAllowedForCc) {
       const levelsSet = new Set<'Primary' | 'Middle' | 'High'>();
       baseCcTournaments.forEach(t => {
-        const parsed = parseTournamentAllowedLevels(t.level, t.ageCategory);
+        const parsed = parseTournamentAllowedLevels(t.level, t.ageCategory, t.sportId || 'cross_country');
         if (parsed === 'ALL') {
           levelsSet.add('Primary');
           levelsSet.add('Middle');
@@ -150,14 +153,18 @@ export const CrossCountryChampionshipModal: React.FC<CrossCountryChampionshipMod
   const visibleCategories = useMemo(() => {
     let list = CROSS_COUNTRY_CATEGORIES;
     if (isTeacherRole && !canManage && effectiveTeacherCadre) {
-      list = list.filter(cat => isCategoryAllowedForTeacherLevel(effectiveTeacherCadre, cat.category));
+      list = list.filter(cat => isCategoryAllowedForTeacherLevel(effectiveTeacherCadre, cat.category, 'cross_country'));
     }
     if (ccTournaments.length > 0) {
       const tourFiltered = list.filter(cat =>
-        ccTournaments.some(t =>
-          normalizeCategoryKey(t.ageCategory) === normalizeCategoryKey(cat.category) &&
-          (t.gender === 'Mixed' || (t.gender as string) === 'Both' || t.gender === cat.gender)
-        )
+        ccTournaments.some(t => {
+          const rawAge = String(t.ageCategory || '');
+          const matchesCat =
+            rawAge.includes('جميع الفئات') ||
+            normalizeCategoryKey(rawAge) === 'OPEN' ||
+            normalizeCategoryKey(rawAge) === normalizeCategoryKey(cat.category);
+          return matchesCat && (t.gender === 'Mixed' || (t.gender as string) === 'Both' || t.gender === cat.gender);
+        })
       );
       if (tourFiltered.length > 0) list = tourFiltered;
     } else if (isTeacherRole && !canManage && baseCcTournaments.length > 0) {
@@ -1804,10 +1811,22 @@ export const CrossCountryChampionshipModal: React.FC<CrossCountryChampionshipMod
                     onChange={(e) => setEditCategory(e.target.value)}
                     className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-900 focus:bg-white focus:border-blue-600 focus:outline-hidden transition-all"
                   >
-                    <option value="U12">U12 - البراعم</option>
-                    <option value="U15">U15 - الصغار</option>
-                    <option value="U18">U18 - الفتيان</option>
-                    <option value="U20">U20 - الشبان</option>
+                    {[
+                      { id: 'U12', label: 'U12 - البراعم' },
+                      { id: 'U15', label: 'U15 - الصغار' },
+                      { id: 'U18', label: 'U18 - الفتيان' },
+                      { id: 'U20', label: 'U20 - الشبان' }
+                    ]
+                      .filter(opt =>
+                        !isTeacherRole ||
+                        canManage ||
+                        !effectiveTeacherCadre ||
+                        normalizeCategoryKey(editingStudent.category) === opt.id ||
+                        isCategoryAllowedForTeacherLevel(effectiveTeacherCadre, opt.id, 'cross_country')
+                      )
+                      .map(opt => (
+                        <option key={opt.id} value={opt.id}>{opt.label}</option>
+                      ))}
                   </select>
                 </div>
               </div>

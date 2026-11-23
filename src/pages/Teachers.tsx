@@ -1,8 +1,13 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
-import { DataService, SPORTS_MAP } from '../lib/dataService';
+import { DataService, SPORTS_MAP, findMatchingSchoolForTeacher } from '../lib/dataService';
 import { User, Student, School, AdministrativeCadre } from '../types';
-import { fixTeacherFieldJumble, formatMoroccanPhone } from '../lib/utils';
+import { fixTeacherFieldJumble, formatMoroccanPhone, isFlexibleEmailMatch, normalizeArabicName } from '../lib/utils';
+import {
+  getWhatsAppUrl,
+  isValidPhoneNumber,
+  generateTeacherSecurityCodeWhatsAppMessage
+} from '../lib/whatsappService';
 import { TeacherDetailModal } from '../components/TeacherDetailModal';
 import { EditTeacherRoleModal } from '../components/EditTeacherRoleModal';
 import { ConfirmDeleteModal } from '../components/ConfirmDeleteModal';
@@ -39,7 +44,9 @@ import {
   Briefcase,
   ShieldCheck,
   X,
-  Save
+  Save,
+  KeyRound,
+  MessageCircle
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -121,6 +128,18 @@ export const Teachers: React.FC = () => {
   const isOrigCentralAdmin = Boolean(
     effectiveAdminProfile?.role === 'CENTRAL_ADMIN' || effectiveAdminProfile?.isSuperAdmin
   );
+  const isPrivilegedAdmin = Boolean(
+    userProfile?.role === 'CENTRAL_ADMIN' ||
+    userProfile?.role === 'REGIONAL_ADMIN' ||
+    userProfile?.role === 'PROVINCIAL_ADMIN' ||
+    userProfile?.role === 'SUPER_ADMIN' ||
+    userProfile?.isSuperAdmin === true ||
+    effectiveAdminProfile?.role === 'CENTRAL_ADMIN' ||
+    effectiveAdminProfile?.role === 'REGIONAL_ADMIN' ||
+    effectiveAdminProfile?.role === 'PROVINCIAL_ADMIN' ||
+    effectiveAdminProfile?.role === 'SUPER_ADMIN' ||
+    effectiveAdminProfile?.isSuperAdmin === true
+  );
   const canTechHeadImpersonate = Boolean(
     (effectiveAdminProfile?.isTechCommitteeHead || isOrigCentralAdmin) && !isImpersonatingTeacher
   );
@@ -168,6 +187,8 @@ export const Teachers: React.FC = () => {
   // Detail Modal State
   const [selectedTeacherModal, setSelectedTeacherModal] = useState<User | null>(null);
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
+  const [pinModalTarget, setPinModalTarget] = useState<{ teacher: User; school: School } | null>(null);
+  const [pinModalPhone, setPinModalPhone] = useState<string>('');
 
   // Edit Role/Cadre Modal State
   const [selectedTeacherForEdit, setSelectedTeacherForEdit] = useState<User | null>(null);
@@ -270,77 +291,241 @@ export const Teachers: React.FC = () => {
       const wb = XLSX.read(buffer, { type: 'array' });
       const firstSheetName = wb.SheetNames[0];
       const ws = wb.Sheets[firstSheetName];
-      
-      const jsonData: any[] = XLSX.utils.sheet_to_json(ws, { defval: '' });
-      const rawRows: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
 
-      let importedCount = 0;
+      const rawRows: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
       const activeDirId = DataService.getActiveDirectorateId() || 'taourirt';
 
-      // 1. Process via raw rows with accurate column index matching
-      // Column B (idx 1): Full Name
-      // Column C (idx 2): School / Work Location
-      // Column D (idx 3): Teaching Cadre
-      // Column E (idx 4): Email
-      // Column F (idx 5): Lease Number (SOM/PPR)
-      // Column G (idx 6): Phone Number
-      for (let i = 0; i < rawRows.length; i++) {
-        const row = rawRows[i];
-        if (!row || row.length === 0) continue;
-
-        const rowText = row.join(' ').toLowerCase();
-        // Skip header row if it contains header keywords
+      const sanitizeImportedLease = (rawVal: any): string => {
+        if (rawVal === undefined || rawVal === null) return '';
+        let str = String(rawVal)
+          .replace(/[٠-٩]/g, d => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)))
+          .trim()
+          .replace(/\.0$/, '')
+          .replace(/^(?:som|ppr)\s*[:\-]?\s*/i, '')
+          .trim();
         if (
-          rowText.includes('الاسم والنسب') ||
-          rowText.includes('الاسم الكامل') ||
-          (rowText.includes('البريد') && rowText.includes('التأجير')) ||
-          (i === 0 && (rowText.includes('الاسم') || rowText.includes('المؤسسة')))
+          !str ||
+          str.includes('لم يستلم') ||
+          str.includes('لا يوجد') ||
+          str.includes('غير متوفر') ||
+          str.includes('بدون') ||
+          str === '-' ||
+          str === '--' ||
+          str === '—'
         ) {
-          continue;
+          return '';
+        }
+        return str;
+      };
+
+      const sanitizeImportedEmail = (rawVal: any): string => {
+        if (rawVal === undefined || rawVal === null) return '';
+        const s = String(rawVal)
+          .replace(/[\s\u200B-\u200D\uFEFF]+/g, '')
+          .trim()
+          .toLowerCase();
+        return s.includes('@') ? s : '';
+      };
+
+      const parseCadreValue = (rawCadre: string, workLocation: string): { cadre: 'PRIMARY' | 'MIDDLE' | 'HIGH'; explicit: boolean } => {
+        const c = (rawCadre || '')
+          .trim()
+          .toLowerCase()
+          .replace(/[أإآٱ]/g, 'ا')
+          .replace(/ة/g, 'ه');
+        if (c.includes('ابتدائ') || c.includes('primary')) return { cadre: 'PRIMARY', explicit: true };
+        if (c.includes('اعداد') || c.includes('middle')) return { cadre: 'MIDDLE', explicit: true };
+        if (c.includes('تاهيل') || c.includes('ثانويه') || c.includes('high')) return { cadre: 'HIGH', explicit: true };
+
+        const w = (workLocation || '')
+          .trim()
+          .toLowerCase()
+          .replace(/[أإآٱ]/g, 'ا')
+          .replace(/ة/g, 'ه');
+        if (w.includes('ابتدائ') || w.includes('م.م') || w.includes('مجموعه مدارس') || /^مدرسه\s/.test(w)) {
+          return { cadre: 'PRIMARY', explicit: false };
+        }
+        if (w.includes('اعداد')) {
+          return { cadre: 'MIDDLE', explicit: false };
+        }
+        return { cadre: 'HIGH', explicit: false };
+      };
+
+      // Detect header row & exact column indices
+      let headerRowIdx = -1;
+      let nameCol = -1;
+      let emailCol = -1;
+      let leaseCol = -1;
+      let schoolCol = -1;
+      let phoneCol = -1;
+      let cadreCol = -1;
+
+      const isHeaderMatchScore = (row: any[]): number => {
+        if (!Array.isArray(row)) return 0;
+        const joined = row.slice(0, 20).map(c => String(c || '').trim().toLowerCase()).join(' | ');
+        let score = 0;
+        if (joined.includes('الاسم الكامل') || joined.includes('الاسم والنسب') || joined.includes('اسم الأستاذ')) score += 2;
+        if (joined.includes('البريد') || joined.includes('gmail') || joined.includes('email')) score += 2;
+        if (joined.includes('التأجير') || joined.includes('التاجير') || joined.includes('som') || joined.includes('ppr')) score += 2;
+        if (joined.includes('مقر العمل') || joined.includes('المؤسسة') || joined.includes('الموسسة')) score += 2;
+        if (joined.includes('الهاتف') || joined.includes('phone')) score += 1;
+        if (joined.includes('السلك') || joined.includes('الإطار') || joined.includes('الاطار')) score += 1;
+        return score;
+      };
+
+      for (let i = 0; i < Math.min(rawRows.length, 15); i++) {
+        if (isHeaderMatchScore(rawRows[i]) >= 4) {
+          headerRowIdx = i;
+          break;
+        }
+      }
+
+      if (headerRowIdx >= 0) {
+        const headerRow = rawRows[headerRowIdx].slice(0, 25).map(c => String(c || '').trim().toLowerCase());
+        headerRow.forEach((hl, idx) => {
+          if (!hl) return;
+          if (
+            nameCol === -1 &&
+            (hl.includes('الاسم الكامل') || hl.includes('الاسم والنسب') || hl === 'الاسم' || hl.includes('اسم الأستاذ') || hl.includes('fullname') || hl === 'name')
+          ) {
+            nameCol = idx;
+            return;
+          }
+          if (emailCol === -1 && (hl.includes('البريد') || hl.includes('gmail') || hl.includes('email'))) {
+            emailCol = idx;
+            return;
+          }
+          if (leaseCol === -1 && (hl.includes('التأجير') || hl.includes('التاجير') || hl.includes('som') || hl.includes('ppr') || hl.includes('leasenumber'))) {
+            leaseCol = idx;
+            return;
+          }
+          if (schoolCol === -1 && (hl.includes('مقر العمل') || hl.includes('المؤسسة') || hl.includes('الموسسة') || hl.includes('worklocation') || hl.includes('school'))) {
+            schoolCol = idx;
+            return;
+          }
+          if (phoneCol === -1 && (hl.includes('الهاتف') || hl.includes('النقال') || hl.includes('phone') || hl.includes('tel'))) {
+            phoneCol = idx;
+            return;
+          }
+          if (cadreCol === -1 && (hl.includes('السلك') || hl.includes('الإطار') || hl.includes('الاطار') || hl.includes('cadre'))) {
+            cadreCol = idx;
+            return;
+          }
+        });
+      }
+
+      // Default to the template/export column layout if no header row was matched:
+      // 0: رقم | 1: الاسم الكامل | 2: البريد الإلكتروني | 3: رقم التأجير | 4: مقر العمل | 5: الهاتف | 6: السلك
+      if (headerRowIdx === -1) {
+        const sampleRow = rawRows.find(
+          r => Array.isArray(r) && r.filter(c => String(c || '').trim() !== '').length >= 2
+        );
+        const col0Val = sampleRow ? String(sampleRow[0] || '').trim() : '';
+        const hasIndexCol = Boolean(sampleRow && (/^\d{1,4}$/.test(col0Val) || col0Val === ''));
+        const offset = hasIndexCol ? 1 : 0;
+        nameCol = offset;
+        emailCol = offset + 1;
+        leaseCol = offset + 2;
+        schoolCol = offset + 3;
+        phoneCol = offset + 4;
+        cadreCol = offset + 5;
+      }
+
+      // Load current users once so re-imports match and update existing teachers without duplicating
+      const existingUsersSnapshot = await DataService.getUsers();
+      const workingUsers: User[] = [...existingUsersSnapshot];
+
+      const findExistingTeacherIdx = (candidate: {
+        fullName: string;
+        email: string;
+        leaseNumber: string;
+        workLocation: string;
+      }): number => {
+        const cleanLease = candidate.leaseNumber.trim();
+        const cleanEmail = candidate.email.trim().toLowerCase();
+        const isRealEmail = Boolean(cleanEmail && !cleanEmail.endsWith('@taourirt-sports.ma'));
+        const normName = normalizeArabicName(candidate.fullName);
+        const normSchool = normalizeArabicName(candidate.workLocation);
+
+        if (cleanLease) {
+          const byLease = workingUsers.findIndex(
+            u => u && u.leaseNumber && sanitizeImportedLease(u.leaseNumber) === cleanLease
+          );
+          if (byLease >= 0) return byLease;
         }
 
-        // Try header row detection if available
-        const col1 = String(row[1] || '').trim();
-        const col2 = String(row[2] || '').trim();
-        const col3 = String(row[3] || '').trim();
-        const col4 = String(row[4] || '').trim();
-        const col5 = String(row[5] || '').trim();
-        const col6 = String(row[6] || '').trim();
-
-        // If row is empty, skip
-        if (!col1 && !col2 && !col3 && !col4 && !col5 && !col6) continue;
-
-        let fullName = col1;
-        let workLocation = col2;
-        let rawCadre = col3;
-        let email = col4.toLowerCase();
-        let leaseNumber = col5;
-        let phone = col6;
-
-        // If fullName was in col 0 (no empty col A)
-        if (!fullName && String(row[0] || '').trim()) {
-          fullName = String(row[0] || '').trim();
-          workLocation = String(row[1] || '').trim();
-          rawCadre = String(row[2] || '').trim();
-          email = String(row[3] || '').trim().toLowerCase();
-          leaseNumber = String(row[4] || '').trim();
-          phone = String(row[5] || '').trim();
+        if (isRealEmail) {
+          const byEmail = workingUsers.findIndex(
+            u => u && u.email && !u.email.endsWith('@taourirt-sports.ma') && isFlexibleEmailMatch(u.email, cleanEmail)
+          );
+          if (byEmail >= 0) return byEmail;
         }
 
-        let teachingCadre = 'HIGH';
-        if (rawCadre.includes('ابتدائ') || rawCadre.toLowerCase() === 'primary') teachingCadre = 'PRIMARY';
-        else if (rawCadre.includes('إعداد') || rawCadre.includes('اعداد') || rawCadre.toLowerCase() === 'middle') teachingCadre = 'MIDDLE';
-        else teachingCadre = 'HIGH';
+        if (normName && normSchool) {
+          const byNameAndSchool = workingUsers.findIndex(u => {
+            if (!u || (u.role && u.role !== 'TEACHER')) return false;
+            if ((u.directorateId || 'taourirt') !== activeDirId) return false;
+            const uNormName = normalizeArabicName(u.fullName || '');
+            const uNormSchool = normalizeArabicName(u.workLocation || '');
+            return (
+              uNormName === normName &&
+              Boolean(uNormSchool) &&
+              (uNormSchool === normSchool || uNormSchool.includes(normSchool) || normSchool.includes(uNormSchool))
+            );
+          });
+          if (byNameAndSchool >= 0) return byNameAndSchool;
+        }
 
-        const teacherId = `teacher_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-        let teacherData: User = {
-          id: teacherId,
-          fullName: fullName || 'أستاذ(ة)',
-          email: email,
-          leaseNumber: leaseNumber,
-          workLocation: workLocation,
-          phone: phone,
-          teachingCadre: teachingCadre,
+        if (normName && normName.length >= 5) {
+          // Prefer existing teacher in the active directorate whose leaseNumber is missing or matches
+          const matches = workingUsers
+            .map((u, idx) => ({ u, idx }))
+            .filter(({ u }) => {
+              if (!u || (u.role && u.role !== 'TEACHER')) return false;
+              if ((u.directorateId || 'taourirt') !== activeDirId) return false;
+              return normalizeArabicName(u.fullName || '') === normName;
+            });
+          if (matches.length > 0) {
+            const missingLeaseMatch = matches.find(({ u }) => !u.leaseNumber || !u.leaseNumber.trim());
+            return (missingLeaseMatch || matches[0]).idx;
+          }
+        }
+
+        return -1;
+      };
+
+      let addedCount = 0;
+      let updatedCount = 0;
+      const startRow = headerRowIdx >= 0 ? headerRowIdx + 1 : 0;
+
+      for (let i = startRow; i < rawRows.length; i++) {
+        const row = rawRows[i];
+        if (!Array.isArray(row) || row.length === 0) continue;
+        if (isHeaderMatchScore(row) >= 4) continue;
+
+        const rawName = nameCol >= 0 ? String(row[nameCol] ?? '').trim() : '';
+        const rawEmailCell = emailCol >= 0 ? String(row[emailCol] ?? '').trim() : '';
+        const rawLeaseCell = leaseCol >= 0 ? row[leaseCol] : '';
+        const rawSchool = schoolCol >= 0 ? String(row[schoolCol] ?? '').trim() : '';
+        const rawPhoneCell = phoneCol >= 0 ? row[phoneCol] : '';
+        const rawCadreCell = cadreCol >= 0 ? String(row[cadreCol] ?? '').trim() : '';
+
+        if (!rawName && !rawEmailCell && !rawLeaseCell && !rawSchool && !rawPhoneCell) continue;
+
+        const cleanedLease = sanitizeImportedLease(rawLeaseCell);
+        const cleanedEmail = sanitizeImportedEmail(rawEmailCell);
+        const cleanedPhone = formatMoroccanPhone(rawPhoneCell);
+        const parsedCadre = parseCadreValue(rawCadreCell, rawSchool);
+
+        const tempId = `teacher_${Date.now()}_${i}_${Math.random().toString(36).substring(2, 6)}`;
+        let parsedTeacher: User = {
+          id: tempId,
+          fullName: rawName || 'أستاذ(ة)',
+          email: cleanedEmail || rawEmailCell.toLowerCase(),
+          leaseNumber: cleanedLease,
+          workLocation: rawSchool,
+          phone: cleanedPhone || String(rawPhoneCell || '').trim(),
+          teachingCadre: parsedCadre.cadre,
           role: 'TEACHER',
           directorateId: activeDirId,
           isActive: true,
@@ -348,57 +533,71 @@ export const Teachers: React.FC = () => {
           updatedAt: new Date()
         };
 
-        // Un-jumble any field mix-ups automatically
-        teacherData = fixTeacherFieldJumble(teacherData);
-
-        if (!teacherData.email) {
-          teacherData.email = `${teacherId}@taourirt-sports.ma`;
+        // Safely normalize / fix any swapped columns if user uploaded a differently ordered file
+        parsedTeacher = fixTeacherFieldJumble(parsedTeacher);
+        if (cleanedLease && !parsedTeacher.leaseNumber) {
+          parsedTeacher.leaseNumber = cleanedLease;
         }
 
-        if (!teacherData.fullName || teacherData.fullName === 'أستاذ(ة)') continue;
+        const finalName = (parsedTeacher.fullName || '').trim();
+        if (!finalName || finalName === 'أستاذ(ة)' || finalName === 'أستاذ') continue;
 
-        await DataService.updateUserProfile(teacherData.id, teacherData);
-        importedCount++;
-      }
+        const finalEmail = sanitizeImportedEmail(parsedTeacher.email);
+        const finalLease = sanitizeImportedLease(parsedTeacher.leaseNumber) || cleanedLease;
+        const finalSchool = (parsedTeacher.workLocation || rawSchool || '').trim();
+        const finalPhone = formatMoroccanPhone(parsedTeacher.phone) || cleanedPhone;
+        const finalCadre = parsedCadre.explicit
+          ? parsedCadre.cadre
+          : (parsedTeacher.teachingCadre as 'PRIMARY' | 'MIDDLE' | 'HIGH') || parsedCadre.cadre;
 
-      // 2. Fallback to JSON object keys mapping if rawRows didn't catch
-      if (importedCount === 0 && jsonData.length > 0) {
-        for (const row of jsonData) {
-          const fullName = String(
-            row['الاسم والنسب'] || row['الاسم الكامل للأستاذ'] || row['الاسم الكامل'] || row['الاسم'] || row['name'] || row['fullName'] || ''
-          ).trim();
-          const workLocation = String(
-            row['المؤسسة'] || row['مقر العمل (المؤسسة)'] || row['مقر العمل'] || row['workLocation'] || row['school'] || ''
-          ).trim();
-          const rawCadre = String(
-            row['الإطار'] || row['السلك التعليمي (تأهيلي / إعدادي / ابتدائي)'] || row['السلك التعليمي'] || row['السلك'] || row['teachingCadre'] || row['cadre'] || ''
-          ).trim();
-          const email = String(
-            row['البريد الإلكتروني (gmail)'] || row['البريد الإلكتروني (Gmail)'] || row['البريد الإلكتروني'] || row['البريد'] || row['email'] || ''
-          ).trim().toLowerCase();
-          const leaseNumber = String(
-            row['رقم التأجير'] || row['رقم التأجير (SOM)'] || row['التأجير'] || row['leaseNumber'] || row['som'] || ''
-          ).trim();
-          const phone = String(
-            row['رقم الهاتف'] || row['الهاتف'] || row['phone'] || ''
-          ).trim();
+        const existingIdx = findExistingTeacherIdx({
+          fullName: finalName,
+          email: finalEmail,
+          leaseNumber: finalLease,
+          workLocation: finalSchool
+        });
 
-          if (!fullName && !email && !leaseNumber) continue;
+        if (existingIdx >= 0) {
+          const existing = workingUsers[existingIdx];
+          const existingEmail = (existing.email || '').trim().toLowerCase();
+          const hasSyntheticEmail = !existingEmail || existingEmail.endsWith('@taourirt-sports.ma');
+          const mergedEmail =
+            finalEmail && hasSyntheticEmail
+              ? finalEmail
+              : existingEmail || finalEmail || `${existing.id}@taourirt-sports.ma`;
 
-          let teachingCadre = 'HIGH';
-          if (rawCadre.includes('ابتدائ') || rawCadre.toLowerCase() === 'primary') teachingCadre = 'PRIMARY';
-          else if (rawCadre.includes('إعداد') || rawCadre.includes('اعداد') || rawCadre.toLowerCase() === 'middle') teachingCadre = 'MIDDLE';
-          else teachingCadre = 'HIGH';
+          const mergedTeacher: User = {
+            ...existing,
+            id: existing.id,
+            fullName:
+              existing.fullName && existing.fullName !== 'أستاذ' && existing.fullName !== 'أستاذ(ة)'
+                ? existing.fullName
+                : finalName,
+            email: mergedEmail,
+            leaseNumber: finalLease || sanitizeImportedLease(existing.leaseNumber) || '',
+            workLocation: finalSchool || existing.workLocation || '',
+            phone: finalPhone || existing.phone || '',
+            teachingCadre: parsedCadre.explicit
+              ? finalCadre
+              : existing.teachingCadre || finalCadre,
+            role: existing.role || 'TEACHER',
+            directorateId: existing.directorateId || activeDirId,
+            isActive: existing.isActive !== undefined ? existing.isActive : true,
+            updatedAt: new Date()
+          };
 
-          const teacherId = `teacher_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-          let teacherData: User = {
-            id: teacherId,
-            fullName: fullName || 'أستاذ(ة)',
-            email: email,
-            leaseNumber: leaseNumber,
-            workLocation: workLocation,
-            phone: phone,
-            teachingCadre: teachingCadre,
+          workingUsers[existingIdx] = mergedTeacher;
+          await DataService.updateUserProfile(existing.id, mergedTeacher);
+          updatedCount++;
+        } else {
+          const newTeacher: User = {
+            id: tempId,
+            fullName: finalName,
+            email: finalEmail || `${tempId}@taourirt-sports.ma`,
+            leaseNumber: finalLease,
+            workLocation: finalSchool,
+            phone: finalPhone,
+            teachingCadre: finalCadre,
             role: 'TEACHER',
             directorateId: activeDirId,
             isActive: true,
@@ -406,24 +605,33 @@ export const Teachers: React.FC = () => {
             updatedAt: new Date()
           };
 
-          teacherData = fixTeacherFieldJumble(teacherData);
-
-          if (!teacherData.email) {
-            teacherData.email = `${teacherId}@taourirt-sports.ma`;
-          }
-
-          if (!teacherData.fullName || teacherData.fullName === 'أستاذ(ة)') continue;
-
-          await DataService.updateUserProfile(teacherData.id, teacherData);
-          importedCount++;
+          workingUsers.push(newTeacher);
+          await DataService.updateUserProfile(newTeacher.id, newTeacher);
+          addedCount++;
         }
       }
 
-      if (importedCount > 0) {
-        toast.success(`تم بنجاح استيراد وتفعيل ${importedCount} أستاذ(ة) جديد في المنظومة!`, { id: toastId });
+      const totalProcessed = addedCount + updatedCount;
+      if (totalProcessed > 0) {
+        if (addedCount > 0 && updatedCount > 0) {
+          toast.success(
+            `تم استيراد ${addedCount} أستاذ(ة) جديد وتحديث بيانات ${updatedCount} أستاذ(ة) موجود (بما في ذلك رقم التأجير) دون تكرار!`,
+            { id: toastId, duration: 5000 }
+          );
+        } else if (updatedCount > 0) {
+          toast.success(
+            `تم تحديث بيانات ${updatedCount} أستاذ(ة) وإضافة أرقام التأجير في مكانها المناسب دون تكرار!`,
+            { id: toastId, duration: 5000 }
+          );
+        } else {
+          toast.success(`تم بنجاح استيراد وتفعيل ${addedCount} أستاذ(ة) جديد في المنظومة!`, { id: toastId });
+        }
         await loadTeachersAndStudents();
       } else {
-        toast.error('لم يتم العثور على بيانات صالحة مطابقة للأعمدة المطلوبة (B:الاسم، C:المؤسسة، D:الإطار، E:البريد، F:التأجير، G:الهاتف).', { id: toastId });
+        toast.error(
+          'لم يتم العثور على بيانات صالحة مطابقة لأعمدة النموذج (الاسم الكامل، البريد الإلكتروني، رقم التأجير، مقر العمل، رقم الهاتف، السلك التعليمي).',
+          { id: toastId }
+        );
       }
     } catch (err) {
       console.error('Error importing teachers Excel:', err);
@@ -1570,6 +1778,15 @@ export const Teachers: React.FC = () => {
                 {filteredTeachers.map((teacher) => {
                   const formattedPhone = formatMoroccanPhone(teacher.phone);
                   const specialties = Array.isArray(teacher.refereeSpecialty) ? teacher.refereeSpecialty : (teacher.refereeSpecialty ? [teacher.refereeSpecialty] : []);
+                  const matchedSchool = findMatchingSchoolForTeacher(schools, teacher);
+                  const hasValidTeacherPhone = isValidPhoneNumber(teacher.phone);
+                  const teacherPinMessage = matchedSchool?.accessCode
+                    ? generateTeacherSecurityCodeWhatsAppMessage({
+                        teacherName: teacher.fullName,
+                        schoolName: matchedSchool.name,
+                        accessCode: matchedSchool.accessCode
+                      })
+                    : '';
 
                   return (
                     <tr
@@ -1624,9 +1841,17 @@ export const Teachers: React.FC = () => {
                       {/* Work Location */}
                       <td className="px-6 py-4 text-slate-600 font-medium">
                         {teacher.workLocation ? (
-                          <div className="flex items-center gap-1.5">
-                            <MapPin className="h-3.5 w-3.5 text-slate-400 shrink-0" />
-                            <span className="font-bold text-slate-700">{teacher.workLocation}</span>
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-1.5">
+                              <MapPin className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+                              <span className="font-bold text-slate-700">{teacher.workLocation}</span>
+                            </div>
+                            {isPrivilegedAdmin && matchedSchool?.accessCode && (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-violet-50 border border-violet-200 text-violet-900 text-[10px] font-mono font-black">
+                                <KeyRound className="h-3 w-3 text-violet-600 shrink-0" />
+                                <span>{matchedSchool.accessCode}</span>
+                              </span>
+                            )}
                           </div>
                         ) : (
                           <span className="text-slate-400 italic">لم يدخل بعد</span>
@@ -1661,6 +1886,38 @@ export const Teachers: React.FC = () => {
                       {/* Actions */}
                       <td className="px-6 py-4 text-center">
                         <div className="flex items-center justify-center gap-1.5">
+                          {isPrivilegedAdmin && matchedSchool?.accessCode && (
+                            hasValidTeacherPhone ? (
+                              <a
+                                href={getWhatsAppUrl(teacher.phone || '', teacherPinMessage)}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  toast.success(`تم فتح واتساب لإرسال رمز أمان ${matchedSchool.name} إلى ${teacher.fullName}`);
+                                }}
+                                className="px-2.5 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded-xl border border-green-700 transition-all cursor-pointer shadow-3xs flex items-center gap-1 text-[11px] font-black"
+                                title={`إرسال رمز الأمان (${matchedSchool.accessCode}) مباشرة إلى ${teacher.fullName} عبر واتساب`}
+                              >
+                                <MessageCircle className="h-3.5 w-3.5 shrink-0" />
+                                <span className="hidden xl:inline">رمز الأمان</span>
+                              </a>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setPinModalPhone(teacher.phone || '');
+                                  setPinModalTarget({ teacher, school: matchedSchool });
+                                }}
+                                className="px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 rounded-xl border border-emerald-200 transition-all cursor-pointer shadow-3xs flex items-center gap-1 text-[11px] font-black"
+                                title={`إرسال رمز الأمان (${matchedSchool.accessCode}) إلى ${teacher.fullName} عبر واتساب`}
+                              >
+                                <MessageCircle className="h-3.5 w-3.5 shrink-0" />
+                                <span className="hidden xl:inline">رمز الأمان</span>
+                              </button>
+                            )
+                          )}
                           {canTechHeadImpersonate && ((teacher.role !== 'CENTRAL_ADMIN' && !teacher.isSuperAdmin) || (isOrigCentralAdmin && teacher.isTechCommitteeHead)) && (
                             <button
                               type="button"
@@ -1732,6 +1989,15 @@ export const Teachers: React.FC = () => {
             {filteredTeachers.map((teacher) => {
               const hasDetails = teacher.workLocation && teacher.leaseNumber;
               const specialties = Array.isArray(teacher.refereeSpecialty) ? teacher.refereeSpecialty : (teacher.refereeSpecialty ? [teacher.refereeSpecialty] : []);
+              const matchedSchool = findMatchingSchoolForTeacher(schools, teacher);
+              const hasValidTeacherPhone = isValidPhoneNumber(teacher.phone);
+              const teacherPinMessage = matchedSchool?.accessCode
+                ? generateTeacherSecurityCodeWhatsAppMessage({
+                    teacherName: teacher.fullName,
+                    schoolName: matchedSchool.name,
+                    accessCode: matchedSchool.accessCode
+                  })
+                : '';
 
               return (
                 <div
@@ -1741,6 +2007,38 @@ export const Teachers: React.FC = () => {
                 >
                   {/* Mobile Action Buttons: Icons only, centered above name */}
                   <div className="flex items-center justify-center flex-wrap gap-2 w-full pb-2.5 border-b border-slate-100">
+                    {isPrivilegedAdmin && matchedSchool?.accessCode && (
+                      hasValidTeacherPhone ? (
+                        <a
+                          href={getWhatsAppUrl(teacher.phone || '', teacherPinMessage)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toast.success(`تم فتح واتساب لإرسال رمز أمان ${matchedSchool.name} إلى ${teacher.fullName}`);
+                          }}
+                          className="px-2.5 py-2 bg-green-600 hover:bg-green-700 active:scale-95 text-white rounded-xl border border-green-700 transition-all cursor-pointer shadow-3xs flex items-center justify-center gap-1 text-[11px] font-black"
+                          title={`إرسال رمز الأمان (${matchedSchool.accessCode}) للأستاذ عبر واتساب`}
+                        >
+                          <MessageCircle className="h-3.5 w-3.5 shrink-0" />
+                          <span>إرسال رمز الأمان</span>
+                        </a>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setPinModalPhone(teacher.phone || '');
+                            setPinModalTarget({ teacher, school: matchedSchool });
+                          }}
+                          className="px-2.5 py-2 bg-emerald-50 hover:bg-emerald-100 active:scale-95 text-emerald-800 rounded-xl border border-emerald-200 transition-all cursor-pointer shadow-3xs flex items-center justify-center gap-1 text-[11px] font-black"
+                          title={`إرسال رمز الأمان (${matchedSchool.accessCode}) للأستاذ عبر واتساب`}
+                        >
+                          <MessageCircle className="h-3.5 w-3.5 shrink-0" />
+                          <span>إرسال رمز الأمان</span>
+                        </button>
+                      )
+                    )}
                     {canTechHeadImpersonate && ((teacher.role !== 'CENTRAL_ADMIN' && !teacher.isSuperAdmin) || (isOrigCentralAdmin && teacher.isTechCommitteeHead)) && (
                       <button
                         type="button"
@@ -2008,6 +2306,125 @@ export const Teachers: React.FC = () => {
         />
       )}
 
+      {/* Send School Security Code via WhatsApp Modal (when phone number is missing or needs confirmation) */}
+      {pinModalTarget && (
+        <div
+          className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4"
+          dir="rtl"
+          onClick={() => setPinModalTarget(null)}
+        >
+          <div
+            className="bg-white rounded-2xl border border-slate-200 w-full max-w-md overflow-hidden shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-5 py-4 bg-gradient-to-l from-emerald-700 to-teal-800 text-white flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-xl bg-white/15">
+                  <KeyRound className="h-5 w-5 text-white" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-black">إرسال رمز الأمان للأستاذ عبر واتساب</h3>
+                  <p className="text-[11px] text-emerald-100">{pinModalTarget.school.name}</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPinModalTarget(null)}
+                className="p-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white cursor-pointer"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4">
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 flex items-center justify-between gap-2">
+                <div className="text-xs">
+                  <p className="font-black text-slate-900">{pinModalTarget.teacher.fullName}</p>
+                  <p className="text-[11px] text-slate-500 font-semibold">{pinModalTarget.school.name}</p>
+                </div>
+                <div className="flex items-center gap-1.5 bg-white border border-violet-200 px-2.5 py-1 rounded-lg">
+                  <span className="font-mono font-black text-sm text-violet-900">
+                    {pinModalTarget.school.accessCode}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (pinModalTarget.school.accessCode) {
+                        navigator.clipboard.writeText(pinModalTarget.school.accessCode);
+                        toast.success('تم نسخ رمز الأمان');
+                      }
+                    }}
+                    className="p-1 text-violet-600 hover:bg-violet-50 rounded cursor-pointer"
+                    title="نسخ رمز الأمان"
+                  >
+                    <Copy className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                  رقم هاتف الأستاذ للواتساب (اختياري):
+                </label>
+                <input
+                  type="tel"
+                  dir="ltr"
+                  value={pinModalPhone}
+                  onChange={(e) => setPinModalPhone(e.target.value)}
+                  placeholder="0661234567"
+                  className="w-full px-3.5 py-2 text-sm font-mono font-bold bg-white border border-slate-200 rounded-xl text-right focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                />
+                <p className="text-[10px] text-slate-500 mt-1">
+                  إذا تُرك فارغاً، سيفتح واتساب بالرسالة الجاهزة لتختار جهة الاتصال مباشرة.
+                </p>
+              </div>
+
+              {(() => {
+                const msg = generateTeacherSecurityCodeWhatsAppMessage({
+                  teacherName: pinModalTarget.teacher.fullName,
+                  schoolName: pinModalTarget.school.name,
+                  accessCode: pinModalTarget.school.accessCode || ''
+                });
+                const url = getWhatsAppUrl(pinModalPhone, msg);
+                const validPhone = isValidPhoneNumber(pinModalPhone);
+                return (
+                  <div className="flex flex-wrap items-center justify-end gap-2 pt-2 border-t border-slate-100">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        navigator.clipboard.writeText(msg);
+                        toast.success('تم نسخ نص رسالة رمز الأمان');
+                      }}
+                      className="px-3 py-2 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl cursor-pointer inline-flex items-center gap-1.5"
+                    >
+                      <Copy className="h-3.5 w-3.5" />
+                      <span>نسخ الرسالة</span>
+                    </button>
+                    <a
+                      href={url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={() => {
+                        toast.success(
+                          validPhone
+                            ? `تم فتح واتساب لإرسال رمز الأمان إلى ${pinModalTarget.teacher.fullName}`
+                            : 'تم فتح واتساب بالرسالة الجاهزة — اختر الأستاذ من جهات اتصالك'
+                        );
+                        setPinModalTarget(null);
+                      }}
+                      className="px-4 py-2 text-xs font-black text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl shadow-xs inline-flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <MessageCircle className="h-4 w-4" />
+                      <span>{validPhone ? 'إرسال عبر واتساب الآن' : 'فتح واتساب واختيار جهة الاتصال'}</span>
+                    </a>
+                  </div>
+                );
+              })()}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Teacher Detail Modal */}
       {isDetailModalOpen && (
         <TeacherDetailModal
@@ -2015,6 +2432,8 @@ export const Teachers: React.FC = () => {
           onClose={() => setIsDetailModalOpen(false)}
           teacher={selectedTeacherModal}
           teacherStudents={teacherStudents}
+          matchedSchool={selectedTeacherModal ? findMatchingSchoolForTeacher(schools, selectedTeacherModal) || null : null}
+          canSendSecurityCode={isPrivilegedAdmin}
           onEditRole={
             canEditTeachers &&
             selectedTeacherModal &&

@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { DataService, SPORTS_MAP, AGE_CATEGORIES, getAgeCategoriesForSeason, getCategoryGenderLabel, isClubTournament, normalizeCategoryKey, validateBirthDateForCategory, isTeacherLevelAllowedForTournament, getEffectiveConfirmedBranches, formatBranchLabelAr, getGenderSpecificCategoryTitle, isSchoolSectorAllowedForTournament, schoolNamesMatch, isAffiliationAllowedByDisplayConfig, resolveEffectiveTeacherCadre, isCategoryAllowedForTeacherLevel, findMatchingSchoolForTeacher } from '../lib/dataService';
+import { DataService, SPORTS_MAP, AGE_CATEGORIES, getAgeCategoriesForSeason, getCategoryGenderLabel, isClubTournament, normalizeCategoryKey, validateBirthDateForCategory, isTeacherLevelAllowedForTournament, isCrossCountryU15OpenToPrimary, getEffectiveConfirmedBranches, formatBranchLabelAr, getGenderSpecificCategoryTitle, isSchoolSectorAllowedForTournament, schoolNamesMatch, isAffiliationAllowedByDisplayConfig, resolveEffectiveTeacherCadre, isCategoryAllowedForTeacherLevel, findMatchingSchoolForTeacher, isTrackOrCrossCountrySport, isTeamSport } from '../lib/dataService';
 import { useSchoolConfirmations } from '../hooks/useSchoolConfirmations';
 import { Student, Sport, Tournament, School, Directorate, AffiliationDisplayConfig } from '../types';
 import { ParticipationFormPdfModal } from '../components/ParticipationFormPdfModal';
@@ -81,7 +81,10 @@ export const TeacherTeams: React.FC = () => {
     });
     if (!isTeacherRole || canManage) return activeTourns;
     return activeTourns.filter(t =>
-      isTeacherLevelAllowedForTournament(teacherCadre, t.level, t.ageCategory) &&
+      (
+        isTeacherLevelAllowedForTournament(teacherCadre, t.level, t.ageCategory, t.sportId) ||
+        (teacherCadre === 'Primary' && isCrossCountryU15OpenToPrimary(t, activeTourns))
+      ) &&
       (!teacherSchoolObj || isSchoolSectorAllowedForTournament(teacherSchoolObj, t))
     );
   }, [tournaments, isTeacherRole, canManage, teacherCadre, teacherSchoolObj, affiliationDisplayConfig]);
@@ -753,27 +756,66 @@ export const TeacherTeams: React.FC = () => {
     const year = parseInt(parts[0], 10);
     if (isNaN(year) || year < 1990 || year > 2030) return;
 
+    // Preserve currently selected category if it already matches the entered birth year (handles U17 overlap cleanly)
+    if (category && activeSportCategories.includes(category)) {
+      const currentValidation = validateBirthDateForCategory(newDate, category, currentSeason, gender, selectedSportId);
+      if (currentValidation.isValid) {
+        return;
+      }
+    }
+
     const match = currentSeason.match(/(\d{4})/);
     const startYear = match ? parseInt(match[1], 10) : 2026;
 
+    const isCC = isTrackOrCrossCountrySport(selectedSportId);
+    const isTeam = isTeamSport(selectedSportId);
     let detectedCatId = '';
-    if (year >= startYear - 11) {
-      detectedCatId = 'U12';
-    } else if (year >= startYear - 14 && year <= startYear - 12) {
-      detectedCatId = 'U15';
-    } else if (year >= startYear - 17 && year <= startYear - 15) {
-      detectedCatId = 'U18';
+    if (isCC) {
+      if (year >= startYear - 12) {
+        detectedCatId = 'U12';
+      } else if (year >= startYear - 14 && year <= startYear - 13) {
+        detectedCatId = 'U15';
+      } else if (year >= startYear - 16 && year <= startYear - 15) {
+        detectedCatId = 'U18';
+      } else {
+        detectedCatId = 'U20';
+      }
+    } else if (isTeam) {
+      if (year >= startYear - 11 && year <= startYear - 9) {
+        detectedCatId = 'U12';
+      } else if (year >= startYear - 14 && year <= startYear - 12) {
+        detectedCatId = 'U15';
+      } else if (year >= startYear - 17 && year <= startYear - 15) {
+        detectedCatId = 'U18';
+      }
     } else {
-      detectedCatId = 'U20';
+      if (year >= startYear - 11 && year <= startYear - 9) {
+        detectedCatId = 'U12';
+      } else if (year >= startYear - 14 && year <= startYear - 12) {
+        detectedCatId = 'U15';
+      } else if (year >= startYear - 16 && year <= startYear - 14 && activeSportCategories.includes('U17')) {
+        detectedCatId = 'U17';
+      } else if (year >= startYear - 17 && year <= startYear - 15) {
+        detectedCatId = 'U18';
+      } else if (year >= startYear - 17) {
+        detectedCatId = 'U20';
+      }
     }
 
     if (detectedCatId) {
       if (activeSportCategories.includes(detectedCatId)) {
         setCategory(detectedCatId);
-      } else if (activeSportCategories.includes('OPEN')) {
-        setCategory('OPEN');
-      } else if (activeSportCategories.length > 0) {
-        setCategory(activeSportCategories[0]);
+      } else {
+        const matchingAvailable = activeSportCategories.find(catId =>
+          validateBirthDateForCategory(newDate, catId, currentSeason, gender, selectedSportId).isValid
+        );
+        if (matchingAvailable) {
+          setCategory(matchingAvailable);
+        } else if (activeSportCategories.includes('OPEN')) {
+          setCategory('OPEN');
+        } else if (activeSportCategories.length > 0) {
+          setCategory(activeSportCategories[0]);
+        }
       }
     }
   };
@@ -1222,14 +1264,14 @@ export const TeacherTeams: React.FC = () => {
   const activeSportCategories = useMemo(() => {
     const rawCats = (activeSportConfig?.ageCategories && activeSportConfig.ageCategories.length > 0)
       ? activeSportConfig.ageCategories
-      : getAgeCategoriesForSeason(currentSeason).map(c => c.id);
+      : getAgeCategoriesForSeason(currentSeason, undefined, selectedSportId).map(c => c.id);
     let normalized: string[] = Array.from(
       new Set<string>(rawCats.map((c: string) => String(normalizeCategoryKey(c))))
     );
     if (isTeacherRole && !canManage && selectedSportId) {
       const sportTourns = teacherAllowedTournaments.filter(t => t.sportId === selectedSportId);
       if (sportTourns.length > 0) {
-        const hasOpenCat = sportTourns.some(t => !t.ageCategory || normalizeCategoryKey(t.ageCategory) === 'OPEN');
+        const hasOpenCat = sportTourns.some(t => !t.ageCategory || String(t.ageCategory).includes('جميع الفئات') || normalizeCategoryKey(t.ageCategory) === 'OPEN');
         if (!hasOpenCat) {
           const allowedSet = new Set<string>(sportTourns.map(t => String(normalizeCategoryKey(t.ageCategory))).filter(Boolean));
           const tournFiltered = normalized.filter(c => allowedSet.has(c));
@@ -1237,7 +1279,7 @@ export const TeacherTeams: React.FC = () => {
         }
       }
       if (teacherCadre) {
-        const levelFiltered = normalized.filter(c => isCategoryAllowedForTeacherLevel(teacherCadre, c));
+        const levelFiltered = normalized.filter(c => isCategoryAllowedForTeacherLevel(teacherCadre, c, selectedSportId));
         if (levelFiltered.length > 0) normalized = levelFiltered;
       }
     }
@@ -2438,7 +2480,7 @@ export const TeacherTeams: React.FC = () => {
                       const hasExisting = activeSportStudents.some(s =>
                         normalizeCategoryKey(s.category) === item.catId && s.gender === item.gender
                       );
-                      if (!hasExisting && !isCategoryAllowedForTeacherLevel(teacherCadre, item.catId)) {
+                      if (!hasExisting && !isCategoryAllowedForTeacherLevel(teacherCadre, item.catId, selectedSportId)) {
                         return false;
                       }
                     }

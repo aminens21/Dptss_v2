@@ -1,7 +1,13 @@
 import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { DataService, SPORTS_MAP, AGE_CATEGORIES, deduplicateById, generateSecureAccessCode, getEffectiveConfirmedBranches, formatBranchLabelAr, normalizeCategoryKey, ConfirmedBranchTuple, normalizeSchoolCycleType, getSchoolEducationSector, normalizeSchoolPureCycleLabel, normalizeArabicSearch, schoolNamesMatch, findMatchingSchoolForTeacher, areSportIdsEquivalent } from '../lib/dataService';
-import { School, Match, Directorate } from '../types';
+import { School, Match, Directorate, User as UserType } from '../types';
+import {
+  getWhatsAppUrl,
+  isValidPhoneNumber,
+  generateTeacherSecurityCodeWhatsAppMessage,
+  generatePrincipalSecurityCodeWhatsAppMessage
+} from '../lib/whatsappService';
 import { useSchoolConfirmations } from '../hooks/useSchoolConfirmations';
 import * as XLSX from 'xlsx';
 import {
@@ -35,7 +41,8 @@ import {
   Eye,
   EyeOff,
   X,
-  RefreshCw
+  RefreshCw,
+  MessageCircle
 } from 'lucide-react';
 import { CreateSchoolModal } from '../components/CreateSchoolModal';
 import { ConfirmDeleteModal } from '../components/ConfirmDeleteModal';
@@ -52,6 +59,7 @@ export const Schools: React.FC = () => {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [schools, setSchools] = useState<School[]>([]);
+  const [teachers, setTeachers] = useState<UserType[]>([]);
   const [activeDirObj, setActiveDirObj] = useState<Directorate | null>(null);
   const [matches, setMatches] = useState<Match[]>([]);
   const [students, setStudents] = useState<any[]>([]);
@@ -100,6 +108,9 @@ export const Schools: React.FC = () => {
   const [isDeletingAll, setIsDeletingAll] = useState(false);
   const [selectedSchoolForParticipants, setSelectedSchoolForParticipants] = useState<School | null>(null);
   const [selectedSchoolForDetails, setSelectedSchoolForDetails] = useState<School | null>(null);
+  const [pinWhatsAppSchool, setPinWhatsAppSchool] = useState<School | null>(null);
+  const [manualTeacherPhone, setManualTeacherPhone] = useState<string>('');
+  const [selectedManualTeacherId, setSelectedManualTeacherId] = useState<string>('');
   const [isPruningExtra, setIsPruningExtra] = useState(false);
   const autoPrunedDirsRef = useRef<Set<string>>(new Set());
 
@@ -171,6 +182,7 @@ export const Schools: React.FC = () => {
     window.addEventListener('directorateChanged', handleRefresh);
     window.addEventListener('schoolsUpdated', handleRefresh);
     window.addEventListener('userDataChanged', handleRefresh);
+    window.addEventListener('teacherProfileUpdated', handleRefresh);
     
     // Subscribe to live schools updates from Firestore
     const unsubscribe = DataService.subscribeToSchools((updatedSchools) => {
@@ -189,6 +201,7 @@ export const Schools: React.FC = () => {
       window.removeEventListener('directorateChanged', handleRefresh);
       window.removeEventListener('schoolsUpdated', handleRefresh);
       window.removeEventListener('userDataChanged', handleRefresh);
+      window.removeEventListener('teacherProfileUpdated', handleRefresh);
       unsubscribe();
     };
   }, []);
@@ -198,11 +211,12 @@ export const Schools: React.FC = () => {
     try {
       const activeDirId = DataService.getActiveDirectorateId() || 'taourirt';
       const isAllDirs = !activeDirId || activeDirId === 'all';
-      const [list, mList, studList, activeDir] = await Promise.all([
+      const [list, mList, studList, activeDir, teachersList] = await Promise.all([
         DataService.getSchools(isAllDirs ? 'all' : activeDirId, isAllDirs),
         DataService.getMatches(),
         DataService.getStudents(),
-        DataService.getActiveDirectorate()
+        DataService.getActiveDirectorate(),
+        DataService.getTeachers().catch(() => [] as UserType[])
       ]);
 
       const dirSchools = list.filter(s => 
@@ -213,9 +227,11 @@ export const Schools: React.FC = () => {
       );
       const dirMatches = mList.filter(m => isAllDirs || (m.directorateId || 'taourirt') === activeDirId);
       const dirStudents = studList.filter(st => isAllDirs || (st.directorateId || 'taourirt') === activeDirId);
+      const dirTeachers = teachersList.filter(t => t && (isAllDirs || (t.directorateId || 'taourirt') === activeDirId));
 
       setActiveDirObj(activeDir);
       setSchools(deduplicateById<School>(dirSchools));
+      setTeachers(deduplicateById<UserType>(dirTeachers));
       setMatches(dirMatches);
       setStudents(dirStudents);
     } catch (e) {
@@ -225,6 +241,22 @@ export const Schools: React.FC = () => {
       setLoading(false);
     }
   };
+
+  const teachersBySchoolId = useMemo(() => {
+    const map = new Map<string, UserType[]>();
+    if (schools.length === 0 || teachers.length === 0) return map;
+    teachers.forEach(t => {
+      const matched = findMatchingSchoolForTeacher(schools, t);
+      if (matched) {
+        const list = map.get(matched.id) || [];
+        if (!list.some(existing => existing.id === t.id)) {
+          list.push(t);
+          map.set(matched.id, list);
+        }
+      }
+    });
+    return map;
+  }, [schools, teachers]);
 
   const handleSaveSchool = async (schoolData: Omit<School, 'id'>) => {
     if (editingSchool && !canEditSchool(editingSchool)) {
@@ -569,27 +601,69 @@ export const Schools: React.FC = () => {
     }
   };
 
-  const handleSendPinViaWhatsApp = (school: School) => {
-    const phone = school.principalPhone || school.phone;
-    if (!phone) {
-      toast.error('لم يتم تسجيل هاتف لمدير المؤسسة أو المنسق لإرسال الرمز إليه');
-      return;
+  const openPinWhatsAppModalForSchool = (school: School, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    setManualTeacherPhone('');
+    setSelectedManualTeacherId('');
+    setPinWhatsAppSchool(school);
+  };
+
+  const renderTeacherPinWhatsAppButton = (school: School, size: 'sm' | 'md' = 'sm') => {
+    if (!school.accessCode) return null;
+    const schoolTeachers = teachersBySchoolId.get(school.id) || [];
+    const teachersWithPhone = schoolTeachers.filter(t => isValidPhoneNumber(t.phone));
+    const iconCls = size === 'sm' ? 'w-3 h-3' : 'w-3.5 h-3.5';
+
+    if (teachersWithPhone.length === 1) {
+      const targetTeacher = teachersWithPhone[0];
+      const waUrl = getWhatsAppUrl(
+        targetTeacher.phone || '',
+        generateTeacherSecurityCodeWhatsAppMessage({
+          teacherName: targetTeacher.fullName,
+          schoolName: school.name,
+          accessCode: school.accessCode
+        })
+      );
+      return (
+        <a
+          href={waUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={(e) => {
+            e.stopPropagation();
+            toast.success(`تم فتح واتساب لإرسال رمز الأمان مباشرة إلى الأستاذ(ة) ${targetTeacher.fullName}`);
+          }}
+          className="p-1 hover:bg-emerald-100 rounded text-emerald-700 transition-colors cursor-pointer inline-flex items-center justify-center"
+          title={`إرسال رمز الأمان عبر WhatsApp مباشرة للأستاذ(ة): ${targetTeacher.fullName}`}
+        >
+          <MessageCircle className={iconCls} />
+        </a>
+      );
     }
-    
-    // Clean phone number: remove spaces, dashes, ensure country code is 212
-    let cleanPhone = phone.replace(/[\s\-\(\)]/g, '');
-    if (cleanPhone.startsWith('0')) {
-      cleanPhone = '212' + cleanPhone.substring(1);
-    } else if (!cleanPhone.startsWith('212')) {
-      cleanPhone = '212' + cleanPhone;
-    }
-    
-    const message = `السلام عليكم ورحمة الله وبركاته،\nالسيد(ة) مدير(ة) مؤسسة *${school.name}*،\n\nإليكم الرمز السري للأمان (Access Code) الخاص بمؤسستكم لتفعيل حسابات الأساتذة في منصة البطولة الإقليمية المدرسية:\n\n*الرمز السري الخاص بمؤسستكم: [ ${school.accessCode || ''} ]*\n\nيرجى تسليم هذا الرمز لأساتذة التربية البدنية العاملين بالمؤسسة لتمكينهم من استكمال ملفاتهم الشخصية والتسجيل الآمن بالمنصة.\n\nمع خالص التقدير والتحية.`;
-    
-    const encodedText = encodeURIComponent(message);
-    const whatsappUrl = `https://wa.me/${cleanPhone}?text=${encodedText}`;
-    window.open(whatsappUrl, '_blank');
-    toast.success('تم فتح واتساب لإرسال الرمز السري بنجاح!');
+
+    return (
+      <button
+        type="button"
+        onClick={(e) => openPinWhatsAppModalForSchool(school, e)}
+        className="p-1 hover:bg-emerald-100 rounded text-emerald-700 transition-colors cursor-pointer inline-flex items-center justify-center"
+        title={
+          schoolTeachers.length > 1
+            ? `اختيار الأستاذ المعني وإرسال رمز الأمان (${schoolTeachers.length} أساتذة)`
+            : 'إرسال رمز الأمان للأستاذ المعني عبر WhatsApp'
+        }
+      >
+        <MessageCircle className={iconCls} />
+      </button>
+    );
+  };
+
+  const getPrincipalPinWhatsAppUrl = (school: School): string => {
+    const phone = school.principalPhone || school.phone || '';
+    const message = generatePrincipalSecurityCodeWhatsAppMessage({
+      schoolName: school.name,
+      accessCode: school.accessCode || ''
+    });
+    return getWhatsAppUrl(phone, message);
   };
 
   const handleRegenerateCodes = async () => {
@@ -1392,14 +1466,21 @@ export const Schools: React.FC = () => {
                                 >
                                   <Copy className="w-3 h-3" />
                                 </button>
-                                {(s.principalPhone || s.phone) && (
-                                  <button
-                                    onClick={() => handleSendPinViaWhatsApp(s)}
-                                    className="p-1 hover:bg-green-100 rounded text-green-600 transition-colors cursor-pointer"
+                                {renderTeacherPinWhatsAppButton(s, 'sm')}
+                                {(s.principalPhone || s.phone) && s.accessCode && (
+                                  <a
+                                    href={getPrincipalPinWhatsAppUrl(s)}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      toast.success('تم فتح واتساب لإرسال الرمز لمدير المؤسسة!');
+                                    }}
+                                    className="p-1 hover:bg-green-100 rounded text-green-600 transition-colors cursor-pointer inline-flex items-center justify-center"
                                     title="إرسال عبر WhatsApp إلى مدير المؤسسة"
                                   >
                                     <Send className="w-3 h-3" />
-                                  </button>
+                                  </a>
                                 )}
                               </div>
                             ) : (
@@ -1770,17 +1851,21 @@ export const Schools: React.FC = () => {
                               >
                                 <Copy className="w-3.5 h-3.5" />
                               </button>
-                              {(s.principalPhone || s.phone) && (
-                                <button
+                              {renderTeacherPinWhatsAppButton(s, 'md')}
+                              {(s.principalPhone || s.phone) && s.accessCode && (
+                                <a
+                                  href={getPrincipalPinWhatsAppUrl(s)}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
                                   onClick={(e) => {
                                     e.stopPropagation();
-                                    handleSendPinViaWhatsApp(s);
+                                    toast.success('تم فتح واتساب لإرسال الرمز لمدير المؤسسة!');
                                   }}
-                                  className="p-1 hover:bg-green-100 rounded text-green-600 transition-colors cursor-pointer"
+                                  className="p-1 hover:bg-green-100 rounded text-green-600 transition-colors cursor-pointer inline-flex items-center justify-center"
                                   title="إرسال عبر WhatsApp إلى مدير المؤسسة"
                                 >
                                   <Send className="w-3.5 h-3.5" />
-                                </button>
+                                </a>
                               )}
                             </div>
                           </div>
@@ -2050,38 +2135,116 @@ export const Schools: React.FC = () => {
                 </div>
                 
                 {(isPrivilegedAdmin || isTeacherSchool(selectedSchoolForDetails)) ? (
-                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-violet-50 border border-violet-100 p-3 rounded-xl">
-                    <div className="flex items-center gap-2.5">
-                      <span className="text-[11px] font-bold text-violet-950">رمز الأمان:</span>
-                      <span className="font-mono font-black text-violet-900 text-base tracking-wider bg-white px-3 py-1 rounded-lg border border-violet-200 shadow-3xs">
-                        {selectedSchoolForDetails.accessCode || '—'}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <button
-                        onClick={() => {
-                          if (selectedSchoolForDetails.accessCode) {
-                            navigator.clipboard.writeText(selectedSchoolForDetails.accessCode);
-                            toast.success('تم نسخ رمز الأمان الموحد!');
-                          }
-                        }}
-                        className="px-2.5 py-1.5 bg-white border border-violet-200 hover:bg-violet-100 text-violet-700 font-bold text-xs rounded-lg transition-colors cursor-pointer flex items-center gap-1 shadow-3xs"
-                        title="نسخ رمز الأمان"
-                      >
-                        <Copy className="w-3.5 h-3.5" />
-                        <span>نسخ الرمز</span>
-                      </button>
-                      {(selectedSchoolForDetails.principalPhone || selectedSchoolForDetails.phone) && (
+                  <div className="space-y-3">
+                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-violet-50 border border-violet-100 p-3 rounded-xl">
+                      <div className="flex items-center gap-2.5">
+                        <span className="text-[11px] font-bold text-violet-950">رمز الأمان:</span>
+                        <span className="font-mono font-black text-violet-900 text-base tracking-wider bg-white px-3 py-1 rounded-lg border border-violet-200 shadow-3xs">
+                          {selectedSchoolForDetails.accessCode || '—'}
+                        </span>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-1.5">
                         <button
-                          onClick={() => handleSendPinViaWhatsApp(selectedSchoolForDetails)}
-                          className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-lg transition-colors cursor-pointer flex items-center gap-1 shadow-2xs"
-                          title="إرسال عبر WhatsApp إلى مدير أو منسق المؤسسة"
+                          onClick={() => {
+                            if (selectedSchoolForDetails.accessCode) {
+                              navigator.clipboard.writeText(selectedSchoolForDetails.accessCode);
+                              toast.success('تم نسخ رمز الأمان الموحد!');
+                            }
+                          }}
+                          className="px-2.5 py-1.5 bg-white border border-violet-200 hover:bg-violet-100 text-violet-700 font-bold text-xs rounded-lg transition-colors cursor-pointer flex items-center gap-1 shadow-3xs"
+                          title="نسخ رمز الأمان"
                         >
-                          <Send className="w-3.5 h-3.5" />
-                          <span>إرسال الرمز</span>
+                          <Copy className="w-3.5 h-3.5" />
+                          <span>نسخ الرمز</span>
                         </button>
-                      )}
+                        {selectedSchoolForDetails.accessCode && (
+                          <button
+                            type="button"
+                            onClick={(e) => openPinWhatsAppModalForSchool(selectedSchoolForDetails, e)}
+                            className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-lg transition-colors cursor-pointer flex items-center gap-1 shadow-2xs"
+                            title="إرسال رمز الأمان مباشرة للأستاذ المعني عبر WhatsApp"
+                          >
+                            <MessageCircle className="w-3.5 h-3.5" />
+                            <span>إرسال للأستاذ (واتساب)</span>
+                          </button>
+                        )}
+                        {(selectedSchoolForDetails.principalPhone || selectedSchoolForDetails.phone) && selectedSchoolForDetails.accessCode && (
+                          <a
+                            href={getPrincipalPinWhatsAppUrl(selectedSchoolForDetails)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={() => toast.success('تم فتح واتساب لإرسال الرمز لمدير المؤسسة!')}
+                            className="px-2.5 py-1.5 bg-slate-700 hover:bg-slate-800 text-white font-bold text-xs rounded-lg transition-colors cursor-pointer flex items-center gap-1 shadow-2xs"
+                            title="إرسال عبر WhatsApp إلى مدير المؤسسة"
+                          >
+                            <Send className="w-3.5 h-3.5" />
+                            <span>للمدير</span>
+                          </a>
+                        )}
+                      </div>
                     </div>
+
+                    {/* Direct list of matched teachers for this school */}
+                    {selectedSchoolForDetails.accessCode && (() => {
+                      const matchedSchoolTeachers = teachersBySchoolId.get(selectedSchoolForDetails.id) || [];
+                      if (matchedSchoolTeachers.length === 0) return null;
+                      return (
+                        <div className="bg-white border border-emerald-200/80 rounded-xl p-2.5 space-y-2">
+                          <p className="text-[11px] font-black text-emerald-950 flex items-center gap-1.5">
+                            <GraduationCap className="w-3.5 h-3.5 text-emerald-600" />
+                            <span>إرسال مباشر لأساتذة المؤسسة ({matchedSchoolTeachers.length}):</span>
+                          </p>
+                          <div className="space-y-1.5">
+                            {matchedSchoolTeachers.map(t => {
+                              const hasPhone = isValidPhoneNumber(t.phone);
+                              const msg = generateTeacherSecurityCodeWhatsAppMessage({
+                                teacherName: t.fullName,
+                                schoolName: selectedSchoolForDetails.name,
+                                accessCode: selectedSchoolForDetails.accessCode || ''
+                              });
+                              return (
+                                <div key={t.id} className="flex flex-wrap items-center justify-between gap-2 bg-slate-50 px-2.5 py-1.5 rounded-lg border border-slate-100 text-xs">
+                                  <div className="min-w-0">
+                                    <span className="font-bold text-slate-800">{t.fullName}</span>
+                                    {t.phone ? (
+                                      <span className="text-[10px] font-mono text-slate-500 mr-2" dir="ltr">{t.phone}</span>
+                                    ) : (
+                                      <span className="text-[10px] text-amber-700 mr-2">(بدون هاتف مسجل)</span>
+                                    )}
+                                  </div>
+                                  {hasPhone ? (
+                                    <a
+                                      href={getWhatsAppUrl(t.phone || '', msg)}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      onClick={() => toast.success(`تم فتح واتساب لإرسال رمز الأمان إلى ${t.fullName}`)}
+                                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-black cursor-pointer"
+                                    >
+                                      <MessageCircle className="w-3 h-3" />
+                                      <span>إرسال للأستاذ</span>
+                                    </a>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setSelectedManualTeacherId(t.id);
+                                        setManualTeacherPhone('');
+                                        setPinWhatsAppSchool(selectedSchoolForDetails);
+                                      }}
+                                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-amber-100 hover:bg-amber-200 text-amber-900 text-[11px] font-black cursor-pointer"
+                                    >
+                                      <MessageCircle className="w-3 h-3" />
+                                      <span>إدخال رقم وإرسال</span>
+                                    </button>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })()}
                   </div>
                 ) : (
                   <div className="p-3 bg-slate-100 border border-slate-200 text-slate-600 rounded-xl flex items-center gap-2.5">
@@ -2198,6 +2361,260 @@ export const Schools: React.FC = () => {
               >
                 إغلاق النافذة
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Send School Security Code directly to Concerned Teacher(s) via WhatsApp */}
+      {pinWhatsAppSchool && (
+        <div
+          className="fixed inset-0 z-[130] bg-slate-900/65 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto"
+          dir="rtl"
+          onClick={() => setPinWhatsAppSchool(null)}
+        >
+          <div
+            className="bg-white rounded-3xl border border-slate-200 shadow-2xl w-full max-w-lg overflow-hidden my-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="px-5 py-4 bg-gradient-to-l from-emerald-700 via-teal-800 to-slate-900 text-white flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-10 h-10 rounded-2xl bg-white/15 border border-white/25 flex items-center justify-center shrink-0">
+                  <MessageCircle className="w-5 h-5 text-emerald-200" />
+                </div>
+                <div className="min-w-0">
+                  <h3 className="text-sm sm:text-base font-black truncate">
+                    إرسال رمز الأمان للأستاذ المعني (واتساب)
+                  </h3>
+                  <p className="text-[11px] text-emerald-100 truncate font-medium">
+                    {pinWhatsAppSchool.name}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPinWhatsAppSchool(null)}
+                className="p-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-white cursor-pointer shrink-0"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4 max-h-[78vh] overflow-y-auto bg-slate-50/60">
+              {/* Access Code Banner */}
+              <div className="bg-white border border-violet-200 rounded-2xl p-3.5 flex items-center justify-between gap-3 shadow-2xs">
+                <div>
+                  <span className="text-[10px] font-bold text-slate-500 block">رمز الأمان الخاص بالمؤسسة (PIN):</span>
+                  <span className="font-mono font-black text-lg text-violet-900 tracking-wider">
+                    {pinWhatsAppSchool.accessCode || '—'}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (pinWhatsAppSchool.accessCode) {
+                      navigator.clipboard.writeText(pinWhatsAppSchool.accessCode);
+                      toast.success('تم نسخ رمز الأمان!');
+                    }
+                  }}
+                  className="px-3 py-1.5 rounded-xl bg-violet-50 hover:bg-violet-100 text-violet-800 border border-violet-200 text-xs font-black flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Copy className="w-3.5 h-3.5" />
+                  <span>نسخ الرمز</span>
+                </button>
+              </div>
+
+              {/* Matched School Teachers */}
+              {(() => {
+                const schoolTeachers = teachersBySchoolId.get(pinWhatsAppSchool.id) || [];
+                const selectedManualTeacher = teachers.find(t => t.id === selectedManualTeacherId) || null;
+                const effectiveName = selectedManualTeacher?.fullName || '';
+                const effectiveManualPhone = manualTeacherPhone.trim() || selectedManualTeacher?.phone || '';
+                const customMsg = generateTeacherSecurityCodeWhatsAppMessage({
+                  teacherName: effectiveName || undefined,
+                  schoolName: pinWhatsAppSchool.name,
+                  accessCode: pinWhatsAppSchool.accessCode || ''
+                });
+                const customHasValidPhone = isValidPhoneNumber(effectiveManualPhone);
+                const customWaUrl = getWhatsAppUrl(effectiveManualPhone, customMsg);
+
+                return (
+                  <>
+                    <div className="bg-white border border-slate-200 rounded-2xl p-4 space-y-3 shadow-2xs">
+                      <div className="flex items-center justify-between gap-2 border-b border-slate-100 pb-2">
+                        <span className="text-xs font-black text-slate-900 flex items-center gap-1.5">
+                          <GraduationCap className="w-4 h-4 text-emerald-600" />
+                          <span>الأساتذة المسجلون بهذه المؤسسة ({schoolTeachers.length})</span>
+                        </span>
+                      </div>
+
+                      {schoolTeachers.length > 0 ? (
+                        <div className="space-y-2">
+                          {schoolTeachers.map(t => {
+                            const hasPhone = isValidPhoneNumber(t.phone);
+                            const msg = generateTeacherSecurityCodeWhatsAppMessage({
+                              teacherName: t.fullName,
+                              schoolName: pinWhatsAppSchool.name,
+                              accessCode: pinWhatsAppSchool.accessCode || ''
+                            });
+                            return (
+                              <div
+                                key={t.id}
+                                className="flex flex-wrap items-center justify-between gap-2 p-2.5 rounded-xl bg-slate-50 border border-slate-200/80"
+                              >
+                                <div className="min-w-0">
+                                  <p className="text-xs font-black text-slate-900 truncate">{t.fullName}</p>
+                                  <div className="flex items-center gap-2 text-[11px] text-slate-500 mt-0.5">
+                                    {t.phone ? (
+                                      <span className="font-mono font-bold text-slate-700" dir="ltr">{t.phone}</span>
+                                    ) : (
+                                      <span className="text-amber-700 font-semibold">لا يوجد هاتف مسجل</span>
+                                    )}
+                                  </div>
+                                </div>
+
+                                <div className="flex items-center gap-1.5">
+                                  {hasPhone ? (
+                                    <a
+                                      href={getWhatsAppUrl(t.phone || '', msg)}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      onClick={() => {
+                                        toast.success(`تم فتح واتساب لإرسال رمز الأمان مباشرة للأستاذ(ة) ${t.fullName}`);
+                                      }}
+                                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black shadow-2xs cursor-pointer"
+                                    >
+                                      <MessageCircle className="w-3.5 h-3.5" />
+                                      <span>إرسال عبر واتساب</span>
+                                    </a>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setSelectedManualTeacherId(t.id);
+                                        setManualTeacherPhone('');
+                                      }}
+                                      className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-amber-100 hover:bg-amber-200 text-amber-900 text-[11px] font-black cursor-pointer"
+                                    >
+                                      <span>تحديد رقم الهاتف أدناه</span>
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <p className="text-xs text-slate-500 font-medium bg-slate-50 border border-slate-100 rounded-xl p-3">
+                          لا يوجد أستاذ مرتبط بهذه المؤسسة حالياً في لائحة الأساتذة؛ يمكنك اختيار أستاذ من اللائحة أدناه أو إدخال رقم هاتفه مباشرة لإرسال رمز الأمان عبر واتساب.
+                        </p>
+                      )}
+                    </div>
+
+                    {/* Manual Teacher / Phone Fallback */}
+                    <div className="bg-white border border-slate-200 rounded-2xl p-4 space-y-3 shadow-2xs">
+                      <h4 className="text-xs font-black text-slate-900">
+                        إرسال مخصص لأستاذ أو رقم واتساب مباشر:
+                      </h4>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                        <div>
+                          <label className="block text-[11px] font-bold text-slate-600 mb-1">
+                            اختيار أستاذ (اختياري):
+                          </label>
+                          <select
+                            value={selectedManualTeacherId}
+                            onChange={(e) => {
+                              const id = e.target.value;
+                              setSelectedManualTeacherId(id);
+                              const found = teachers.find(t => t.id === id);
+                              if (found?.phone) {
+                                setManualTeacherPhone(found.phone);
+                              }
+                            }}
+                            className="w-full px-3 py-2 text-xs font-bold bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                          >
+                            <option value="">— أي أستاذ بالمؤسسة —</option>
+                            {teachers.map(t => (
+                              <option key={t.id} value={t.id}>
+                                {t.fullName}{t.workLocation ? ` (${t.workLocation})` : ''}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="block text-[11px] font-bold text-slate-600 mb-1">
+                            رقم الواتساب (اختياري):
+                          </label>
+                          <input
+                            type="tel"
+                            dir="ltr"
+                            value={manualTeacherPhone}
+                            onChange={(e) => setManualTeacherPhone(e.target.value)}
+                            placeholder="0661234567"
+                            className="w-full px-3 py-2 text-xs font-mono font-bold bg-slate-50 border border-slate-200 rounded-xl text-right focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="flex flex-wrap items-center justify-end gap-2 pt-1">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            navigator.clipboard.writeText(customMsg);
+                            toast.success('تم نسخ رسالة رمز الأمان!');
+                          }}
+                          className="px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer"
+                        >
+                          <Copy className="w-3.5 h-3.5" />
+                          <span>نسخ نص الرسالة</span>
+                        </button>
+                        <a
+                          href={customWaUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={() => {
+                            toast.success(
+                              customHasValidPhone
+                                ? 'تم فتح واتساب لإرسال رمز الأمان مباشرة!'
+                                : 'تم فتح واتساب بالرسالة الجاهزة — اختر جهة الاتصال للإرسال'
+                            );
+                          }}
+                          className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black inline-flex items-center gap-1.5 shadow-xs cursor-pointer"
+                        >
+                          <MessageCircle className="w-4 h-4" />
+                          <span>{customHasValidPhone ? 'إرسال للأستاذ عبر واتساب' : 'فتح واتساب واختيار جهة الاتصال'}</span>
+                        </a>
+                      </div>
+                    </div>
+
+                    {/* Principal option if available */}
+                    {(pinWhatsAppSchool.principalPhone || pinWhatsAppSchool.phone) && pinWhatsAppSchool.accessCode && (
+                      <div className="bg-slate-100/80 border border-slate-200 rounded-2xl p-3 flex flex-wrap items-center justify-between gap-2">
+                        <div className="text-xs">
+                          <span className="font-bold text-slate-700">مدير المؤسسة: </span>
+                          <span className="font-black text-slate-900">{pinWhatsAppSchool.principalName || 'غير مسجل'}</span>
+                          <span className="text-[11px] font-mono text-slate-600 mr-2" dir="ltr">
+                            {pinWhatsAppSchool.principalPhone || pinWhatsAppSchool.phone}
+                          </span>
+                        </div>
+                        <a
+                          href={getPrincipalPinWhatsAppUrl(pinWhatsAppSchool)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={() => toast.success('تم فتح واتساب لإرسال الرمز لمدير المؤسسة!')}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold cursor-pointer"
+                        >
+                          <Send className="w-3.5 h-3.5" />
+                          <span>إرسال لمدير المؤسسة</span>
+                        </a>
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
             </div>
           </div>
         </div>

@@ -17,7 +17,10 @@ import {
   resolveEffectiveTeacherCadre,
   isTeacherLevelAllowedForTournament,
   isCategoryAllowedForTeacherLevel,
-  findMatchingSchoolForTeacher
+  isCrossCountryU15OpenToPrimary,
+  findMatchingSchoolForTeacher,
+  isTrackOrCrossCountrySport,
+  isTeamSport
 } from '../lib/dataService';
 import { useAuth } from '../contexts/AuthContext';
 import { CountdownTimer } from './CountdownTimer';
@@ -155,8 +158,12 @@ export const ConfirmParticipationModal: React.FC<ConfirmParticipationModalProps>
 
   const activeSportTournaments = useMemo(() => {
     if (!effectiveCycleLevel) return baseSportTournaments;
-    return baseSportTournaments.filter(t => isTeacherLevelAllowedForTournament(effectiveCycleLevel, t.level, t.ageCategory));
-  }, [baseSportTournaments, effectiveCycleLevel]);
+    return baseSportTournaments.filter(
+      t =>
+        isTeacherLevelAllowedForTournament(effectiveCycleLevel, t.level, t.ageCategory, t.sportId || sport.id) ||
+        (effectiveCycleLevel === 'Primary' && isCrossCountryU15OpenToPrimary(t, baseSportTournaments))
+    );
+  }, [baseSportTournaments, effectiveCycleLevel, sport.id]);
 
   const isLevelRestrictedOut = useMemo(() => {
     return Boolean(effectiveCycleLevel && baseSportTournaments.length > 0 && activeSportTournaments.length === 0);
@@ -198,26 +205,35 @@ export const ConfirmParticipationModal: React.FC<ConfirmParticipationModalProps>
           const norm = normalizeCategoryKey(cat);
           return {
             id: norm,
-            name: getCustomCategoryName(norm, sport.id) || getCategoryShortName(norm) || norm,
+            name: getCustomCategoryName(norm, sport.id) || getCategoryShortName(norm, undefined, sport.id) || norm,
             years: ''
           };
         });
-      } else if (sport.id === 'cross_country' || sport.id === 'athletics') {
+      } else if (isTrackOrCrossCountrySport(sport.id)) {
         baseCats = [
-          { id: 'U12', name: 'البراعم والبرعمات (U12)', years: '' },
-          { id: 'U15', name: 'الصغار والصغيرات (U15)', years: '' },
-          { id: 'U18', name: 'الفتيان والفتيات (U18)', years: '' },
-          { id: 'U20', name: 'الشبان والشابات (U20)', years: '' }
+          { id: 'U12', name: 'البراعم والبرعمات', years: '' },
+          { id: 'U15', name: 'الصغار والصغيرات', years: '' },
+          { id: 'U18', name: 'الفتيان والفتيات', years: '' },
+          { id: 'U20', name: 'الشبان والشابات', years: '' }
+        ];
+      } else if (isTeamSport(sport.id)) {
+        baseCats = [
+          { id: 'U12', name: 'أقل من 12 سنة (U12)', years: '' },
+          { id: 'U15', name: 'أقل من 15 سنة (U15)', years: '' },
+          { id: 'U18', name: 'أقل من 18 سنة (U18)', years: '' }
         ];
       } else {
         baseCats = [
-          { id: 'U15', name: 'الصغار والصغيرات (U15)', years: '' },
-          { id: 'U18', name: 'الفتيان والفتيات (U18)', years: '' }
+          { id: 'U12', name: 'أقل من 12 سنة (U12)', years: '' },
+          { id: 'U15', name: 'أقل من 15 سنة (U15)', years: '' },
+          { id: 'U17', name: 'أقل من 17 سنة (U17)', years: '' },
+          { id: 'U18', name: 'أقل من 18 سنة (U18)', years: '' },
+          { id: 'U20', name: 'مواليد 2009 وما بعد', years: '' }
         ];
       }
     }
     if (effectiveCycleLevel) {
-      return baseCats.filter(c => isCategoryAllowedForTeacherLevel(effectiveCycleLevel, c.id));
+      return baseCats.filter(c => isCategoryAllowedForTeacherLevel(effectiveCycleLevel, c.id, sport.id));
     }
     return baseCats;
   }, [sport, effectiveCycleLevel]);
@@ -258,14 +274,20 @@ export const ConfirmParticipationModal: React.FC<ConfirmParticipationModalProps>
     if (activeSportTournaments.length > 0) {
       activeSportTournaments.forEach(t => {
         const aff = t.affiliationType || 'non_club';
-        const catId = normalizeCategoryKey(t.ageCategory || t.category || 'U15');
-        if (effectiveCycleLevel && !isCategoryAllowedForTeacherLevel(effectiveCycleLevel, catId)) return;
-        if (t.gender === 'Male' || t.gender === 'Female') {
-          addBranchOption(aff, catId, t.gender);
-        } else {
-          addBranchOption(aff, catId, 'Male');
-          addBranchOption(aff, catId, 'Female');
-        }
+        const rawAge = String(t.ageCategory || t.category || '');
+        const isAllCats = rawAge.includes('جميع الفئات') || normalizeCategoryKey(rawAge) === 'OPEN';
+        const targetCats = isAllCats
+          ? availableCategories.map(c => c.id)
+          : [normalizeCategoryKey(rawAge || 'U15')];
+        targetCats.forEach(catId => {
+          if (effectiveCycleLevel && !isCategoryAllowedForTeacherLevel(effectiveCycleLevel, catId, sport.id)) return;
+          if (t.gender === 'Male' || t.gender === 'Female') {
+            addBranchOption(aff, catId, t.gender);
+          } else {
+            addBranchOption(aff, catId, 'Male');
+            addBranchOption(aff, catId, 'Female');
+          }
+        });
       });
     } else if (baseSportTournaments.length === 0) {
       const sportAffs: string[] = Array.isArray((sport as any)?.targetAffiliations) && (sport as any).targetAffiliations.length > 0

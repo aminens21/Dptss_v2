@@ -310,7 +310,7 @@ export const Dashboard: React.FC = () => {
     const active = tournaments.filter(t => t.status !== 'Draft' && (t as any).isActive !== false);
     if (!isPureTeacher) return active;
     return active.filter(t =>
-      isTeacherLevelAllowedForTournament(effectiveTeacherCadre, t.level, t.ageCategory) &&
+      isTeacherLevelAllowedForTournament(effectiveTeacherCadre, t.level, t.ageCategory, t.sportId) &&
       (!teacherSchoolObj || isSchoolSectorAllowedForTournament(teacherSchoolObj, t))
     );
   }, [tournaments, isPureTeacher, effectiveTeacherCadre, teacherSchoolObj]);
@@ -322,7 +322,7 @@ export const Dashboard: React.FC = () => {
         const explicitTourn = tournaments.find(t => t.id === m.tournamentId);
         if (explicitTourn) {
           return (
-            isTeacherLevelAllowedForTournament(effectiveTeacherCadre, explicitTourn.level, explicitTourn.ageCategory) &&
+            isTeacherLevelAllowedForTournament(effectiveTeacherCadre, explicitTourn.level, explicitTourn.ageCategory, explicitTourn.sportId || m.sportId) &&
             (!teacherSchoolObj || isSchoolSectorAllowedForTournament(teacherSchoolObj, explicitTourn))
           );
         }
@@ -395,7 +395,7 @@ export const Dashboard: React.FC = () => {
 
     const catKey = m.ageCategory || m.category || matchedTourn?.ageCategory || '';
     const genderKey = m.gender || matchedTourn?.gender;
-    const rawCatLabel = getCustomCategoryName(catKey, m.sportId) || getCategoryShortName(catKey, genderKey);
+    const rawCatLabel = getCustomCategoryName(catKey, m.sportId) || getCategoryShortName(catKey, genderKey, m.sportId);
     const shortCatLabel = (rawCatLabel || '').replace(
       /^ال(?=صغار|صغيرات|فتيان|فتيات|براعم|برعمات|شبان|شابات)/,
       ''

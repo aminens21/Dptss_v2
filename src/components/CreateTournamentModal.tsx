@@ -127,7 +127,7 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
     }
     if (isTeamSport(sportId)) {
       return seasonalCategories
-        .filter(c => c.id === 'U15' || c.id === 'U18')
+        .filter(c => c.id === 'U12' || c.id === 'U15' || c.id === 'U18')
         .map(c => ({
           id: c.id,
           name: c.name,
@@ -219,7 +219,7 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
         let sawAllLevels = false;
         sportTourns.forEach(t => {
           if (t.level && String(t.level).trim()) {
-            const parsed = parseTournamentAllowedLevels(t.level, t.ageCategory);
+            const parsed = parseTournamentAllowedLevels(t.level, t.ageCategory, t.sportId || sportId);
             if (parsed === 'ALL') {
               sawAllLevels = true;
             } else {
@@ -364,7 +364,7 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
 
       for (const catId of selectedCategories) {
         for (const gen of gendersToGenerate) {
-          const genderCatName = getCategoryGenderLabel(catId, gen);
+          const genderCatName = getCategoryGenderLabel(catId, gen, currentSeason, sportId);
 
           for (const affId of selectedAffiliations) {
             const affPrefix = affId === 'club_affiliated' ? 'بطولة المنتمين للأندية' : 'بطولة غير المنتمين للأندية';
@@ -498,7 +498,7 @@ export const CreateTournamentModal: React.FC<CreateTournamentModalProps> = ({
               className="w-full text-xs rounded-xl border border-slate-200 px-3 py-2 text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
             />
             <span className="text-[10px] text-slate-400 block mt-1 leading-relaxed">
-              * سيقوم النظام بإضافة لواحق الجنس والفئة تلقائياً (مثال: - ذكور (البراعم U12)) لكل نسخة يتم توليدها.
+              * سيقوم النظام بإضافة لواحق الفئة والجنس تلقائياً (مثال: U15 / U18 ذكور للألعاب الجماعية، أو البراعم / الصغار للعدو الريفي وألعاب القوى) لكل فرع يتم توليده.
             </span>
           </div>
 
