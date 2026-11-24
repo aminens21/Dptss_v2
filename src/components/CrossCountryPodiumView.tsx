@@ -102,7 +102,7 @@ const PodiumRunnerCard: React.FC<PodiumRunnerCardProps> = ({
 
   const matchedStudent = categoryStudents.find(s => 
     (winner?.studentId && s.id === winner.studentId) ||
-    (winner?.fullName && s.fullName.trim().toLowerCase() === winner.fullName.trim().toLowerCase())
+    (winner?.fullName && s.fullName && String(s.fullName).trim().toLowerCase() === String(winner.fullName).trim().toLowerCase())
   );
   const participantPhoto = winner?.photoUrl || matchedStudent?.photoUrl;
 

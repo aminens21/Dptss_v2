@@ -1108,24 +1108,6 @@ export const Teachers: React.FC = () => {
               <span>إنشاء شارات وبادجات الأساتذة (A4)</span>
             </button>
 
-            <button
-              onClick={loadTeachersAndStudents}
-              className="flex items-center justify-center gap-1.5 px-2.5 sm:px-3 py-2 border border-slate-200 hover:bg-slate-50 rounded-xl text-[11px] sm:text-xs font-semibold text-slate-600 cursor-pointer transition-all bg-white shadow-3xs text-center whitespace-nowrap shrink-0"
-            >
-              <RefreshCw className="h-3.5 w-3.5 shrink-0" />
-              <span>تحديث القائمة</span>
-            </button>
-
-            {userProfile?.role === 'CENTRAL_ADMIN' && teachers.length > 0 && (
-              <button
-                onClick={() => setShowDeleteAllModal(true)}
-                className="flex items-center justify-center gap-1.5 px-2.5 sm:px-3 py-2 bg-red-50 border border-red-200 hover:bg-red-100 rounded-xl text-[11px] sm:text-xs font-bold text-red-600 transition-all shadow-3xs cursor-pointer text-center whitespace-nowrap shrink-0"
-                title="حذف جميع حسابات الأطر التربوية في هذه المديرية"
-              >
-                <Trash2 className="h-3.5 w-3.5 shrink-0" />
-                <span>حذف الكل</span>
-              </button>
-            )}
           </div>
         ) : (
           <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto">

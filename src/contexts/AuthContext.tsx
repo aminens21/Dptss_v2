@@ -231,26 +231,39 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           if (matchedData) {
             let data = matchedData as User;
 
-            // Enrich any missing fields (especially photoUrl or tech committee flags) from merged user directory
-            if (!data.photoUrl || !data.workLocation || !data.leaseNumber || !data.phone) {
+            // Enrich any missing fields (especially photoUrl, teachingCadre or tech committee flags) from merged user/teacher directories
+            if (!data.photoUrl || !data.workLocation || !data.leaseNumber || !data.phone || !data.teachingCadre) {
               try {
-                const allUsers = await DataService.getUsers();
-                const dirMatch = allUsers.find(u =>
+                const [allUsers, allTeachers] = await Promise.all([
+                  DataService.getUsers(),
+                  DataService.getTeachers().catch(() => [] as User[])
+                ]);
+                const matchPredicate = (u: User) =>
                   (u.id && (u.id === user.uid || u.id === docId)) ||
                   (u.email && isFlexibleEmailMatch(u.email, cleanUserEmail)) ||
-                  (data.leaseNumber && u.leaseNumber && u.leaseNumber.trim() === data.leaseNumber.trim())
-                );
-                if (dirMatch) {
+                  (data.leaseNumber && u.leaseNumber && u.leaseNumber.trim() === data.leaseNumber.trim());
+                const dirMatch = allUsers.find(matchPredicate) || allTeachers.find(matchPredicate);
+                const teacherMatch = allTeachers.find(matchPredicate);
+                if (dirMatch || teacherMatch) {
+                  const base = dirMatch || teacherMatch!;
                   data = {
-                    ...dirMatch,
+                    ...base,
                     ...data,
-                    workLocation: data.workLocation || dirMatch.workLocation || '',
-                    schoolId: data.schoolId || dirMatch.schoolId || '',
-                    leaseNumber: data.leaseNumber || dirMatch.leaseNumber || '',
-                    phone: data.phone || dirMatch.phone || '',
-                    photoUrl: (data.photoUrl && String(data.photoUrl).trim()) || (dirMatch.photoUrl && String(dirMatch.photoUrl).trim()) || '',
-                    isTechCommitteeHead: data.isTechCommitteeHead ?? dirMatch.isTechCommitteeHead,
-                    techCommitteeSports: (data.techCommitteeSports && data.techCommitteeSports.length > 0) ? data.techCommitteeSports : dirMatch.techCommitteeSports
+                    workLocation: data.workLocation || dirMatch?.workLocation || teacherMatch?.workLocation || '',
+                    schoolId: data.schoolId || dirMatch?.schoolId || teacherMatch?.schoolId || '',
+                    teachingCadre: data.teachingCadre || dirMatch?.teachingCadre || teacherMatch?.teachingCadre || '',
+                    leaseNumber: data.leaseNumber || dirMatch?.leaseNumber || teacherMatch?.leaseNumber || '',
+                    phone: data.phone || dirMatch?.phone || teacherMatch?.phone || '',
+                    photoUrl:
+                      (data.photoUrl && String(data.photoUrl).trim()) ||
+                      (dirMatch?.photoUrl && String(dirMatch.photoUrl).trim()) ||
+                      (teacherMatch?.photoUrl && String(teacherMatch.photoUrl).trim()) ||
+                      '',
+                    isTechCommitteeHead: data.isTechCommitteeHead ?? dirMatch?.isTechCommitteeHead ?? teacherMatch?.isTechCommitteeHead,
+                    techCommitteeSports:
+                      (data.techCommitteeSports && data.techCommitteeSports.length > 0)
+                        ? data.techCommitteeSports
+                        : (dirMatch?.techCommitteeSports || teacherMatch?.techCommitteeSports)
                   };
                 }
               } catch {}

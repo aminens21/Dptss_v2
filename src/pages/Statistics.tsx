@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useMemo } from 'react';
-import { DataService, SPORTS_MAP, deduplicateById, normalizeSchoolCycleType, normalizeArabicMatchText, schoolNamesMatch, isClubTournament, isSchoolSectorAllowedForTournament, isAffiliationAllowedByDisplayConfig, getEffectiveConfirmedBranches, normalizeCategoryKey } from '../lib/dataService';
+import { useAuth, isSuperAdminEmail } from '../contexts/AuthContext';
+import { DataService, SPORTS_MAP, deduplicateById, normalizeSchoolCycleType, normalizeArabicMatchText, schoolNamesMatch, isClubTournament, isSchoolSectorAllowedForTournament, isAffiliationAllowedByDisplayConfig, getEffectiveConfirmedBranches, normalizeCategoryKey, findMatchingSchoolForTeacher, resolveEffectiveTeacherCadre, isTeacherLevelAllowedForTournament, isCrossCountryU15OpenToPrimary } from '../lib/dataService';
 import { School, Match, Student, Tournament, Sport, Directorate, CrossCountryCategoryResult, SchoolTournamentConfirmation, Referee, User, AffiliationDisplayConfig } from '../types';
 import { CROSS_COUNTRY_CATEGORIES, calculateTeamRankings } from '../lib/crossCountryConfig';
 import {
@@ -32,6 +33,7 @@ import {
 } from 'lucide-react';
 
 export const Statistics: React.FC = () => {
+  const { userProfile, isImpersonatingTeacher } = useAuth();
   const [schools, setSchools] = useState<School[]>([]);
   const [activeDirObj, setActiveDirObj] = useState<Directorate | null>(null);
   const [matches, setMatches] = useState<Match[]>([]);
@@ -235,6 +237,80 @@ export const Statistics: React.FC = () => {
     return Array.from(set).sort();
   }, [schools]);
 
+  // Scope championships & sports when viewer is a pure TEACHER (hide championships closed to their educational cycle)
+  const isPureTeacher = useMemo(() => {
+    if (!userProfile) return false;
+    if (
+      !isImpersonatingTeacher &&
+      (userProfile.isSuperAdmin === true ||
+        userProfile.role === 'CENTRAL_ADMIN' ||
+        userProfile.role === 'SUPER_ADMIN' ||
+        isSuperAdminEmail(userProfile.email))
+    ) {
+      return false;
+    }
+    if (
+      userProfile.isTechCommitteeHead ||
+      userProfile.role === 'TECH_HEAD' ||
+      (userProfile.role as string) === 'TECH_COMMITTEE_HEAD' ||
+      userProfile.role === 'SPORT_MANAGER'
+    ) {
+      return false;
+    }
+    return userProfile.role === 'TEACHER';
+  }, [userProfile, isImpersonatingTeacher]);
+
+  const mergedTeacherProfile = useMemo(() => {
+    if (!userProfile) return null;
+    const dirMatch = usersList.find(u =>
+      (u.id && u.id === userProfile.id) ||
+      (u.email && userProfile.email && u.email.trim().toLowerCase() === userProfile.email.trim().toLowerCase()) ||
+      (u.leaseNumber && userProfile.leaseNumber && u.leaseNumber.trim() === userProfile.leaseNumber.trim())
+    );
+    if (!dirMatch) return userProfile;
+    return {
+      ...dirMatch,
+      ...userProfile,
+      workLocation: userProfile.workLocation || dirMatch.workLocation,
+      schoolId: userProfile.schoolId || dirMatch.schoolId,
+      teachingCadre: userProfile.teachingCadre || dirMatch.teachingCadre
+    };
+  }, [userProfile, usersList]);
+
+  const teacherSchoolObj = useMemo(() => {
+    return findMatchingSchoolForTeacher(schools, mergedTeacherProfile);
+  }, [schools, mergedTeacherProfile]);
+
+  const effectiveTeacherCadre = useMemo(() => {
+    return resolveEffectiveTeacherCadre(mergedTeacherProfile, teacherSchoolObj);
+  }, [mergedTeacherProfile, teacherSchoolObj]);
+
+  const visibleTournaments = useMemo(() => {
+    if (!isPureTeacher) return tournaments;
+    const active = tournaments.filter(t => t.status !== 'Draft' && (t as any).isActive !== false);
+    return active.filter(t =>
+      (
+        isTeacherLevelAllowedForTournament(effectiveTeacherCadre, t.level, t.ageCategory, t.sportId) ||
+        (effectiveTeacherCadre === 'Primary' && isCrossCountryU15OpenToPrimary(t, active))
+      ) &&
+      (!teacherSchoolObj || isSchoolSectorAllowedForTournament(teacherSchoolObj, t))
+    );
+  }, [tournaments, isPureTeacher, effectiveTeacherCadre, teacherSchoolObj]);
+
+  const allowedTeacherSportIds = useMemo(() => {
+    if (!isPureTeacher) return null;
+    return new Set(visibleTournaments.map(t => t.sportId).filter(Boolean));
+  }, [isPureTeacher, visibleTournaments]);
+
+  const visibleMatches = useMemo(() => {
+    if (!isPureTeacher) return matches;
+    const visibleTournIds = new Set(visibleTournaments.map(t => t.id));
+    return matches.filter(m => {
+      if (m.tournamentId) return visibleTournIds.has(m.tournamentId);
+      return allowedTeacherSportIds ? allowedTeacherSportIds.has(m.sportId) : false;
+    });
+  }, [matches, isPureTeacher, visibleTournaments, allowedTeacherSportIds]);
+
   // 1. Calculate Results Table (ترتيب المؤسسات حسب النتائج والتتويجات في الفئات)
   const schoolResultsRanking = useMemo(() => {
     interface SchoolPodiumRank {
@@ -303,11 +379,11 @@ export const Statistics: React.FC = () => {
     };
 
     // Process tournaments and finished categories
-    tournaments.forEach((t) => {
+    visibleTournaments.forEach((t) => {
       // Sport filter if active
       if (selectedSport !== 'ALL' && t.sportId !== selectedSport) return;
 
-      const tMatches = matches.filter((m) => m.tournamentId === t.id);
+      const tMatches = visibleMatches.filter((m) => m.tournamentId === t.id);
       const sportInfo = SPORTS_MAP[t.sportId] || { name: t.sportId || 'الرياضة', icon: '🏆' };
       const catLabel = `${sportInfo.name} - ${t.ageCategory || ''} (${t.gender === 'Female' ? 'إناث' : 'ذكور'})`.trim();
 
@@ -679,7 +755,7 @@ export const Statistics: React.FC = () => {
         if (b.totalPodiums !== a.totalPodiums) return b.totalPodiums - a.totalPodiums;
         return a.schoolName.localeCompare(b.schoolName, 'ar');
       });
-  }, [schools, tournaments, matches, crossCountryResults, selectedSport, selectedType, selectedCommune, searchQuery]);
+  }, [schools, visibleTournaments, visibleMatches, crossCountryResults, selectedSport, selectedType, selectedCommune, searchQuery]);
 
   // 2. Calculate Participation Ranking (ترتيب المؤسسات حسب عدد المشاركين والفرق)
   const schoolParticipationRanking = useMemo(() => {
@@ -780,6 +856,7 @@ export const Statistics: React.FC = () => {
     > = {};
 
     Object.entries(SPORTS_MAP).forEach(([id, info]) => {
+      if (allowedTeacherSportIds && !allowedTeacherSportIds.has(id)) return;
       map[id] = {
         sportId: id,
         name: info.name,
@@ -806,7 +883,7 @@ export const Statistics: React.FC = () => {
       }
     });
 
-    matches.forEach((m) => {
+    visibleMatches.forEach((m) => {
       const sId = m.sportId || 'football';
       if (map[sId]) {
         map[sId].matchesCount += 1;
@@ -814,7 +891,7 @@ export const Statistics: React.FC = () => {
     });
 
     // For Cross Country: count completed race podiums ONLY if Cross Country tournament is active
-    const hasCCTourn = tournaments.some(t => t.sportId === 'cross_country' && t.status !== 'Draft' && (t as any).isActive !== false);
+    const hasCCTourn = visibleTournaments.some(t => t.sportId === 'cross_country' && t.status !== 'Draft' && (t as any).isActive !== false);
     if (map['cross_country']) {
       const ccCompletedRaces = hasCCTourn
         ? CROSS_COUNTRY_CATEGORIES.filter(c => crossCountryResults[c.id]?.podium && crossCountryResults[c.id].podium.length > 0).length
@@ -823,21 +900,24 @@ export const Statistics: React.FC = () => {
     }
 
     return Object.values(map).sort((a, b) => b.studentsCount - a.studentsCount);
-  }, [students, matches, tournaments, crossCountryResults]);
+  }, [students, visibleMatches, visibleTournaments, crossCountryResults, allowedTeacherSportIds]);
 
   // Total summary counts (no hardcoded CC ghost counts when Cross Country isn't programmed)
   const summaryCounts = useMemo(() => {
-    const activeTourns = tournaments.filter(t => t.status !== 'Draft' && (t as any).isActive !== false);
+    const activeTourns = visibleTournaments.filter(t => t.status !== 'Draft' && (t as any).isActive !== false);
     const hasCCTourn = activeTourns.some(t => t.sportId === 'cross_country');
-    const totalStudents = students.length;
-    const totalBoys = students.filter((s) => s.gender === 'Male').length;
-    const totalGirls = students.filter((s) => s.gender === 'Female').length;
+    const visibleStudents = allowedTeacherSportIds
+      ? students.filter(s => allowedTeacherSportIds.has(s.sportId))
+      : students;
+    const totalStudents = visibleStudents.length;
+    const totalBoys = visibleStudents.filter((s) => s.gender === 'Male').length;
+    const totalGirls = visibleStudents.filter((s) => s.gender === 'Female').length;
     const ccCompletedCount = hasCCTourn
       ? CROSS_COUNTRY_CATEGORIES.filter(c => crossCountryResults[c.id]?.podium && crossCountryResults[c.id].podium.length > 0).length
       : 0;
     const ccTotalCount = hasCCTourn ? 8 : 0;
-    const completedMatches = matches.filter((m) => m.status === 'Completed').length + ccCompletedCount;
-    const totalMatchesCount = matches.length + ccTotalCount;
+    const completedMatches = visibleMatches.filter((m) => m.status === 'Completed').length + ccCompletedCount;
+    const totalMatchesCount = visibleMatches.length + ccTotalCount;
     return {
       schools: schools.length,
       students: totalStudents,
@@ -847,7 +927,7 @@ export const Statistics: React.FC = () => {
       completedMatches,
       tournaments: activeTourns.length
     };
-  }, [schools, students, matches, tournaments, crossCountryResults]);
+  }, [schools, students, visibleMatches, visibleTournaments, crossCountryResults, allowedTeacherSportIds]);
 
   // 4. Championship Participation Rates by Educational Cycle & Zone (Zone 1: El Aioun & Ain Lahjar, Zone 2: Tansharfi/Tankarfa & Rest)
   const tournamentParticipationByCycleAndZone = useMemo(() => {
@@ -937,7 +1017,7 @@ export const Statistics: React.FC = () => {
       return false;
     };
 
-    const activeTourns = tournaments.filter(t => {
+    const activeTourns = visibleTournaments.filter(t => {
       if (t.status === 'Draft' || (t as any).isActive === false) return false;
       const tAff = t.affiliationType || (isClubTournament(t) ? 'club_affiliated' : 'non_club');
       if (!isAffiliationAllowedByDisplayConfig(tAff, affiliationDisplayConfig, t.sportId)) return false;
@@ -1106,7 +1186,7 @@ export const Statistics: React.FC = () => {
     });
 
     return reports.sort((a, b) => b.overall.pct - a.overall.pct || b.overall.participating - a.overall.participating);
-  }, [tournaments, schools, students, confirmations, sportsConfig, affiliationDisplayConfig, selectedSport, selectedType, selectedCommune, searchQuery]);
+  }, [visibleTournaments, schools, students, confirmations, sportsConfig, affiliationDisplayConfig, selectedSport, selectedType, selectedCommune, searchQuery]);
 
   // 5. Officiated Matches Statistics per Referee Teacher Broken Down by Sport
   const refereeOfficiatingStats = useMemo(() => {
@@ -1493,7 +1573,9 @@ export const Statistics: React.FC = () => {
                   className="px-2.5 py-2 sm:py-1.5 bg-slate-50 border border-slate-200 rounded-xl sm:rounded-lg font-medium text-slate-700 w-full sm:w-auto cursor-pointer"
                 >
                   <option value="ALL">جميع الرياضات</option>
-                  {Object.entries(SPORTS_MAP).map(([id, info]) => (
+                  {Object.entries(SPORTS_MAP)
+                    .filter(([id]) => !allowedTeacherSportIds || allowedTeacherSportIds.has(id))
+                    .map(([id, info]) => (
                     <option key={id} value={id}>
                       {info.icon} {info.name}
                     </option>
@@ -2358,7 +2440,7 @@ export const Statistics: React.FC = () => {
         {activeTab === 'matches' && (
           <div className="p-3.5 sm:p-5 space-y-3 bg-slate-50/40">
             {(() => {
-              const filteredMatches = matches.filter(m => {
+              const filteredMatches = visibleMatches.filter(m => {
                 if (selectedSport !== 'ALL' && m.sportId !== selectedSport) return false;
                 if (searchQuery.trim()) {
                   const q = searchQuery.trim().toLowerCase();

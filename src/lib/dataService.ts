@@ -1482,15 +1482,38 @@ export function normalizeCadreToLevelKey(value?: string | null): 'Primary' | 'Mi
 export function inferLevelFromSchoolName(schoolName?: string | null): 'Primary' | 'Middle' | 'High' | '' {
   const name = String(schoolName || '').trim();
   if (!name) return '';
-  if (name.includes('تأهيلي') || name.includes('تاهيلي') || name.includes('التأهيلي')) return 'High';
-  if (name.includes('إعدادي') || name.includes('اعدادي') || name.includes('أعدادي') || name.includes('الإعدادي')) return 'Middle';
+  const lower = name.toLowerCase();
+  if (
+    name.includes('إعدادي') ||
+    name.includes('اعدادي') ||
+    name.includes('أعدادي') ||
+    name.includes('الإعدادي') ||
+    lower.includes('college') ||
+    lower.includes('collège')
+  ) {
+    return 'Middle';
+  }
+  if (
+    name.includes('تأهيلي') ||
+    name.includes('تاهيلي') ||
+    name.includes('التأهيلي') ||
+    name.includes('ثانوي') ||
+    name.includes('ليسي') ||
+    lower.includes('lycee') ||
+    lower.includes('lycée')
+  ) {
+    return 'High';
+  }
   if (
     name.includes('ابتدائي') ||
     name.includes('ابتدائ') ||
     name.includes('م.م') ||
     name.includes('م م') ||
     name.includes('مجموعة مدارس') ||
-    /^مدرسة\s/.test(name)
+    name.includes('فرعية') ||
+    /^مدرسة\s/.test(name) ||
+    lower.includes('ecole') ||
+    lower.includes('école')
   ) {
     return 'Primary';
   }
@@ -7104,6 +7127,31 @@ export const DataService = {
       console.warn("Deleted student locally:", e);
     }
     window.dispatchEvent(new CustomEvent('studentsUpdated'));
+  },
+
+  async deleteStudentsBulk(ids: string[]): Promise<number> {
+    if (!ids || ids.length === 0) return 0;
+    const idSet = new Set(ids);
+    ids.forEach(id => markRecentlyDeleted('students', id));
+    const localList = getLocal<Student>('taourirt_students_data', []);
+    const remaining = localList.filter(s => !idSet.has(s.id));
+    const removedCount = localList.length - remaining.length;
+    setLocal('taourirt_students_data', remaining);
+
+    try {
+      for (let i = 0; i < ids.length; i += 450) {
+        const chunk = ids.slice(i, i + 450);
+        const batch = writeBatch(db);
+        chunk.forEach(id => {
+          batch.delete(doc(db, 'students', id));
+        });
+        await batch.commit();
+      }
+    } catch (e) {
+      console.warn("Bulk deleted students locally; Firestore sync pending:", e);
+    }
+    window.dispatchEvent(new CustomEvent('studentsUpdated'));
+    return removedCount > 0 ? removedCount : ids.length;
   },
 
   async updateStudent(id: string, student: Partial<Student>): Promise<void> {

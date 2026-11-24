@@ -1,6 +1,17 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { Tournament, Match, School, User, Venue, Referee, BlockedSchedulePeriod } from '../types';
-import { DataService, SPORTS_MAP, findAllBlockedPeriodsForDate, isMatchProgramPendingApproval } from '../lib/dataService';
+import {
+  DataService,
+  SPORTS_MAP,
+  findAllBlockedPeriodsForDate,
+  isMatchProgramPendingApproval,
+  findMatchingSchoolForTeacher,
+  resolveEffectiveTeacherCadre,
+  isTeacherLevelAllowedForTournament,
+  isCrossCountryU15OpenToPrimary,
+  isSchoolSectorAllowedForTournament,
+  normalizeCategoryKey
+} from '../lib/dataService';
 import { SPORTS_CONFIG } from '../config/sportsConfig';
 import { ProgramExportModal } from './ProgramExportModal';
 import {
@@ -187,6 +198,63 @@ export const ChampionshipCalendarView: React.FC<ChampionshipCalendarViewProps> =
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   const [exportModalInitialSports, setExportModalInitialSports] = useState<string[]>([]);
 
+  const mergedTeacherProfile = useMemo(() => {
+    if (!activeUser) return null;
+    const dirMatch = loadedTeachers.find(t =>
+      (t.id && t.id === activeUser.id) ||
+      (t.email && activeUser.email && t.email.trim().toLowerCase() === activeUser.email.trim().toLowerCase()) ||
+      (t.leaseNumber && activeUser.leaseNumber && t.leaseNumber.trim() === activeUser.leaseNumber.trim())
+    );
+    if (!dirMatch) return activeUser;
+    return {
+      ...dirMatch,
+      ...activeUser,
+      workLocation: activeUser.workLocation || dirMatch.workLocation,
+      schoolId: activeUser.schoolId || dirMatch.schoolId,
+      teachingCadre: activeUser.teachingCadre || dirMatch.teachingCadre
+    };
+  }, [activeUser, loadedTeachers]);
+
+  const teacherSchoolObj = useMemo(() => {
+    return findMatchingSchoolForTeacher(schools, mergedTeacherProfile);
+  }, [schools, mergedTeacherProfile]);
+
+  const effectiveTeacherCadre = useMemo(() => {
+    return resolveEffectiveTeacherCadre(mergedTeacherProfile, teacherSchoolObj);
+  }, [mergedTeacherProfile, teacherSchoolObj]);
+
+  const isTournamentAllowedForTeacher = (t: Tournament, pool: Tournament[]): boolean => {
+    if (t.status === 'Draft' || (t as any).isActive === false) return false;
+    const levelOk =
+      isTeacherLevelAllowedForTournament(effectiveTeacherCadre, t.level, t.ageCategory, t.sportId) ||
+      (effectiveTeacherCadre === 'Primary' && isCrossCountryU15OpenToPrimary(t, pool));
+    if (!levelOk) return false;
+    if (teacherSchoolObj && !isSchoolSectorAllowedForTournament(teacherSchoolObj, t)) return false;
+    return true;
+  };
+
+  const isCalendarEventAllowedForTeacher = (
+    ev: { id: string; sportId: string; category?: string; gender?: string },
+    matchObj?: Match
+  ): boolean => {
+    if (!isTeacher) return true;
+    const activeTourns = tournaments.filter(t => t.status !== 'Draft' && (t as any).isActive !== false);
+    const parentT =
+      (matchObj?.tournamentId ? tournaments.find(t => t.id === matchObj.tournamentId) : undefined) ||
+      activeTourns.find(
+        t =>
+          t.sportId === ev.sportId &&
+          (!ev.category || normalizeCategoryKey(t.ageCategory) === normalizeCategoryKey(ev.category)) &&
+          (!ev.gender || !t.gender || t.gender === ev.gender)
+      );
+    if (parentT) {
+      return isTournamentAllowedForTeacher(parentT, activeTourns);
+    }
+    const sportActiveTourns = activeTourns.filter(t => t.sportId === ev.sportId);
+    if (sportActiveTourns.length === 0) return false;
+    return sportActiveTourns.some(t => isTournamentAllowedForTeacher(t, activeTourns));
+  };
+
   // Build calendar events for monthly/screen views: hide Technical Committee Heads assigned as referees
   const allEvents = useMemo<CalendarEventItem[]>(() => {
     const allowedSet = isScopedToTechHead ? new Set(effectiveAllowedSportIds || []) : null;
@@ -205,7 +273,11 @@ export const ChampionshipCalendarView: React.FC<ChampionshipCalendarViewProps> =
     );
 
     return built
-      .filter(ev => !allowedSet || allowedSet.has(ev.sportId))
+      .filter(ev => {
+        if (allowedSet && !allowedSet.has(ev.sportId)) return false;
+        if (isTeacher && !isCalendarEventAllowedForTeacher(ev, matchById.get(ev.id))) return false;
+        return true;
+      })
       .map(ev => ({
         id: ev.id,
         title: ev.title,
@@ -228,11 +300,15 @@ export const ChampionshipCalendarView: React.FC<ChampionshipCalendarViewProps> =
         isRealData: true,
         rawMatch: matchById.get(ev.id)
       }));
-  }, [tournaments, matches, schools, venues, loadedReferees, loadedTeachers, isScopedToTechHead, effectiveAllowedSportIds]);
+  }, [tournaments, matches, schools, venues, loadedReferees, loadedTeachers, isScopedToTechHead, effectiveAllowedSportIds, isTeacher, effectiveTeacherCadre, teacherSchoolObj]);
 
   // Build export events WITH Technical Committee Heads visible when assigned to a match (البرنامج المحمل)
   const allExportEvents = useMemo(() => {
     const allowedSet = isScopedToTechHead ? new Set(effectiveAllowedSportIds || []) : null;
+    const matchById = new Map<string, Match>();
+    matches.forEach(m => {
+      if (m.id) matchById.set(`match-${m.id}`, m);
+    });
     const built = buildAllCalendarEvents(
       tournaments,
       matches,
@@ -241,8 +317,12 @@ export const ChampionshipCalendarView: React.FC<ChampionshipCalendarViewProps> =
       loadedReferees,
       loadedTeachers
     );
-    return built.filter(ev => !allowedSet || allowedSet.has(ev.sportId));
-  }, [tournaments, matches, schools, venues, loadedReferees, loadedTeachers, isScopedToTechHead, effectiveAllowedSportIds]);
+    return built.filter(ev => {
+      if (allowedSet && !allowedSet.has(ev.sportId)) return false;
+      if (isTeacher && !isCalendarEventAllowedForTeacher(ev, matchById.get(ev.id))) return false;
+      return true;
+    });
+  }, [tournaments, matches, schools, venues, loadedReferees, loadedTeachers, isScopedToTechHead, effectiveAllowedSportIds, isTeacher, effectiveTeacherCadre, teacherSchoolObj]);
 
   // Available sports for dropdown (strictly Tech Head's assigned sports, or sports that have matches for Admin)
   const availableFilterSports = useMemo(() => {

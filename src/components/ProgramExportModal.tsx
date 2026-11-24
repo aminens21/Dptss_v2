@@ -21,7 +21,10 @@ import {
   downloadProgramAsWord,
   printProgram,
   ProgramAffiliationFilter,
-  AFFILIATION_LABELS
+  AFFILIATION_LABELS,
+  sortCalendarEvents,
+  getEventCategoryGenderTuple,
+  formatTargetCategoryWithGender
 } from '../lib/programExportService';
 import toast from 'react-hot-toast';
 
@@ -98,6 +101,7 @@ export const ProgramExportModal: React.FC<ProgramExportModalProps> = ({
 
   const [scopeFilter, setScopeFilter] = useState<'ALL' | 'provincial' | 'regional' | 'national'>(initialScopeFilter);
   const [affiliationFilter, setAffiliationFilter] = useState<ProgramAffiliationFilter>(initialAffiliationFilter);
+  const [categoryFilter, setCategoryFilter] = useState<string>('ALL');
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
   const [loadedVenues, setLoadedVenues] = useState<Venue[]>([]);
   const [loadedReferees, setLoadedReferees] = useState<Referee[]>([]);
@@ -137,6 +141,7 @@ export const ProgramExportModal: React.FC<ProgramExportModalProps> = ({
         setScopeFilter(initialScopeFilter);
       }
       setAffiliationFilter(initialAffiliationFilter || 'ALL');
+      setCategoryFilter('ALL');
 
       if (!propVenues || propVenues.length === 0) {
         DataService.getVenues().then(setLoadedVenues).catch(() => {});
@@ -271,15 +276,59 @@ export const ProgramExportModal: React.FC<ProgramExportModalProps> = ({
     }
   }, [affiliationFilter, availableAffiliationOptions]);
 
-  // Filter events for preview and count
-  const filteredEvents = useMemo(() => {
+  // Events after sport, scope, and affiliation filters (used to compute available age/gender categories)
+  const sportScopeAffiliationEvents = useMemo(() => {
     let list = sportAndScopeEvents.slice();
     if (affiliationFilter !== 'ALL') {
       list = list.filter(ev => (ev.affiliationType || 'non_club') === affiliationFilter);
     }
-    list.sort((a, b) => a.date.localeCompare(b.date));
     return list;
   }, [sportAndScopeEvents, affiliationFilter]);
+
+  // Available age category + gender combinations sorted in official order (female first, then male)
+  const availableCategoryOptions = useMemo(() => {
+    const map = new Map<
+      string,
+      { id: string; label: string; count: number; genderKey: 'Female' | 'Male' | 'Mixed'; ageRank: number; genderRank: number }
+    >();
+    sportScopeAffiliationEvents.forEach(ev => {
+      const tuple = getEventCategoryGenderTuple(ev);
+      const existing = map.get(tuple.filterKey);
+      if (existing) {
+        existing.count += 1;
+      } else {
+        map.set(tuple.filterKey, {
+          id: tuple.filterKey,
+          label: tuple.label,
+          count: 1,
+          genderKey: tuple.genderKey,
+          ageRank: tuple.ageRank,
+          genderRank: tuple.genderRank
+        });
+      }
+    });
+    return Array.from(map.values()).sort((a, b) => {
+      if (a.genderRank !== b.genderRank) return a.genderRank - b.genderRank;
+      if (a.ageRank !== b.ageRank) return a.ageRank - b.ageRank;
+      return a.label.localeCompare(b.label, 'ar');
+    });
+  }, [sportScopeAffiliationEvents]);
+
+  // Reset categoryFilter if selected category no longer has matches under current sport/scope/affiliation
+  useEffect(() => {
+    if (categoryFilter !== 'ALL' && !availableCategoryOptions.some(o => o.id === categoryFilter)) {
+      setCategoryFilter('ALL');
+    }
+  }, [categoryFilter, availableCategoryOptions]);
+
+  // Filter events for preview and count, sorted by category, gender, and match number
+  const filteredEvents = useMemo(() => {
+    let list = sportScopeAffiliationEvents.slice();
+    if (categoryFilter !== 'ALL') {
+      list = list.filter(ev => getEventCategoryGenderTuple(ev).filterKey === categoryFilter);
+    }
+    return sortCalendarEvents(list);
+  }, [sportScopeAffiliationEvents, categoryFilter]);
 
   const showNotesColumn = useMemo(
     () => filteredEvents.some(ev => Boolean(ev.notes && ev.notes.trim().length > 0)),
@@ -306,6 +355,7 @@ export const ProgramExportModal: React.FC<ProgramExportModalProps> = ({
     selectedSportIds: activeSelectedSportIds,
     scopeFilter,
     affiliationFilter,
+    categoryFilter,
     activeSeason
   });
 
@@ -608,6 +658,49 @@ export const ProgramExportModal: React.FC<ProgramExportModalProps> = ({
             </div>
           )}
 
+          {/* Section 4: Specific Age Category & Gender Filter */}
+          {availableCategoryOptions.length > 0 && (
+            <div className="space-y-2">
+              <label className="text-xs font-black text-slate-800 flex items-center gap-2">
+                <Calendar className="h-4 w-4 text-purple-600" />
+                <span>الفئة المعنية والجنس (لتحميل البرنامج كاملاً مرتباً أو برنامج فئة محددة فقط):</span>
+              </label>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setCategoryFilter('ALL')}
+                  className={`py-2 px-3 rounded-xl font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer border ${
+                    categoryFilter === 'ALL'
+                      ? 'bg-purple-600 text-white border-purple-600 shadow-xs'
+                      : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                  }`}
+                >
+                  <span>🌐</span>
+                  <span>جميع الفئات ({sportScopeAffiliationEvents.length})</span>
+                </button>
+                {availableCategoryOptions.map(opt => {
+                  const isActive = categoryFilter === opt.id;
+                  const icon = opt.genderKey === 'Female' ? '👧' : opt.genderKey === 'Male' ? '👦' : '🤝';
+                  return (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      onClick={() => setCategoryFilter(opt.id)}
+                      className={`py-2 px-3 rounded-xl font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer border ${
+                        isActive
+                          ? 'bg-purple-600 text-white border-purple-600 shadow-xs'
+                          : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                      }`}
+                    >
+                      <span>{icon}</span>
+                      <span>{opt.label} ({opt.count})</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           {/* Summary Indicator Box */}
           <div className="bg-gradient-to-r from-blue-50 via-indigo-50 to-slate-50 p-3.5 rounded-xl border border-blue-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div className="flex items-center gap-2.5">
@@ -627,13 +720,16 @@ export const ProgramExportModal: React.FC<ProgramExportModalProps> = ({
                   {' • '}
                   {scopeFilter === 'ALL' ? 'جميع المستويات' : scopeFilter === 'provincial' ? 'إقليمي' : scopeFilter === 'regional' ? 'جهوي' : 'وطني'}
                   {affiliationFilter !== 'ALL' ? ` • ${AFFILIATION_LABELS[affiliationFilter]}` : ''}
+                  {categoryFilter !== 'ALL'
+                    ? ` • فئة: ${availableCategoryOptions.find(o => o.id === categoryFilter)?.label || categoryFilter}`
+                    : ''}
                 </p>
               </div>
             </div>
 
             <div className="text-[11px] text-slate-600 flex items-center gap-1.5 font-medium bg-white px-3 py-1.5 rounded-lg border border-slate-200">
               <Info className="h-3.5 w-3.5 text-blue-600 shrink-0" />
-              <span>يتضمن الترويسة الوزارية والتوقيعات الإدارية الرسمية</span>
+              <span>مرتب حسب الفئة المعنية ورقم المقابلة</span>
             </div>
           </div>
 
@@ -645,39 +741,39 @@ export const ProgramExportModal: React.FC<ProgramExportModalProps> = ({
           ) : (
             <div className="border border-slate-200 rounded-xl overflow-hidden">
               <div className="bg-slate-100 px-3 py-2 border-b border-slate-200 font-bold text-slate-700 flex items-center justify-between text-[11px]">
-                <span>معاينة محتوى الجدول الرسمي (أول {Math.min(filteredEvents.length, 5)} مواعيد من أصل {filteredEvents.length}):</span>
-                <span className="text-blue-700 font-bold">جاهز للتوليد 📄</span>
+                <span>معاينة محتوى الجدول الرسمي (أول {Math.min(filteredEvents.length, 15)} مواعيد من أصل {filteredEvents.length}):</span>
+                <span className="text-blue-700 font-bold">مرتب حسب الفئة ورقم المقابلة 📄</span>
               </div>
-              <div className="max-h-36 overflow-y-auto">
+              <div className="max-h-48 overflow-y-auto">
                 <table className="w-full text-right text-[11px]">
-                  <thead className="bg-slate-50 text-slate-600 border-b border-slate-200">
+                  <thead className="bg-slate-50 text-slate-600 border-b border-slate-200 sticky top-0">
                     <tr>
+                      <th className="p-2 text-center">رقم المقابلة</th>
                       <th className="p-2">التاريخ</th>
+                      <th className="p-2">الفئة المعنية</th>
                       <th className="p-2">المقابلة (مؤسسة ضد مؤسسة)</th>
                       {mode !== 'SINGLE_SPORT' && <th className="p-2">الرياضة</th>}
-                      <th className="p-2">المستوى</th>
                       <th className="p-2">المكان</th>
                       <th className="p-2">الحكام</th>
                       {showNotesColumn && <th className="p-2">ملاحظات</th>}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {filteredEvents.slice(0, 5).map(ev => (
+                    {filteredEvents.slice(0, 15).map((ev, idx) => (
                       <tr key={ev.id} className="hover:bg-slate-50">
+                        <td className="p-2 text-center font-black text-sky-700 whitespace-nowrap">
+                          {ev.matchNumber ? ev.matchNumber : idx + 1}
+                        </td>
                         <td className="p-2 font-bold text-blue-800 whitespace-nowrap">{ev.date}</td>
+                        <td className="p-2 font-bold text-purple-800 whitespace-nowrap">
+                          {formatTargetCategoryWithGender(ev.category, ev.gender, ev.sportId)}
+                        </td>
                         <td className="p-2 font-semibold text-slate-900">{ev.title}</td>
                         {mode !== 'SINGLE_SPORT' && <td className="p-2 text-slate-600">{ev.sportName}</td>}
-                        <td className="p-2">
-                          <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
-                            ev.scope === 'national' ? 'bg-amber-100 text-amber-800' : ev.scope === 'regional' ? 'bg-emerald-100 text-emerald-800' : 'bg-blue-100 text-blue-800'
-                          }`}>
-                            {ev.scope === 'national' ? 'وطني' : ev.scope === 'regional' ? 'جهوي' : 'إقليمي'}
-                          </span>
-                        </td>
-                        <td className="p-2 text-slate-600 truncate max-w-[150px]">{ev.venue}</td>
-                        <td className="p-2 text-slate-600 truncate max-w-[140px]">{ev.refereesText || 'يعين لاحقاً'}</td>
+                        <td className="p-2 text-slate-600 truncate max-w-[140px]">{ev.venue}</td>
+                        <td className="p-2 text-slate-600 truncate max-w-[130px]">{ev.refereesText || 'يعين لاحقاً'}</td>
                         {showNotesColumn && (
-                          <td className="p-2 text-slate-600 truncate max-w-[140px]">{ev.notes?.trim() || '-'}</td>
+                          <td className="p-2 text-slate-600 truncate max-w-[130px]">{ev.notes?.trim() || '-'}</td>
                         )}
                       </tr>
                     ))}

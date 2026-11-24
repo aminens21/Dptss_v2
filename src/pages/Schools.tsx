@@ -994,47 +994,6 @@ export const Schools: React.FC = () => {
             </button>
           )}
 
-          {/* Prune extra High/Middle schools not represented in Teachers */}
-          {isPrivilegedAdmin && schools.length > 0 && (
-            <button
-              onClick={() => handlePruneExtraHighMiddleSchools(false)}
-              disabled={isPruningExtra || isLoading}
-              className="inline-flex items-center justify-center gap-1.5 sm:gap-2 rounded-xl bg-rose-50 border border-rose-300 px-2.5 sm:px-3.5 py-2 sm:py-2.5 text-[11px] sm:text-xs font-black text-rose-800 shadow-2xs hover:bg-rose-100 transition-all hover:shadow-xs active:scale-97 cursor-pointer text-center disabled:opacity-50"
-              title="حذف مؤسسات الثانوي التأهيلي والإعدادي الإضافية غير المسجلة في الأطر التربوية"
-            >
-              <div className="w-5 h-5 sm:w-6 sm:h-6 rounded-lg bg-rose-600 text-white flex items-center justify-center shadow-2xs shrink-0">
-                <RefreshCw className={`h-3.5 w-3.5 ${isPruningExtra ? 'animate-spin' : ''}`} />
-              </div>
-              <span>{isPruningExtra ? 'جاري التصفية...' : 'تصفية الإضافي (تأهيلي/إعدادي)'}</span>
-            </button>
-          )}
-
-          {/* Central Admin Only Actions */}
-          {userProfile?.role === 'CENTRAL_ADMIN' && schools.length > 0 && (
-            <>
-              <button
-                onClick={handleRegenerateCodes}
-                disabled={isLoading}
-                className="inline-flex items-center justify-center gap-1.5 sm:gap-2 rounded-xl bg-orange-50 border border-orange-300 px-2.5 sm:px-3.5 py-2 sm:py-2.5 text-[11px] sm:text-xs font-black text-orange-800 shadow-2xs hover:bg-orange-100 transition-all hover:shadow-xs active:scale-97 cursor-pointer text-center disabled:opacity-50"
-                title="تحديث جميع الرموز السرية القديمة إلى رموز أكثر أماناً"
-              >
-                <div className="w-5 h-5 sm:w-6 sm:h-6 rounded-lg bg-orange-500 text-white flex items-center justify-center shadow-2xs shrink-0">
-                  <Lock className="h-3.5 w-3.5" />
-                </div>
-                <span>تحديث الرموز القديمة</span>
-              </button>
-              <button
-                onClick={() => setShowDeleteAllModal(true)}
-                className="inline-flex items-center justify-center gap-1.5 sm:gap-2 rounded-xl bg-red-50 border border-red-300 px-2.5 sm:px-3.5 py-2 sm:py-2.5 text-[11px] sm:text-xs font-black text-red-700 shadow-2xs hover:bg-red-100 transition-all hover:shadow-xs active:scale-97 cursor-pointer text-center"
-                title="حذف جميع المؤسسات المسجلة في هذه المديرية"
-              >
-                <div className="w-5 h-5 sm:w-6 sm:h-6 rounded-lg bg-red-600 text-white flex items-center justify-center shadow-2xs shrink-0">
-                  <Trash2 className="h-3.5 w-3.5" />
-                </div>
-                <span>حذف الكل</span>
-              </button>
-            </>
-          )}
         </div>
       </div>
 

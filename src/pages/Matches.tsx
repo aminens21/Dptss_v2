@@ -2,7 +2,7 @@ import React, { useEffect, useState, useMemo } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import clsx from 'clsx';
 import { useAuth, isSuperAdminEmail } from '../contexts/AuthContext';
-import { DataService, SPORTS_MAP, GENDER_MAP, deduplicateById, AGE_CATEGORIES, isClubTournament, getAgeCategoriesForSeason, normalizeCategoryKey, getCustomCategoryName, getCustomCategoryDetails, canUserApproveSportResult, canUserEnterMatchScore, isUserTechHeadForSport, normalizeCanonicalSportId, areSportIdsEquivalent, normalizeArabicMatchText, isAffiliationAllowedByDisplayConfig, normalizeTournamentAffiliation, resolveEffectiveTeacherCadre, isTeacherLevelAllowedForTournament, isSchoolSectorAllowedForTournament, schoolNamesMatch, getMatchEducationalCycles, findAllBlockedPeriodsForDate, isMatchProgramPendingApproval, isTrackOrCrossCountrySport } from '../lib/dataService';
+import { DataService, SPORTS_MAP, GENDER_MAP, deduplicateById, AGE_CATEGORIES, isClubTournament, getAgeCategoriesForSeason, normalizeCategoryKey, getCustomCategoryName, getCustomCategoryDetails, canUserApproveSportResult, canUserEnterMatchScore, isUserTechHeadForSport, normalizeCanonicalSportId, areSportIdsEquivalent, normalizeArabicMatchText, isAffiliationAllowedByDisplayConfig, normalizeTournamentAffiliation, resolveEffectiveTeacherCadre, isTeacherLevelAllowedForTournament, isCrossCountryU15OpenToPrimary, isSchoolSectorAllowedForTournament, schoolNamesMatch, getMatchEducationalCycles, findAllBlockedPeriodsForDate, isMatchProgramPendingApproval, isTrackOrCrossCountrySport } from '../lib/dataService';
 import { formatTeamDisplayName, hasValidMatchTeams } from '../lib/drawTournamentUtils';
 import { Match, School, Venue, Tournament, Sport, Student, User, Referee, AffiliationDisplayConfig } from '../types';
 import { CountdownTimer } from '../components/CountdownTimer';
@@ -448,6 +448,13 @@ export const Matches: React.FC = () => {
       toast.error('هذه الرياضة غير مبرمجة بعد للموسم الحالي، ولا يمكن استعراض نتائجها أو مقابلاتها.');
       return;
     }
+    if (isTeacher && !canManageSport(sport.id)) {
+      const sportItem = sportsData.find(s => s.sport.id === sport.id);
+      if (sportItem && !sportItem.isProgrammed) {
+        toast.error('عذراً، هذه البطولة غير مفتوحة للسلك التعليمي لمؤسستك.');
+        return;
+      }
+    }
     setSelectedSportForResults(sport);
     setIsResultsModalOpen(true);
   };
@@ -772,8 +779,12 @@ export const Matches: React.FC = () => {
       
       // For regular teachers, scope tournaments to their educational cycle & school sector
       if (isTeacher && !canManageSport(sport.id)) {
-        sportTournaments = sportTournaments.filter(t =>
-          isTeacherLevelAllowedForTournament(effectiveTeacherCadre, t.level, t.ageCategory, t.sportId || sport.id) &&
+        const rawSportTourns = sportTournaments;
+        sportTournaments = rawSportTourns.filter(t =>
+          (
+            isTeacherLevelAllowedForTournament(effectiveTeacherCadre, t.level, t.ageCategory, t.sportId || sport.id) ||
+            (effectiveTeacherCadre === 'Primary' && isCrossCountryU15OpenToPrimary(t, rawSportTourns))
+          ) &&
           (!teacherSchoolObj || isSchoolSectorAllowedForTournament(teacherSchoolObj, t))
         );
       }

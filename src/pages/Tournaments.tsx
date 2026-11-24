@@ -31,12 +31,14 @@ import {
   UploadCloud,
   RefreshCw,
   RotateCcw,
-  FileText
+  FileText,
+  Sparkles
 } from 'lucide-react';
 import { CreateTournamentModal } from '../components/CreateTournamentModal';
 import { EditTournamentModal } from '../components/EditTournamentModal';
 import { ConfirmDeleteModal } from '../components/ConfirmDeleteModal';
 import { CrossCountryChampionshipModal } from '../components/CrossCountryChampionshipModal';
+import { CrossCountryDemoModal } from '../components/CrossCountryDemoModal';
 import { SportChampionshipModal } from '../components/SportChampionshipModal';
 import { AthleticsChampionshipModal } from '../components/AthleticsChampionshipModal';
 import { EditTournamentScheduleModal } from '../components/EditTournamentScheduleModal';
@@ -98,6 +100,7 @@ export const Tournaments: React.FC = () => {
   const [search, setSearch] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isCcModalOpen, setIsCcModalOpen] = useState(false);
+  const [isCcDemoModalOpen, setIsCcDemoModalOpen] = useState(false);
   const [filterSport, setFilterSport] = useState<string>('ALL');
   const [filterStatus, setFilterStatus] = useState<'ALL' | 'PROGRAMMED' | 'UNPROGRAMMED' | 'MY_SCHOOL'>('ALL');
 
@@ -1153,8 +1156,9 @@ export const Tournaments: React.FC = () => {
       );
 
       if (sportTourns.length > 0) {
-        const isAnyLevelAllowed = sportTourns.some(t => 
-          isTeacherLevelAllowedForTournament(teacherCadre, t.level, t.ageCategory, t.sportId || sport.id)
+        const isAnyLevelAllowed = sportTourns.some(t =>
+          isTeacherLevelAllowedForTournament(teacherCadre, t.level, t.ageCategory, t.sportId || sport.id) ||
+          (teacherCadre === 'Primary' && isCrossCountryU15OpenToPrimary(t, sportTourns))
         );
         const isAnySectorAllowed = !userSchool || sportTourns.some(t =>
           isSchoolSectorAllowedForTournament(userSchool, t)
@@ -1783,6 +1787,24 @@ export const Tournaments: React.FC = () => {
                         </button>
                       )}
                     </div>
+
+                    {isCentralAdmin && (
+                      <div className="px-3 py-2 bg-indigo-950/70 border-t border-white/10 flex items-center justify-between gap-2">
+                        <span className="text-[10px] font-bold text-indigo-200">أداة المسير المركزي:</span>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setIsCcDemoModalOpen(true);
+                          }}
+                          title="توليد بيانات افتراضية للمشاركين الخاصة بالمؤسسات الموجودة في المنصة"
+                          className="px-3 py-1.5 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white rounded-xl text-[11px] font-black flex items-center gap-1.5 shadow-sm border border-indigo-400/40 cursor-pointer transition-all"
+                        >
+                          <Sparkles className="h-3.5 w-3.5 text-amber-300" />
+                          <span>توليد بيانات افتراضية للمشاركين</span>
+                        </button>
+                      </div>
+                    )}
                   </div>
                 );
               }
@@ -2246,6 +2268,8 @@ export const Tournaments: React.FC = () => {
         techHead={teachers.find(tch => tch.isTechCommitteeHead && (tch.techCommitteeSports?.includes('cross_country') || tch.sportId === 'cross_country'))}
         activeSeason={activeSeason}
         canManage={canManageSport('cross_country')}
+        isCentralAdmin={isCentralAdmin}
+        activeDirectorateId={activeDirObj?.id || 'taourirt'}
         onProgramTournament={(sId) => {
           setIsCcModalOpen(false);
           handleOpenProgramModal(sId);
@@ -2254,6 +2278,24 @@ export const Tournaments: React.FC = () => {
         isTeacherRole={effectiveRole === 'TEACHER'}
         teacherSchoolName={effectiveRole === 'TEACHER' && userProfile ? userProfile.workLocation : undefined}
       />
+
+      {isCentralAdmin && (
+        <CrossCountryDemoModal
+          isOpen={isCcDemoModalOpen}
+          onClose={() => setIsCcDemoModalOpen(false)}
+          schools={schools}
+          teachers={teachers}
+          allStudents={allStudents}
+          tournaments={tournaments}
+          activeSeason={activeSeason}
+          activeDirectorateId={activeDirObj?.id || 'taourirt'}
+          currentUser={userProfile}
+          onSuccess={() => {
+            refreshConfirmations();
+            loadData();
+          }}
+        />
+      )}
 
       {/* General Sport Championship Modal for viewing categories, controls & rosters */}
       {selectedSportForModal && (

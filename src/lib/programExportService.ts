@@ -601,8 +601,191 @@ export interface ProgramHtmlOptions {
   selectedSportIds: string[]; // empty or ['ALL'] means all sports
   scopeFilter: 'ALL' | 'provincial' | 'regional' | 'national';
   affiliationFilter?: ProgramAffiliationFilter;
+  categoryFilter?: string; // 'ALL' or '<catKey>__<genderKey>' e.g. 'U15__Female'
   activeSeason: string;
   customTitle?: string;
+}
+
+const AGE_CATEGORY_ORDER: Record<string, number> = {
+  U12: 1,
+  U15: 2,
+  U17: 3,
+  U18: 4,
+  U20: 5
+};
+
+const GENDER_ORDER: Record<'Female' | 'Male' | 'Mixed', number> = {
+  Female: 0,
+  Male: 1,
+  Mixed: 2
+};
+
+export interface CategoryGenderTuple {
+  categoryKey: string;
+  genderKey: 'Female' | 'Male' | 'Mixed';
+  filterKey: string;
+  label: string;
+  ageRank: number;
+  genderRank: number;
+}
+
+export function getEventCategoryGenderTuple(ev: {
+  category?: string;
+  gender?: string;
+  sportId?: string;
+}): CategoryGenderTuple {
+  const rawCat = (ev.category || '').trim();
+  const upperCat = rawCat.toUpperCase();
+
+  let categoryKey = 'OTHER';
+  if (
+    upperCat.includes('U12') ||
+    rawCat.includes('أقل من 12') ||
+    rawCat.includes('اقل من 12') ||
+    rawCat.includes('براعم') ||
+    rawCat.includes('برعمات')
+  ) {
+    categoryKey = 'U12';
+  } else if (
+    upperCat.includes('U15') ||
+    rawCat.includes('أقل من 15') ||
+    rawCat.includes('اقل من 15') ||
+    rawCat.includes('صغار') ||
+    rawCat.includes('صغيرات')
+  ) {
+    categoryKey = 'U15';
+  } else if (
+    upperCat.includes('U17') ||
+    rawCat.includes('أقل من 17') ||
+    rawCat.includes('اقل من 17')
+  ) {
+    categoryKey = 'U17';
+  } else if (
+    upperCat.includes('U18') ||
+    rawCat.includes('أقل من 18') ||
+    rawCat.includes('اقل من 18') ||
+    rawCat.includes('فتيان') ||
+    rawCat.includes('فتيات')
+  ) {
+    categoryKey = 'U18';
+  } else if (
+    upperCat.includes('U20') ||
+    rawCat.includes('شبان') ||
+    rawCat.includes('شابات') ||
+    rawCat.includes('2009 وما بعد')
+  ) {
+    categoryKey = 'U20';
+  } else if (/^CAT_/i.test(rawCat)) {
+    categoryKey = normalizeCategoryKey(rawCat);
+  } else if (rawCat) {
+    categoryKey = rawCat;
+  }
+
+  const gNorm = (ev.gender || '').trim().toLowerCase();
+  const hasFemaleWords = /إناث|اناث|فتيات|صغيرات|برعمات|شابات/.test(rawCat);
+  const hasMaleWords = /ذكور|فتيان|صغار|براعم|شبان/.test(rawCat);
+
+  let genderKey: 'Female' | 'Male' | 'Mixed' = 'Mixed';
+  if (gNorm === 'female' || gNorm === 'f' || gNorm === 'إناث' || gNorm === 'اناث') {
+    genderKey = 'Female';
+  } else if (gNorm === 'male' || gNorm === 'm' || gNorm === 'ذكور') {
+    genderKey = 'Male';
+  } else if (gNorm === 'mixed' || gNorm === 'مختلط') {
+    genderKey = 'Mixed';
+  } else if (hasFemaleWords && !hasMaleWords) {
+    genderKey = 'Female';
+  } else if (hasMaleWords && !hasFemaleWords) {
+    genderKey = 'Male';
+  }
+
+  const spId = (ev.sportId || '').toLowerCase();
+  const isTrackOrCC = spId === 'cross_country' || spId === 'athletics' || spId === 'track_field';
+
+  const genderAr = genderKey === 'Female' ? 'إناث' : genderKey === 'Male' ? 'ذكور' : 'مختلط';
+  let label = '';
+
+  if (isTrackOrCC) {
+    if (categoryKey === 'U12') {
+      label = genderKey === 'Female' ? 'البرعمات إناث' : genderKey === 'Male' ? 'البراعم ذكور' : 'البراعم والبرعمات';
+    } else if (categoryKey === 'U15') {
+      label = genderKey === 'Female' ? 'الصغيرات إناث' : genderKey === 'Male' ? 'الصغار ذكور' : 'الصغار والصغيرات';
+    } else if (categoryKey === 'U18') {
+      label = genderKey === 'Female' ? 'الفتيات إناث' : genderKey === 'Male' ? 'الفتيان ذكور' : 'الفتيان والفتيات';
+    } else if (categoryKey === 'U20') {
+      label = genderKey === 'Female' ? 'الشابات إناث' : genderKey === 'Male' ? 'الشبان ذكور' : 'الشبان والشابات';
+    }
+  }
+
+  if (!label) {
+    if (categoryKey === 'U12') {
+      label = genderKey === 'Mixed' ? 'أقل من 12 سنة (مختلط)' : `أقل من 12 سنة ${genderAr}`;
+    } else if (categoryKey === 'U15') {
+      label = genderKey === 'Mixed' ? 'أقل من 15 سنة (مختلط)' : `أقل من 15 سنة ${genderAr}`;
+    } else if (categoryKey === 'U17') {
+      label = genderKey === 'Mixed' ? 'أقل من 17 سنة (مختلط)' : `أقل من 17 سنة ${genderAr}`;
+    } else if (categoryKey === 'U18') {
+      label = genderKey === 'Mixed' ? 'أقل من 18 سنة (مختلط)' : `أقل من 18 سنة ${genderAr}`;
+    } else if (categoryKey === 'U20') {
+      label = genderKey === 'Mixed' ? 'أقل من 20 سنة (مختلط)' : `أقل من 20 سنة ${genderAr}`;
+    } else if (rawCat) {
+      label = /ذكور|إناث|اناث|مختلط/.test(rawCat) || !ev.gender ? rawCat : `${rawCat} ${genderAr}`;
+    } else {
+      label = genderAr;
+    }
+  }
+
+  return {
+    categoryKey,
+    genderKey,
+    filterKey: `${categoryKey}__${genderKey}`,
+    label,
+    ageRank: AGE_CATEGORY_ORDER[categoryKey] ?? 99,
+    genderRank: GENDER_ORDER[genderKey]
+  };
+}
+
+export function sortCalendarEvents(events: CalendarExportEvent[]): CalendarExportEvent[] {
+  return events.slice().sort((a, b) => {
+    const tA = getEventCategoryGenderTuple(a);
+    const tB = getEventCategoryGenderTuple(b);
+
+    // 1. Gender priority: Female (إناث) first, then Male (ذكور), then Mixed
+    if (tA.genderRank !== tB.genderRank) {
+      return tA.genderRank - tB.genderRank;
+    }
+
+    // 2. Age category priority: U12 -> U15 -> U17 -> U18 -> U20 -> other
+    if (tA.ageRank !== tB.ageRank) {
+      return tA.ageRank - tB.ageRank;
+    }
+    if (tA.categoryKey !== tB.categoryKey) {
+      return tA.categoryKey.localeCompare(tB.categoryKey, 'ar');
+    }
+
+    // 3. Keep events of the same sport grouped within the same category
+    const sportCmp = (a.sportId || '').localeCompare(b.sportId || '');
+    if (sportCmp !== 0) {
+      return sportCmp;
+    }
+
+    // 4. Match number ascending
+    const numA = typeof a.matchNumber === 'number' && !Number.isNaN(a.matchNumber)
+      ? a.matchNumber
+      : Number.MAX_SAFE_INTEGER;
+    const numB = typeof b.matchNumber === 'number' && !Number.isNaN(b.matchNumber)
+      ? b.matchNumber
+      : Number.MAX_SAFE_INTEGER;
+    if (numA !== numB) {
+      return numA - numB;
+    }
+
+    // 5. Chronological tie-breaker (date, then time)
+    const dateCmp = (a.date || '').localeCompare(b.date || '');
+    if (dateCmp !== 0) {
+      return dateCmp;
+    }
+    return (a.time || '').localeCompare(b.time || '');
+  });
 }
 
 function getActiveDirectorateSync() {
@@ -636,22 +819,13 @@ function getOfficialLogosSync(): { ministryLogo?: string; frmssLogo?: string; mi
   return {};
 }
 
-function formatTargetCategoryWithGender(category?: string, gender?: string): string {
-  const cat = (category || '').trim();
-  const gNorm = (gender || '').trim().toLowerCase();
-  const genderLabel =
-    gNorm === 'female' || gNorm === 'إناث' || gNorm === 'اناث'
-      ? 'إناث'
-      : gNorm === 'male' || gNorm === 'ذكور'
-      ? 'ذكور'
-      : gNorm === 'mixed' || gNorm === 'مختلط'
-      ? 'مختلط'
-      : '';
-
-  if (!cat) return genderLabel || '-';
-  if (!genderLabel) return cat;
-  if (/ذكور|إناث|اناث|مختلط/.test(cat)) return cat;
-  return `${cat} ${genderLabel}`;
+export function formatTargetCategoryWithGender(
+  category?: string,
+  gender?: string,
+  sportId?: string
+): string {
+  const tuple = getEventCategoryGenderTuple({ category, gender, sportId });
+  return tuple.label || '-';
 }
 
 export function generateProgramHtml({
@@ -659,6 +833,7 @@ export function generateProgramHtml({
   selectedSportIds,
   scopeFilter,
   affiliationFilter = 'ALL',
+  categoryFilter = 'ALL',
   activeSeason,
   customTitle
 }: ProgramHtmlOptions): { html: string; title: string; filenameBase: string } {
@@ -683,8 +858,29 @@ export function generateProgramHtml({
     filtered = filtered.filter(ev => (ev.affiliationType || 'non_club') === affiliationFilter);
   }
 
-  // Sort chronologically
-  filtered.sort((a, b) => a.date.localeCompare(b.date));
+  // Category & Gender Filter
+  let selectedCategoryLabel = '';
+  if (categoryFilter && categoryFilter !== 'ALL') {
+    filtered = filtered.filter(ev => {
+      const tuple = getEventCategoryGenderTuple(ev);
+      if (tuple.filterKey === categoryFilter) {
+        if (!selectedCategoryLabel) selectedCategoryLabel = tuple.label;
+        return true;
+      }
+      return false;
+    });
+    if (!selectedCategoryLabel) {
+      const [catPart, genderPart] = categoryFilter.split('__');
+      selectedCategoryLabel = formatTargetCategoryWithGender(
+        catPart,
+        genderPart,
+        !isAllSports && selectedSportIds.length === 1 ? selectedSportIds[0] : undefined
+      );
+    }
+  }
+
+  // Sort by gender (females first), age category, sport, match number, and date/time
+  filtered = sortCalendarEvents(filtered);
 
   const affiliationLabel = affiliationFilter !== 'ALL' ? AFFILIATION_LABELS[affiliationFilter] : '';
 
@@ -727,6 +923,11 @@ export function generateProgramHtml({
       title = `${title} — ${affiliationLabel}`;
       filenameBase = `${filenameBase}_${affiliationFilter}`;
     }
+
+    if (selectedCategoryLabel) {
+      title = `${title} — فئة ${selectedCategoryLabel}`;
+      filenameBase = `${filenameBase}_${selectedCategoryLabel.replace(/\s+/g, '_')}`;
+    }
   }
 
   const hideSportColumn = !isAllSports && selectedSportIds.length === 1;
@@ -734,7 +935,7 @@ export function generateProgramHtml({
   const totalColumns = 7 + (hideSportColumn ? 0 : 1) + (showNotesColumn ? 1 : 0);
 
   const rowsHtml = filtered.length > 0 ? filtered.map((ev, index) => {
-    const targetCategoryDisplay = formatTargetCategoryWithGender(ev.category, ev.gender);
+    const targetCategoryDisplay = formatTargetCategoryWithGender(ev.category, ev.gender, ev.sportId);
     const matchNumDisplay = ev.matchNumber ? String(ev.matchNumber) : String(index + 1);
 
     return `

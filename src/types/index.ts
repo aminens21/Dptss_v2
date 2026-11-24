@@ -409,6 +409,7 @@ export interface Student {
   isQualifiedRegional?: boolean;
   isQualifiedNational?: boolean;
   qualificationLevel?: 'provincial' | 'regional' | 'national';
+  isDemoGenerated?: boolean;
 }
 
 export interface AppNotification {

@@ -84,7 +84,7 @@ export const EditTournamentScheduleModal: React.FC<EditTournamentScheduleModalPr
         let sawAll = false;
         sportTournaments.forEach(t => {
           if (t.level && String(t.level).trim()) {
-            const parsed = parseTournamentAllowedLevels(t.level, t.ageCategory);
+            const parsed = parseTournamentAllowedLevels(t.level, t.ageCategory, t.sportId || sport.id);
             if (parsed === 'ALL') sawAll = true;
             else parsed.forEach(l => parsedLevelsSet.add(l));
           }

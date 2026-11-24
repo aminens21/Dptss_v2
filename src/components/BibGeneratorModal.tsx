@@ -225,33 +225,77 @@ export const BibGeneratorModal: React.FC<BibGeneratorModalProps> = ({
     return CROSS_COUNTRY_CATEGORIES.find(cat => cat.gender === targetGender);
   };
 
-  // Build list of all runners with normalized bib numbers
-  const allRunners: BibRunnerData[] = useMemo(() => {
-    return students.map((student, idx) => {
+  // Build list of all runners sorted sequentially by category order (البراعم -> البرعمات -> الصغار -> الصغيرات -> الفتيان -> الفتيات -> الشبان -> الشابات)
+  // starting from 0001 continuously across categories
+  const { allRunners, raceRanges } = useMemo(() => {
+    const categoryOrderMap = new Map<string, number>();
+    CROSS_COUNTRY_CATEGORIES.forEach((c, idx) => categoryOrderMap.set(c.id, idx));
+
+    const prepared = students.map((student, idx) => {
       const catDef = matchCategoryDef(student);
       const school = student.schoolId ? schoolMap.get(student.schoolId) : undefined;
       const schoolName = student.schoolName || school?.name || 'مؤسسة تعليمية';
       const commune = school?.commune || '';
-      
-      const isFemale = student.gender === 'Female' || (student.gender as string)?.includes('أنثى') || (student.gender as string)?.includes('إناث');
-      const genderLabel = isFemale ? 'أنثى' : 'ذكر';
-      
-      // Category display name
-      let categoryLabel = catDef ? catDef.titleAr.replace('سباق ', '') : (student.category || 'مشارك');
 
-      // Bib number: check assigned bibNumber or crossCountryBibNumber from database, otherwise generate systematic starting from 101
-      const assignedBib = student.bibNumber ?? (student as any).crossCountryBibNumber;
-      const bibNumber = (assignedBib !== undefined && assignedBib !== null && String(assignedBib).trim() !== '')
-        ? assignedBib
-        : (101 + idx);
+      const isFemale =
+        student.gender === 'Female' ||
+        (student.gender as string)?.includes('أنثى') ||
+        (student.gender as string)?.includes('إناث');
+      const genderLabel = isFemale ? 'أنثى' : 'ذكر';
+      const categoryLabel = catDef ? catDef.titleAr.replace('سباق ', '') : (student.category || 'مشارك');
+      const catOrder = catDef ? (categoryOrderMap.get(catDef.id) ?? 99) : 99;
 
       return {
-        id: student.id || `runner-${idx}`,
-        bibNumber,
-        fullName: student.fullName || student.name || `متسابق ${idx + 1}`,
-        massarNumber: student.massarNumber || student.nationalId || `${150000 + idx}`,
-        birthDate: normalizeDateToYmd(student.birthDate) || ((student as any).birthYear ? `01/01/${(student as any).birthYear}` : '2012/01/01'),
-        birthYear: (student as any).birthYear || (normalizeDateToYmd(student.birthDate) ? normalizeDateToYmd(student.birthDate).split('-')[0] : '2012'),
+        student,
+        originalIdx: idx,
+        catDef,
+        catOrder,
+        schoolName,
+        commune,
+        isFemale,
+        genderLabel,
+        categoryLabel
+      };
+    });
+
+    prepared.sort((a, b) => {
+      if (a.catOrder !== b.catOrder) return a.catOrder - b.catOrder;
+      const schCmp = (a.schoolName || '').localeCompare(b.schoolName || '', 'ar');
+      if (schCmp !== 0) return schCmp;
+      const nameCmp = (a.student.fullName || a.student.name || '').localeCompare(
+        b.student.fullName || b.student.name || '',
+        'ar'
+      );
+      if (nameCmp !== 0) return nameCmp;
+      return a.originalIdx - b.originalIdx;
+    });
+
+    const ranges: Record<string, { start: string; end: string; count: number }> = {};
+
+    const runnersList: BibRunnerData[] = prepared.map((item, seqIdx) => {
+      const { student, originalIdx, catDef, schoolName, commune, isFemale, genderLabel, categoryLabel } = item;
+      const sequentialBib = String(seqIdx + 1).padStart(4, '0');
+
+      if (catDef) {
+        if (!ranges[catDef.id]) {
+          ranges[catDef.id] = { start: sequentialBib, end: sequentialBib, count: 1 };
+        } else {
+          ranges[catDef.id].end = sequentialBib;
+          ranges[catDef.id].count += 1;
+        }
+      }
+
+      return {
+        id: student.id || `runner-${originalIdx}`,
+        bibNumber: sequentialBib,
+        fullName: student.fullName || student.name || `متسابق ${originalIdx + 1}`,
+        massarNumber: student.massarNumber || student.nationalId || `${150000 + originalIdx}`,
+        birthDate:
+          normalizeDateToYmd(student.birthDate) ||
+          ((student as any).birthYear ? `01/01/${(student as any).birthYear}` : '2012/01/01'),
+        birthYear:
+          (student as any).birthYear ||
+          (normalizeDateToYmd(student.birthDate) ? normalizeDateToYmd(student.birthDate).split('-')[0] : '2012'),
         schoolName,
         commune,
         directorateName,
@@ -260,9 +304,11 @@ export const BibGeneratorModal: React.FC<BibGeneratorModalProps> = ({
         gender: isFemale ? 'Female' : 'Male',
         genderLabel,
         affiliationType: student.affiliationType || 'non_club',
-        affiliationTypeLabel: student.affiliationType === 'club_affiliated' ? 'مشاركة فريق' : 'مشاركة فردية'
+        affiliationTypeLabel: student.affiliationType === 'club_affiliated' ? 'منتمي لنادي' : 'غير منتمي (مدرسي)'
       };
     });
+
+    return { allRunners: runnersList, raceRanges: ranges };
   }, [students, schoolMap, directorateName]);
 
   // Filter runners based on selected races (multi-race selection), gender, search query, and empty state
@@ -468,6 +514,14 @@ export const BibGeneratorModal: React.FC<BibGeneratorModalProps> = ({
         bibNumber: r.bibNumber
       }));
       await DataService.updateBibNumbersBulk(items);
+      const bibById = new Map(items.map(it => [it.id, String(it.bibNumber)]));
+      setStudents(prev =>
+        prev.map(s =>
+          bibById.has(s.id)
+            ? { ...s, bibNumber: bibById.get(s.id), crossCountryBibNumber: bibById.get(s.id) }
+            : s
+        )
+      );
       toast.dismiss(toastId);
       toast.success(`تم حفظ ومزامنة ${items.length} رقم صدرية في قاعدة البيانات بنجاح! جاهزة للمسح الآلي في تطبيق الماسح 🎯`);
     } catch (e) {
@@ -531,6 +585,11 @@ export const BibGeneratorModal: React.FC<BibGeneratorModalProps> = ({
       generateQrs();
     }
   }, [currentPageRunners]);
+
+  // Invalidate cached QR codes when sequential bib numbers change
+  useEffect(() => {
+    setQrCodeMap({});
+  }, [allRunners]);
 
   // Reset preview page if filter or layout changes
   useEffect(() => {
@@ -1109,13 +1168,18 @@ export const BibGeneratorModal: React.FC<BibGeneratorModalProps> = ({
                         </div>
                       </div>
 
-                      {/* Bottom Row: Runner Count Badge + Gender Pill */}
-                      <div className="flex items-center justify-between pt-1 border-t border-slate-200/60 text-[10px]">
+                      {/* Bottom Row: Runner Count Badge + Bib Range + Gender Pill */}
+                      <div className="flex items-center justify-between pt-1 border-t border-slate-200/60 text-[10px] gap-1">
                         <span className={`font-bold px-1.5 py-0.2 rounded-sm ${
                           isFemale ? 'bg-rose-100/70 text-rose-800' : 'bg-blue-100/70 text-blue-800'
                         }`}>
                           {cat.gender === 'Female' ? 'إناث' : 'ذكور'}
                         </span>
+                        {raceRanges[cat.id] && (
+                          <span className="font-mono font-black text-[9.5px] px-1.5 py-0.2 rounded bg-white/90 border border-slate-300/70 text-slate-800" dir="ltr">
+                            {raceRanges[cat.id].start} - {raceRanges[cat.id].end}
+                          </span>
+                        )}
                         <span className={`font-extrabold font-mono ${count > 0 ? 'text-slate-900' : 'text-slate-400'}`}>
                           {count} مشارك
                         </span>

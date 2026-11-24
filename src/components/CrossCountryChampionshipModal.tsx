@@ -14,6 +14,7 @@ import { RegisterStudentModal } from './RegisterStudentModal';
 import { CrossCountryBulkRegisterModal } from './CrossCountryBulkRegisterModal';
 import { EditDeadlineModal } from './EditDeadlineModal';
 import { ParticipationFormPdfModal } from './ParticipationFormPdfModal';
+import { CrossCountryDemoModal } from './CrossCountryDemoModal';
 import * as XLSX from 'xlsx';
 import {
   X,
@@ -61,6 +62,8 @@ interface CrossCountryChampionshipModalProps {
   techHead?: User;
   activeSeason: string;
   canManage?: boolean;
+  isCentralAdmin?: boolean;
+  activeDirectorateId?: string;
   onRefreshData?: () => void;
   onProgramTournament?: (sportId: string) => void;
   isTeacherRole?: boolean;
@@ -77,6 +80,8 @@ export const CrossCountryChampionshipModal: React.FC<CrossCountryChampionshipMod
   techHead,
   activeSeason,
   canManage = false,
+  isCentralAdmin: propIsCentralAdmin,
+  activeDirectorateId = 'taourirt',
   onRefreshData,
   onProgramTournament,
   isTeacherRole: propIsTeacherRole,
@@ -84,9 +89,13 @@ export const CrossCountryChampionshipModal: React.FC<CrossCountryChampionshipMod
 }) => {
   const { userProfile } = useAuth();
   const { canDo } = useRolePermissions();
+  const isCentralAdmin = propIsCentralAdmin !== undefined
+    ? propIsCentralAdmin
+    : (userProfile?.role === 'CENTRAL_ADMIN' || userProfile?.isSuperAdmin === true);
   const isTeacherRole = propIsTeacherRole !== undefined ? propIsTeacherRole : userProfile?.role === 'TEACHER';
   const teacherSchoolName = propTeacherSchoolName !== undefined ? propTeacherSchoolName : (userProfile?.workLocation || '');
   const [loadedTeachers, setLoadedTeachers] = useState<User[]>([]);
+  const [isCcDemoModalOpen, setIsCcDemoModalOpen] = useState(false);
   const effectiveTeachers = propTeachers.length > 0 ? propTeachers : loadedTeachers;
 
   const effectiveSchoolNameForCadre = teacherSchoolName || userProfile?.schoolName || userProfile?.workLocation || '';
@@ -348,18 +357,7 @@ export const CrossCountryChampionshipModal: React.FC<CrossCountryChampionshipMod
     return isSameSchoolName || isSameSchoolId;
   };
 
-  const customTitle = useMemo(() => {
-    if (tournaments && tournaments.length > 0) {
-      const ccTourn = tournaments.find(t => t.sportId === 'cross_country');
-      if (ccTourn && ccTourn.name) {
-        const raw = ccTourn.name;
-        const clean = raw.split(/\s*-\s*(?:البرعمات|البراعم|الصغيرات|الصغار|الفتيات|الفتيان|الشابات|الشبان|ذكور|إناث|مختلط|U12|U15|U18|U20|جميع الفئات|فئة|صغار|فتيان|شبان|براعم|صغيرات|فتيات|شابات|برعمات|لا منتمين|للمنتمين للأندية|مفتوحة|مواليد|السلك|دوري)/i)[0].trim();
-        if (clean && clean.length >= 3) return clean;
-        return raw.split(/\s*-\s*/)[0].trim() || raw;
-      }
-    }
-    return 'البطولة الإقليمية المدرسية للعدو الريفي';
-  }, [tournaments]);
+  const customTitle = 'البطولة الإقليمية المدرسية للعدو الريفي';
 
   // Sync editing student form values when a student is selected
   useEffect(() => {
@@ -734,6 +732,18 @@ export const CrossCountryChampionshipModal: React.FC<CrossCountryChampionshipMod
                   </div>
 
                   <div className="flex flex-wrap items-center justify-end gap-2 shrink-0">
+                    {isCentralAdmin && (
+                      <button
+                        type="button"
+                        onClick={() => setIsCcDemoModalOpen(true)}
+                        className="px-3.5 py-2 bg-gradient-to-r from-indigo-500/25 to-purple-500/25 hover:from-indigo-500/40 hover:to-purple-500/40 text-indigo-200 border border-indigo-400/40 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-1.5 shadow-3xs"
+                        title="توليد بيانات افتراضية للمشاركين الخاصة بالمؤسسات الموجودة في المنصة (خاص بالمسير المركزي)"
+                      >
+                        <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+                        <span>توليد بيانات افتراضية ⚡</span>
+                      </button>
+                    )}
+
                     {canManage && (
                       <button
                         onClick={() => setIsBibGeneratorOpen(true)}
@@ -1982,6 +1992,24 @@ export const CrossCountryChampionshipModal: React.FC<CrossCountryChampionshipMod
           }}
           onProceedToRegister={() => {
             setIsBulkRegisterModalOpen(true);
+          }}
+        />
+      )}
+
+      {isCentralAdmin && (
+        <CrossCountryDemoModal
+          isOpen={isCcDemoModalOpen}
+          onClose={() => setIsCcDemoModalOpen(false)}
+          schools={schools}
+          teachers={effectiveTeachers}
+          allStudents={localStudents}
+          tournaments={tournaments}
+          activeSeason={activeSeason}
+          activeDirectorateId={activeDirectorateId}
+          currentUser={userProfile}
+          onSuccess={() => {
+            refreshConfirmations();
+            if (onRefreshData) onRefreshData();
           }}
         />
       )}

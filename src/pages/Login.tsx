@@ -2911,7 +2911,7 @@ export const Login: React.FC = () => {
                                     {(() => {
                                       const matchedStud = students.find(s => 
                                         (runner?.studentId && s.id === runner.studentId) ||
-                                        (runnerName && s.fullName.trim().toLowerCase() === runnerName.trim().toLowerCase())
+                                        (runnerName && s.fullName && String(s.fullName).trim().toLowerCase() === String(runnerName).trim().toLowerCase())
                                       );
                                       const pPhoto = runner?.photoUrl || matchedStud?.photoUrl;
                                       if (pPhoto) {
@@ -3358,7 +3358,7 @@ export const Login: React.FC = () => {
                                       {(() => {
                                         const matchedStud = students.find(s => 
                                           (winner?.studentId && s.id === winner.studentId) ||
-                                          (winner?.fullName && s.fullName.trim().toLowerCase() === winner.fullName.trim().toLowerCase())
+                                          (winner?.fullName && s.fullName && String(s.fullName).trim().toLowerCase() === String(winner.fullName).trim().toLowerCase())
                                         );
                                         const pPhoto = winner?.photoUrl || matchedStud?.photoUrl;
                                         if (pPhoto) {

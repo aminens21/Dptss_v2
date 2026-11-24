@@ -2,7 +2,7 @@ import React, { useEffect, useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { formatMatchDate, parseDateToTimestampMs } from '../lib/utils';
-import { DataService, SPORTS_MAP, deduplicateById, normalizeCategoryKey, getCategoryShortName, getCustomCategoryName, isTeacherLevelAllowedForTournament, isSchoolSectorAllowedForTournament, schoolNamesMatch, resolveEffectiveTeacherCadre, findMatchingSchoolForTeacher } from '../lib/dataService';
+import { DataService, SPORTS_MAP, deduplicateById, normalizeCategoryKey, getCategoryShortName, getCustomCategoryName, isTeacherLevelAllowedForTournament, isCrossCountryU15OpenToPrimary, isSchoolSectorAllowedForTournament, schoolNamesMatch, resolveEffectiveTeacherCadre, findMatchingSchoolForTeacher } from '../lib/dataService';
 import { extractMatchGroupLabel } from '../lib/drawTournamentUtils';
 import { Match, Tournament, School, Venue, Referee, User } from '../types';
 import {
@@ -310,7 +310,10 @@ export const Dashboard: React.FC = () => {
     const active = tournaments.filter(t => t.status !== 'Draft' && (t as any).isActive !== false);
     if (!isPureTeacher) return active;
     return active.filter(t =>
-      isTeacherLevelAllowedForTournament(effectiveTeacherCadre, t.level, t.ageCategory, t.sportId) &&
+      (
+        isTeacherLevelAllowedForTournament(effectiveTeacherCadre, t.level, t.ageCategory, t.sportId) ||
+        (effectiveTeacherCadre === 'Primary' && isCrossCountryU15OpenToPrimary(t, active))
+      ) &&
       (!teacherSchoolObj || isSchoolSectorAllowedForTournament(teacherSchoolObj, t))
     );
   }, [tournaments, isPureTeacher, effectiveTeacherCadre, teacherSchoolObj]);
@@ -322,7 +325,10 @@ export const Dashboard: React.FC = () => {
         const explicitTourn = tournaments.find(t => t.id === m.tournamentId);
         if (explicitTourn) {
           return (
-            isTeacherLevelAllowedForTournament(effectiveTeacherCadre, explicitTourn.level, explicitTourn.ageCategory, explicitTourn.sportId || m.sportId) &&
+            (
+              isTeacherLevelAllowedForTournament(effectiveTeacherCadre, explicitTourn.level, explicitTourn.ageCategory, explicitTourn.sportId || m.sportId) ||
+              (effectiveTeacherCadre === 'Primary' && isCrossCountryU15OpenToPrimary(explicitTourn, tournaments))
+            ) &&
             (!teacherSchoolObj || isSchoolSectorAllowedForTournament(teacherSchoolObj, explicitTourn))
           );
         }

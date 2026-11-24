@@ -198,16 +198,33 @@ export const TechCommitteeHeads: React.FC = () => {
     }
   };
 
-  // Detect if viewer is a pure Primary-level teacher (not Central Admin / Tech Head)
+  // Detect if viewer is a pure Teacher (not Central Admin / Tech Head) and resolve their educational cycle
+  const mergedViewerProfile = useMemo(() => {
+    if (!userProfile) return null;
+    const dirMatch = teachers.find(t =>
+      (t.id && t.id === userProfile.id) ||
+      (t.email && userProfile.email && t.email.trim().toLowerCase() === userProfile.email.trim().toLowerCase()) ||
+      (t.leaseNumber && userProfile.leaseNumber && t.leaseNumber.trim() === userProfile.leaseNumber.trim())
+    );
+    if (!dirMatch) return userProfile;
+    return {
+      ...dirMatch,
+      ...userProfile,
+      workLocation: userProfile.workLocation || dirMatch.workLocation,
+      schoolId: userProfile.schoolId || dirMatch.schoolId,
+      teachingCadre: userProfile.teachingCadre || dirMatch.teachingCadre
+    };
+  }, [userProfile, teachers]);
+
   const teacherSchoolObj = useMemo(() => {
-    return findMatchingSchoolForTeacher(schools, userProfile);
-  }, [schools, userProfile]);
+    return findMatchingSchoolForTeacher(schools, mergedViewerProfile);
+  }, [schools, mergedViewerProfile]);
 
   const effectiveTeacherCadre = useMemo(() => {
-    return resolveEffectiveTeacherCadre(userProfile, teacherSchoolObj);
-  }, [userProfile, teacherSchoolObj]);
+    return resolveEffectiveTeacherCadre(mergedViewerProfile, teacherSchoolObj);
+  }, [mergedViewerProfile, teacherSchoolObj]);
 
-  const isPrimaryTeacher = useMemo(() => {
+  const isScopedTeacher = useMemo(() => {
     if (!userProfile || userProfile.role !== 'TEACHER') return false;
     if (isCentralAdmin) return false;
     const isSelfHead = Boolean(
@@ -216,23 +233,37 @@ export const TechCommitteeHeads: React.FC = () => {
       (userProfile.role as string) === 'TECH_COMMITTEE_HEAD'
     );
     if (isSelfHead) return false;
-    return effectiveTeacherCadre === 'Primary';
-  }, [userProfile, isCentralAdmin, effectiveTeacherCadre]);
+    return true;
+  }, [userProfile, isCentralAdmin]);
 
-  // Regional school championships that Primary teachers are eligible to participate in
-  const primaryEligibleTournaments = useMemo(() => {
-    if (!isPrimaryTeacher) return tournaments;
-    return tournaments.filter(t => {
+  const teacherCycleLabels = useMemo(() => {
+    if (effectiveTeacherCadre === 'Primary') {
+      return { full: 'التعليم الابتدائي', short: 'الابتدائي' };
+    }
+    if (effectiveTeacherCadre === 'Middle') {
+      return { full: 'التعليم الثانوي الإعدادي', short: 'الإعدادي' };
+    }
+    if (effectiveTeacherCadre === 'High') {
+      return { full: 'التعليم الثانوي التأهيلي', short: 'التأهيلي' };
+    }
+    return { full: 'سلك مؤسستك التعليمي', short: 'سلكك التعليمي' };
+  }, [effectiveTeacherCadre]);
+
+  // Regional school championships that the signed-in teacher's cycle/sector is eligible to participate in
+  const eligibleTeacherTournaments = useMemo(() => {
+    if (!isScopedTeacher) return tournaments;
+    const activeTourns = tournaments.filter(t => t.status !== 'Draft' && (t as any).isActive !== false);
+    return activeTourns.filter(t => {
       const tAff = t.affiliationType || (isClubTournament(t) ? 'club_affiliated' : 'non_club');
       if (!isAffiliationAllowedByDisplayConfig(tAff, affiliationDisplayConfig, t.sportId)) return false;
       const levelOk =
-        isTeacherLevelAllowedForTournament('Primary', t.level, t.ageCategory, t.sportId) ||
-        isCrossCountryU15OpenToPrimary(t, tournaments);
+        isTeacherLevelAllowedForTournament(effectiveTeacherCadre, t.level, t.ageCategory, t.sportId) ||
+        (effectiveTeacherCadre === 'Primary' && isCrossCountryU15OpenToPrimary(t, activeTourns));
       if (!levelOk) return false;
       if (teacherSchoolObj && !isSchoolSectorAllowedForTournament(teacherSchoolObj, t)) return false;
       return true;
     });
-  }, [isPrimaryTeacher, tournaments, affiliationDisplayConfig, teacherSchoolObj]);
+  }, [isScopedTeacher, tournaments, affiliationDisplayConfig, effectiveTeacherCadre, teacherSchoolObj]);
 
   const doesHeadOverseeTournament = (head: User, t: Tournament): boolean => {
     const headSports = Array.from(new Set([
@@ -246,26 +277,26 @@ export const TechCommitteeHeads: React.FC = () => {
   };
 
   const getVisibleTournamentsForHead = (head: User): Tournament[] => {
-    const pool = isPrimaryTeacher ? primaryEligibleTournaments : tournaments;
+    const pool = isScopedTeacher ? eligibleTeacherTournaments : tournaments;
     return pool.filter(t => doesHeadOverseeTournament(head, t));
   };
 
   const getVisibleSportKeysForHead = (head: User): string[] => {
     const rawKeys = head.techCommitteeSports || [];
-    if (!isPrimaryTeacher) return rawKeys;
+    if (!isScopedTeacher) return rawKeys;
     const eligibleFromAssigned = rawKeys.filter(sk =>
-      primaryEligibleTournaments.some(t => areSportIdsEquivalent(t.sportId, sk, sportsConfig))
+      eligibleTeacherTournaments.some(t => areSportIdsEquivalent(t.sportId, sk, sportsConfig))
     );
     if (eligibleFromAssigned.length > 0) return eligibleFromAssigned;
     return Array.from(new Set(getVisibleTournamentsForHead(head).map(t => t.sportId).filter(Boolean)));
   };
 
-  // Tech committee heads list (scoped for Primary teachers to their eligible championships only)
+  // Tech committee heads list (scoped for regular teachers to their eligible championships only)
   const heads = teachers.filter(t => t.isTechCommitteeHead);
   const scopedHeads = useMemo(() => {
-    if (!isPrimaryTeacher) return heads;
+    if (!isScopedTeacher) return heads;
     return heads.filter(h => getVisibleTournamentsForHead(h).length > 0);
-  }, [heads, isPrimaryTeacher, primaryEligibleTournaments, sportsConfig]);
+  }, [heads, isScopedTeacher, eligibleTeacherTournaments, sportsConfig]);
 
   // Filtered heads based on search term
   const filteredHeads = scopedHeads.filter(h => {
@@ -454,11 +485,11 @@ export const TechCommitteeHeads: React.FC = () => {
   const totalHeads = scopedHeads.length;
   const displayedSportsEntries = useMemo(() => {
     const entries = Object.entries(effectiveSportsMap);
-    if (!isPrimaryTeacher) return entries;
+    if (!isScopedTeacher) return entries;
     return entries.filter(([sportKey]) =>
-      primaryEligibleTournaments.some(t => areSportIdsEquivalent(t.sportId, sportKey, sportsConfig))
+      eligibleTeacherTournaments.some(t => areSportIdsEquivalent(t.sportId, sportKey, sportsConfig))
     );
-  }, [effectiveSportsMap, isPrimaryTeacher, primaryEligibleTournaments, sportsConfig]);
+  }, [effectiveSportsMap, isScopedTeacher, eligibleTeacherTournaments, sportsConfig]);
   const uniqueSportsCount = new Set(scopedHeads.flatMap(h => getVisibleSportKeysForHead(h))).size;
 
   // Detect signed-in Technical Committee Head (including Central Admin impersonation mode)
@@ -770,11 +801,11 @@ export const TechCommitteeHeads: React.FC = () => {
         </div>
       )}
 
-      {isPrimaryTeacher && (
+      {isScopedTeacher && (
         <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 flex items-center gap-2.5 text-xs text-blue-900 font-semibold shadow-3xs">
           <ShieldCheck className="h-4.5 w-4.5 text-blue-600 shrink-0" />
           <span>
-            تُعرض لك حصرياً اللجان ورؤساء اللجن التقنية المشرفون على البطولات الإقليمية المدرسية المفتوحة لمؤسسات <strong className="font-black">التعليم الابتدائي</strong> والمعنيّون بالمشاركة فيها.
+            تُعرض لك حصرياً اللجان ورؤساء اللجن التقنية المشرفون على البطولات الإقليمية المدرسية المفتوحة لمؤسسات <strong className="font-black">{teacherCycleLabels.full}</strong> والمعنيّون بالمشاركة فيها.
           </span>
         </div>
       )}
@@ -784,7 +815,7 @@ export const TechCommitteeHeads: React.FC = () => {
         <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs flex items-center justify-between">
           <div>
             <p className="text-[10px] text-slate-400 font-bold uppercase mb-1">
-              {isPrimaryTeacher ? 'رؤساء اللجن المعنيين ببطولات الابتدائي' : 'إجمالي رؤساء اللجن التقنية'}
+              {isScopedTeacher ? `رؤساء اللجن المعنيين ببطولات ${teacherCycleLabels.short}` : 'إجمالي رؤساء اللجن التقنية'}
             </p>
             <h3 className="text-2xl font-black text-slate-800">{totalHeads}</h3>
           </div>
@@ -839,8 +870,8 @@ export const TechCommitteeHeads: React.FC = () => {
           <div className="bg-white rounded-xl border border-slate-200 p-12 text-center space-y-2">
             <AlertCircle className="h-8 w-8 text-slate-300 mx-auto" />
             <p className="text-slate-500 text-xs font-semibold">
-              {isPrimaryTeacher && !searchTerm.trim()
-                ? 'لا يوجد رؤساء لجن تقنية معينون حالياً للبطولات الإقليمية المدرسية الخاصة بالسلك الابتدائي.'
+              {isScopedTeacher && !searchTerm.trim()
+                ? `لا يوجد رؤساء لجن تقنية معينون حالياً للبطولات الإقليمية المدرسية الخاصة بسلك ${teacherCycleLabels.short}.`
                 : 'لا يوجد أي رئيس لجنة تقنية معين حالياً يطابق تصفيتك.'}
             </p>
             {isCentralAdmin && (

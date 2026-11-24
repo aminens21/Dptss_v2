@@ -1279,7 +1279,15 @@ export const TeacherTeams: React.FC = () => {
         }
       }
       if (teacherCadre) {
-        const levelFiltered = normalized.filter(c => isCategoryAllowedForTeacherLevel(teacherCadre, c, selectedSportId));
+        const sportTourns = teacherAllowedTournaments.filter(t => t.sportId === selectedSportId);
+        const levelFiltered = normalized.filter(c =>
+          isCategoryAllowedForTeacherLevel(teacherCadre, c, selectedSportId) ||
+          sportTourns.some(t => {
+            const tCat = normalizeCategoryKey(t.ageCategory);
+            return (!tCat || tCat === 'OPEN' || tCat === c) &&
+              isTeacherLevelAllowedForTournament(teacherCadre, t.level, t.ageCategory, t.sportId || selectedSportId);
+          })
+        );
         if (levelFiltered.length > 0) normalized = levelFiltered;
       }
     }
@@ -2480,7 +2488,12 @@ export const TeacherTeams: React.FC = () => {
                       const hasExisting = activeSportStudents.some(s =>
                         normalizeCategoryKey(s.category) === item.catId && s.gender === item.gender
                       );
-                      if (!hasExisting && !isCategoryAllowedForTeacherLevel(teacherCadre, item.catId, selectedSportId)) {
+                      const allowedByExplicitTourn = sportTourns.some(t => {
+                        const tCat = normalizeCategoryKey(t.ageCategory);
+                        return (!tCat || tCat === 'OPEN' || tCat === item.catId) &&
+                          isTeacherLevelAllowedForTournament(teacherCadre, t.level, t.ageCategory, t.sportId || selectedSportId);
+                      });
+                      if (!hasExisting && !allowedByExplicitTourn && !isCategoryAllowedForTeacherLevel(teacherCadre, item.catId, selectedSportId)) {
                         return false;
                       }
                     }
