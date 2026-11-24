@@ -24,7 +24,8 @@ import {
   AFFILIATION_LABELS,
   sortCalendarEvents,
   getEventCategoryGenderTuple,
-  formatTargetCategoryWithGender
+  formatTargetCategoryWithGender,
+  formatYmdToDmy
 } from '../lib/programExportService';
 import toast from 'react-hot-toast';
 
@@ -751,7 +752,7 @@ export const ProgramExportModal: React.FC<ProgramExportModalProps> = ({
                       <th className="p-2 text-center">رقم المقابلة</th>
                       <th className="p-2">التاريخ</th>
                       <th className="p-2">الفئة المعنية</th>
-                      <th className="p-2">المقابلة (مؤسسة ضد مؤسسة)</th>
+                      <th className="p-2">المقابلة (مؤسسة ≠ مؤسسة)</th>
                       {mode !== 'SINGLE_SPORT' && <th className="p-2">الرياضة</th>}
                       <th className="p-2">المكان</th>
                       <th className="p-2">الحكام</th>
@@ -764,7 +765,7 @@ export const ProgramExportModal: React.FC<ProgramExportModalProps> = ({
                         <td className="p-2 text-center font-black text-sky-700 whitespace-nowrap">
                           {ev.matchNumber ? ev.matchNumber : idx + 1}
                         </td>
-                        <td className="p-2 font-bold text-blue-800 whitespace-nowrap">{ev.date}</td>
+                        <td className="p-2 font-bold text-blue-800 whitespace-nowrap">{formatYmdToDmy(ev.date)}</td>
                         <td className="p-2 font-bold text-purple-800 whitespace-nowrap">
                           {formatTargetCategoryWithGender(ev.category, ev.gender, ev.sportId)}
                         </td>

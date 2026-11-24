@@ -4,6 +4,15 @@ import { normalizeArabicName } from './utils';
 import { hasValidMatchTeams, formatTeamDisplayName } from './drawTournamentUtils';
 import toast from 'react-hot-toast';
 
+export function formatYmdToDmy(ymd?: string): string {
+  if (!ymd) return '';
+  const parts = String(ymd).split('-');
+  if (parts.length === 3 && parts[0].length === 4) {
+    return `${parts[2]}-${parts[1]}-${parts[0]}`;
+  }
+  return ymd;
+}
+
 export type ProgramAffiliationFilter = 'ALL' | 'non_club' | 'club_affiliated' | 'open';
 
 export const AFFILIATION_LABELS: Record<'non_club' | 'club_affiliated' | 'open', string> = {
@@ -570,7 +579,7 @@ export function buildAllCalendarEvents(
 
     list.push({
       id: `match-${m.id}`,
-      title: `${school1} ضد ${school2}`,
+      title: `${school1} ≠ ${school2}`,
       sportId: resolvedSportId,
       sportName: sp.name,
       sportIcon: sp.icon,
@@ -941,7 +950,7 @@ export function generateProgramHtml({
     return `
       <tr style="background-color: ${index % 2 === 0 ? '#ffffff' : '#f8fafc'};">
         <td style="border: 1px solid #cbd5e1; padding: 7px 5px; text-align: center; font-weight: bold; font-size: 11px;">${index + 1}</td>
-        <td style="border: 1px solid #cbd5e1; padding: 7px 8px; text-align: center; white-space: nowrap; font-weight: bold; color: #1e3a8a; font-size: 11px;">${ev.date}${ev.time ? `<div style="font-size: 9.5px; color: #475569; margin-top: 2px;">${ev.time}</div>` : ''}</td>
+        <td style="border: 1px solid #cbd5e1; padding: 7px 8px; text-align: center; white-space: nowrap; font-weight: bold; color: #1e3a8a; font-size: 11px;">${formatYmdToDmy(ev.date)}${ev.time ? `<div style="font-size: 9.5px; color: #475569; margin-top: 2px;">${ev.time}</div>` : ''}</td>
         <td style="border: 1px solid #cbd5e1; padding: 7px 6px; text-align: center; font-weight: bold; color: #0284c7; font-size: 11px;">${matchNumDisplay}</td>
         <td style="border: 1px solid #cbd5e1; padding: 7px 8px; font-weight: bold; color: #0f172a; font-size: 11px;">${ev.title}</td>
         ${!hideSportColumn ? `<td style="border: 1px solid #cbd5e1; padding: 7px 6px; text-align: center; font-size: 11px; font-weight: bold; color: #334155;">${ev.sportName}</td>` : ''}
