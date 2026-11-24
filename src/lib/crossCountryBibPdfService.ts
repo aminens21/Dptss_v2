@@ -407,106 +407,24 @@ export async function printBibsAsNativeText(
 
   const html = generateBibsPrintHtml(options, qrMap);
 
-  const PRINT_FRAME_ID = '__cc-bib-print-frame';
-  const existing = document.getElementById(PRINT_FRAME_ID);
-  if (existing && existing.parentNode) {
-    existing.parentNode.removeChild(existing);
+  const printWindow = window.open('', '_blank', 'width=1150,height=850');
+  if (!printWindow) {
+    throw new Error('يرجى السماح بفتح النوافذ المنبثقة لطباعة الصدريات');
   }
 
+  printWindow.document.open();
+  printWindow.document.write(html);
+  printWindow.document.close();
+
   return new Promise((resolve) => {
-    const iframe = document.createElement('iframe');
-    iframe.id = PRINT_FRAME_ID;
-    iframe.setAttribute('aria-hidden', 'true');
-    iframe.style.position = 'fixed';
-    iframe.style.right = '0';
-    iframe.style.bottom = '0';
-    iframe.style.width = '1px';
-    iframe.style.height = '1px';
-    iframe.style.opacity = '0';
-    iframe.style.pointerEvents = 'none';
-    iframe.style.border = '0';
-    iframe.style.zIndex = '-1';
-    document.body.appendChild(iframe);
-
-    let cleanedUp = false;
-    let printTriggered = false;
-
-    const cleanup = () => {
-      if (cleanedUp) return;
-      cleanedUp = true;
-      window.removeEventListener('afterprint', cleanup);
+    setTimeout(() => {
       try {
-        iframe.contentWindow?.removeEventListener('afterprint', cleanup);
-      } catch {}
-      setTimeout(() => {
-        if (iframe.parentNode) {
-          iframe.parentNode.removeChild(iframe);
-        }
-        try {
-          window.focus();
-        } catch {}
-      }, 250);
-    };
-
-    const triggerPrint = () => {
-      if (printTriggered || cleanedUp) return;
-      printTriggered = true;
-
-      try {
-        window.addEventListener('afterprint', cleanup, { once: true });
-        iframe.contentWindow?.addEventListener('afterprint', cleanup, { once: true });
-      } catch {}
-
-      try {
-        iframe.contentWindow?.focus();
-        iframe.contentWindow?.print();
+        printWindow.focus();
+        printWindow.print();
       } catch (e) {
-        console.error('Native bib print failed:', e);
-        cleanup();
+        console.error('Print failed:', e);
       }
-
-      // Safety cleanup in case afterprint does not fire in embedded environments
-      setTimeout(cleanup, 60000);
       resolve();
-    };
-
-    const doc = iframe.contentWindow?.document;
-    if (!doc) {
-      cleanup();
-      resolve();
-      return;
-    }
-
-    doc.open();
-    doc.write(html);
-    doc.close();
-
-    // Wait briefly for embedded data-URI QR images to decode before invoking print once
-    const imgs = Array.from(doc.images || []);
-    if (imgs.length === 0) {
-      setTimeout(triggerPrint, 120);
-      return;
-    }
-
-    let settled = false;
-    const finishWait = () => {
-      if (settled) return;
-      settled = true;
-      setTimeout(triggerPrint, 80);
-    };
-
-    Promise.all(
-      imgs.map(img =>
-        img.complete
-          ? Promise.resolve()
-          : new Promise<void>(res => {
-              img.addEventListener('load', () => res(), { once: true });
-              img.addEventListener('error', () => res(), { once: true });
-            })
-      )
-    ).then(finishWait);
-
-    // Fallback timeout so large batches never hang waiting on image events
-    setTimeout(finishWait, 650);
+    }, 400);
   });
 }
