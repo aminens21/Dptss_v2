@@ -1302,9 +1302,9 @@ export const AthleticsBibGeneratorModal: React.FC<AthleticsBibGeneratorModalProp
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-slate-950/80 backdrop-blur-md overflow-y-auto">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-0 bg-slate-950/80 overflow-hidden">
       <div 
-        className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl w-full max-w-7xl max-h-[95vh] flex flex-col shadow-2xl overflow-hidden text-right select-none" 
+        className="bg-white dark:bg-slate-900 border-0 rounded-none w-full h-[100dvh] flex flex-col shadow-2xl overflow-hidden text-right select-none" 
         dir="rtl"
       >
         

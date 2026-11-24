@@ -802,11 +802,11 @@ export const SportBulkRegisterModal: React.FC<SportBulkRegisterModalProps> = ({
   if (!isOpen || !sport) return null;
 
   return (
-    <div className="fixed inset-0 z-[150] overflow-y-auto" id="sport-bulk-modal" dir="rtl">
-      <div className="flex min-h-screen items-center justify-center p-4 text-center sm:p-0">
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm transition-opacity" onClick={onClose} />
+    <div className="fixed inset-0 z-[150] overflow-hidden" id="sport-bulk-modal" dir="rtl">
+      <div className="flex h-[100dvh] items-center justify-center p-0 text-center">
+        <div className="fixed inset-0 bg-slate-950/80 transition-opacity" onClick={onClose} />
 
-        <div className="relative transform overflow-hidden rounded-3xl bg-slate-50 dark:bg-slate-900 text-right shadow-2xl transition-all sm:my-8 sm:w-full sm:max-w-6xl flex flex-col max-h-[92vh]">
+        <div className="relative transform overflow-hidden rounded-none bg-slate-50 dark:bg-slate-900 text-right shadow-2xl transition-all w-full h-[100dvh] flex flex-col">
           {/* Header */}
           <div className="bg-gradient-to-r from-blue-700 to-indigo-800 px-6 py-5 text-white flex items-center justify-between shadow-md shrink-0">
             <div className="flex items-center gap-3">

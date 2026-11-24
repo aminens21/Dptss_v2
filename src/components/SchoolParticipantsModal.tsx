@@ -577,8 +577,8 @@ export const SchoolParticipantsModal: React.FC<SchoolParticipantsModalProps> = (
 
   return (
     <>
-      <div className="fixed inset-0 z-50 overflow-y-auto p-1.5 sm:p-4 flex min-h-full items-center justify-center bg-slate-900/60 backdrop-blur-xs overscroll-contain" dir="rtl">
-        <div className="relative w-full max-w-4xl bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden my-auto max-h-[94dvh] flex flex-col animate-in fade-in zoom-in-95 duration-150">
+      <div className="fixed inset-0 z-50 overflow-hidden p-0 flex h-[100dvh] items-center justify-center bg-slate-900/60 overscroll-contain" dir="rtl">
+        <div className="relative w-full h-[100dvh] bg-white rounded-none shadow-2xl border-0 overflow-hidden my-0 flex flex-col animate-in fade-in duration-150">
           {/* Header */}
           <div className="bg-gradient-to-r from-emerald-800 via-teal-900 to-slate-900 text-white p-4 sm:p-5 relative shrink-0">
             <button

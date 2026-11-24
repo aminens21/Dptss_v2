@@ -483,8 +483,8 @@ export const TournamentCertificateModal: React.FC<TournamentCertificateModalProp
   const currentTheme = getThemeClasses();
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-xs p-2 sm:p-4 overflow-y-auto">
-      <div className="bg-white rounded-3xl shadow-2xl border border-slate-200 w-full max-w-6xl max-h-[96vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-0 overflow-hidden">
+      <div className="bg-white rounded-none shadow-2xl border-0 w-full h-[100dvh] flex flex-col overflow-hidden animate-in fade-in duration-150">
         
         {/* Modal Top Bar */}
         <div className="px-3 sm:px-5 py-2.5 sm:py-3.5 bg-gradient-to-r from-red-950 via-slate-900 to-red-950 text-white flex items-center justify-between border-b border-red-900 shrink-0">

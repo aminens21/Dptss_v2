@@ -30,29 +30,18 @@ import {
 import QRCode from 'qrcode';
 import jsPDF from 'jspdf';
 import { Student, School } from '../types';
-import { CROSS_COUNTRY_CATEGORIES, CrossCountryCategoryDef } from '../lib/crossCountryConfig';
-import { DataService, normalizeDateToYmd } from '../lib/dataService';
+import {
+  CROSS_COUNTRY_CATEGORIES,
+  CrossCountryCategoryDef,
+  CrossCountryBibRunnerData,
+  filterCrossCountryStudents,
+  computeCrossCountrySequentialBibs
+} from '../lib/crossCountryConfig';
+import { DataService } from '../lib/dataService';
 import { printBibsAsNativeText, pregenerateQrsForBibs } from '../lib/crossCountryBibPdfService';
 import toast from 'react-hot-toast';
 
-export interface BibRunnerData {
-  id: string;
-  bibNumber: string | number;
-  fullName: string;
-  massarNumber: string;
-  birthDate?: string;
-  birthYear?: string | number;
-  schoolName: string;
-  commune?: string;
-  directorateName: string;
-  category: string;
-  categoryLabel: string;
-  gender: 'Male' | 'Female' | string;
-  genderLabel: string;
-  affiliationType?: string;
-  affiliationTypeLabel?: string;
-  qrDataUrl?: string;
-}
+export type BibRunnerData = CrossCountryBibRunnerData;
 
 interface BibGeneratorModalProps {
   isOpen: boolean;
@@ -113,6 +102,18 @@ export const BibGeneratorModal: React.FC<BibGeneratorModalProps> = ({
   // Printable container ref
   const printContainerRef = useRef<HTMLDivElement>(null);
 
+  // Allow closing via Escape key at any time
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
+
   // Load data if not provided
   useEffect(() => {
     if (!isOpen) return;
@@ -126,8 +127,7 @@ export const BibGeneratorModal: React.FC<BibGeneratorModalProps> = ({
             DataService.getSchools(),
             DataService.getActiveDirectorate()
           ]);
-          // Filter cross country or all registered
-          const cc = loadedStudents.filter(s => s.sportId === 'cross_country' || !s.sportId);
+          const cc = filterCrossCountryStudents(loadedStudents);
           setStudents(cc.length > 0 ? cc : loadedStudents);
           setSchools(loadedSchools);
           if (loadedDir?.name) {
@@ -139,7 +139,8 @@ export const BibGeneratorModal: React.FC<BibGeneratorModalProps> = ({
           setIsLoadingData(false);
         }
       } else {
-        setStudents(propStudents);
+        const ccProp = filterCrossCountryStudents(propStudents);
+        setStudents(ccProp.length > 0 ? ccProp : propStudents);
         setSchools(propSchools);
         if (propDirectorateName) setDirectorateName(propDirectorateName);
       }
@@ -161,155 +162,60 @@ export const BibGeneratorModal: React.FC<BibGeneratorModalProps> = ({
     }
   }, [initialCategoryId, initialSelectedRaces]);
 
-  // School lookup map
-  const schoolMap = useMemo(() => {
-    const map = new Map<string, School>();
-    schools.forEach(s => map.set(s.id, s));
-    return map;
-  }, [schools]);
-
-  // Helper to normalize and match category strictly and accurately
-  const matchCategoryDef = (student: Student): CrossCountryCategoryDef | undefined => {
-    const sCat = (student.category || '').toLowerCase().trim();
-    const sGen = (student.gender || '').toLowerCase().trim();
-
-    // 1. Direct ID match (e.g. 'u12_male')
-    if (sCat) {
-      const direct = CROSS_COUNTRY_CATEGORIES.find(c => c.id.toLowerCase() === sCat);
-      if (direct) return direct;
-    }
-
-    // 2. Strict Gender Check (avoiding 'female'.includes('male'))
-    const isFemale =
-      sGen === 'female' ||
-      sGen === 'f' ||
-      sGen.includes('أنثى') ||
-      sGen.includes('انثى') ||
-      sGen.includes('إناث') ||
-      sGen.includes('اناث') ||
-      sGen.includes('بنت') ||
-      sCat.includes('برعمات') ||
-      sCat.includes('صغيرات') ||
-      sCat.includes('فتيات') ||
-      sCat.includes('شابات') ||
-      sCat.includes('female');
-
-    const targetGender = isFemale ? 'Female' : 'Male';
-
-    // 3. Category from Name / Tag
-    if (sCat.includes('براعم') || sCat.includes('برعمات') || sCat.includes('u12') || sCat.includes('12')) {
-      return CROSS_COUNTRY_CATEGORIES.find(c => c.category === 'U12' && c.gender === targetGender);
-    }
-    if (sCat.includes('صغار') || sCat.includes('صغيرات') || sCat.includes('u15') || sCat.includes('15')) {
-      return CROSS_COUNTRY_CATEGORIES.find(c => c.category === 'U15' && c.gender === targetGender);
-    }
-    if (sCat.includes('فتيان') || sCat.includes('فتيات') || sCat.includes('u18') || sCat.includes('18')) {
-      return CROSS_COUNTRY_CATEGORIES.find(c => c.category === 'U18' && c.gender === targetGender);
-    }
-    if (sCat.includes('شبان') || sCat.includes('شابات') || sCat.includes('u20') || sCat.includes('20')) {
-      return CROSS_COUNTRY_CATEGORIES.find(c => c.category === 'U20' && c.gender === targetGender);
-    }
-
-    // 4. Fallback to birth year / date
-    const normalizedBirthYmd = normalizeDateToYmd(student.birthDate);
-    const bYear = (student as any).birthYear ? parseInt(String((student as any).birthYear)) : (
-      normalizedBirthYmd ? parseInt(normalizedBirthYmd.split('-')[0]) : null
-    );
-    if (bYear && !isNaN(bYear)) {
-      if (bYear >= 2015) return CROSS_COUNTRY_CATEGORIES.find(c => c.category === 'U12' && c.gender === targetGender);
-      if (bYear >= 2012) return CROSS_COUNTRY_CATEGORIES.find(c => c.category === 'U15' && c.gender === targetGender);
-      if (bYear >= 2009) return CROSS_COUNTRY_CATEGORIES.find(c => c.category === 'U18' && c.gender === targetGender);
-      return CROSS_COUNTRY_CATEGORIES.find(c => c.category === 'U20' && c.gender === targetGender);
-    }
-
-    return CROSS_COUNTRY_CATEGORIES.find(cat => cat.gender === targetGender);
-  };
-
-  // Build list of all runners sorted sequentially by category order (البراعم -> البرعمات -> الصغار -> الصغيرات -> الفتيان -> الفتيات -> الشبان -> الشابات)
-  // starting from 0001 continuously across categories
+  // Build list of all runners sorted sequentially by category order using shared canonical helper
+  // starting from 0001 continuously across categories so BibGenerator & FinishLineScanner always match 100%
   const { allRunners, raceRanges } = useMemo(() => {
-    const categoryOrderMap = new Map<string, number>();
-    CROSS_COUNTRY_CATEGORIES.forEach((c, idx) => categoryOrderMap.set(c.id, idx));
+    const computed = computeCrossCountrySequentialBibs(students, schools, directorateName);
+    return {
+      allRunners: computed.runners,
+      raceRanges: computed.raceRanges
+    };
+  }, [students, schools, directorateName]);
 
-    const prepared = students.map((student, idx) => {
-      const catDef = matchCategoryDef(student);
-      const school = student.schoolId ? schoolMap.get(student.schoolId) : undefined;
-      const schoolName = student.schoolName || school?.name || 'مؤسسة تعليمية';
-      const commune = school?.commune || '';
+  // Auto-sync sequential bib numbers silently to database whenever any runner differs from stored bibNumber
+  const lastAutoSyncedSigRef = useRef<string>('');
+  useEffect(() => {
+    if (!isOpen || isLoadingData || allRunners.length === 0) return;
 
-      const isFemale =
-        student.gender === 'Female' ||
-        (student.gender as string)?.includes('أنثى') ||
-        (student.gender as string)?.includes('إناث');
-      const genderLabel = isFemale ? 'أنثى' : 'ذكر';
-      const categoryLabel = catDef ? catDef.titleAr.replace('سباق ', '') : (student.category || 'مشارك');
-      const catOrder = catDef ? (categoryOrderMap.get(catDef.id) ?? 99) : 99;
-
-      return {
-        student,
-        originalIdx: idx,
-        catDef,
-        catOrder,
-        schoolName,
-        commune,
-        isFemale,
-        genderLabel,
-        categoryLabel
-      };
+    const studentMap = new Map<string, Student>();
+    students.forEach(s => {
+      if (s.id) studentMap.set(s.id, s);
     });
 
-    prepared.sort((a, b) => {
-      if (a.catOrder !== b.catOrder) return a.catOrder - b.catOrder;
-      const schCmp = (a.schoolName || '').localeCompare(b.schoolName || '', 'ar');
-      if (schCmp !== 0) return schCmp;
-      const nameCmp = (a.student.fullName || a.student.name || '').localeCompare(
-        b.student.fullName || b.student.name || '',
-        'ar'
-      );
-      if (nameCmp !== 0) return nameCmp;
-      return a.originalIdx - b.originalIdx;
-    });
+    const outOfSyncItems = allRunners
+      .filter(r => {
+        const orig = studentMap.get(r.id);
+        if (!orig) return false;
+        const storedBib = String(orig.bibNumber ?? (orig as any).crossCountryBibNumber ?? '').trim();
+        return storedBib !== String(r.bibNumber).trim();
+      })
+      .map(r => ({ id: r.id, bibNumber: r.bibNumber }));
 
-    const ranges: Record<string, { start: string; end: string; count: number }> = {};
+    if (outOfSyncItems.length === 0) return;
 
-    const runnersList: BibRunnerData[] = prepared.map((item, seqIdx) => {
-      const { student, originalIdx, catDef, schoolName, commune, isFemale, genderLabel, categoryLabel } = item;
-      const sequentialBib = String(seqIdx + 1).padStart(4, '0');
+    const sig = outOfSyncItems.map(i => `${i.id}:${i.bibNumber}`).join('|');
+    if (lastAutoSyncedSigRef.current === sig) return;
+    lastAutoSyncedSigRef.current = sig;
 
-      if (catDef) {
-        if (!ranges[catDef.id]) {
-          ranges[catDef.id] = { start: sequentialBib, end: sequentialBib, count: 1 };
-        } else {
-          ranges[catDef.id].end = sequentialBib;
-          ranges[catDef.id].count += 1;
-        }
-      }
+    let cancelled = false;
+    DataService.updateBibNumbersBulk(outOfSyncItems)
+      .then(() => {
+        if (cancelled) return;
+        const bibById = new Map(outOfSyncItems.map(it => [it.id, String(it.bibNumber)]));
+        setStudents(prev =>
+          prev.map(s =>
+            bibById.has(s.id)
+              ? { ...s, bibNumber: bibById.get(s.id), crossCountryBibNumber: bibById.get(s.id) }
+              : s
+          )
+        );
+      })
+      .catch(err => console.warn('Silent bib auto-sync skipped:', err));
 
-      return {
-        id: student.id || `runner-${originalIdx}`,
-        bibNumber: sequentialBib,
-        fullName: student.fullName || student.name || `متسابق ${originalIdx + 1}`,
-        massarNumber: student.massarNumber || student.nationalId || `${150000 + originalIdx}`,
-        birthDate:
-          normalizeDateToYmd(student.birthDate) ||
-          ((student as any).birthYear ? `01/01/${(student as any).birthYear}` : '2012/01/01'),
-        birthYear:
-          (student as any).birthYear ||
-          (normalizeDateToYmd(student.birthDate) ? normalizeDateToYmd(student.birthDate).split('-')[0] : '2012'),
-        schoolName,
-        commune,
-        directorateName,
-        category: catDef?.id || student.category || 'U12',
-        categoryLabel,
-        gender: isFemale ? 'Female' : 'Male',
-        genderLabel,
-        affiliationType: student.affiliationType || 'non_club',
-        affiliationTypeLabel: student.affiliationType === 'club_affiliated' ? 'منتمي لنادي' : 'غير منتمي (مدرسي)'
-      };
-    });
-
-    return { allRunners: runnersList, raceRanges: ranges };
-  }, [students, schoolMap, directorateName]);
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, isLoadingData, allRunners, students]);
 
   // Filter runners based on selected races (multi-race selection), gender, search query, and empty state
   const filteredRunners = useMemo(() => {
@@ -461,7 +367,7 @@ export const BibGeneratorModal: React.FC<BibGeneratorModalProps> = ({
         DataService.getSchools(),
         DataService.getActiveDirectorate()
       ]);
-      const cc = loadedStudents.filter(s => s.sportId === 'cross_country' || !s.sportId);
+      const cc = filterCrossCountryStudents(loadedStudents);
       setStudents(cc.length > 0 ? cc : loadedStudents);
       setSchools(loadedSchools);
       if (loadedDir?.name) {
@@ -634,7 +540,10 @@ export const BibGeneratorModal: React.FC<BibGeneratorModalProps> = ({
       }, neededQrs);
 
       toast.dismiss(toastId);
-      toast.success('تم فتح نافذة الطباعة / الحفظ كـ PDF (كتابة ونصوص نقية) بنجاح!');
+      toast.success('تم فتح نافذة الطباعة / الحفظ كـ PDF (كتابة ونصوص نقية) بنجاح!', {
+        id: 'bib-fast-print-success',
+        duration: 2200
+      });
     } catch (error) {
       console.error('Error generating fast text bibs:', error);
       toast.dismiss(toastId);
@@ -980,8 +889,14 @@ export const BibGeneratorModal: React.FC<BibGeneratorModalProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-xs p-2 sm:p-4 overflow-y-auto" dir="rtl">
-      <div className="bg-white border border-slate-200 rounded-3xl shadow-2xl max-w-4xl w-full max-h-[96vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-0 overflow-hidden"
+      dir="rtl"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <div className="bg-white border-0 rounded-none shadow-2xl w-full h-[100dvh] flex flex-col overflow-hidden animate-in fade-in duration-200">
         
         {/* Modal Top Header - Polished, High Contrast, Responsive (Centered on Mobile) */}
         <div className="px-3.5 sm:px-6 py-2.5 sm:py-4 bg-gradient-to-r from-slate-950 via-slate-900 to-emerald-950 text-white flex flex-col sm:flex-row items-center sm:justify-between gap-2.5 sm:gap-4 border-b border-slate-800 shrink-0 shadow-md">
@@ -1044,6 +959,7 @@ export const BibGeneratorModal: React.FC<BibGeneratorModalProps> = ({
 
             {/* Close Modal button */}
             <button
+              type="button"
               onClick={onClose}
               className="p-2 sm:p-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-slate-200 hover:text-white flex items-center justify-center transition-all cursor-pointer active:scale-95"
               title="إغلاق"

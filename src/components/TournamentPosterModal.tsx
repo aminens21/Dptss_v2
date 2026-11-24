@@ -782,8 +782,8 @@ export const TournamentPosterModal: React.FC<TournamentPosterModalProps> = ({
   const currentTheme = getThemeClasses();
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start sm:items-center justify-center bg-black/70 backdrop-blur-xs p-2 sm:p-4 overflow-y-auto">
-      <div className="bg-white rounded-3xl shadow-2xl border border-slate-200 w-full max-w-6xl my-auto flex flex-col overflow-visible lg:overflow-hidden lg:max-h-[96vh] animate-in fade-in zoom-in-95 duration-150">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-0 overflow-hidden">
+      <div className="bg-white rounded-none shadow-2xl border-0 w-full h-[100dvh] my-0 flex flex-col overflow-hidden animate-in fade-in duration-150">
         
         {/* Modal Top Bar - Ultra sleek on mobile */}
         <div className="px-3.5 py-2 sm:px-5 sm:py-3.5 bg-gradient-to-r from-emerald-800 via-teal-900 to-slate-900 text-white flex items-center justify-between border-b border-white/10 shrink-0">

@@ -1966,8 +1966,8 @@ export const AthleticsChampionshipModal: React.FC<AthleticsChampionshipModalProp
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-2 sm:p-4 overflow-y-auto" dir="rtl">
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl w-full max-w-7xl h-[92vh] flex flex-col shadow-2xl overflow-hidden text-slate-900 dark:text-slate-100 transition-colors duration-300">
+    <div className="fixed inset-0 z-50 bg-slate-950/80 flex items-center justify-center p-0 overflow-hidden" dir="rtl">
+      <div className="bg-white dark:bg-slate-900 border-0 rounded-none w-full h-[100dvh] flex flex-col shadow-2xl overflow-hidden text-slate-900 dark:text-slate-100 transition-colors duration-300">
         
         {/* ========================================================================= */}
         {/* MODAL HEADER WITH APP IDENTITY & SETTINGS BUTTON - Responsive & Centered on Mobile */}

@@ -1961,8 +1961,8 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-xs p-2 sm:p-4 overflow-y-auto" dir="rtl">
-      <div className="bg-white border border-slate-200 rounded-3xl shadow-2xl max-w-5xl w-full max-h-[94vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-0 overflow-hidden" dir="rtl">
+      <div className="bg-white border-0 rounded-none shadow-2xl w-full h-[100dvh] flex flex-col overflow-hidden animate-in fade-in duration-200">
         
         {/* Modal Header - Responsive & Dynamic Color */}
         <div className={cn(

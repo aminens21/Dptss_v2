@@ -477,7 +477,7 @@ export const TeacherBadgesModal: React.FC<TeacherBadgesModalProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-1 sm:p-4 bg-slate-950/80 backdrop-blur-sm overflow-hidden" dir="rtl">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-0 bg-slate-950/80 overflow-hidden" dir="rtl">
       {/* Hidden Global Print Style Override for A4 */}
       <style>{`
         @media print {
@@ -515,7 +515,7 @@ export const TeacherBadgesModal: React.FC<TeacherBadgesModalProps> = ({
       `}</style>
 
       {/* Main Modal Dialog */}
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl sm:rounded-3xl w-full max-w-7xl h-[96dvh] sm:h-[94vh] flex flex-col shadow-2xl overflow-hidden text-slate-100">
+      <div className="bg-slate-900 border-0 rounded-none w-full h-[100dvh] flex flex-col shadow-2xl overflow-hidden text-slate-100">
         
         {/* Top Header Bar */}
         <div className="px-3 sm:px-5 py-2.5 sm:py-3.5 bg-slate-950 border-b border-slate-800 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-2.5 sm:gap-3 shrink-0">

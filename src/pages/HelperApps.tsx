@@ -23,7 +23,7 @@ import {
   Check,
   X
 } from 'lucide-react';
-import { CROSS_COUNTRY_CATEGORIES, CrossCountryCategoryDef } from '../lib/crossCountryConfig';
+import { CROSS_COUNTRY_CATEGORIES, CrossCountryCategoryDef, filterCrossCountryStudents } from '../lib/crossCountryConfig';
 import { CrossCountryCategoryResult, School, Student, User } from '../types';
 import { DataService } from '../lib/dataService';
 import { FinishLineScannerModal } from '../components/FinishLineScannerModal';
@@ -151,7 +151,8 @@ export const HelperApps: React.FC = () => {
       });
 
       setSchools(prev => scList.length > prev.length ? scList : (prev.length > 0 ? prev : scList));
-      setStudents(prev => stList.length > prev.length ? stList.filter(s => s.sportId === 'cross_country') : (prev.length > 0 ? prev : stList.filter(s => s.sportId === 'cross_country')));
+      const ccStudents = filterCrossCountryStudents(stList);
+      setStudents(prev => stList.length > prev.length ? ccStudents : (prev.length > 0 ? prev : ccStudents));
       setTeachers(tcList || []);
       
       if (scList.length > 0 && drawPool.length === 0) {
@@ -627,8 +628,8 @@ export const HelperApps: React.FC = () => {
       {/* 🏆 DIRECT RACE RESULTS MODAL (OPENED WHEN CLICKING FINISHED RACE) 🏆 */}
       {/* ========================================================================= */}
       {resultsCategory && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-xs p-2 sm:p-4 overflow-y-auto" dir="rtl">
-          <div className="bg-white border border-slate-200 rounded-3xl shadow-2xl max-w-6xl w-full max-h-[92vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-0 overflow-hidden" dir="rtl">
+          <div className="bg-white border-0 rounded-none shadow-2xl w-full h-[100dvh] flex flex-col overflow-hidden animate-in fade-in duration-200">
             {/* Modal Top Header */}
             <div className="p-4 bg-slate-900 text-white flex items-center justify-between border-b border-slate-800">
               <div className="flex items-center gap-3">

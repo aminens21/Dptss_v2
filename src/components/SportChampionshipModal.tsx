@@ -192,7 +192,7 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
     [userProfile, sport]
   );
   const [isHeaderCollapsed, setIsHeaderCollapsed] = useState(false);
-  const [isFullScreen, setIsFullScreen] = useState(false);
+  const [isFullScreen, setIsFullScreen] = useState(true);
   const [isPdfModalOpen, setIsPdfModalOpen] = useState(false);
   const [isDrawModalOpen, setIsDrawModalOpen] = useState(false);
   const [drawTarget, setDrawTarget] = useState<{
@@ -1488,9 +1488,13 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
   if (!isOpen || !sport) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-slate-900/70 backdrop-blur-xs overflow-y-auto" dir="rtl">
-      <div className={`bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl w-full flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150 my-auto transition-all text-slate-900 dark:text-slate-100 ${
-        isFullScreen ? 'max-w-[98vw] h-[96vh]' : 'max-w-6xl xl:max-w-7xl h-[92vh] sm:h-[85vh] max-h-[96vh] sm:max-h-[92vh]'
+    <div className={`fixed inset-0 z-50 flex items-center justify-center bg-slate-900/70 backdrop-blur-xs ${
+      isFullScreen ? 'p-0 overflow-hidden' : 'p-2 sm:p-4 overflow-y-auto'
+    }`} dir="rtl">
+      <div className={`bg-white dark:bg-slate-900 shadow-2xl w-full flex flex-col overflow-hidden animate-in fade-in duration-150 transition-all text-slate-900 dark:text-slate-100 ${
+        isFullScreen
+          ? 'max-w-none h-[100dvh] max-h-none rounded-none border-0 my-0'
+          : 'rounded-2xl border border-slate-200 dark:border-slate-800 my-auto max-w-6xl xl:max-w-7xl h-[92vh] sm:h-[85vh] max-h-[96vh] sm:max-h-[92vh]'
       }`}>
         
         {/* Top Header - Responsive & Centered on Mobile */}
@@ -2239,8 +2243,8 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
 
       {/* INNER MODAL: Dedicated branch viewing window for participating schools */}
       {activeBranchModal && (
-        <div className="fixed inset-0 z-60 bg-slate-900/70 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4 overflow-y-auto animate-in fade-in duration-200">
-          <div className="w-full max-w-5xl bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden flex flex-col max-h-[92vh] my-auto">
+        <div className="fixed inset-0 z-60 bg-slate-900/70 flex items-center justify-center p-0 overflow-hidden animate-in fade-in duration-200">
+          <div className="w-full h-[100dvh] bg-white dark:bg-slate-900 rounded-none shadow-2xl border-0 overflow-hidden flex flex-col my-0">
             {/* Header */}
             <div className={`p-4 sm:p-5 text-white flex flex-col lg:flex-row lg:items-center justify-between gap-4 ${
               activeBranchModal === 'non_club'

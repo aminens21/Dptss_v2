@@ -391,8 +391,8 @@ export const ProgramExportModal: React.FC<ProgramExportModalProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-slate-900/75 backdrop-blur-xs overflow-y-auto animate-in fade-in duration-150" dir="rtl">
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl w-full max-w-4xl flex flex-col overflow-hidden my-auto max-h-[92vh]">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-0 bg-slate-900/75 overflow-hidden animate-in fade-in duration-150" dir="rtl">
+      <div className="bg-white rounded-none border-0 shadow-2xl w-full h-[100dvh] flex flex-col overflow-hidden my-0">
         
         {/* Modal Header */}
         <div className="bg-gradient-to-r from-blue-900 via-indigo-900 to-slate-900 text-white p-4 sm:p-5 flex items-center justify-between gap-3 shrink-0">

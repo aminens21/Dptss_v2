@@ -103,7 +103,7 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
   const [selectedGender, setSelectedGender] = useState<string>('ALL');
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
   const [searchQuery, setSearchQuery] = useState('');
-  const [isFullScreen, setIsFullScreen] = useState(false);
+  const [isFullScreen, setIsFullScreen] = useState(true);
   const [loadedReferees, setLoadedReferees] = useState<Referee[]>([]);
   const [loadedTeachers, setLoadedTeachers] = useState<User[]>([]);
   const [loadedUsers, setLoadedUsers] = useState<User[]>([]);
@@ -774,10 +774,12 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/70 backdrop-blur-xs p-2 sm:p-4 overflow-y-auto dir-rtl">
+    <div className={`fixed inset-0 z-50 flex items-center justify-center bg-slate-900/70 backdrop-blur-xs dir-rtl ${
+      isFullScreen ? 'p-0 overflow-hidden' : 'p-2 sm:p-4 overflow-y-auto'
+    }`}>
       <div
-        className={`w-full bg-white rounded-3xl shadow-2xl border border-slate-200 flex flex-col overflow-hidden transition-all duration-300 ${
-          isFullScreen ? 'h-full max-w-none m-0 rounded-none' : 'max-w-6xl max-h-[92vh] my-4'
+        className={`w-full bg-white shadow-2xl flex flex-col overflow-hidden transition-all duration-300 ${
+          isFullScreen ? 'h-[100dvh] max-w-none m-0 rounded-none border-0' : 'rounded-3xl border border-slate-200 max-w-6xl max-h-[92vh] my-4'
         }`}
       >
         {/* Modal Header */}

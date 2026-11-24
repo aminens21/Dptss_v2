@@ -448,9 +448,9 @@ export const ParticipationFormPdfModal: React.FC<ParticipationFormPdfModalProps>
   }
 
   return (
-    <div className="fixed inset-0 z-[150] overflow-y-auto bg-slate-950/80 backdrop-blur-sm" dir="rtl">
-      <div className="min-h-full flex items-center justify-center p-2 sm:p-4 text-right">
-        <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 max-w-4xl w-full flex flex-col animate-in fade-in zoom-in-95 duration-150 relative overflow-hidden transition-colors">
+    <div className="fixed inset-0 z-[150] overflow-y-auto bg-slate-950/80" dir="rtl">
+      <div className="min-h-[100dvh] flex items-stretch justify-center p-0 text-right">
+        <div className="bg-white dark:bg-slate-900 rounded-none shadow-2xl border-0 w-full min-h-[100dvh] flex flex-col animate-in fade-in duration-150 relative overflow-hidden transition-colors">
           
           {/* Modal Header */}
           <div className="p-4 bg-gradient-to-r from-sky-800 via-sky-700 to-sky-900 text-white flex items-center justify-between border-b border-sky-600/50 shrink-0">

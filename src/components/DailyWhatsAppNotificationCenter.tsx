@@ -881,9 +881,9 @@ export const DailyWhatsAppNotificationCenter: React.FC<DailyWhatsAppNotification
   }
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-xs overflow-y-auto animate-in fade-in duration-200" dir="rtl" style={{ fontFamily: "'Cairo', 'Tajawal', sans-serif" }}>
-      <div className="min-h-full flex items-center justify-center p-2 sm:p-4 text-right">
-        <div className="w-full max-w-5xl bg-white rounded-3xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col animate-in zoom-in-95 duration-150 relative">
+    <div className="fixed inset-0 z-50 bg-slate-900/70 overflow-hidden animate-in fade-in duration-200" dir="rtl" style={{ fontFamily: "'Cairo', 'Tajawal', sans-serif" }}>
+      <div className="h-[100dvh] flex items-stretch justify-center p-0 text-right">
+        <div className="w-full h-[100dvh] bg-white rounded-none shadow-2xl border-0 overflow-hidden flex flex-col relative">
           {/* Header Banner */}
           <div className="bg-gradient-to-r from-emerald-800 via-teal-800 to-slate-900 p-5 md:p-6 text-white relative shrink-0">
           

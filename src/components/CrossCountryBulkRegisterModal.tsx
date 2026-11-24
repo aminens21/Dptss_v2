@@ -1038,8 +1038,8 @@ export const CrossCountryBulkRegisterModal: React.FC<CrossCountryBulkRegisterMod
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-[150] flex items-center justify-center p-2 sm:p-4 md:p-6 bg-slate-950/80 backdrop-blur-xs overflow-y-auto" dir="rtl">
-      <div className="relative w-full max-w-5xl bg-white rounded-3xl shadow-2xl border border-slate-200 overflow-hidden my-4 sm:my-8 flex flex-col animate-in fade-in zoom-in-95 duration-200">
+    <div className="fixed inset-0 z-[150] flex items-start justify-center p-0 bg-slate-950/80 overflow-y-auto" dir="rtl">
+      <div className="relative w-full min-h-[100dvh] bg-white rounded-none shadow-2xl border-0 overflow-hidden my-0 flex flex-col animate-in fade-in duration-200">
         
         {/* Top Header Banner */}
         <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white p-4 sm:p-5 border-b border-slate-800">

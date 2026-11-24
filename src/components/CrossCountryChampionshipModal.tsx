@@ -202,7 +202,7 @@ export const CrossCountryChampionshipModal: React.FC<CrossCountryChampionshipMod
   const [isPdfModalOpen, setIsPdfModalOpen] = useState(false);
   const [isBibGeneratorOpen, setIsBibGeneratorOpen] = useState(false);
   const [isHeaderCollapsed, setIsHeaderCollapsed] = useState(false);
-  const [isFullScreen, setIsFullScreen] = useState(false);
+  const [isFullScreen, setIsFullScreen] = useState(true);
 
   // School Participation Confirmation & Affiliation Display State
   const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
@@ -643,9 +643,13 @@ export const CrossCountryChampionshipModal: React.FC<CrossCountryChampionshipMod
 
   return (
     <>
-      <div ref={scrollContainerRef} className="fixed inset-0 z-50 flex items-start justify-center p-2 sm:p-4 md:p-6 bg-slate-900/70 backdrop-blur-xs overflow-y-auto scroll-smooth" dir="rtl">
-        <div className={`relative w-full bg-white rounded-2xl shadow-2xl border border-slate-200 my-4 sm:my-8 flex flex-col transition-all duration-200 ${
-          isFullScreen ? 'max-w-[98vw]' : 'max-w-6xl xl:max-w-7xl'
+      <div ref={scrollContainerRef} className={`fixed inset-0 z-50 flex items-start justify-center bg-slate-900/70 backdrop-blur-xs overflow-y-auto scroll-smooth ${
+        isFullScreen ? 'p-0' : 'p-2 sm:p-4 md:p-6'
+      }`} dir="rtl">
+        <div className={`relative w-full bg-white shadow-2xl flex flex-col transition-all duration-200 ${
+          isFullScreen
+            ? 'max-w-none min-h-[100dvh] my-0 rounded-none border-0'
+            : 'max-w-6xl xl:max-w-7xl my-4 sm:my-8 rounded-2xl border border-slate-200'
         }`}>
           {/* Modal Top Header Banner - Responsive & Centered on Mobile */}
           <div className="p-2.5 sm:p-4 md:p-5 bg-gradient-to-r from-slate-900 via-blue-950 to-slate-900 text-white border-b border-slate-800 shrink-0">

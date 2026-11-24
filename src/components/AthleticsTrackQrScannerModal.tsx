@@ -526,8 +526,8 @@ export const AthleticsTrackQrScannerModal: React.FC<AthleticsTrackQrScannerModal
   const totalLaps = recordedLaps.length;
 
   return (
-    <div className="fixed inset-0 z-[80] bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-2 sm:p-4 md:p-6 overflow-y-auto">
-      <div className="bg-slate-900 border-2 border-emerald-500/40 rounded-3xl max-w-4xl w-full p-4 sm:p-6 shadow-2xl flex flex-col max-h-[95vh] space-y-4 animate-in fade-in zoom-in-95 duration-150">
+    <div className="fixed inset-0 z-[80] bg-slate-950/85 flex items-center justify-center p-0 overflow-hidden">
+      <div className="bg-slate-900 border-0 rounded-none w-full h-[100dvh] p-4 sm:p-6 shadow-2xl flex flex-col space-y-4 overflow-y-auto animate-in fade-in duration-150">
         
         {/* ========================================================================= */}
         {/* TOP HEADER BAR - Centered & Responsive on Mobile */}

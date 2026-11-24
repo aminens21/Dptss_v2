@@ -1,4 +1,4 @@
-import { CrossCountryCategoryResult, PodiumWinner, Student } from '../types';
+import { CrossCountryCategoryResult, PodiumWinner, School, Student } from '../types';
 import * as XLSX from 'xlsx';
 import toast from 'react-hot-toast';
 
@@ -104,6 +104,273 @@ export const CROSS_COUNTRY_CATEGORIES: CrossCountryCategoryDef[] = [
     colorClass: 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100'
   }
 ];
+
+export interface CrossCountryBibRunnerData {
+  id: string;
+  bibNumber: string;
+  fullName: string;
+  massarNumber: string;
+  birthDate?: string;
+  birthYear?: string | number;
+  schoolName: string;
+  commune?: string;
+  directorateName: string;
+  category: string;
+  categoryLabel: string;
+  gender: 'Male' | 'Female' | string;
+  genderLabel: string;
+  affiliationType?: string;
+  affiliationTypeLabel?: string;
+  qrDataUrl?: string;
+}
+
+/**
+ * توحيد تصفية التلاميذ المعنيين ببطولة العدو الريفي بين مولد الصدريات والماسح الضوئي
+ */
+export function filterCrossCountryStudents(students: Student[]): Student[] {
+  if (!students || students.length === 0) return [];
+  const cc = students.filter(s => {
+    const sp = String(s.sportId || '').toLowerCase().trim();
+    return (
+      !sp ||
+      sp === 'cross_country' ||
+      sp === 'cross-country' ||
+      sp.includes('cross') ||
+      sp.includes('عدو')
+    );
+  });
+  return cc;
+}
+
+function normalizeBirthYmdLocal(rawDate?: string | null): string {
+  if (!rawDate) return '';
+  const str = String(rawDate).trim();
+  const ymdMatch = str.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+  if (ymdMatch) {
+    return `${ymdMatch[1]}-${ymdMatch[2].padStart(2, '0')}-${ymdMatch[3].padStart(2, '0')}`;
+  }
+  const dmyMatch = str.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})/);
+  if (dmyMatch) {
+    return `${dmyMatch[3]}-${dmyMatch[2].padStart(2, '0')}-${dmyMatch[1].padStart(2, '0')}`;
+  }
+  const yearMatch = str.match(/\b(19\d\d|20\d\d)\b/);
+  return yearMatch ? `${yearMatch[1]}-01-01` : '';
+}
+
+function normalizeArabicDigitsLocal(str: string): string {
+  return String(str || '').replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d).toString());
+}
+
+/**
+ * مقارنة مرنة وموحدة لأرقام الصدريات (تدعم الأصفار البادئة مثل 0001 و 1 والأرقام العربية)
+ */
+export function bibNumbersMatch(bibA?: string | number | null, bibB?: string | number | null): boolean {
+  const a = normalizeArabicDigitsLocal(String(bibA ?? '')).trim();
+  const b = normalizeArabicDigitsLocal(String(bibB ?? '')).trim();
+  if (!a || !b) return false;
+  if (a === b) return true;
+  if (/^\d+$/.test(a) && /^\d+$/.test(b) && Number(a) === Number(b)) return true;
+  return false;
+}
+
+/**
+ * تحديد فئة السباق المعتمدة للتلميذ بدقة موحدة في كل من مولد الصدريات وماسح خط النهاية
+ */
+export function resolveCrossCountryCategoryDef(
+  student?: Partial<Student> | null,
+  fallbackCategoryId?: string
+): CrossCountryCategoryDef {
+  const fallbackDef =
+    (fallbackCategoryId ? CROSS_COUNTRY_CATEGORIES.find(c => c.id === fallbackCategoryId) : undefined) ||
+    CROSS_COUNTRY_CATEGORIES[0];
+
+  if (!student) return fallbackDef;
+
+  const rawCat = String(student.category || '').toLowerCase().trim();
+  const cleanCatId = rawCat.replace(/_club(_affiliated)?$/, '');
+  const rawGen = String(student.gender || '').toLowerCase().trim();
+
+  // 1. Direct ID match (e.g. 'u12_male')
+  if (cleanCatId) {
+    const direct = CROSS_COUNTRY_CATEGORIES.find(c => c.id.toLowerCase() === cleanCatId);
+    if (direct) return direct;
+  }
+
+  // 2. Strict Gender Check (avoiding 'female'.includes('male'))
+  const isFemale =
+    rawGen === 'female' ||
+    rawGen === 'f' ||
+    rawGen.includes('أنثى') ||
+    rawGen.includes('انثى') ||
+    rawGen.includes('إناث') ||
+    rawGen.includes('اناث') ||
+    rawGen.includes('بنت') ||
+    (rawCat.includes('برعمات') && !rawCat.includes('البراعم')) ||
+    (rawCat.includes('صغيرات') && !rawCat.includes('الصغار')) ||
+    (rawCat.includes('فتيات') && !rawCat.includes('الفتيان')) ||
+    (rawCat.includes('شابات') && !rawCat.includes('الشبان')) ||
+    rawCat.includes('female');
+
+  const isMale = !isFemale && (
+    rawGen === 'male' ||
+    rawGen === 'm' ||
+    rawGen.includes('ذكر') ||
+    rawGen.includes('ذكور') ||
+    rawGen.includes('ولد') ||
+    (rawCat.includes('براعم') && !rawCat.includes('برعمات')) ||
+    (rawCat.includes('صغار') && !rawCat.includes('صغيرات')) ||
+    (rawCat.includes('فتيان') && !rawCat.includes('فتيات')) ||
+    (rawCat.includes('شبان') && !rawCat.includes('شابات')) ||
+    (rawCat.includes('male') && !rawCat.includes('female'))
+  );
+
+  const targetGender: 'Male' | 'Female' = isFemale
+    ? 'Female'
+    : (isMale ? 'Male' : fallbackDef.gender);
+
+  // 3. Category from Name / Tag
+  if (rawCat.includes('براعم') || rawCat.includes('برعمات') || rawCat.includes('u12') || rawCat.includes('12')) {
+    return CROSS_COUNTRY_CATEGORIES.find(c => c.category === 'U12' && c.gender === targetGender) || fallbackDef;
+  }
+  if (rawCat.includes('صغار') || rawCat.includes('صغيرات') || rawCat.includes('u15') || rawCat.includes('15')) {
+    return CROSS_COUNTRY_CATEGORIES.find(c => c.category === 'U15' && c.gender === targetGender) || fallbackDef;
+  }
+  if (rawCat.includes('فتيان') || rawCat.includes('فتيات') || rawCat.includes('u18') || rawCat.includes('18')) {
+    return CROSS_COUNTRY_CATEGORIES.find(c => c.category === 'U18' && c.gender === targetGender) || fallbackDef;
+  }
+  if (rawCat.includes('شبان') || rawCat.includes('شابات') || rawCat.includes('u20') || rawCat.includes('20')) {
+    return CROSS_COUNTRY_CATEGORIES.find(c => c.category === 'U20' && c.gender === targetGender) || fallbackDef;
+  }
+
+  // 4. Fallback to birth year / date
+  const normalizedBirthYmd = normalizeBirthYmdLocal(student.birthDate);
+  const bYear = (student as any).birthYear
+    ? parseInt(String((student as any).birthYear), 10)
+    : (normalizedBirthYmd ? parseInt(normalizedBirthYmd.split('-')[0], 10) : NaN);
+
+  if (!isNaN(bYear)) {
+    if (bYear >= 2015) return CROSS_COUNTRY_CATEGORIES.find(c => c.category === 'U12' && c.gender === targetGender) || fallbackDef;
+    if (bYear >= 2012) return CROSS_COUNTRY_CATEGORIES.find(c => c.category === 'U15' && c.gender === targetGender) || fallbackDef;
+    if (bYear >= 2009) return CROSS_COUNTRY_CATEGORIES.find(c => c.category === 'U18' && c.gender === targetGender) || fallbackDef;
+    return CROSS_COUNTRY_CATEGORIES.find(c => c.category === 'U20' && c.gender === targetGender) || fallbackDef;
+  }
+
+  return (
+    CROSS_COUNTRY_CATEGORIES.find(c => c.category === fallbackDef.category && c.gender === targetGender) ||
+    CROSS_COUNTRY_CATEGORIES.find(c => c.gender === targetGender) ||
+    fallbackDef
+  );
+}
+
+/**
+ * الحساب المرجعي الموحد للأرقام التسلسلية لصدريات العدو الريفي (تبدأ من 0001 بالبراعم ثم البرعمات ثم الصغار...)
+ * يُستخدم في كل من تطبيق مولد الصدريات وتطبيق ماسح الصدريات لضمان التطابق الكامل بنسبة 100%.
+ */
+export function computeCrossCountrySequentialBibs(
+  students: Student[],
+  schools: School[] = [],
+  directorateName: string = 'تاوريرت'
+): {
+  runners: CrossCountryBibRunnerData[];
+  bibByStudentId: Record<string, string>;
+  categoryIdByStudentId: Record<string, string>;
+  raceRanges: Record<string, { start: string; end: string; count: number }>;
+} {
+  const ccPool = filterCrossCountryStudents(students);
+  const schoolMap = new Map<string, School>();
+  schools.forEach(s => {
+    if (s.id) schoolMap.set(s.id, s);
+  });
+
+  const categoryOrderMap = new Map<string, number>();
+  CROSS_COUNTRY_CATEGORIES.forEach((c, idx) => categoryOrderMap.set(c.id, idx));
+
+  const prepared = ccPool.map((student, idx) => {
+    const catDef = resolveCrossCountryCategoryDef(student);
+    const school = student.schoolId ? schoolMap.get(student.schoolId) : undefined;
+    const schoolName = student.schoolName || school?.name || 'مؤسسة تعليمية';
+    const commune = school?.commune || '';
+    const isFemale = catDef.gender === 'Female';
+    const genderLabel = isFemale ? 'أنثى' : 'ذكر';
+    const categoryLabel = catDef.titleAr.replace('سباق ', '');
+    const catOrder = categoryOrderMap.get(catDef.id) ?? 99;
+
+    return {
+      student,
+      originalIdx: idx,
+      catDef,
+      catOrder,
+      schoolName,
+      commune,
+      isFemale,
+      genderLabel,
+      categoryLabel
+    };
+  });
+
+  prepared.sort((a, b) => {
+    if (a.catOrder !== b.catOrder) return a.catOrder - b.catOrder;
+    const schCmp = (a.schoolName || '').localeCompare(b.schoolName || '', 'ar');
+    if (schCmp !== 0) return schCmp;
+    const nameCmp = (a.student.fullName || a.student.name || '').localeCompare(
+      b.student.fullName || b.student.name || '',
+      'ar'
+    );
+    if (nameCmp !== 0) return nameCmp;
+    const keyA = String(a.student.massarNumber || a.student.id || '');
+    const keyB = String(b.student.massarNumber || b.student.id || '');
+    const keyCmp = keyA.localeCompare(keyB);
+    if (keyCmp !== 0) return keyCmp;
+    return a.originalIdx - b.originalIdx;
+  });
+
+  const ranges: Record<string, { start: string; end: string; count: number }> = {};
+  const bibByStudentId: Record<string, string> = {};
+  const categoryIdByStudentId: Record<string, string> = {};
+
+  const runners: CrossCountryBibRunnerData[] = prepared.map((item, seqIdx) => {
+    const { student, originalIdx, catDef, schoolName, commune, isFemale, genderLabel, categoryLabel } = item;
+    const sequentialBib = String(seqIdx + 1).padStart(4, '0');
+    const runnerId = student.id || `runner-${originalIdx}`;
+
+    if (student.id) {
+      bibByStudentId[student.id] = sequentialBib;
+      categoryIdByStudentId[student.id] = catDef.id;
+    }
+
+    if (!ranges[catDef.id]) {
+      ranges[catDef.id] = { start: sequentialBib, end: sequentialBib, count: 1 };
+    } else {
+      ranges[catDef.id].end = sequentialBib;
+      ranges[catDef.id].count += 1;
+    }
+
+    const normalizedBirthYmd = normalizeBirthYmdLocal(student.birthDate);
+    return {
+      id: runnerId,
+      bibNumber: sequentialBib,
+      fullName: student.fullName || student.name || `متسابق ${originalIdx + 1}`,
+      massarNumber: student.massarNumber || student.nationalId || `${150000 + originalIdx}`,
+      birthDate:
+        normalizedBirthYmd ||
+        ((student as any).birthYear ? `01/01/${(student as any).birthYear}` : '2012/01/01'),
+      birthYear:
+        (student as any).birthYear ||
+        (normalizedBirthYmd ? normalizedBirthYmd.split('-')[0] : '2012'),
+      schoolName,
+      commune,
+      directorateName,
+      category: catDef.id,
+      categoryLabel,
+      gender: isFemale ? 'Female' : 'Male',
+      genderLabel,
+      affiliationType: student.affiliationType || 'non_club',
+      affiliationTypeLabel: student.affiliationType === 'club_affiliated' ? 'منتمي لنادي' : 'غير منتمي (مدرسي)'
+    };
+  });
+
+  return { runners, bibByStudentId, categoryIdByStudentId, raceRanges: ranges };
+}
 
 export interface TeamRankingResult {
   schoolName: string;

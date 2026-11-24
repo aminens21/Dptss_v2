@@ -42,8 +42,17 @@ import {
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
 import toast from 'react-hot-toast';
 import * as XLSX from 'xlsx';
-import { CROSS_COUNTRY_CATEGORIES, CrossCountryCategoryDef, calculateTeamRankings, resolveRunnerParticipationType } from '../lib/crossCountryConfig';
-import { CrossCountryCategoryResult, PodiumWinner, Student } from '../types';
+import {
+  CROSS_COUNTRY_CATEGORIES,
+  CrossCountryCategoryDef,
+  calculateTeamRankings,
+  resolveRunnerParticipationType,
+  filterCrossCountryStudents,
+  resolveCrossCountryCategoryDef,
+  computeCrossCountrySequentialBibs,
+  bibNumbersMatch
+} from '../lib/crossCountryConfig';
+import { CrossCountryCategoryResult, PodiumWinner, School, Student } from '../types';
 import { DataService, canUserApproveSportResult } from '../lib/dataService';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -105,15 +114,46 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
   // Audio Beep
   const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
 
-  // Registered Students List for Lookup
+  // Registered Students & Schools List for Synchronized Bib Lookup
   const [allStudents, setAllStudents] = useState<Student[]>([]);
+  const [allSchools, setAllSchools] = useState<School[]>([]);
   const [loadingStudents, setLoadingStudents] = useState<boolean>(true);
+
+  // Canonical sequential bib numbers synchronized 1:1 with BibGeneratorModal (0001, 0002, ...)
+  const { bibByStudentId: canonicalBibByStudentId } = useMemo(() => {
+    return computeCrossCountrySequentialBibs(allStudents, allSchools);
+  }, [allStudents, allSchools]);
+
+  const getStudentBib = (student?: Partial<Student> | null): string => {
+    if (!student) return '';
+    if (student.id && canonicalBibByStudentId[student.id]) {
+      return canonicalBibByStudentId[student.id];
+    }
+    return String(student.bibNumber ?? (student as any).crossCountryBibNumber ?? '').trim();
+  };
 
   // Live Arrivals Stream
   const [arrivals, setArrivals] = useState<PodiumWinner[]>([]);
 
   // Local cache of all CC results to show completion status icons and handle multi-race status
   const [resultsMap, setResultsMap] = useState<Record<string, CrossCountryCategoryResult>>(existingResults || {});
+
+  // Sync initial race category whenever modal opens or props change
+  useEffect(() => {
+    if (!isOpen) return;
+    if (initialRaceIds && initialRaceIds.length > 0) {
+      setSelectedRaceIds(initialRaceIds);
+      setSelectedRaceId(initialRaceIds[0]);
+      setManualCategory(initialRaceIds[0]);
+      setSummaryCategoryTab(initialRaceIds[0]);
+    } else if (initialRaceId) {
+      setSelectedRaceIds([initialRaceId]);
+      setSelectedRaceId(initialRaceId);
+      setManualCategory(initialRaceId);
+      setSummaryCategoryTab(initialRaceId);
+    }
+    setViewCategoryFilter('ALL');
+  }, [isOpen, initialRaceId, initialRaceIds]);
 
   // Subscribe to real-time CC results to show status icons (Green dots / Completed states)
   useEffect(() => {
@@ -135,11 +175,17 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
     allStudentsRef.current = allStudents;
   }, [allStudents]);
 
+  const canonicalBibByStudentIdRef = useRef<Record<string, string>>(canonicalBibByStudentId);
+  useEffect(() => {
+    canonicalBibByStudentIdRef.current = canonicalBibByStudentId;
+  }, [canonicalBibByStudentId]);
+
   const elapsedMsRef = useRef<number>(elapsedMs);
   useEffect(() => {
     elapsedMsRef.current = elapsedMs;
   }, [elapsedMs]);
 
+  const handleQrScanSuccessRef = useRef<(scannedText: string) => void>(() => {});
   const manualBibInputRef = useRef<HTMLInputElement | null>(null);
 
   // Barcode Scanner Gun Buffer (for USB / Bluetooth handheld scanners)
@@ -174,6 +220,7 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
     setSelectedRaceId(catId);
     setManualCategory(catId);
     setSummaryCategoryTab(catId);
+    setViewCategoryFilter('ALL');
   };
 
   const selectAllRaces = () => {
@@ -275,78 +322,9 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
     }
   };
 
-  // Resolve Student Category ID strictly and accurately (avoiding 'female'.includes('male'))
+  // Resolve Student Category ID strictly using shared canonical cross-country resolver
   const resolveStudentCategoryId = (student?: Partial<Student> | null, defaultCatId?: string): string => {
-    if (!student) return defaultCatId || activeCategory.id;
-
-    const rawCat = String(student.category || '').toLowerCase().trim();
-    const rawGen = String(student.gender || '').toLowerCase().trim();
-
-    // Exact ID already?
-    if (['u12_male', 'u12_female', 'u15_male', 'u15_female', 'u18_male', 'u18_female', 'u20_male', 'u20_female'].includes(rawCat)) {
-      return rawCat;
-    }
-
-    // Determine Gender STRICTLY (avoiding 'female'.includes('male'))
-    const isFemale =
-      rawGen === 'female' ||
-      rawGen === 'f' ||
-      rawGen.includes('أنثى') ||
-      rawGen.includes('انثى') ||
-      rawGen.includes('إناث') ||
-      rawGen.includes('اناث') ||
-      rawGen.includes('بنت') ||
-      (rawCat.includes('برعمات') && !rawCat.includes('البراعم')) ||
-      (rawCat.includes('صغيرات') && !rawCat.includes('الصغار')) ||
-      (rawCat.includes('فتيات') && !rawCat.includes('الفتيان')) ||
-      (rawCat.includes('شابات') && !rawCat.includes('الشبان')) ||
-      rawCat.includes('female');
-
-    const isMale = !isFemale && (
-      rawGen === 'male' ||
-      rawGen === 'm' ||
-      rawGen.includes('ذكر') ||
-      rawGen.includes('ذكور') ||
-      rawGen.includes('ولد') ||
-      (rawCat.includes('براعم') && !rawCat.includes('برعمات')) ||
-      (rawCat.includes('صغار') && !rawCat.includes('صغيرات')) ||
-      (rawCat.includes('فتيان') && !rawCat.includes('فتيات')) ||
-      (rawCat.includes('شبان') && !rawCat.includes('شابات')) ||
-      rawCat.includes('male')
-    );
-
-    const effectiveMale = isFemale ? false : (isMale ? true : (activeCategory.gender === 'Male'));
-
-    if (rawCat.includes('براعم') || rawCat.includes('برعمات') || rawCat.includes('u12') || rawCat.includes('12')) {
-      return effectiveMale ? 'u12_male' : 'u12_female';
-    }
-    if (rawCat.includes('صغار') || rawCat.includes('صغيرات') || rawCat.includes('u15') || rawCat.includes('15')) {
-      return effectiveMale ? 'u15_male' : 'u15_female';
-    }
-    if (rawCat.includes('فتيان') || rawCat.includes('فتيات') || rawCat.includes('u18') || rawCat.includes('18')) {
-      return effectiveMale ? 'u18_male' : 'u18_female';
-    }
-    if (rawCat.includes('شبان') || rawCat.includes('شابات') || rawCat.includes('u20') || rawCat.includes('20')) {
-      return effectiveMale ? 'u20_male' : 'u20_female';
-    }
-
-    // Check birth year / date fallback (Moroccan School Sports official categories)
-    let bYear: number | null = null;
-    if ((student as any).birthYear && !isNaN(Number((student as any).birthYear))) {
-      bYear = Number((student as any).birthYear);
-    } else if (student.birthDate) {
-      const match = String(student.birthDate).match(/\b(19\d\d|20\d\d)\b/);
-      if (match) bYear = Number(match[1]);
-    }
-    if (bYear !== null) {
-      if (bYear >= 2014) return effectiveMale ? 'u12_male' : 'u12_female';
-      if (bYear >= 2012) return effectiveMale ? 'u15_male' : 'u15_female';
-      if (bYear >= 2009) return effectiveMale ? 'u18_male' : 'u18_female';
-      return effectiveMale ? 'u20_male' : 'u20_female';
-    }
-
-    const baseAge = activeCategory.id.split('_')[0] || 'u12';
-    return `${baseAge}_${effectiveMale ? 'male' : 'female'}`;
+    return resolveCrossCountryCategoryDef(student, defaultCatId || activeCategory.id).id;
   };
 
   // Match Excel Arabic Category/Gender names to active Category IDs
@@ -364,8 +342,8 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
       return;
     }
 
-    // Never overwrite arrivals during an active running race
-    if (isInitialLoadDone.current && (phase === 'running' || arrivalsRef.current.length > 0)) {
+    // Never overwrite live arrivals while a race is actively running
+    if (isInitialLoadDone.current && phase === 'running') {
       return;
     }
 
@@ -403,8 +381,7 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
           participationType: resolveRunnerParticipationType(arr, allStudentsRef.current)
         }));
         
-        // Only set arrivals if no live arrivals have been scanned yet
-        if (arrivalsRef.current.length === 0 || !isInitialLoadDone.current) {
+        if (phase !== 'running') {
           setArrivals(mappedArrivals);
           arrivalsRef.current = mappedArrivals;
         }
@@ -417,23 +394,21 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
     loadAllSelectedResults();
   }, [selectedRaceIds, isOpen, raceAffiliation]);
 
-  // Load registered students list (both cross_country and all available students)
+  // Load registered cross-country students & schools to compute synchronized sequential bibs
   const fetchStudents = async () => {
     setLoadingStudents(true);
     try {
-      const list = await DataService.getStudents();
-      // Prioritize cross country students, but fallback to all students if no specific tag
-      const ccStudents = list.filter(s => 
-        !s.sportId || 
-        s.sportId === 'cross_country' || 
-        s.sportId === 'cross-country' || 
-        s.sportId.toLowerCase().includes('cross') || 
-        s.sportId.includes('عدو') ||
-        s.sportId === 'athletics'
-      );
+      const [list, schoolsList] = await Promise.all([
+        DataService.getStudents(),
+        DataService.getSchools()
+      ]);
+      const ccStudents = filterCrossCountryStudents(list);
       const effectiveList = ccStudents.length > 0 ? ccStudents : list;
+      const computed = computeCrossCountrySequentialBibs(effectiveList, schoolsList);
+      setAllSchools(schoolsList);
       setAllStudents(effectiveList);
       allStudentsRef.current = effectiveList;
+      canonicalBibByStudentIdRef.current = computed.bibByStudentId;
     } catch (err) {
       console.error('Failed to load students for finish line scanner:', err);
     } finally {
@@ -531,7 +506,7 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
           { facingMode: 'environment' },
           scanConfig,
           (decodedText) => {
-            handleQrScanSuccess(decodedText);
+            handleQrScanSuccessRef.current(decodedText);
           },
           () => {}
         );
@@ -542,7 +517,7 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
           { facingMode: 'user' },
           scanConfig,
           (decodedText) => {
-            handleQrScanSuccess(decodedText);
+            handleQrScanSuccessRef.current(decodedText);
           },
           () => {}
         );
@@ -651,7 +626,12 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
         }
 
         const newStudents = await DataService.addStudentsBulk(importedList);
-        setAllStudents(prev => [...newStudents, ...prev]);
+        setAllStudents(prev => {
+          const merged = [...newStudents, ...prev];
+          allStudentsRef.current = merged;
+          canonicalBibByStudentIdRef.current = computeCrossCountrySequentialBibs(merged, allSchools).bibByStudentId;
+          return merged;
+        });
         toast.success(`تم استيراد وحفظ ${newStudents.length} عداء(ة) بنجاح في قاعدة البيانات! 📂🔥`);
       } catch (error) {
         console.error('Error importing Excel:', error);
@@ -704,7 +684,7 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
 
         if (buffer.length > 0) {
           e.preventDefault();
-          handleQrScanSuccess(buffer);
+          handleQrScanSuccessRef.current(buffer);
           return;
         }
         return;
@@ -811,6 +791,7 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
 
     processArrival(bib, nameOverride, schoolOverride);
   };
+  handleQrScanSuccessRef.current = handleQrScanSuccess;
 
   // Main Logic: Record Runner Arrival & SAVE LIVE INSTANTLY
   const processArrival = async (bibInput: string, nameInput = '', schoolInput = '') => {
@@ -830,14 +811,12 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
     }
 
     const currentArrivals = arrivalsRef.current;
-    const bibNum = !isNaN(Number(cleanBib)) ? Number(cleanBib) : null;
+    const bibNum = /^\d+$/.test(cleanBib) ? Number(cleanBib) : null;
 
     // Check if bib is already in current race arrivals list
     const existingIndex = currentArrivals.findIndex(a => {
       if (!a.bibNumber && !a.studentId) return false;
-      const aBib = String(a.bibNumber || '').trim();
-      if (aBib === cleanBib) return true;
-      if (bibNum !== null && aBib && !isNaN(Number(aBib)) && Number(aBib) === bibNum) return true;
+      if (bibNumbersMatch(a.bibNumber, cleanBib)) return true;
       if (a.studentId && a.studentId === cleanBib) return true;
       return false;
     });
@@ -854,64 +833,78 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
       return;
     }
 
-    // Match runner in database (allStudentsRef.current)
+    // Match runner in synchronized pool (canonical BibGenerator numbering + stored DB/Excel bibs)
     const studentsPool = allStudentsRef.current;
-    let matchedStudent: Student | undefined;
+    const canonicalMap = canonicalBibByStudentIdRef.current;
+    const getCanonicalBib = (s: Student) => (s.id ? (canonicalMap[s.id] || '') : '');
+    const getStoredBib = (s: Student) => normalizeArabicDigits(String(s.bibNumber ?? (s as any).crossCountryBibNumber ?? '')).trim();
 
-    // 1. Prioritize runner in EXACT active race (matching category, gender, affiliation, and bib)
-    matchedStudent = studentsPool.find(s => {
+    const findMatchingStudent = (pool: Student[]): { student?: Student; matchedByCanonical: boolean } => {
+      // Exact string match against canonical sequential bib generated by BibGeneratorModal (e.g. '0001', '0376')
+      const exactCanonical = pool.find(s => {
+        const cBib = getCanonicalBib(s);
+        return cBib && cBib === cleanBib;
+      });
+      if (exactCanonical) return { student: exactCanonical, matchedByCanonical: true };
+
+      // Exact string match against stored / Excel-imported bibNumber
+      const exactStored = pool.find(s => {
+        const sBib = getStoredBib(s);
+        return sBib && sBib === cleanBib;
+      });
+      if (exactStored) return { student: exactStored, matchedByCanonical: false };
+
+      // Numeric match (e.g. manual entry '1' matching '0001') against canonical first, then stored
+      if (bibNum !== null) {
+        const numCanonical = pool.find(s => {
+          const cBib = getCanonicalBib(s);
+          return cBib && /^\d+$/.test(cBib) && Number(cBib) === bibNum;
+        });
+        if (numCanonical) return { student: numCanonical, matchedByCanonical: true };
+
+        const numStored = pool.find(s => {
+          const sBib = getStoredBib(s);
+          return sBib && /^\d+$/.test(sBib) && Number(sBib) === bibNum;
+        });
+        if (numStored) return { student: numStored, matchedByCanonical: false };
+      }
+
+      return { student: undefined, matchedByCanonical: false };
+    };
+
+    const inSelectedRacesAff = studentsPool.filter(s => {
       const resolvedCatId = resolveStudentCategoryId(s);
-      if (resolvedCatId !== activeCategory.id) return false;
+      if (!selectedRaceIds.includes(resolvedCatId)) return false;
       const sAff = s.affiliationType || 'non_club';
-      if (sAff !== raceAffiliation) return false;
-      const sBib = String(s.bibNumber ?? (s as any).crossCountryBibNumber ?? '').trim();
-      if (sBib && sBib === cleanBib) return true;
-      if (bibNum !== null && sBib && !isNaN(Number(sBib)) && Number(sBib) === bibNum) return true;
-      return false;
+      return sAff === raceAffiliation;
     });
 
-    // 2. Search in current active race category & gender (any affiliation)
-    if (!matchedStudent) {
-      matchedStudent = studentsPool.find(s => {
-        const resolvedCatId = resolveStudentCategoryId(s);
-        if (resolvedCatId !== activeCategory.id) return false;
-        const sBib = String(s.bibNumber ?? (s as any).crossCountryBibNumber ?? '').trim();
-        if (sBib && sBib === cleanBib) return true;
-        if (bibNum !== null && sBib && !isNaN(Number(sBib)) && Number(sBib) === bibNum) return true;
-        return false;
-      });
+    const inSelectedRacesAnyAff = studentsPool.filter(s => {
+      const resolvedCatId = resolveStudentCategoryId(s);
+      return selectedRaceIds.includes(resolvedCatId);
+    });
+
+    let matchedResult = findMatchingStudent(inSelectedRacesAff);
+
+    if (!matchedResult.student) {
+      matchedResult = findMatchingStudent(inSelectedRacesAnyAff);
     }
 
-    // 3. Search across ALL students in database by bibNumber or crossCountryBibNumber
-    if (!matchedStudent) {
-      matchedStudent = studentsPool.find(s => {
-        const sBib = String(s.bibNumber ?? (s as any).crossCountryBibNumber ?? '').trim();
-        if (sBib && sBib === cleanBib) return true;
-        if (bibNum !== null && sBib && !isNaN(Number(sBib)) && Number(sBib) === bibNum) return true;
-        return false;
-      });
+    if (!matchedResult.student) {
+      matchedResult = findMatchingStudent(studentsPool);
     }
 
-    // 4. If still not found, check by id (UUID)
+    let matchedStudent = matchedResult.student;
+    const matchedByCanonical = matchedResult.matchedByCanonical;
+
+    // Fallback check by student ID (UUID) or Massar number
     if (!matchedStudent) {
       matchedStudent = studentsPool.find(s => s.id === cleanBib);
     }
-
-    // 5. Check by massarNumber
     if (!matchedStudent) {
-      matchedStudent = studentsPool.find(s => s.massarNumber && s.massarNumber.trim().toUpperCase() === cleanBib.toUpperCase());
-    }
-
-    // 6. Fallback for systematic numbering generated by BibGeneratorModal (101 + index)
-    if (!matchedStudent && bibNum !== null && bibNum >= 101) {
-      const categoryRunners = studentsPool.filter(s => {
-        const resolvedCatId = resolveStudentCategoryId(s);
-        return resolvedCatId === activeCategory.id && (s.affiliationType || 'non_club') === raceAffiliation;
-      });
-      const systematicIdx = bibNum - 101;
-      if (systematicIdx >= 0 && systematicIdx < categoryRunners.length) {
-        matchedStudent = categoryRunners[systematicIdx];
-      }
+      matchedStudent = studentsPool.find(
+        s => s.massarNumber && s.massarNumber.trim().toUpperCase() === cleanBib.toUpperCase()
+      );
     }
 
     const nextRank = currentArrivals.length + 1;
@@ -924,8 +917,12 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
 
     const targetCatDef = CROSS_COUNTRY_CATEGORIES.find(c => c.id === studentCatId) || activeCategory;
 
-    const displayBib = (matchedStudent?.bibNumber || (matchedStudent as any)?.crossCountryBibNumber)
-      ? String(matchedStudent.bibNumber || (matchedStudent as any).crossCountryBibNumber)
+    const canonicalMatchedBib = matchedStudent ? getCanonicalBib(matchedStudent) : '';
+    const storedMatchedBib = matchedStudent ? getStoredBib(matchedStudent) : '';
+    const displayBib = matchedStudent
+      ? (matchedByCanonical
+          ? canonicalMatchedBib
+          : (storedMatchedBib || canonicalMatchedBib || cleanBib))
       : cleanBib;
 
     // 🛑 VALIDATION 1: Check category and gender mismatch!
@@ -1421,13 +1418,14 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
 
   // Check if a student has arrived at the finish line
   const checkIsStudentArrived = (student: Student) => {
-    const sBib = String(student.bibNumber ?? (student as any).crossCountryBibNumber ?? '').trim();
+    const sCanonicalBib = getStudentBib(student);
+    const sStoredBib = String(student.bibNumber ?? (student as any).crossCountryBibNumber ?? '').trim();
     const sMassar = student.massarNumber ? student.massarNumber.trim().toUpperCase() : '';
     const sId = student.id;
 
     return arrivals.some(a => {
-      const aBib = String(a.bibNumber || '').trim();
-      if (sBib && aBib && sBib === aBib) return true;
+      if (bibNumbersMatch(sCanonicalBib, a.bibNumber)) return true;
+      if (sStoredBib && bibNumbersMatch(sStoredBib, a.bibNumber)) return true;
       if (a.studentId && sId && a.studentId === sId) return true;
       if (sMassar && a.massarNumber && a.massarNumber.trim().toUpperCase() === sMassar) return true;
       return false;
@@ -1435,13 +1433,14 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
   };
 
   const getStudentArrival = (student: Student) => {
-    const sBib = String(student.bibNumber ?? (student as any).crossCountryBibNumber ?? '').trim();
+    const sCanonicalBib = getStudentBib(student);
+    const sStoredBib = String(student.bibNumber ?? (student as any).crossCountryBibNumber ?? '').trim();
     const sMassar = student.massarNumber ? student.massarNumber.trim().toUpperCase() : '';
     const sId = student.id;
 
     return arrivals.find(a => {
-      const aBib = String(a.bibNumber || '').trim();
-      if (sBib && aBib && sBib === aBib) return true;
+      if (bibNumbersMatch(sCanonicalBib, a.bibNumber)) return true;
+      if (sStoredBib && bibNumbersMatch(sStoredBib, a.bibNumber)) return true;
       if (a.studentId && sId && a.studentId === sId) return true;
       if (sMassar && a.massarNumber && a.massarNumber.trim().toUpperCase() === sMassar) return true;
       return false;
@@ -1451,7 +1450,7 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
   // Active Race Remaining Students list (who haven't arrived yet)
   const activeRaceRemainingStudents = useMemo(() => {
     return activeRaceRegisteredStudents.filter(s => !checkIsStudentArrived(s));
-  }, [activeRaceRegisteredStudents, arrivals]);
+  }, [activeRaceRegisteredStudents, arrivals, canonicalBibByStudentId]);
 
   // Filtered items in the Details Modal based on search query
   const detailsRegisteredFiltered = useMemo(() => {
@@ -1460,12 +1459,12 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
     const q = detailsSearchQuery.toLowerCase().trim();
     return baseList.filter(s => {
       const nameMatch = (s.fullName || '').toLowerCase().includes(q);
-      const bibMatch = String(s.bibNumber ?? (s as any).crossCountryBibNumber ?? '').includes(q);
+      const bibMatch = getStudentBib(s).includes(q) || String(s.bibNumber ?? (s as any).crossCountryBibNumber ?? '').includes(q);
       const schoolMatch = (s.schoolName || '').toLowerCase().includes(q);
       const massarMatch = (s.massarNumber || '').toLowerCase().includes(q);
       return nameMatch || bibMatch || schoolMatch || massarMatch;
     });
-  }, [detailsScope, activeRaceRegisteredStudents, allStudents, detailsSearchQuery]);
+  }, [detailsScope, activeRaceRegisteredStudents, allStudents, detailsSearchQuery, canonicalBibByStudentId]);
 
   const detailsArrivalsFiltered = useMemo(() => {
     if (!detailsSearchQuery.trim()) return arrivals;
@@ -1483,12 +1482,12 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
     const q = detailsSearchQuery.toLowerCase().trim();
     return activeRaceRemainingStudents.filter(s => {
       const nameMatch = (s.fullName || '').toLowerCase().includes(q);
-      const bibMatch = String(s.bibNumber ?? (s as any).crossCountryBibNumber ?? '').includes(q);
+      const bibMatch = getStudentBib(s).includes(q) || String(s.bibNumber ?? (s as any).crossCountryBibNumber ?? '').includes(q);
       const schoolMatch = (s.schoolName || '').toLowerCase().includes(q);
       const massarMatch = (s.massarNumber || '').toLowerCase().includes(q);
       return nameMatch || bibMatch || schoolMatch || massarMatch;
     });
-  }, [activeRaceRemainingStudents, detailsSearchQuery]);
+  }, [activeRaceRemainingStudents, detailsSearchQuery, canonicalBibByStudentId]);
 
   // Export Details to Excel
   const handleExportDetailsToExcel = () => {
@@ -1502,7 +1501,7 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
     if (isRegistered) {
       sheetData = detailsRegisteredFiltered.map((s, idx) => {
         const arr = getStudentArrival(s);
-        const bib = s.bibNumber ?? (s as any).crossCountryBibNumber ?? '-';
+        const bib = getStudentBib(s) || '-';
         return {
           'الرقم الترتيبي': idx + 1,
           'رقم الصدرية': bib,
@@ -1530,7 +1529,7 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
       fileName = `لائحة_الواصلين_${activeCategory.shortLabel}_${new Date().toISOString().slice(0, 10)}.xlsx`;
     } else if (isRemaining) {
       sheetData = detailsRemainingFiltered.map((s, idx) => {
-        const bib = s.bibNumber ?? (s as any).crossCountryBibNumber ?? '-';
+        const bib = getStudentBib(s) || '-';
         return {
           'الرقم': idx + 1,
           'رقم الصدرية': bib,
@@ -1559,8 +1558,8 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-2 sm:p-4 overflow-y-auto">
-      <div className="bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 w-full max-w-5xl overflow-hidden flex flex-col max-h-[95vh] my-auto">
+    <div className="fixed inset-0 z-50 bg-slate-950/80 flex items-center justify-center p-0 overflow-hidden">
+      <div className="bg-white dark:bg-slate-900 rounded-none shadow-2xl border-0 w-full h-[100dvh] overflow-hidden flex flex-col my-0">
         
         {/* Modal Main Header - Centered & Responsive on Mobile */}
         <div className="bg-gradient-to-r from-emerald-800 via-teal-900 to-slate-900 dark:from-emerald-950 dark:via-teal-950 dark:to-slate-950 text-white p-2.5 sm:p-5 flex flex-col sm:flex-row items-center sm:justify-between gap-2.5 sm:gap-4 shrink-0 relative border-b border-emerald-900/50">
@@ -2041,7 +2040,7 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
                             processArrival(manualBib, manualName, manualSchool);
                           }
                         }}
-                        placeholder="رقم الصدرية (104)"
+                        placeholder="رقم الصدرية (0001)"
                         autoFocus
                         className="flex-1 bg-white dark:bg-slate-900 border-2 border-blue-500 dark:border-blue-500 rounded-xl sm:rounded-2xl px-3 sm:px-4 py-2 sm:py-3 text-base sm:text-lg font-mono font-black text-slate-900 dark:text-white shadow-inner focus:outline-none focus:ring-4 focus:ring-blue-200 dark:focus:ring-blue-900 placeholder:text-slate-400 dark:placeholder:text-slate-500 placeholder:font-sans placeholder:text-[10px]"
                       />
@@ -2994,7 +2993,7 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
                   <div className="space-y-2">
                     {detailsRegisteredFiltered.map((student, idx) => {
                       const arr = getStudentArrival(student);
-                      const bib = student.bibNumber ?? (student as any).crossCountryBibNumber ?? (idx + 1 + 100);
+                      const bib = getStudentBib(student) || '-';
                       const partType = resolveRunnerParticipationType(student, allStudents);
                       return (
                         <div key={student.id || idx} className="bg-white dark:bg-slate-900 p-3 rounded-2xl border border-slate-200 dark:border-slate-800 flex items-center justify-between gap-3 text-xs shadow-3xs">
@@ -3079,7 +3078,7 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
                 ) : (
                   <div className="space-y-2">
                     {detailsRemainingFiltered.map((student, idx) => {
-                      const bib = student.bibNumber ?? (student as any).crossCountryBibNumber ?? '-';
+                      const bib = getStudentBib(student) || '-';
                       return (
                         <div key={student.id || idx} className="bg-white dark:bg-slate-900 p-3 rounded-2xl border border-slate-200 dark:border-slate-800 flex items-center justify-between gap-3 text-xs shadow-3xs">
                           <div className="flex items-center gap-3 min-w-0">
