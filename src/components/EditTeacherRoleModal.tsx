@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { User, School, Sport } from '../types';
 import { DataService, SPORTS_MAP, inferLevelFromSchoolName, findMatchingSchoolForTeacher, normalizeCadreToLevelKey } from '../lib/dataService';
 import { useAuth, isSuperAdminEmail } from '../contexts/AuthContext';
+import { isAmineSanoussiIdentity } from '../lib/utils';
 import {
   X,
   UserCheck,
@@ -220,19 +221,21 @@ export const EditTeacherRoleModal: React.FC<EditTeacherRoleModalProps> = ({
       isSuperAdminEmail(userProfile?.email)
     );
     const targetIsSuperAdmin = Boolean(teacher?.isSuperAdmin || isSuperAdminEmail(cleanEmail));
-    const safeRole: 'TEACHER' | 'SPORT_MANAGER' | 'CENTRAL_ADMIN' = targetIsSuperAdmin
+    const targetIsAmineInspector = isAmineSanoussiIdentity({ email: cleanEmail, fullName: cleanName });
+    const safeRole: 'TEACHER' | 'SPORT_MANAGER' | 'CENTRAL_ADMIN' = (targetIsSuperAdmin || targetIsAmineInspector)
       ? 'CENTRAL_ADMIN'
       : role === 'CENTRAL_ADMIN' && !isCentralOrSuperAdmin
       ? (teacher?.role === 'CENTRAL_ADMIN' ? 'CENTRAL_ADMIN' : 'TEACHER')
       : role;
 
     const updateData: Partial<User> = {
-      fullName: cleanName,
-      email: cleanEmail,
+      fullName: targetIsAmineInspector ? 'أمين سنوسي' : cleanName,
+      email: targetIsAmineInspector ? 'aminens21@gmail.com' : cleanEmail,
       phone: phone.trim(),
-      teachingCadre: cadre,
+      teachingCadre: targetIsAmineInspector ? '' : cadre,
+      ...(targetIsAmineInspector ? { cadre: 'مفتش تربوي', schoolAccessVerified: true } : {}),
       role: safeRole,
-      isSuperAdmin: targetIsSuperAdmin,
+      isSuperAdmin: targetIsSuperAdmin || targetIsAmineInspector,
       isTechCommitteeHead: isTechCommitteeHead,
       techCommitteeSports: isTechCommitteeHead ? techCommitteeSports : [],
       sportId: primarySport,
@@ -241,7 +244,8 @@ export const EditTeacherRoleModal: React.FC<EditTeacherRoleModalProps> = ({
       refereeSpecialty: refereeSpecialty,
       refereeDiplomas: cleanedDiplomas,
       refereeDiploma: summaryDiploma,
-      workLocation: workLocation.trim(),
+      workLocation: targetIsAmineInspector ? '' : workLocation.trim(),
+      ...(targetIsAmineInspector ? { schoolId: '' } : {}),
       leaseNumber: cleanLease,
       updatedAt: new Date()
     };

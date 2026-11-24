@@ -229,7 +229,7 @@ export const Teachers: React.FC = () => {
   }>({
     fullName: '',
     leaseNumber: '',
-    cadre: 'مفتش',
+    cadre: 'مفتش تربوي',
     phone: '',
     email: ''
   });
@@ -750,7 +750,7 @@ export const Teachers: React.FC = () => {
     setAdminForm({
       fullName: '',
       leaseNumber: '',
-      cadre: 'مفتش',
+      cadre: 'مفتش تربوي',
       phone: '',
       email: ''
     });
@@ -763,7 +763,7 @@ export const Teachers: React.FC = () => {
     setAdminForm({
       fullName: cadreItem.fullName || '',
       leaseNumber: cadreItem.leaseNumber || '',
-      cadre: cadreItem.cadre || 'مفتش',
+      cadre: cadreItem.cadre || 'مفتش تربوي',
       phone: cadreItem.phone || '',
       email: cadreItem.email || ''
     });
@@ -2198,7 +2198,7 @@ export const Teachers: React.FC = () => {
                   الإطار <span className="text-red-500">*</span>
                 </label>
                 <div className="flex flex-wrap gap-1.5 mb-2">
-                  {['مفتش', 'رئيس مكتب التربية البدنية', 'إطار إداري'].map((preset) => (
+                  {['مفتش تربوي', 'مفتش', 'رئيس مكتب التربية البدنية', 'إطار إداري'].map((preset) => (
                     <button
                       key={preset}
                       type="button"

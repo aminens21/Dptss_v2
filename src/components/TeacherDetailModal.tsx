@@ -1,6 +1,7 @@
 import React from 'react';
 import { User, Student, School } from '../types';
 import { SPORTS_MAP } from '../lib/dataService';
+import { isAmineSanoussiIdentity } from '../lib/utils';
 import {
   getWhatsAppUrl,
   isValidPhoneNumber,
@@ -106,12 +107,18 @@ export const TeacherDetailModal: React.FC<TeacherDetailModalProps> = ({
 
             <div>
               <div className="flex flex-wrap items-center gap-2">
-                <span className={`text-[10px] font-extrabold px-2.5 py-0.5 rounded-full border ${getCadreLabel(teacher.teachingCadre).bg}`}>
-                  {getCadreLabel(teacher.teachingCadre).text}
-                </span>
+                {teacher.role === 'CENTRAL_ADMIN' || teacher.role === 'SUPER_ADMIN' || teacher.isSuperAdmin || isAmineSanoussiIdentity(teacher) ? (
+                  <span className="text-[10px] font-extrabold px-2.5 py-0.5 rounded-full border bg-amber-500/20 text-amber-200 border-amber-400/30">
+                    {isAmineSanoussiIdentity(teacher) ? 'مفتش تربوي' : (teacher.cadre || 'إطار إداري / تربوي')}
+                  </span>
+                ) : (
+                  <span className={`text-[10px] font-extrabold px-2.5 py-0.5 rounded-full border ${getCadreLabel(teacher.teachingCadre).bg}`}>
+                    {getCadreLabel(teacher.teachingCadre).text}
+                  </span>
+                )}
 
                 <span className="text-[10px] font-extrabold px-2.5 py-0.5 rounded-full bg-emerald-500/30 text-emerald-200 border border-emerald-400/30">
-                  {teacher.isSuperAdmin
+                  {teacher.isSuperAdmin || isAmineSanoussiIdentity(teacher)
                     ? 'المسؤول المركزي'
                     : teacher.role === 'CENTRAL_ADMIN'
                     ? 'مسير إقليمي'
@@ -138,7 +145,11 @@ export const TeacherDetailModal: React.FC<TeacherDetailModalProps> = ({
                 {teacher.fullName}
               </h2>
               <p className="text-xs text-emerald-100 font-medium mt-0.5">
-                {teacher.workLocation ? `مؤطر أستاذ بـ: ${teacher.workLocation}` : 'أستاذ بالمديرية الإقليمية بتاوريرت'}
+                {teacher.role === 'CENTRAL_ADMIN' || teacher.role === 'SUPER_ADMIN' || teacher.isSuperAdmin || isAmineSanoussiIdentity(teacher)
+                  ? `${isAmineSanoussiIdentity(teacher) ? 'مفتش تربوي · المسؤول المركزي — ' : ''}${teacher.directorateName || 'المديرية الإقليمية بتاوريرت'}`
+                  : teacher.workLocation
+                  ? `مؤطر أستاذ بـ: ${teacher.workLocation}`
+                  : 'أستاذ بالمديرية الإقليمية بتاوريرت'}
               </p>
             </div>
           </div>

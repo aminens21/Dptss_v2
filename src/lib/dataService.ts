@@ -21,7 +21,7 @@ import {
   arrayUnion,
   deleteField
 } from 'firebase/firestore';
-import { isFlexibleEmailMatch, fixTeacherFieldJumble, normalizeArabicName, normalizeArabicSearch, normalizeDateToYmd, formatMatchDate } from './utils';
+import { isFlexibleEmailMatch, fixTeacherFieldJumble, normalizeArabicName, normalizeArabicSearch, normalizeDateToYmd, formatMatchDate, isAmineSanoussiIdentity, normalizeCentralAdminUser } from './utils';
 import { isPlaceholderTeamId, makePlaceholderTeamId } from './drawTournamentUtils';
 export { normalizeDateToYmd, normalizeArabicSearch };
 
@@ -1521,9 +1521,47 @@ export function inferLevelFromSchoolName(schoolName?: string | null): 'Primary' 
 }
 
 export function resolveEffectiveTeacherCadre(
-  userProfile?: { teachingCadre?: string; workLocation?: string; schoolName?: string } | null,
-  schoolObj?: { type?: string; name?: string } | null
+  userProfile?: {
+    teachingCadre?: string;
+    workLocation?: string;
+    schoolName?: string;
+    isPrivate?: boolean;
+    educationSector?: 'public' | 'private';
+  } | null,
+  schoolObj?: {
+    type?: string;
+    name?: string;
+    isPrivate?: boolean;
+    educationSector?: 'public' | 'private';
+  } | null
 ): 'Primary' | 'Middle' | 'High' | '' {
+  // مؤسسات التعليم الخصوصي يمكن أن تتوفر على الأسلاك الثلاثة (الابتدائي + الإعدادي + التأهيلي)
+  // لذلك لا يتم حصر أساتذتها في سلك واحد، وتظهر لهم جميع البطولات المفتوحة
+  if (schoolObj) {
+    if (isPrivateSchoolRecord(schoolObj)) return '';
+    if (
+      schoolObj.educationSector !== 'public' &&
+      schoolObj.isPrivate !== false &&
+      isPrivateSchoolRecord({
+        name: userProfile?.workLocation || userProfile?.schoolName,
+        type: userProfile?.teachingCadre,
+        isPrivate: userProfile?.isPrivate,
+        educationSector: userProfile?.educationSector
+      })
+    ) {
+      return '';
+    }
+  } else if (
+    isPrivateSchoolRecord({
+      name: userProfile?.workLocation || userProfile?.schoolName,
+      type: userProfile?.teachingCadre,
+      isPrivate: userProfile?.isPrivate,
+      educationSector: userProfile?.educationSector
+    })
+  ) {
+    return '';
+  }
+
   // 1. Trust the matched school's official educational cycle first if available
   const fromSchoolType = normalizeCadreToLevelKey(schoolObj?.type);
   if (fromSchoolType) return fromSchoolType;
@@ -1799,6 +1837,9 @@ export function isSchoolEligibleForTournament(params: {
   if (!tournament) return true;
   if (school && !isSchoolSectorAllowedForTournament(school, tournament)) {
     return false;
+  }
+  if (school && isPrivateSchoolRecord(school)) {
+    return true;
   }
   if (school?.type) {
     if (!isSchoolLevelAllowedForTournament(school.type, tournament.level, tournament.ageCategory, tournament.sportId)) {
@@ -4195,22 +4236,37 @@ export const DataService = {
           .map(d => ({ id: d.id, ...d.data(), directorateId: d.data().directorateId || 'taourirt' } as School))
           .filter(s => s && s.name && !s.name.includes('غير محدد'));
 
-        // Auto-heal accessCode and migrate private schools into dedicated 'خصوصي' cycle
+        // Auto-heal accessCode, migrate private schools into dedicated 'خصوصي' cycle, and clean polluted central-admin teacher attribution
         const listWithCodes = firestoreList.map(s => {
           const normalizedType = normalizeSchoolCycleType(s);
           const hasValidCode = !!(s.accessCode && s.accessCode.trim().length === 6);
           const accessCode = hasValidCode ? s.accessCode! : generateSecureAccessCode();
           const needsTypeMigration = s.type !== normalizedType;
 
-          if ((!hasValidCode || needsTypeMigration) && s.id && !isCloudSyncPaused()) {
+          const pollutedTeacher = Boolean(s.teacherName && isAmineSanoussiIdentity({ fullName: s.teacherName }));
+          const pollutedCoordinator = Boolean(s.coordinatorName && isAmineSanoussiIdentity({ fullName: s.coordinatorName }));
+          const pollutedCoordEmail = Boolean((s as any).coordinatorEmail && isFlexibleEmailMatch((s as any).coordinatorEmail, 'aminens21@gmail.com'));
+          const fallbackAlFathName = (s.id === 'sch-1' || s.name.includes('الفتح')) ? 'ذ. عبد الرحيم بلقاسم' : '';
+
+          if ((pollutedTeacher || pollutedCoordinator || pollutedCoordEmail || !hasValidCode || needsTypeMigration) && s.id && !isCloudSyncPaused()) {
             const patch: Record<string, any> = {};
             if (!hasValidCode) patch.accessCode = accessCode;
             if (needsTypeMigration) patch.type = normalizedType;
+            if (pollutedTeacher) patch.teacherName = fallbackAlFathName;
+            if (pollutedCoordinator) patch.coordinatorName = fallbackAlFathName;
+            if (pollutedCoordEmail) patch.coordinatorEmail = '';
             setDoc(doc(db, 'schools', s.id), patch, { merge: true }).catch(err =>
               console.warn(`Failed to auto-update school ${s.name}:`, err)
             );
           }
-          return { ...s, accessCode, type: normalizedType };
+          return {
+            ...s,
+            accessCode,
+            type: normalizedType,
+            ...(pollutedTeacher ? { teacherName: fallbackAlFathName } : {}),
+            ...(pollutedCoordinator ? { coordinatorName: fallbackAlFathName } : {}),
+            ...(pollutedCoordEmail ? { coordinatorEmail: '' } : {})
+          };
         });
 
         // Merge ONLY genuinely pending local writes (not deleted schools)
@@ -4312,13 +4368,28 @@ export const DataService = {
           const accessCode = hasValidCode ? s.accessCode! : generateSecureAccessCode();
           const needsTypeMigration = s.type !== normalizedType;
 
-          if ((!hasValidCode || needsTypeMigration) && s.id && !isCloudSyncPaused()) {
+          const pollutedTeacher = Boolean(s.teacherName && isAmineSanoussiIdentity({ fullName: s.teacherName }));
+          const pollutedCoordinator = Boolean(s.coordinatorName && isAmineSanoussiIdentity({ fullName: s.coordinatorName }));
+          const pollutedCoordEmail = Boolean((s as any).coordinatorEmail && isFlexibleEmailMatch((s as any).coordinatorEmail, 'aminens21@gmail.com'));
+          const fallbackAlFathName = (s.id === 'sch-1' || s.name.includes('الفتح')) ? 'ذ. عبد الرحيم بلقاسم' : '';
+
+          if ((pollutedTeacher || pollutedCoordinator || pollutedCoordEmail || !hasValidCode || needsTypeMigration) && s.id && !isCloudSyncPaused()) {
             const patch: Record<string, any> = {};
             if (!hasValidCode) patch.accessCode = accessCode;
             if (needsTypeMigration) patch.type = normalizedType;
+            if (pollutedTeacher) patch.teacherName = fallbackAlFathName;
+            if (pollutedCoordinator) patch.coordinatorName = fallbackAlFathName;
+            if (pollutedCoordEmail) patch.coordinatorEmail = '';
             setDoc(doc(db, 'schools', s.id), patch, { merge: true }).catch(() => {});
           }
-          return { ...s, accessCode, type: normalizedType };
+          return {
+            ...s,
+            accessCode,
+            type: normalizedType,
+            ...(pollutedTeacher ? { teacherName: fallbackAlFathName } : {}),
+            ...(pollutedCoordinator ? { coordinatorName: fallbackAlFathName } : {}),
+            ...(pollutedCoordEmail ? { coordinatorEmail: '' } : {})
+          };
         });
 
         const localList = getLocal<School>(STORAGE_KEYS.SCHOOLS, []);
@@ -5859,6 +5930,53 @@ export const DataService = {
       });
     }
 
+    // Ensure registered super admin أمين سنوسي (aminens21@gmail.com) is always represented as Central Admin & Educational Inspector, never as a school teacher
+    const aminKey = findMatchingKey({ email: 'aminens21@gmail.com' }) || findMatchingKey({ fullName: 'أمين سنوسي' }) || findMatchingKey({ fullName: 'amine sanoussi' });
+    if (aminKey) {
+      const existing = usersMap.get(aminKey)!;
+      const needsCloudHeal =
+        existing.role !== 'CENTRAL_ADMIN' ||
+        !existing.isSuperAdmin ||
+        Boolean(existing.workLocation && existing.workLocation.trim()) ||
+        Boolean(existing.schoolId && existing.schoolId.trim()) ||
+        Boolean(existing.teachingCadre && existing.teachingCadre.trim()) ||
+        existing.cadre !== 'مفتش تربوي';
+      const normalizedAmin = normalizeCentralAdminUser(existing);
+      usersMap.set(aminKey, normalizedAmin);
+      if (needsCloudHeal && existing.id && !existing.id.startsWith('demo-') && !isCloudSyncPaused()) {
+        setDoc(doc(db, 'users', existing.id), {
+          fullName: normalizedAmin.fullName,
+          email: 'aminens21@gmail.com',
+          role: 'CENTRAL_ADMIN',
+          isSuperAdmin: true,
+          cadre: 'مفتش تربوي',
+          workLocation: '',
+          schoolId: '',
+          teachingCadre: '',
+          schoolAccessVerified: true,
+          updatedAt: serverTimestamp()
+        }, { merge: true }).catch(() => {});
+      }
+    } else if (!isRecentlyDeleted('users', 'admin_aminens21_gmail_com')) {
+      usersMap.set('admin_aminens21_gmail_com', {
+        id: 'admin_aminens21_gmail_com',
+        fullName: 'أمين سنوسي',
+        email: 'aminens21@gmail.com',
+        role: 'CENTRAL_ADMIN',
+        isSuperAdmin: true,
+        cadre: 'مفتش تربوي',
+        workLocation: '',
+        schoolId: '',
+        teachingCadre: '',
+        schoolAccessVerified: true,
+        directorateId: 'taourirt',
+        directorateName: 'المديرية الإقليمية بتاوريرت',
+        isActive: true,
+        createdAt: new Date(),
+        updatedAt: new Date()
+      });
+    }
+
     const mergedUsers = Array.from(usersMap.values()).map(u => fixTeacherFieldJumble(u));
     inMemoryCollectionCache['local_registered_users'] = mergedUsers;
     hasSyncedUsersForSchoolFilter = true;
@@ -5870,7 +5988,12 @@ export const DataService = {
   async getTeachers(): Promise<User[]> {
     try {
       const allUsers = await this.getUsers();
-      return allUsers.filter(u => !u.role || u.role === 'TEACHER');
+      return allUsers.filter(u =>
+        (!u.role || u.role === 'TEACHER') &&
+        !u.isSuperAdmin &&
+        !(u.email && SUPER_ADMIN_EMAILS.some(e => isFlexibleEmailMatch(e, u.email!))) &&
+        !isAmineSanoussiIdentity(u)
+      );
     } catch (e) {
       console.warn("Firestore fetch teachers error:", e);
       return [];
@@ -6018,6 +6141,9 @@ export const DataService = {
         isActive: users[idx].isActive !== undefined ? users[idx].isActive : true,
         updatedAt: new Date()
       };
+      if (isAmineSanoussiIdentity(fullUserRecord)) {
+        fullUserRecord = normalizeCentralAdminUser(fullUserRecord);
+      }
       users[idx] = fullUserRecord;
     } else {
       fullUserRecord = {
@@ -6038,6 +6164,9 @@ export const DataService = {
         createdAt: new Date(),
         updatedAt: new Date()
       };
+      if (isAmineSanoussiIdentity(fullUserRecord)) {
+        fullUserRecord = normalizeCentralAdminUser(fullUserRecord);
+      }
       users.push(fullUserRecord);
     }
     inMemoryCollectionCache['local_registered_users'] = users;
@@ -6078,8 +6207,13 @@ export const DataService = {
         window.dispatchEvent(new CustomEvent('teacherProfileUpdated', { detail: fullUserRecord }));
       }
 
-      // Synchronize changes to Schools (teacherName & teacher phone)
-      if (profileData.workLocation || profileData.fullName || profileData.phone) {
+      // Synchronize changes to Schools (teacherName & teacher phone) ONLY for school teachers (never Central/Super Admins or Inspectors)
+      const isCentralOrInspector =
+        fullUserRecord.role === 'CENTRAL_ADMIN' ||
+        fullUserRecord.role === 'SUPER_ADMIN' ||
+        fullUserRecord.isSuperAdmin === true ||
+        isAmineSanoussiIdentity(fullUserRecord);
+      if (!isCentralOrInspector && (profileData.workLocation || profileData.fullName || profileData.phone)) {
         const schoolsList = getLocal<School>(STORAGE_KEYS.SCHOOLS, INITIAL_SCHOOLS);
         let schoolChanged = false;
         const updatedSchools = schoolsList.map(sch => {
@@ -11104,7 +11238,7 @@ export const DataService = {
         id: `default_admin_cadre_amin_${normalizedDir}`,
         fullName: 'أمين سنوسي',
         leaseNumber: '',
-        cadre: 'مفتش',
+        cadre: 'مفتش تربوي',
         phone: '',
         email: 'aminens21@gmail.com',
         category: 'INSPECTOR',
@@ -11115,7 +11249,7 @@ export const DataService = {
         id: `default_admin_cadre_meqnou_${normalizedDir}`,
         fullName: 'نور الدين مقتل',
         leaseNumber: '',
-        cadre: 'مفتش',
+        cadre: 'مفتش تربوي',
         phone: '',
         email: 'meqnou@gmail.com',
         category: 'INSPECTOR',
@@ -11165,10 +11299,17 @@ export const DataService = {
         return;
       }
       const prev = byId.get(rec.id);
+      const isAmineCadre = rec.id.startsWith('default_admin_cadre_amin_') || isAmineSanoussiIdentity(rec);
+      const resolvedCadreTitle =
+        isAmineCadre && (!rec.cadre || rec.cadre.trim() === 'مفتش')
+          ? 'مفتش تربوي'
+          : (rec.cadre || prev?.cadre || 'إطار إداري');
       byId.set(rec.id, {
         ...prev,
         ...rec,
-        category: this._resolveAdminCadreCategory(rec.cadre, rec.category || prev?.category),
+        fullName: isAmineCadre ? 'أمين سنوسي' : rec.fullName,
+        cadre: resolvedCadreTitle,
+        category: this._resolveAdminCadreCategory(resolvedCadreTitle, rec.category || prev?.category),
         directorateId: recDir
       });
     });

@@ -66,7 +66,7 @@ import { AppLogo } from '../components/AppLogo';
 import { SportsIntroAnimation } from '../components/SportsIntroAnimation';
 import { CrossCountryPodiumView } from '../components/CrossCountryPodiumView';
 import toast from 'react-hot-toast';
-import { cn, isFlexibleEmailMatch, normalizeDateToYmd, formatMatchDate } from '../lib/utils';
+import { cn, isFlexibleEmailMatch, normalizeDateToYmd, formatMatchDate, isAmineSanoussiIdentity, normalizeCentralAdminUser } from '../lib/utils';
 
 export const Login: React.FC = () => {
   const { currentUser, userProfile, loading, updateProfileState } = useAuth();
@@ -653,13 +653,15 @@ export const Login: React.FC = () => {
       const cleanEmail = (googleUser.email || '').toLowerCase().trim();
 
       if (isSuperAdminEmail(cleanEmail)) {
+        const isAmine = isAmineSanoussiIdentity({ email: cleanEmail, fullName: googleUser.displayName || undefined });
         try {
           await setDoc(doc(db, 'users', googleUser.uid), {
             id: googleUser.uid,
-            fullName: googleUser.displayName || (cleanEmail === 'meqnou@gmail.com' ? 'مقتل نور الدين' : 'المسير المركزي الرئيسي'),
+            fullName: isAmine ? 'أمين سنوسي' : (googleUser.displayName || (cleanEmail === 'meqnou@gmail.com' ? 'مقتل نور الدين' : 'المسير المركزي الرئيسي')),
             email: cleanEmail,
             role: 'CENTRAL_ADMIN',
             isSuperAdmin: true,
+            ...(isAmine ? { cadre: 'مفتش تربوي', workLocation: '', schoolId: '', teachingCadre: '', schoolAccessVerified: true } : {}),
             isActive: true,
             lastLoginAt: serverTimestamp(),
             updatedAt: serverTimestamp()
@@ -787,7 +789,7 @@ export const Login: React.FC = () => {
         const effectiveDirName = matchedTeacher.directorateName || effectiveDir?.name || 'المديرية الإقليمية بتاوريرت';
         DataService.setActiveDirectorateId(effectiveDirId);
 
-        const mergedProfile: User = {
+        let mergedProfile: User = {
           ...matchedTeacher,
           id: googleUser.uid,
           email: cleanEmail,
@@ -798,6 +800,9 @@ export const Login: React.FC = () => {
           photoUrl: (matchedTeacher.photoUrl && matchedTeacher.photoUrl.trim()) || googleUser.photoURL || '',
           isActive: true
         };
+        if (isAmineSanoussiIdentity(mergedProfile)) {
+          mergedProfile = normalizeCentralAdminUser(mergedProfile);
+        }
 
         try {
           await setDoc(doc(db, 'users', googleUser.uid), {
@@ -3009,6 +3014,70 @@ export const Login: React.FC = () => {
                                 {/* Rank 3 (Right) - Order 3 */}
                                 <div dir="rtl" className="flex-1 min-w-0 max-w-[33.33%]">
                                   {renderPodiumSlot(third, 3)}
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })()}
+
+                        {/* WINNING TEAM & PARTICIPATING MEMBERS (UNDER PODIUM - PUBLIC DASHBOARD) */}
+                        {(() => {
+                          const winningTeam = catGroup.teamRankings && catGroup.teamRankings.length > 0 ? catGroup.teamRankings[0] : null;
+                          if (!winningTeam) return null;
+                          return (
+                            <div className="bg-gradient-to-r from-blue-950 via-slate-900 to-indigo-950 rounded-2xl p-4 md:p-6 text-white shadow-xl border border-blue-600/60 space-y-4">
+                              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pb-3 border-b border-white/10">
+                                <div className="flex items-center gap-3">
+                                  <div className="w-12 h-12 rounded-2xl bg-amber-400 text-slate-950 flex items-center justify-center font-black text-2xl shadow-md">
+                                    🏆
+                                  </div>
+                                  <div>
+                                    <span className="inline-flex items-center gap-1 text-[11px] font-black text-amber-300 bg-amber-400/20 px-3 py-1 rounded-full border border-amber-400/30">
+                                      الفريق الفائز بالمرتبة الأولى (بطل الفئة) 🥇
+                                    </span>
+                                    <h3 className="text-base md:text-lg font-black text-white mt-1">
+                                      {winningTeam.schoolName}
+                                    </h3>
+                                  </div>
+                                </div>
+                                <div className="flex items-center gap-3 bg-blue-900/60 px-4 py-2 rounded-xl border border-blue-500/40">
+                                  <span className="text-xs text-blue-200 font-bold">مجموع نقاط أسرع 4 عداءين:</span>
+                                  <span className="text-sm font-mono font-black text-amber-300 bg-slate-950 px-3 py-1 rounded-lg">
+                                    {winningTeam.totalPoints} نقطة
+                                  </span>
+                                </div>
+                              </div>
+
+                              <div>
+                                <h4 className="text-xs font-black text-amber-300 mb-2.5 flex items-center gap-1.5">
+                                  <span>👥 أسماء المشاركين الذين ينتمون للفريق وصدرياتهم ورتبهم الفردية:</span>
+                                </h4>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
+                                  {winningTeam.top4Runners.map((runner: any, rIdx: number) => (
+                                    <div key={rIdx} className="bg-white/10 rounded-xl p-3 border border-white/15 flex flex-col justify-between space-y-2">
+                                      <div className="flex items-center justify-between">
+                                        <span className="text-[10px] font-black bg-amber-400 text-slate-950 px-2.5 py-0.5 rounded-full shadow-xs">
+                                          الرتبة #{runner.rank}
+                                        </span>
+                                        <span className="text-xs font-mono font-black text-amber-300 bg-slate-950/70 px-2.5 py-0.5 rounded">
+                                          #{runner.bibNumber || '—'}
+                                        </span>
+                                      </div>
+                                      <div>
+                                        <p className="text-xs font-black text-white truncate" title={runner.fullName}>
+                                          {runner.fullName}
+                                        </p>
+                                        <p className="text-[10px] text-blue-200 truncate mt-0.5" title={runner.schoolName}>
+                                          {runner.schoolName} 🏫
+                                        </p>
+                                      </div>
+                                      {runner.time && (
+                                        <div className="text-[10px] font-mono text-emerald-300 bg-emerald-950/60 px-2 py-0.5 rounded text-center">
+                                          ⏱️ التوقيت: {runner.time}
+                                        </div>
+                                      )}
+                                    </div>
+                                  ))}
                                 </div>
                               </div>
                             </div>

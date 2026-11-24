@@ -54,13 +54,13 @@ import toast from 'react-hot-toast';
 
 interface CrossCountryPodiumViewProps {
   results: Record<string, CrossCountryCategoryResult>;
-  onUpdateResult: (result: CrossCountryCategoryResult) => Promise<void>;
-  onBack: () => void;
+  onUpdateResult?: (result: CrossCountryCategoryResult) => Promise<void>;
+  onBack?: () => void;
   canEdit?: boolean;
-  activeSeason: string;
-  directorateName: string;
+  activeSeason?: string;
+  directorateName?: string;
   students: Student[];
-  schools: School[];
+  schools?: School[];
   currentUser?: User | null;
   onRefreshData?: () => void;
   initialCategoryId?: string;
@@ -270,13 +270,13 @@ const PodiumRunnerCard: React.FC<PodiumRunnerCardProps> = ({
 
 export const CrossCountryPodiumView: React.FC<CrossCountryPodiumViewProps> = ({
   results,
-  onUpdateResult,
-  onBack,
+  onUpdateResult = async (_res?: CrossCountryCategoryResult) => {},
+  onBack = () => {},
   canEdit = false,
-  activeSeason,
-  directorateName,
+  activeSeason = '2026/2027',
+  directorateName = 'مديرية تاوريرت',
   students,
-  schools,
+  schools = [],
   currentUser,
   onRefreshData,
   initialCategoryId
@@ -1633,6 +1633,163 @@ export const CrossCountryPodiumView: React.FC<CrossCountryPodiumViewProps> = ({
                         <span>ملء أوتوماتيكي من المسجلين بالفئة ⚡</span>
                       </button>
                     )}
+                  </div>
+                )}
+              </div>
+
+              {/* WINNING TEAM & PARTICIPATING MEMBERS (UNDER PODIUM) */}
+              {winningTeam ? (
+                <div className="bg-gradient-to-r from-blue-950 via-slate-900 to-indigo-950 rounded-2xl p-4 md:p-6 text-white shadow-xl border border-blue-600/60 space-y-4">
+                  <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pb-3 border-b border-white/10">
+                    <div className="flex items-center gap-3">
+                      <div className="w-12 h-12 rounded-2xl bg-amber-400 text-slate-950 flex items-center justify-center font-black text-2xl shadow-md">
+                        🏆
+                      </div>
+                      <div>
+                        <span className="inline-flex items-center gap-1 text-[11px] font-black text-amber-300 bg-amber-400/20 px-3 py-1 rounded-full border border-amber-400/30">
+                          الفريق الفائز بالمرتبة الأولى (بطل الفئة) 🥇
+                        </span>
+                        <h3 className="text-base md:text-lg font-black text-white mt-1">
+                          {winningTeam.schoolName}
+                        </h3>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3 bg-blue-900/60 px-4 py-2 rounded-xl border border-blue-500/40">
+                      <span className="text-xs text-blue-200 font-bold">مجموع نقاط أسرع 4 عداءين:</span>
+                      <span className="text-sm font-mono font-black text-amber-300 bg-slate-950 px-3 py-1 rounded-lg">
+                        {winningTeam.totalPoints} نقطة
+                      </span>
+                    </div>
+                  </div>
+
+                  <div>
+                    <h4 className="text-xs font-black text-amber-300 mb-2.5 flex items-center gap-1.5">
+                      <span>👥 أسماء المشاركين الذين ينتمون للفريق وصدرياتهم ورتبهم الفردية:</span>
+                    </h4>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
+                      {winningTeam.top4Runners.map((runner, rIdx) => (
+                        <div key={rIdx} className="bg-white/10 rounded-xl p-3 border border-white/15 flex flex-col justify-between space-y-2">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] font-black bg-amber-400 text-slate-950 px-2.5 py-0.5 rounded-full shadow-xs">
+                              الرتبة #{runner.rank}
+                            </span>
+                            <span className="text-xs font-mono font-black text-amber-300 bg-slate-950/70 px-2.5 py-0.5 rounded">
+                              #{runner.bibNumber || '—'}
+                            </span>
+                          </div>
+                          <div>
+                            <p className="text-xs font-black text-white truncate" title={runner.fullName}>
+                              {runner.fullName}
+                            </p>
+                            <p className="text-[10px] text-blue-200 truncate mt-0.5" title={runner.schoolName}>
+                              {runner.schoolName} 🏫
+                            </p>
+                          </div>
+                          {runner.time && (
+                            <div className="text-[10px] font-mono text-emerald-300 bg-emerald-950/60 px-2 py-0.5 rounded text-center">
+                              ⏱️ التوقيت: {runner.time}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              ) : currentCategoryResult.podium && currentCategoryResult.podium.length > 0 ? (
+                <div className="p-4 bg-amber-50 rounded-2xl border border-amber-200 text-amber-900 text-xs font-bold flex items-center gap-2">
+                  <Info className="w-4 h-4 text-amber-600 shrink-0" />
+                  <span>الفريق الفائز بالمرتبة الأولى: يتطلب احتساب ترتيب الفرق وجود 4 عداءين على الأقل واصلين لخط النهاية ينتمون لنفس المؤسسة.</span>
+                </div>
+              ) : null}
+
+              {/* SCHOOL TEAM RANKINGS TABLE (ترتيب المؤسسات التعليمية للفرق) */}
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
+                <div className="p-4 md:p-5 border-b border-slate-100 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 bg-slate-50/50">
+                  <div>
+                    <h3 className="text-sm md:text-base font-black text-slate-900 flex items-center gap-2">
+                      <Users className="w-4 h-4 text-blue-600" />
+                      <span>ترتيب فرق المؤسسات التعليمية (حسب مجموع نقاط أسرع 4 عداءين)</span>
+                    </h3>
+                    <p className="text-xs text-slate-500 font-medium mt-0.5">
+                      قانون حسم التعادل: أسبقية رتبة العداء الرابع (الأقل رتبة يفوز)
+                    </p>
+                  </div>
+
+                  <button
+                    onClick={() => setActiveSubTab('team')}
+                    className="text-xs font-bold text-blue-600 hover:text-blue-800 bg-blue-50 px-3 py-1.5 rounded-xl transition-colors cursor-pointer"
+                  >
+                    عرض تفاصيل الفرق كاملة ←
+                  </button>
+                </div>
+
+                {teamRankings.length > 0 ? (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-right text-xs">
+                      <thead className="bg-slate-50 text-slate-600 border-b border-slate-200 font-bold">
+                        <tr>
+                          <th className="py-3 px-4 w-16 text-center">الترتيب</th>
+                          <th className="py-3 px-4">المؤسسة التعليمية</th>
+                          <th className="py-3 px-4 text-center">حالة الفريق</th>
+                          <th className="py-3 px-4 text-center">مجموع النقاط</th>
+                          <th className="py-3 px-4 text-center">رتبة العداء الرابع (حسم)</th>
+                          <th className="py-3 px-4">أعضاء الفريق المحتسبون (أسرع 4)</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {teamRankings.map((team, idx) => {
+                          const is1st = team.rank === 1;
+                          return (
+                            <tr key={idx} className={is1st ? 'bg-amber-50/40 font-bold' : 'hover:bg-slate-50'}>
+                              <td className="py-3 px-4 text-center">
+                                {is1st ? (
+                                  <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-amber-400 text-slate-950 font-black text-xs shadow-xs">
+                                    🥇 1
+                                  </span>
+                                ) : team.rank === 2 ? (
+                                  <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-slate-300 text-slate-900 font-black text-xs">
+                                    🥈 2
+                                  </span>
+                                ) : team.rank === 3 ? (
+                                  <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-amber-700 text-white font-black text-xs">
+                                    🥉 3
+                                  </span>
+                                ) : (
+                                  <span className="font-bold text-slate-700">#{team.rank}</span>
+                                )}
+                              </td>
+                              <td className="py-3 px-4 font-black text-slate-900">
+                                {team.schoolName}
+                              </td>
+                              <td className="py-3 px-4 text-center">
+                                {team.isValidTeam ? (
+                                  <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-bold">
+                                    فريق مكتمل (4+) ✅
+                                  </span>
+                                ) : (
+                                  <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 text-[10px] font-bold">
+                                    غير مكتمل ({team.runners.length}/4) ⏳
+                                  </span>
+                                )}
+                              </td>
+                              <td className="py-3 px-4 text-center font-mono font-black text-amber-600 text-sm">
+                                {team.totalPoints} ن
+                              </td>
+                              <td className="py-3 px-4 text-center font-mono text-slate-700 font-bold">
+                                {team.fourthRunnerRank < 9999 ? `الرتبة ${team.fourthRunnerRank}` : '—'}
+                              </td>
+                              <td className="py-3 px-4 text-slate-600">
+                                {team.top4Runners.map(r => `${r.fullName} (#${r.rank})`).join(' ، ')}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <div className="p-6 text-center text-slate-400 text-xs">
+                    لا توجد فرق مسجلة بعد لهذه الفئة.
                   </div>
                 )}
               </div>

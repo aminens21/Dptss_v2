@@ -4,7 +4,7 @@ import { doc, getDoc, setDoc, serverTimestamp, query, collection, where, getDocs
 import { auth, db } from '../firebase/config';
 import { User, Role, SUPER_ADMIN_EMAILS, Directorate } from '../types';
 import { DataService } from '../lib/dataService';
-import { isFlexibleEmailMatch } from '../lib/utils';
+import { isFlexibleEmailMatch, isAmineSanoussiIdentity, normalizeCentralAdminUser } from '../lib/utils';
 
 interface AuthContextType {
   currentUser: FirebaseUser | null;
@@ -35,10 +35,11 @@ export const isSuperAdminEmail = (email?: string): boolean => {
   return SUPER_ADMIN_EMAILS.includes(email.trim().toLowerCase());
 };
 
-const DEMO_PROFILES: Partial<Record<Role, { name: string; email: string; sportId?: string; workLocation?: string; leaseNumber?: string; directorateId?: string; directorateName?: string }>> = {
+const DEMO_PROFILES: Partial<Record<Role, { name: string; email: string; sportId?: string; workLocation?: string; leaseNumber?: string; cadre?: string; directorateId?: string; directorateName?: string }>> = {
   CENTRAL_ADMIN: {
-    name: 'المسؤول المركزي (المشرف العام)',
+    name: 'أمين سنوسي',
     email: 'aminens21@gmail.com',
+    cadre: 'مفتش تربوي',
     directorateId: 'taourirt',
     directorateName: 'المديرية الإقليمية بتاوريرت'
   },
@@ -141,11 +142,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       try {
         const parsed = JSON.parse(savedDemo) as User;
         const isSuper = isSuperAdminEmail(parsed.email);
-        const resolvedProfile = {
+        const rawResolved: User = {
           ...parsed,
           isSuperAdmin: isSuper || parsed.isSuperAdmin,
           role: isSuper ? 'CENTRAL_ADMIN' : parsed.role
         };
+        const resolvedProfile = isAmineSanoussiIdentity(rawResolved)
+          ? normalizeCentralAdminUser(rawResolved)
+          : rawResolved;
         setUserProfile(resolvedProfile);
         setIsDemo(true);
         // We don't set loading to false yet, we let onAuthStateChanged decide
@@ -230,9 +234,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
           if (matchedData) {
             let data = matchedData as User;
+            const isAmineUser = isAmineSanoussiIdentity({ email: cleanUserEmail, fullName: data.fullName });
 
-            // Enrich any missing fields (especially photoUrl, teachingCadre or tech committee flags) from merged user/teacher directories
-            if (!data.photoUrl || !data.workLocation || !data.leaseNumber || !data.phone || !data.teachingCadre) {
+            // Enrich missing fields from merged directories ONLY for non-super-admin/teacher accounts (never copy school/teacher fields onto Central Admin Inspector)
+            if (!isAmineUser && !isSuperAdmin && data.role !== 'CENTRAL_ADMIN' && (!data.photoUrl || !data.workLocation || !data.leaseNumber || !data.phone || !data.teachingCadre)) {
               try {
                 const [allUsers, allTeachers] = await Promise.all([
                   DataService.getUsers(),
@@ -270,7 +275,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             }
 
             let role: Role = data.role || 'TEACHER';
-            if (isSuperAdmin) {
+            if (isSuperAdmin || isAmineUser) {
               role = 'CENTRAL_ADMIN';
             } else if (managedDirectorate) {
               role = 'CENTRAL_ADMIN';
@@ -286,18 +291,31 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               )
             );
 
-            const profile: User = {
+            let profile: User = {
               ...data,
               id: user.uid, // Migrate/link to the user's Auth uid without letting data.id overwrite it
               aliasIds: mergedAliases,
               role,
-              isSuperAdmin,
+              isSuperAdmin: isSuperAdmin || isAmineUser,
               directorateId: data.directorateId || managedDirectorate?.id || 'taourirt',
               directorateName: data.directorateName || managedDirectorate?.name || 'المديرية الإقليمية بتاوريرت'
             };
 
+            const needsAmineSanitization = isAmineUser && (
+              data.role !== 'CENTRAL_ADMIN' ||
+              !data.isSuperAdmin ||
+              Boolean(data.workLocation && data.workLocation.trim()) ||
+              Boolean(data.schoolId && data.schoolId.trim()) ||
+              Boolean(data.teachingCadre && data.teachingCadre.trim()) ||
+              data.cadre !== 'مفتش تربوي' ||
+              /^(amine\s+sanoussi|amin\s+sanoussi)$/i.test(String(data.fullName || '').trim())
+            );
+            if (isAmineUser) {
+              profile = normalizeCentralAdminUser(profile);
+            }
+
             // Migrate/Save under the new auth uid in Firestore so it's linked to their Auth account
-            if (!DataService.isCloudSyncPaused() && (docId !== user.uid || (isSuperAdmin && (data.role !== 'CENTRAL_ADMIN' || !data.isSuperAdmin)))) {
+            if (!DataService.isCloudSyncPaused() && (docId !== user.uid || needsAmineSanitization || (isSuperAdmin && (data.role !== 'CENTRAL_ADMIN' || !data.isSuperAdmin)))) {
               try {
                 const cleanDoc: Record<string, any> = {};
                 Object.entries(profile).forEach(([k, v]) => {
@@ -326,7 +344,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             const managerDocId = `mgr_${cleanUserEmail.replace(/[^a-z0-9]/g, '_')}`;
             let mgrFound = false;
             let detectedRole: Role = isSuperAdmin ? 'CENTRAL_ADMIN' : (managedDirectorate ? 'CENTRAL_ADMIN' : 'TEACHER');
-            let detectedName = user.displayName || (isSuperAdmin ? (cleanUserEmail === 'sayhihassan@gmail.com' ? 'حسن السايحي' : cleanUserEmail === 'meqnou@gmail.com' ? 'مقتل نور الدين' : 'المسير المركزي الرئيسي') : user.email?.split('@')[0] || 'مستخدم');
+            let detectedName =
+              isAmineSanoussiIdentity({ email: cleanUserEmail, fullName: user.displayName || undefined })
+                ? 'أمين سنوسي'
+                : (user.displayName || (isSuperAdmin ? (cleanUserEmail === 'sayhihassan@gmail.com' ? 'حسن السايحي' : cleanUserEmail === 'meqnou@gmail.com' ? 'مقتل نور الدين' : 'المسير المركزي الرئيسي') : user.email?.split('@')[0] || 'مستخدم'));
             let detectedSportId: string | undefined = undefined;
             let detectedTournamentId: string | undefined = undefined;
             let detectedWorkLocation: string | undefined = undefined;
@@ -381,6 +402,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 fullName: detectedName,
                 email: cleanUserEmail,
                 role: detectedRole,
+                ...(isAmineSanoussiIdentity({ email: cleanUserEmail, fullName: detectedName }) ? { cadre: 'مفتش تربوي', workLocation: '', schoolId: '', teachingCadre: '', schoolAccessVerified: true } : {}),
                 ...(detectedSportId ? { sportId: detectedSportId } : {}),
                 ...(detectedTournamentId ? { assignedTournamentId: detectedTournamentId } : {}),
                 ...(detectedWorkLocation ? { workLocation: detectedWorkLocation } : {}),
@@ -428,10 +450,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           if (isSuper) {
             setUserProfile({
               id: user.uid,
-              fullName: cleanUserEmail === 'sayhihassan@gmail.com' ? 'حسن السايحي' : cleanUserEmail === 'meqnou@gmail.com' ? 'مقتل نور الدين' : 'المسير المركزي الرئيسي',
+              fullName: isAmineSanoussiIdentity({ email: cleanUserEmail })
+                ? 'أمين سنوسي'
+                : cleanUserEmail === 'sayhihassan@gmail.com'
+                ? 'حسن السايحي'
+                : cleanUserEmail === 'meqnou@gmail.com'
+                ? 'مقتل نور الدين'
+                : 'المسير المركزي الرئيسي',
               email: cleanUserEmail,
               role: 'CENTRAL_ADMIN',
               isSuperAdmin: true,
+              ...(isAmineSanoussiIdentity({ email: cleanUserEmail }) ? { cadre: 'مفتش تربوي', workLocation: '', schoolId: '', teachingCadre: '', schoolAccessVerified: true } : {}),
               directorateId: 'taourirt',
               directorateName: 'المديرية الإقليمية بتاوريرت',
               isActive: true,
@@ -458,12 +487,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const targetEmail = (customEmail || defaultInfo.email).trim().toLowerCase();
     const isSuper = isSuperAdminEmail(targetEmail) || (role === 'CENTRAL_ADMIN' && (targetEmail === 'aminens21@gmail.com' || targetEmail === 'omrhaman.figuig@gmail.com' || targetEmail === 'sayhihassan@gmail.com' || targetEmail === 'meqnou@gmail.com'));
 
-    const demoProfile: User = {
+    const rawDemoProfile: User = {
       id: `demo-${role.toLowerCase()}`,
       fullName: customName || defaultInfo.name,
       email: targetEmail,
       sportId: sportId || defaultInfo.sportId,
       assignedTournamentId: assignedTournamentId,
+      cadre: defaultInfo.cadre,
       directorateId: extraFields?.directorateId || defaultInfo.directorateId || 'taourirt',
       directorateName: extraFields?.directorateName || defaultInfo.directorateName || 'المديرية الإقليمية بتاوريرت',
       workLocation: defaultInfo.workLocation,
@@ -475,6 +505,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       role: isSuper ? 'CENTRAL_ADMIN' : role,
       isSuperAdmin: isSuper || Boolean(extraFields?.isSuperAdmin && role === 'CENTRAL_ADMIN')
     };
+    const demoProfile = isAmineSanoussiIdentity(rawDemoProfile)
+      ? normalizeCentralAdminUser(rawDemoProfile)
+      : rawDemoProfile;
 
     localStorage.setItem('demo_user_profile', JSON.stringify(demoProfile));
     setUserProfile(demoProfile);

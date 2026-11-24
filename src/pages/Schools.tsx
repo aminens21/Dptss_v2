@@ -998,7 +998,7 @@ export const Schools: React.FC = () => {
       </div>
 
       {/* Teacher's School Highlight Notice & Permissions Banner */}
-      {(userProfile?.workLocation || teacherMatchedSchool) && (
+      {isTeacher && (userProfile?.workLocation || teacherMatchedSchool) && (
         <div className="p-3.5 bg-gradient-to-r from-amber-500/15 via-amber-50 to-white border border-amber-300/90 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-amber-950 font-bold shadow-xs">
           <div className="flex items-center gap-2.5">
             <div className="w-8 h-8 rounded-xl bg-amber-500 text-white flex items-center justify-center font-bold text-sm shadow-2xs shrink-0">

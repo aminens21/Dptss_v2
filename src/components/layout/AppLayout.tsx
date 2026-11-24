@@ -56,6 +56,7 @@ import {
   getPendingCloudSyncCount
 } from '../../lib/excelParticipationsImportService';
 import { RoleKey, RoleSidebarPermissions, Directorate, School } from '../../types';
+import { isAmineSanoussiIdentity, isFlexibleEmailMatch } from '../../lib/utils';
 import { useNotifications } from '../../contexts/NotificationContext';
 import { PWAInstallButton } from '../PWAInstallButton';
 import { AppLogo } from '../AppLogo';
@@ -597,6 +598,12 @@ export const AppLayout: React.FC = () => {
   // Role display helper
   const getRoleLabel = (user?: any) => {
     if (!user) return 'مستخدم';
+    if (isAmineSanoussiIdentity(user)) {
+      return 'المسؤول المركزي · مفتش تربوي';
+    }
+    if (user.email && isFlexibleEmailMatch(user.email, 'meqnou@gmail.com')) {
+      return 'المسؤول المركزي · مفتش تربوي';
+    }
     if (user.email && String(user.email).trim().toLowerCase() === 'sayhihassan@gmail.com') {
       return 'مشرف تربوي';
     }
@@ -1433,7 +1440,9 @@ export const AppLayout: React.FC = () => {
                 <p className="text-xs font-bold text-slate-800 dark:text-slate-100 leading-tight truncate max-w-[120px]">
                   {userProfile?.fullName || 'المستخدم'}
                 </p>
-                <p className="text-[9px] text-emerald-600 dark:text-emerald-400 font-bold leading-none">الملف الشخصي</p>
+                <p className="text-[9px] text-emerald-600 dark:text-emerald-400 font-bold leading-none">
+                  {isAmineSanoussiIdentity(userProfile) ? 'مسؤول مركزي · مفتش تربوي' : 'الملف الشخصي'}
+                </p>
               </div>
               <Edit3 className="h-3 w-3 text-slate-400 hidden sm:block" />
             </button>

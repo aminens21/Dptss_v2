@@ -68,6 +68,7 @@ export interface User {
   schoolAccessVerified?: boolean; // هل تم تأكيد رمز أمان المؤسسة المعتمدة
   photoUrl?: string; // صورة الأستاذ الشخصية
   teachingCadre?: 'PRIMARY' | 'MIDDLE' | 'HIGH' | string; // الإطار التعليمي: أستاذ الابتدائي / ثانوي إعدادي / ثانوي تأهيلي
+  cadre?: string; // الإطار الإداري أو التربوي (مثل: مفتش تربوي)
   pendingTransfer?: DirectorateTransferRequest | null; // طلب انتقال معلق إلى مديرية أخرى بانتظار موافقة مسيرها
   aliasIds?: string[]; // معرفات الوثائق المدمجة لنفس المستخدم لضمان التطابق مع التعيينات السابقة
 }

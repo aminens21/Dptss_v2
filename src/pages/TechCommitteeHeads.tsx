@@ -13,7 +13,8 @@ import {
   isCrossCountryU15OpenToPrimary,
   isSchoolSectorAllowedForTournament,
   isAffiliationAllowedByDisplayConfig,
-  isClubTournament
+  isClubTournament,
+  isPrivateSchoolRecord
 } from '../lib/dataService';
 import { User, Sport, Tournament, Match, School, AffiliationDisplayConfig } from '../types';
 import {
@@ -237,6 +238,9 @@ export const TechCommitteeHeads: React.FC = () => {
   }, [userProfile, isCentralAdmin]);
 
   const teacherCycleLabels = useMemo(() => {
+    if (isPrivateSchoolRecord(teacherSchoolObj)) {
+      return { full: 'التعليم الخصوصي (الأسلاك الثلاثة)', short: 'التعليم الخصوصي' };
+    }
     if (effectiveTeacherCadre === 'Primary') {
       return { full: 'التعليم الابتدائي', short: 'الابتدائي' };
     }
@@ -247,7 +251,7 @@ export const TechCommitteeHeads: React.FC = () => {
       return { full: 'التعليم الثانوي التأهيلي', short: 'التأهيلي' };
     }
     return { full: 'سلك مؤسستك التعليمي', short: 'سلكك التعليمي' };
-  }, [effectiveTeacherCadre]);
+  }, [effectiveTeacherCadre, teacherSchoolObj]);
 
   // Regional school championships that the signed-in teacher's cycle/sector is eligible to participate in
   const eligibleTeacherTournaments = useMemo(() => {

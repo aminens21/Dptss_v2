@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { DataService, SPORTS_MAP, inferLevelFromSchoolName, findMatchingSchoolForTeacher, normalizeCadreToLevelKey } from '../lib/dataService';
+import { isAmineSanoussiIdentity } from '../lib/utils';
 import { compressImageToBase64 } from '../lib/imageUtils';
 import { CameraCaptureModal } from './CameraCaptureModal';
 import { School, User } from '../types';
@@ -206,7 +207,14 @@ export const TeacherProfileModal: React.FC = () => {
 
   if (!isProfileModalOpen || !userProfile) return null;
 
-  const isIncomplete = userProfile.role === 'TEACHER' && (!userProfile.workLocation || !userProfile.leaseNumber);
+  const isAmineInspector = isAmineSanoussiIdentity(userProfile);
+  const isCentralAdminOrInspector = Boolean(
+    userProfile.role === 'CENTRAL_ADMIN' ||
+    userProfile.role === 'SUPER_ADMIN' ||
+    userProfile.isSuperAdmin ||
+    isAmineInspector
+  );
+  const isIncomplete = !isCentralAdminOrInspector && userProfile.role === 'TEACHER' && (!userProfile.workLocation || !userProfile.leaseNumber);
   const currentDirId = userProfile.directorateId || 'taourirt';
   const currentDirObj = directorates.find(d => d.id === currentDirId);
   const currentDirName = currentDirObj ? currentDirObj.name : (userProfile.directorateName || 'المديرية الإقليمية بتاوريرت');
@@ -236,17 +244,19 @@ export const TeacherProfileModal: React.FC = () => {
       toast.error('الرجاء إدخال الإسم الكامل');
       return;
     }
-    if (!workLocation.trim()) {
-      toast.error('الرجاء اختيار مؤسستك التعليمية من لائحة المؤسسات المعتمدة');
-      return;
-    }
-    if (!leaseNumber.trim()) {
-      toast.error('الرجاء إدخال رقم التأجير');
-      return;
-    }
-    if (!phone.trim()) {
-      toast.error('الرجاء إدخال رقم الهاتف');
-      return;
+    if (!isCentralAdminOrInspector) {
+      if (!workLocation.trim()) {
+        toast.error('الرجاء اختيار مؤسستك التعليمية من لائحة المؤسسات المعتمدة');
+        return;
+      }
+      if (!leaseNumber.trim()) {
+        toast.error('الرجاء إدخال رقم التأجير');
+        return;
+      }
+      if (!phone.trim()) {
+        toast.error('الرجاء إدخال رقم الهاتف');
+        return;
+      }
     }
 
     setLoading(true);
@@ -310,23 +320,48 @@ export const TeacherProfileModal: React.FC = () => {
       const summaryDiploma = Object.values(cleanedDiplomas).filter(Boolean).join(' • ');
 
       // Update basic profile info in current directorate (remains in current directorate until manager approval)
-      const updatedData: Partial<User> = {
-        fullName: fullName.trim(),
-        workLocation: workLocation.trim(),
-        schoolId: schoolId || undefined,
-        leaseNumber: leaseNumber.trim(),
-        teachingCadre: effectiveCadreSave,
-        refereeSpecialty: refereeSpecialty || [],
-        refereeDiplomas: cleanedDiplomas,
-        refereeDiploma: summaryDiploma,
-        phone: phone.trim(),
-        photoUrl: photoUrl || '',
-        email: userProfile.email || email.trim(),
-        directorateId: currentDirId,
-        directorateName: currentDirName,
-        pendingTransfer: updatedPendingTransfer || undefined,
-        updatedAt: new Date()
-      };
+      const updatedData: Partial<User> = isCentralAdminOrInspector
+        ? {
+            fullName: fullName.trim(),
+            leaseNumber: leaseNumber.trim(),
+            phone: phone.trim(),
+            photoUrl: photoUrl || '',
+            email: userProfile.email || email.trim(),
+            directorateId: currentDirId,
+            directorateName: currentDirName,
+            ...(isAmineInspector
+              ? {
+                  role: 'CENTRAL_ADMIN',
+                  isSuperAdmin: true,
+                  cadre: 'مفتش تربوي',
+                  workLocation: '',
+                  schoolId: '',
+                  teachingCadre: '',
+                  schoolAccessVerified: true
+                }
+              : {}),
+            refereeSpecialty: refereeSpecialty || [],
+            refereeDiplomas: cleanedDiplomas,
+            refereeDiploma: summaryDiploma,
+            updatedAt: new Date()
+          }
+        : {
+            fullName: fullName.trim(),
+            workLocation: workLocation.trim(),
+            schoolId: schoolId || undefined,
+            leaseNumber: leaseNumber.trim(),
+            teachingCadre: effectiveCadreSave,
+            refereeSpecialty: refereeSpecialty || [],
+            refereeDiplomas: cleanedDiplomas,
+            refereeDiploma: summaryDiploma,
+            phone: phone.trim(),
+            photoUrl: photoUrl || '',
+            email: userProfile.email || email.trim(),
+            directorateId: currentDirId,
+            directorateName: currentDirName,
+            pendingTransfer: updatedPendingTransfer || undefined,
+            updatedAt: new Date()
+          };
 
       // 1. Update in backend/local cache
       await DataService.updateUserProfile(userProfile.id || `teacher-${Date.now()}`, updatedData);
@@ -515,22 +550,36 @@ export const TeacherProfileModal: React.FC = () => {
               />
             </div>
 
-            {/* Teaching Cadre */}
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center gap-1.5">
-                <Award className="h-3.5 w-3.5 text-slate-400" />
-                <span>الإطار التعليمي للأستاذ(ة) *</span>
-              </label>
-              <select
-                value={teachingCadre}
-                onChange={(e) => setTeachingCadre(e.target.value)}
-                className="w-full text-xs px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all font-bold text-slate-800 cursor-pointer"
-              >
-                <option value="PRIMARY">🏫 أستاذ التعليم الابتدائي</option>
-                <option value="MIDDLE">📘 أستاذ التعليم الثانوي الإعدادي</option>
-                <option value="HIGH">🎓 أستاذ التعليم الثانوي التأهيلي</option>
-              </select>
-            </div>
+            {/* Administrative Cadre / Teaching Cadre */}
+            {isCentralAdminOrInspector ? (
+              <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3.5 space-y-1">
+                <span className="text-[11px] font-bold text-emerald-700 flex items-center gap-1.5">
+                  <ShieldCheck className="h-4 w-4 text-emerald-600" />
+                  <span>الصفة والإطار الإداري والتربوي:</span>
+                </span>
+                <p className="text-xs font-black text-emerald-950">
+                  {isAmineInspector
+                    ? 'المسؤول المركزي · مفتش تربوي'
+                    : (userProfile.cadre || (userProfile.isSuperAdmin ? 'المسؤول المركزي' : 'مسير إقليمي'))}
+                </p>
+              </div>
+            ) : (
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center gap-1.5">
+                  <Award className="h-3.5 w-3.5 text-slate-400" />
+                  <span>الإطار التعليمي للأستاذ(ة) *</span>
+                </label>
+                <select
+                  value={teachingCadre}
+                  onChange={(e) => setTeachingCadre(e.target.value)}
+                  className="w-full text-xs px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all font-bold text-slate-800 cursor-pointer"
+                >
+                  <option value="PRIMARY">🏫 أستاذ التعليم الابتدائي</option>
+                  <option value="MIDDLE">📘 أستاذ التعليم الثانوي الإعدادي</option>
+                  <option value="HIGH">🎓 أستاذ التعليم الثانوي التأهيلي</option>
+                </select>
+              </div>
+            )}
 
             {/* Email (Read Only) */}
             <div>
@@ -551,11 +600,11 @@ export const TeacherProfileModal: React.FC = () => {
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center gap-1.5">
                   <CreditCard className="h-3.5 w-3.5 text-slate-400" />
-                  <span>رقم التأجير *</span>
+                  <span>{isCentralAdminOrInspector ? 'رقم التأجير (اختياري)' : 'رقم التأجير *'}</span>
                 </label>
                 <input
                   type="text"
-                  required
+                  required={!isCentralAdminOrInspector}
                   className="w-full text-xs px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all font-mono"
                   placeholder="مثال: 1245789"
                   value={leaseNumber}
@@ -567,11 +616,11 @@ export const TeacherProfileModal: React.FC = () => {
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center gap-1.5">
                   <Phone className="h-3.5 w-3.5 text-slate-400" />
-                  <span>رقم الهاتف *</span>
+                  <span>{isCentralAdminOrInspector ? 'رقم الهاتف (اختياري)' : 'رقم الهاتف *'}</span>
                 </label>
                 <input
                   type="tel"
-                  required
+                  required={!isCentralAdminOrInspector}
                   className="w-full text-xs px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all font-mono"
                   placeholder="مثال: 0661234567"
                   value={phone}
@@ -642,8 +691,8 @@ export const TeacherProfileModal: React.FC = () => {
               </div>
             )}
 
-            {/* Secure Directorate Transfer Request Section (when no transfer is pending) */}
-            {!hasPendingTransfer && (
+            {/* Secure Directorate Transfer Request Section (Teachers only when no transfer is pending) */}
+            {!isCentralAdminOrInspector && !hasPendingTransfer && (
               <div className="border border-emerald-100 bg-emerald-50/40 rounded-2xl p-3.5 space-y-3">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
@@ -733,6 +782,9 @@ export const TeacherProfileModal: React.FC = () => {
               </div>
             )}
 
+            {/* Educational Cycle Selection & Approved Work Location (Teachers only — never Central Admins / Inspectors) */}
+            {!isCentralAdminOrInspector && (
+            <>
             {/* Educational Cycle Selection */}
             <div>
               <label className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center justify-between">
@@ -819,6 +871,8 @@ export const TeacherProfileModal: React.FC = () => {
                 </div>
               </div>
             </div>
+            </>
+            )}
 
             {/* Sports Specialization in Refereeing */}
             <div className="space-y-3">

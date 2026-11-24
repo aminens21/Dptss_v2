@@ -212,10 +212,97 @@ export function isPhoneLike(val: any): boolean {
 }
 
 /**
+ * Identifies Amine Sanoussi (aminens21@gmail.com / أمين سنوسي / amine sanoussi),
+ * who is strictly a Central Admin and Educational Inspector (مفتش تربوي), never a school PE teacher.
+ */
+export function isAmineSanoussiIdentity(
+  userOrInput?: string | { email?: string; fullName?: string; name?: string } | null
+): boolean {
+  if (!userOrInput) return false;
+  if (typeof userOrInput === 'string') {
+    const trimmed = userOrInput.trim();
+    if (!trimmed) return false;
+    if (isFlexibleEmailMatch(trimmed, 'aminens21@gmail.com')) return true;
+    const normStr = trimmed
+      .toLowerCase()
+      .replace(/[أإآا]/g, 'ا')
+      .replace(/ة/g, 'ه')
+      .replace(/ى/g, 'ي')
+      .replace(/[\s\-_.]+/g, '');
+    return (
+      normStr === 'امينسنوسي' ||
+      normStr === 'المفتشامينسنوسي' ||
+      normStr === 'aminesanoussi' ||
+      normStr === 'aminsanoussi' ||
+      normStr === 'sanoussiamine'
+    );
+  }
+
+  const cleanEmail = String(userOrInput.email || '').trim().toLowerCase();
+  if (cleanEmail && isFlexibleEmailMatch(cleanEmail, 'aminens21@gmail.com')) {
+    return true;
+  }
+
+  const rawName = String(userOrInput.fullName || userOrInput.name || '').trim();
+  if (!rawName) return false;
+  const normName = rawName
+    .toLowerCase()
+    .replace(/[أإآا]/g, 'ا')
+    .replace(/ة/g, 'ه')
+    .replace(/ى/g, 'ي')
+    .replace(/[\s\-_.]+/g, '');
+
+  const isNameMatch =
+    normName === 'امينسنوسي' ||
+    normName === 'المفتشامينسنوسي' ||
+    normName === 'aminesanoussi' ||
+    normName === 'aminsanoussi' ||
+    normName === 'sanoussiamine';
+
+  return isNameMatch && (!cleanEmail || !cleanEmail.includes('@') || isFlexibleEmailMatch(cleanEmail, 'aminens21@gmail.com'));
+}
+
+/**
+ * Enforces canonical Central Admin + Educational Inspector metadata for Amine Sanoussi
+ * and clears any mistakenly attached school/teacher fields (such as الثانوية التأهيلية الفتح).
+ */
+export function normalizeCentralAdminUser<T extends Record<string, any>>(user: T): T {
+  if (!user || typeof user !== 'object') return user;
+  if (!isAmineSanoussiIdentity(user)) return user;
+
+  const rawName = String(user.fullName || user.name || '').trim();
+  const isGenericOrLatinName =
+    !rawName ||
+    rawName === 'أستاذ' ||
+    rawName === 'أستاذ(ة)' ||
+    rawName === 'مستخدم' ||
+    rawName === 'المسير المركزي الرئيسي' ||
+    rawName === 'المسؤول المركزي (المشرف العام)' ||
+    /^(amine\s+sanoussi|amin\s+sanoussi|sanoussi\s+amine)$/i.test(rawName);
+
+  return {
+    ...user,
+    fullName: isGenericOrLatinName ? 'أمين سنوسي' : rawName,
+    email: 'aminens21@gmail.com',
+    role: 'CENTRAL_ADMIN',
+    isSuperAdmin: true,
+    cadre: 'مفتش تربوي',
+    workLocation: '',
+    schoolId: '',
+    teachingCadre: '',
+    schoolAccessVerified: true,
+    isActive: user.isActive !== false
+  };
+}
+
+/**
  * Auto-detects and repairs jumbled teacher profile fields (e.g. if school was saved as email or lease number as phone).
  */
 export function fixTeacherFieldJumble(user: any): any {
   if (!user || typeof user !== 'object') return user;
+  if (isAmineSanoussiIdentity(user)) {
+    return normalizeCentralAdminUser(user);
+  }
 
   const name = String(user.fullName || user.name || '').trim();
   let email = String(user.email || '').trim().toLowerCase();

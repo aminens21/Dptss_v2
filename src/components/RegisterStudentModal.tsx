@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Sport, Student, School, Tournament } from '../types';
-import { DataService, getAgeCategoriesForSeason, SPORTS_MAP, getCategoryGenderLabel, validateBirthDateForCategory, normalizeCategoryKey, isSchoolLevelAllowedForTournament, getTournamentLevelAr, isTeacherLevelAllowedForTournament, isCrossCountryU15OpenToPrimary, isSchoolSectorAllowedForTournament, getTournamentEducationSectorsAr, getSchoolEducationSector, schoolNamesMatch, resolveEffectiveTeacherCadre, isCategoryAllowedForTeacherLevel, isTrackOrCrossCountrySport, isTeamSport } from '../lib/dataService';
+import { DataService, getAgeCategoriesForSeason, SPORTS_MAP, getCategoryGenderLabel, validateBirthDateForCategory, normalizeCategoryKey, isSchoolLevelAllowedForTournament, getTournamentLevelAr, isTeacherLevelAllowedForTournament, isCrossCountryU15OpenToPrimary, isSchoolSectorAllowedForTournament, getTournamentEducationSectorsAr, getSchoolEducationSector, schoolNamesMatch, resolveEffectiveTeacherCadre, isCategoryAllowedForTeacherLevel, isTrackOrCrossCountrySport, isTeamSport, isPrivateSchoolRecord } from '../lib/dataService';
 import { AthleticsService } from '../lib/athleticsService';
 import { useAuth } from '../contexts/AuthContext';
 import { X, GraduationCap, User, Calendar, Upload, AlertCircle, Lock, ShieldCheck, CheckCircle2, Camera } from 'lucide-react';
@@ -373,6 +373,7 @@ export const RegisterStudentModal: React.FC<RegisterStudentModalProps> = ({
           const ccSportTourns = tournaments.filter(t => t.sportId === 'cross_country' && t.status !== 'Draft' && (t as any).isActive !== false);
           const resolvedCadre = resolveEffectiveTeacherCadre(userProfile, activeSchoolObj);
           const isAllowed =
+            isPrivateSchoolRecord(activeSchoolObj) ||
             isSchoolLevelAllowedForTournament(
               activeSchoolObj.type,
               relevantTournament.level,

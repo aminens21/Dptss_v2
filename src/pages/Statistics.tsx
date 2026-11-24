@@ -1005,14 +1005,7 @@ export const Statistics: React.FC = () => {
       if (sCycle === 'إعدادي') return allowsMiddle;
       if (sCycle === 'تأهيلي') return allowsHigh;
       if (sCycle === 'خصوصي') {
-        const sTypeAndName = normalizeArabicMatchText(`${school.type || ''} ${school.name || ''}`);
-        const hintsPrimary = sTypeAndName.includes('ابتدائ');
-        const hintsMiddle = sTypeAndName.includes('اعداد') || sTypeAndName.includes('إعداد');
-        const hintsHigh = sTypeAndName.includes('تاهيل') || sTypeAndName.includes('تأهيل');
-        if (!hintsPrimary && !hintsMiddle && !hintsHigh) {
-          return allowsPrimary || allowsMiddle || allowsHigh;
-        }
-        return (hintsPrimary && allowsPrimary) || (hintsMiddle && allowsMiddle) || (hintsHigh && allowsHigh);
+        return allowsPrimary || allowsMiddle || allowsHigh;
       }
       return false;
     };
