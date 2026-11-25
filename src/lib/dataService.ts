@@ -1649,12 +1649,13 @@ function getAllowedLevelsForAgeCategory(
   ageCategory?: string,
   sportId?: string | null
 ): Set<'Primary' | 'Middle' | 'High'> | null {
+  if (sportId && normalizeCanonicalSportId(sportId) === 'cross_country') {
+    return null;
+  }
   if (!ageCategory) return null;
   const normCat = normalizeCategoryKey(ageCategory);
   if (normCat === 'U12') return new Set(['Primary']);
-  if (normCat === 'U15') {
-    return sportId === 'cross_country' ? new Set(['Primary', 'Middle']) : new Set(['Middle']);
-  }
+  if (normCat === 'U15') return new Set(['Middle']);
   if (normCat === 'U17') return new Set(['Middle', 'High']);
   if (normCat === 'U18') return new Set(['Middle', 'High']);
   if (normCat === 'U20') return new Set(['High']);
@@ -1761,14 +1762,15 @@ export function isCategoryAllowedForTeacherLevel(
   categoryId?: string | null,
   sportId?: string | null
 ): boolean {
+  if (sportId && normalizeCanonicalSportId(sportId) === 'cross_country') {
+    return true;
+  }
   const levelKey = normalizeCadreToLevelKey(cadreOrLevel) || inferLevelFromSchoolName(cadreOrLevel);
   if (!levelKey) return true;
   const normCat = normalizeCategoryKey(categoryId || '');
   if (!normCat || !['U12', 'U15', 'U17', 'U18', 'U20'].includes(normCat)) return true;
 
-  if (levelKey === 'Primary') {
-    return sportId === 'cross_country' ? (normCat === 'U12' || normCat === 'U15') : normCat === 'U12';
-  }
+  if (levelKey === 'Primary') return normCat === 'U12';
   if (levelKey === 'Middle') return normCat === 'U15' || normCat === 'U17' || normCat === 'U18';
   if (levelKey === 'High') return normCat === 'U17' || normCat === 'U18' || normCat === 'U20';
   return true;

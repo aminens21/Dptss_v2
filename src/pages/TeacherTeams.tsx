@@ -1268,6 +1268,10 @@ export const TeacherTeams: React.FC = () => {
     let normalized: string[] = Array.from(
       new Set<string>(rawCats.map((c: string) => String(normalizeCategoryKey(c))))
     );
+    if (selectedSportId === 'cross_country') {
+      normalized = Array.from(new Set<string>([...normalized, 'U12', 'U15', 'U18', 'U20']));
+      return normalized;
+    }
     if (isTeacherRole && !canManage && selectedSportId) {
       const sportTourns = teacherAllowedTournaments.filter(t => t.sportId === selectedSportId);
       if (sportTourns.length > 0) {
@@ -2526,7 +2530,16 @@ export const TeacherTeams: React.FC = () => {
                     // 3. If no active tournaments are programmed for this sport, show default non-club categories
                     if (sportTourns.length === 0) return !aff || aff === 'non_club';
 
-                    // 4. Otherwise, strictly keep items that match at least one active programmed tournament
+                    // 4. For Cross Country, expose all 8 category/gender branches for active affiliations
+                    if (selectedSportId === 'cross_country') {
+                      if (!aff) return true;
+                      return sportTourns.some(t => {
+                        const tAff = t.affiliationType || (isClubTournament(t) ? 'club_affiliated' : 'non_club');
+                        return tAff === 'open' || (tAff as string) === 'both' || tAff === aff;
+                      });
+                    }
+
+                    // 5. Otherwise, strictly keep items that match at least one active programmed tournament
                     return sportTourns.some(t => {
                       const genderMatch = t.gender === 'Mixed' || t.gender === g;
                       if (!genderMatch) return false;

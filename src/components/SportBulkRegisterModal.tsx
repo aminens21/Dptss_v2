@@ -81,13 +81,16 @@ export const SportBulkRegisterModal: React.FC<SportBulkRegisterModalProps> = ({
 
   // Available categories for selection
   const availableCategories = useMemo(() => {
-    const baseCats = (sport?.ageCategories && sport.ageCategories.length > 0)
+    const configuredCats = (sport?.ageCategories && sport.ageCategories.length > 0)
       ? sport.ageCategories.map(normalizeCategoryKey)
       : ['U12', 'U15', 'U18', 'U20'];
+    const baseCats = sport?.id === 'cross_country'
+      ? Array.from(new Set([...configuredCats, 'U12', 'U15', 'U18', 'U20']))
+      : configuredCats;
 
     if (!isTeacher || !effectiveTeacherCadre) return baseCats;
 
-    return baseCats.filter(catId => isCategoryAllowedForTeacherLevel(effectiveTeacherCadre, catId));
+    return baseCats.filter(catId => isCategoryAllowedForTeacherLevel(effectiveTeacherCadre, catId, sport?.id));
   }, [sport, isTeacher, effectiveTeacherCadre]);
 
   // Selected age category

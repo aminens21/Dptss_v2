@@ -100,31 +100,13 @@ export const CrossCountryBulkRegisterModal: React.FC<CrossCountryBulkRegisterMod
     );
   }, [baseCcTourns, isTeacher, effectiveTeacherCadre, teacherSchoolObj]);
 
-  // Filter categories based on programmed tournaments & teacher cadre
+  // Expose all 8 cross-country categories across all educational levels whenever cross-country is accessible
   const availableRaceCategories = useMemo(() => {
     if (isTeacher && baseCcTourns.length > 0 && ccTourns.length === 0) {
       return [];
     }
-    let cats = CROSS_COUNTRY_CATEGORIES;
-    if (ccTourns.length > 0) {
-      const matched = cats.filter(cat =>
-        ccTourns.some(t => {
-          const rawAge = String(t.ageCategory || '');
-          const matchesCategory =
-            rawAge.includes('جميع الفئات') ||
-            normalizeCategoryKey(rawAge) === 'OPEN' ||
-            normalizeCategoryKey(rawAge) === normalizeCategoryKey(cat.category);
-          const matchesGender = (t.gender as string) === 'Both' || t.gender === 'Mixed' || t.gender === cat.gender;
-          return matchesCategory && matchesGender;
-        })
-      );
-      if (matched.length > 0) cats = matched;
-    }
-    if (isTeacher && effectiveTeacherCadre) {
-      return cats.filter(cat => isCategoryAllowedForTeacherLevel(effectiveTeacherCadre, cat.category, 'cross_country'));
-    }
-    return cats;
-  }, [ccTourns, baseCcTourns.length, isTeacher, effectiveTeacherCadre]);
+    return CROSS_COUNTRY_CATEGORIES;
+  }, [ccTourns.length, baseCcTourns.length, isTeacher]);
 
   const finalCategories = useMemo(() => {
     if (isTeacher && baseCcTourns.length > 0 && ccTourns.length === 0) {
@@ -951,8 +933,17 @@ export const CrossCountryBulkRegisterModal: React.FC<CrossCountryBulkRegisterMod
         );
         if (relevantTournament) {
           if (relevantTournament.level) {
+            const schoolAllowedInAnyCc = baseCcTourns.some(t =>
+              isSchoolLevelAllowedForTournament(
+                activeSchoolObj.type,
+                t.level,
+                t.ageCategory,
+                'cross_country'
+              )
+            );
             const isAllowed =
               isPrivateSchoolRecord(activeSchoolObj) ||
+              schoolAllowedInAnyCc ||
               isSchoolLevelAllowedForTournament(
                 activeSchoolObj.type,
                 relevantTournament.level,

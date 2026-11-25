@@ -151,9 +151,12 @@ export const RegisterStudentModal: React.FC<RegisterStudentModalProps> = ({
   }, [birthDate, category, currentSeason, gender, sport?.id]);
 
   const seasonalCategories = getAgeCategoriesForSeason(currentSeason, undefined, sport?.id);
-  const baseCategories = (sport?.ageCategories && sport.ageCategories.length > 0)
+  const configuredCategories = (sport?.ageCategories && sport.ageCategories.length > 0)
     ? sport.ageCategories.map(normalizeCategoryKey)
     : seasonalCategories.map(c => c.id);
+  const baseCategories = sport?.id === 'cross_country'
+    ? Array.from(new Set([...configuredCategories, 'U12', 'U15', 'U18', 'U20']))
+    : configuredCategories;
 
   const matchedTeacherSchool = useMemo(() => {
     const lookupName = preselectedSchoolName || userProfile?.workLocation || (userProfile as any)?.schoolName;
@@ -372,8 +375,15 @@ export const RegisterStudentModal: React.FC<RegisterStudentModalProps> = ({
         if (relevantTournament) {
           const ccSportTourns = tournaments.filter(t => t.sportId === 'cross_country' && t.status !== 'Draft' && (t as any).isActive !== false);
           const resolvedCadre = resolveEffectiveTeacherCadre(userProfile, activeSchoolObj);
+          const schoolAllowedAnyCc = sport.id === 'cross_country' && ccSportTourns.some(t =>
+            isSchoolLevelAllowedForTournament(activeSchoolObj.type, t.level, t.ageCategory, 'cross_country')
+          );
+          const cadreAllowedAnyCc = sport.id === 'cross_country' && Boolean(resolvedCadre) && ccSportTourns.some(t =>
+            isTeacherLevelAllowedForTournament(resolvedCadre, t.level, t.ageCategory, 'cross_country')
+          );
           const isAllowed =
             isPrivateSchoolRecord(activeSchoolObj) ||
+            schoolAllowedAnyCc ||
             isSchoolLevelAllowedForTournament(
               activeSchoolObj.type,
               relevantTournament.level,
@@ -390,6 +400,7 @@ export const RegisterStudentModal: React.FC<RegisterStudentModalProps> = ({
           // Check teacher cadre (extra safety)
           if (
             resolvedCadre &&
+            !cadreAllowedAnyCc &&
             !isTeacherLevelAllowedForTournament(resolvedCadre, relevantTournament.level, relevantTournament.ageCategory || normCategory, relevantTournament.sportId || sport.id) &&
             !(resolvedCadre === 'Primary' && isCrossCountryU15OpenToPrimary(relevantTournament, ccSportTourns))
           ) {

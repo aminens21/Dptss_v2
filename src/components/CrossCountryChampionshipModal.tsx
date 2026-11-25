@@ -162,27 +162,11 @@ export const CrossCountryChampionshipModal: React.FC<CrossCountryChampionshipMod
   }, [isOpen, isTeacherAllowedForCc, baseCcTournaments, onClose]);
 
   const visibleCategories = useMemo(() => {
-    let list = CROSS_COUNTRY_CATEGORIES;
-    if (isTeacherRole && !canManage && effectiveTeacherCadre) {
-      list = list.filter(cat => isCategoryAllowedForTeacherLevel(effectiveTeacherCadre, cat.category, 'cross_country'));
-    }
-    if (ccTournaments.length > 0) {
-      const tourFiltered = list.filter(cat =>
-        ccTournaments.some(t => {
-          const rawAge = String(t.ageCategory || '');
-          const matchesCat =
-            rawAge.includes('جميع الفئات') ||
-            normalizeCategoryKey(rawAge) === 'OPEN' ||
-            normalizeCategoryKey(rawAge) === normalizeCategoryKey(cat.category);
-          return matchesCat && (t.gender === 'Mixed' || (t.gender as string) === 'Both' || t.gender === cat.gender);
-        })
-      );
-      if (tourFiltered.length > 0) list = tourFiltered;
-    } else if (isTeacherRole && !canManage && baseCcTournaments.length > 0) {
+    if (isTeacherRole && !canManage && baseCcTournaments.length > 0 && ccTournaments.length === 0) {
       return [];
     }
-    return list;
-  }, [isTeacherRole, canManage, effectiveTeacherCadre, ccTournaments, baseCcTournaments.length]);
+    return CROSS_COUNTRY_CATEGORIES;
+  }, [isTeacherRole, canManage, ccTournaments.length, baseCcTournaments.length]);
 
   const [selectedCatId, setSelectedCatId] = useState<string>('u15_male');
   useEffect(() => {
