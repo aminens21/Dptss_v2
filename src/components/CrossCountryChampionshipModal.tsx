@@ -1,12 +1,13 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { Tournament, Student, School, User, Sport, AffiliationDisplayConfig } from '../types';
+import { Tournament, Student, School, User, Sport, AffiliationDisplayConfig, CrossCountryBibsStatus } from '../types';
 import { DataService, SPORTS_MAP, getAgeCategoriesForSeason, validateBirthDateForCategory, resolveSchoolCoach, schoolNamesMatch, resolveEffectiveAffiliationMode, isAffiliationAllowedByDisplayConfig, normalizeCategoryKey, resolveEffectiveTeacherCadre, isTeacherLevelAllowedForTournament, isCategoryAllowedForTeacherLevel, isCrossCountryU15OpenToPrimary, isSchoolSectorAllowedForTournament, findMatchingSchoolForTeacher, parseTournamentAllowedLevels, getTournamentLevelAr } from '../lib/dataService';
 import { canUserDownloadTournamentTablePdf, buildParticipationTableRows, downloadTournamentParticipationTablePdf, formatTournamentRedBannerTitle } from '../lib/tournamentTablePdfService';
 import { useAuth } from '../contexts/AuthContext';
 import { useRolePermissions } from '../hooks/useRolePermissions';
 import {
   CROSS_COUNTRY_CATEGORIES,
-  CrossCountryCategoryDef
+  CrossCountryCategoryDef,
+  filterCrossCountryStudents
 } from '../lib/crossCountryConfig';
 import { AppLogo } from './AppLogo';
 import { CountdownTimer } from './CountdownTimer';
@@ -42,7 +43,8 @@ import {
   Upload,
   Printer,
   Image as ImageIcon,
-  UserPlus
+  UserPlus,
+  Lock
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { downloadIndividualCardPdf } from '../lib/participationPdfService';
@@ -211,8 +213,14 @@ export const CrossCountryChampionshipModal: React.FC<CrossCountryChampionshipMod
     () => DataService.getAffiliationDisplayConfigSync()
   );
   const [withdrawRefreshTick, setWithdrawRefreshTick] = useState(0);
+  const [bibsPublishStatus, setBibsPublishStatus] = useState<CrossCountryBibsStatus>(() =>
+    DataService.getCrossCountryBibsStatusSync(activeDirectorateId)
+  );
 
   useEffect(() => {
+    const unsubBibs = DataService.subscribeToCrossCountryBibsStatus((st) => {
+      setBibsPublishStatus(st);
+    }, activeDirectorateId);
     const unsub = DataService.subscribeToAffiliationDisplayConfig((cfg) => {
       setAffiliationDisplayConfig(cfg);
     });
@@ -223,11 +231,12 @@ export const CrossCountryChampionshipModal: React.FC<CrossCountryChampionshipMod
     window.addEventListener('schoolWithdrawalsUpdated', handleSyncEvents);
     window.addEventListener('schoolConfirmationsUpdated', handleSyncEvents);
     return () => {
+      if (typeof unsubBibs === 'function') unsubBibs();
       if (typeof unsub === 'function') unsub();
       window.removeEventListener('schoolWithdrawalsUpdated', handleSyncEvents);
       window.removeEventListener('schoolConfirmationsUpdated', handleSyncEvents);
     };
-  }, [refreshConfirmations]);
+  }, [refreshConfirmations, activeDirectorateId]);
 
   const effectiveSchoolName = teacherSchoolName || userProfile?.schoolName || userProfile?.workLocation || '';
   const canonicalTeacherSchoolId = useMemo(() => {
@@ -240,6 +249,30 @@ export const CrossCountryChampionshipModal: React.FC<CrossCountryChampionshipMod
     () => canUserDownloadTournamentTablePdf(userProfile, 'cross_country'),
     [userProfile]
   );
+
+  const teacherOwnCcRunnersCount = useMemo(() => {
+    if (!isTeacherRole || canManage) return 0;
+    const pool = filterCrossCountryStudents(allStudents);
+    return pool.filter(s =>
+      (canonicalTeacherSchoolId && s.schoolId === canonicalTeacherSchoolId) ||
+      (effectiveSchoolName && schoolNamesMatch(s.schoolName || '', effectiveSchoolName))
+    ).length;
+  }, [isTeacherRole, canManage, allStudents, canonicalTeacherSchoolId, effectiveSchoolName]);
+
+  const handleOpenTeacherSchoolBibs = () => {
+    if (!bibsPublishStatus.generated) {
+      toast('لم يقم المسير بتوليد وإتاحة الصدريات بعد — ستتاح صدريات مؤسستك للتحميل والطباعة فور توليدها.', {
+        icon: '⏳',
+        duration: 4000
+      });
+      return;
+    }
+    if (teacherOwnCcRunnersCount === 0) {
+      toast.error('لا يوجد تلاميذ مسجلون لمؤسستكم في بطولة العدو الريفي بعد.');
+      return;
+    }
+    setIsBibGeneratorOpen(true);
+  };
 
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
@@ -759,6 +792,34 @@ export const CrossCountryChampionshipModal: React.FC<CrossCountryChampionshipMod
                       </button>
                     )}
 
+                    {isTeacherRole && !canManage && (
+                      <button
+                        type="button"
+                        onClick={handleOpenTeacherSchoolBibs}
+                        className={`px-3.5 py-2 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-1.5 shadow-3xs border ${
+                          bibsPublishStatus.generated && teacherOwnCcRunnersCount > 0
+                            ? 'bg-gradient-to-r from-emerald-500/25 to-teal-500/25 hover:from-emerald-500/40 hover:to-teal-500/40 text-emerald-200 border-emerald-400/50'
+                            : 'bg-white/5 hover:bg-white/10 text-slate-300 border-white/15'
+                        }`}
+                        title={
+                          bibsPublishStatus.generated
+                            ? 'تحميل أو طباعة صدريات مؤسستك فقط بصيغة PDF'
+                            : 'تُفعّل هذه الميزة بعد توليد الصدريات من طرف المسير'
+                        }
+                      >
+                        {bibsPublishStatus.generated ? (
+                          <Download className="w-3.5 h-3.5 text-emerald-300" />
+                        ) : (
+                          <Lock className="w-3.5 h-3.5 text-amber-300" />
+                        )}
+                        <span>
+                          {bibsPublishStatus.generated
+                            ? `صدريات مؤسستي PDF (${teacherOwnCcRunnersCount}) 🎽`
+                            : 'صدريات مؤسستي PDF (بعد توليد المسير)'}
+                        </span>
+                      </button>
+                    )}
+
                     {canManage && onProgramTournament && (
                       <div className="flex items-center gap-2">
                         <button
@@ -942,6 +1003,34 @@ export const CrossCountryChampionshipModal: React.FC<CrossCountryChampionshipMod
                   <Sparkles className="w-4 h-4 text-slate-950" />
                   <span>تسجيل 8 مشاركين (3 فردي + 5 فريق) ⚡</span>
                 </button>
+
+                {isTeacherRole && !canManage && (
+                  <button
+                    type="button"
+                    onClick={handleOpenTeacherSchoolBibs}
+                    className={`px-3.5 py-2 rounded-xl text-xs font-black shadow-xs transition-all cursor-pointer flex items-center gap-1.5 border ${
+                      bibsPublishStatus.generated && teacherOwnCcRunnersCount > 0
+                        ? 'bg-emerald-600 hover:bg-emerald-700 text-white border-emerald-600'
+                        : 'bg-slate-100 hover:bg-slate-200 text-slate-600 border-slate-300'
+                    }`}
+                    title={
+                      bibsPublishStatus.generated
+                        ? 'تحميل أو طباعة صدريات مؤسستك فقط بصيغة PDF'
+                        : 'في انتظار توليد الصدريات من طرف المسير'
+                    }
+                  >
+                    {bibsPublishStatus.generated ? (
+                      <Printer className="w-4 h-4" />
+                    ) : (
+                      <Lock className="w-3.5 h-3.5 text-amber-600" />
+                    )}
+                    <span>
+                      {bibsPublishStatus.generated
+                        ? `تحميل صدريات مؤسستي PDF (${teacherOwnCcRunnersCount}) 🎽`
+                        : 'صدريات المؤسسة PDF (بعد التوليد)'}
+                    </span>
+                  </button>
+                )}
               </div>
             </div>
           </div>
@@ -1968,6 +2057,11 @@ export const CrossCountryChampionshipModal: React.FC<CrossCountryChampionshipMod
           students={allStudents}
           schools={schools}
           initialCategoryId={selectedCatId}
+          teacherSchoolScope={
+            isTeacherRole && !canManage
+              ? { schoolId: canonicalTeacherSchoolId, schoolName: effectiveSchoolName }
+              : undefined
+          }
         />
       )}
 

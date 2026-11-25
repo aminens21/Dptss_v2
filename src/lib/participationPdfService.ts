@@ -1,6 +1,27 @@
 import { Student, School, User, Sport, Directorate } from '../types';
-import { SPORTS_MAP, getAgeCategoriesForSeason, getCategoryGenderLabel, DataService } from './dataService';
+import { SPORTS_MAP, DataService, normalizeCategoryKey, isTeamSport } from './dataService';
+import { resolveRunnerParticipationType } from './crossCountryConfig';
 import toast from 'react-hot-toast';
+
+function formatConciseCategoryLabel(category: any, gender?: string): string {
+  if (!category) return '—';
+  const normKey = normalizeCategoryKey(String(category));
+  const gLabel = gender === 'Female' || gender === 'إناث' ? 'إناث' : gender === 'Male' || gender === 'ذكور' ? 'ذكور' : '';
+  return gLabel ? `${normKey} ${gLabel}` : normKey;
+}
+
+function formatParticipationTypeForSheet(student: Student, sportId?: string): string {
+  if (!student.participationType && isTeamSport(sportId || student.sportId || '')) {
+    return 'فريق المؤسسة';
+  }
+  const resolved = resolveRunnerParticipationType({
+    studentId: student.id,
+    fullName: student.fullName || student.name,
+    participationType: student.participationType,
+    bibNumber: student.bibNumber
+  });
+  return resolved === 'school_team' ? 'فريق المؤسسة' : 'مشاركة فردية';
+}
 
 export interface ParticipationPdfOptions {
   sport: Sport | { id: string; name: string };
@@ -10,6 +31,7 @@ export interface ParticipationPdfOptions {
   season?: string;
   categoryLabel?: string;
   genderLabel?: string;
+  affiliationLabel?: string;
   teacher?: {
     fullName?: string;
     workLocation?: string;
@@ -26,20 +48,37 @@ export interface ParticipationPdfOptions {
   };
 }
 
+function formatSeasonDisplay(rawSeason?: string): string {
+  const s = (rawSeason || '2026/2027').trim();
+  return s.replace(/\s*\/\s*/g, '-').replace(/\s*[–—-]\s*/g, '-');
+}
+
+function resolveSheetAffiliationLabel(students: Student[], explicitLabel?: string): string {
+  if (explicitLabel && explicitLabel.trim()) return explicitLabel.trim();
+  const hasClub = students.some(s => s?.affiliationType === 'club_affiliated');
+  const hasNonClub = students.some(s => !s?.affiliationType || s.affiliationType !== 'club_affiliated');
+  if (hasClub && hasNonClub) return 'منتمين وغير منتمين للأندية';
+  if (hasClub) return 'منتمين للأندية';
+  return 'غير منتمين للأندية';
+}
+
 export function generateParticipationFormHtml(options: ParticipationPdfOptions): string {
   const {
     sport,
     schoolName,
     directorateName = 'المديرية الإقليمية بتاوريرت',
     regionName = 'الأكاديمية الجهوية للتربية والتكوين لجهة الشرق',
-    season = '2025 – 2026',
+    season = '2026/2027',
     categoryLabel = 'جميع الفئات',
     genderLabel = 'ذكور وإناث',
+    affiliationLabel,
     teacher = {},
     students,
     officialLogos
   } = options;
 
+  const displaySeason = formatSeasonDisplay(season);
+  const resolvedAffiliationLabel = resolveSheetAffiliationLabel(students, affiliationLabel);
   const sportName = SPORTS_MAP[sport.id]?.name || sport.name || sport.id;
 
   // We want minimum 12 rows for official uniformity as shown in the template image
@@ -54,10 +93,8 @@ export function generateParticipationFormHtml(options: ParticipationPdfOptions):
     if (student) {
       const bDate = student.birthDate || '';
       const massar = student.massarNumber || '—';
-      const catLabel = getCategoryGenderLabel(student.category, student.gender, season, sport.id);
-      const affiliationLabel = student.affiliationType === 'club_affiliated' 
-        ? 'منتمي لنادي' 
-        : 'لا منتمي';
+      const catLabel = formatConciseCategoryLabel(student.category, student.gender);
+      const participationLabel = formatParticipationTypeForSheet(student, sport.id);
       const photoHtml = student.photoUrl
         ? `<img src="${student.photoUrl}" referrerpolicy="no-referrer" style="width: 32px; height: 38px; object-fit: cover; border-radius: 3px; border: 1px solid #94a3b8; display: block; margin: 0 auto;" />`
         : `<div style="width: 32px; height: 38px; border: 1px dashed #cbd5e1; border-radius: 3px; margin: 0 auto; display: flex; align-items: center; justify-content: center; font-size: 8px; color: #94a3b8;">صورة</div>`;
@@ -68,8 +105,8 @@ export function generateParticipationFormHtml(options: ParticipationPdfOptions):
           <td style="border: 1px solid #cbd5e1; padding: 3px 4px; font-weight: bold; font-family: monospace; letter-spacing: 0.5px; color: #0369a1; width: 100px;">${massar}</td>
           <td style="border: 1px solid #cbd5e1; padding: 3px 6px; font-weight: bold; text-align: center; color: #0f172a;">${student.fullName}</td>
           <td style="border: 1px solid #cbd5e1; padding: 3px 4px; font-family: monospace; color: #334155; width: 80px;">${bDate}</td>
-          <td style="border: 1px solid #cbd5e1; padding: 3px 4px; font-weight: bold; color: #1e293b; width: 140px;">${catLabel}</td>
-          <td style="border: 1px solid #cbd5e1; padding: 3px 4px; font-weight: bold; color: #475569; width: 95px;">${affiliationLabel}</td>
+          <td style="border: 1px solid #cbd5e1; padding: 3px 4px; font-weight: bold; color: #1e293b; width: 100px;">${catLabel}</td>
+          <td style="border: 1px solid #cbd5e1; padding: 3px 4px; font-weight: bold; color: #0f172a; width: 105px;">${participationLabel}</td>
           <td style="border: 1px solid #cbd5e1; padding: 3px 6px; text-align: center; color: #334155;">${student.schoolName || schoolName}</td>
           <td style="border: 1px solid #cbd5e1; padding: 2px; width: 45px;">
             ${photoHtml}
@@ -128,8 +165,11 @@ export function generateParticipationFormHtml(options: ParticipationPdfOptions):
       <!-- Document Banner / Title -->
       <div style="border: 2px solid #0284c7; border-radius: 6px; background-color: #f0f9ff; text-align: center; padding: 10px; margin-bottom: 12px;">
         <h1 style="margin: 0; font-size: 15px; font-weight: 900; color: #0369a1; letter-spacing: 0.2px;">
-          لائحة المشاركة في البطولة المدرسية برسم الموسم الدراسي: ${season}
+          لائحة المشاركة في البطولة المدرسية برسم الموسم الدراسي: <span dir="ltr" style="unicode-bidi: embed;">${displaySeason}</span>
         </h1>
+        <div style="margin-top: 4px; font-size: 12px; font-weight: 800; color: #0f172a;">
+          صنف المشاركة: <span style="color: #0369a1;">${resolvedAffiliationLabel}</span>
+        </div>
       </div>
 
       <!-- Top Information Box: Sport, Category, School, Directorate -->
@@ -200,8 +240,8 @@ export function generateParticipationFormHtml(options: ParticipationPdfOptions):
             <th style="border: 1px solid #0284c7; padding: 6px 4px; width: 100px;">رقم مسار</th>
             <th style="border: 1px solid #0284c7; padding: 6px 6px;">الاسم والنسب</th>
             <th style="border: 1px solid #0284c7; padding: 6px 4px; width: 80px;">تاريخ الازدياد</th>
-            <th style="border: 1px solid #0284c7; padding: 6px 4px; width: 140px;">الفئة العمرية (التاريخ)</th>
-            <th style="border: 1px solid #0284c7; padding: 6px 4px; width: 95px;">صنف المشاركة</th>
+            <th style="border: 1px solid #0284c7; padding: 6px 4px; width: 100px;">الفئة العمرية</th>
+            <th style="border: 1px solid #0284c7; padding: 6px 4px; width: 105px;">نوع المشاركة</th>
             <th style="border: 1px solid #0284c7; padding: 6px 6px;">المؤسسة</th>
             <th style="border: 1px solid #0284c7; padding: 6px 4px; width: 45px;">الصورة</th>
           </tr>

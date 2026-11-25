@@ -144,7 +144,7 @@ export const TechCommitteeHeads: React.FC = () => {
         (t.directorateId || 'taourirt') === activeDirId &&
         t.status !== 'Draft' &&
         (t as any).isActive !== false &&
-        (!activeSeason || !t.seasonId || t.seasonId === activeSeason)
+        (!activeSeason || !t.seasonId || t.seasonId === activeSeason || (activeSeason === '2026/2027' && t.seasonId === '2025/2026'))
       );
       const dirMatches = allMatches.filter(m => !m.directorateId || m.directorateId === activeDirId);
       setTeachers(dirTeachers);

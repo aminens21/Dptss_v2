@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Match, School, Venue, Tournament, Referee, Student, User, BlockedSchedulePeriod } from '../types';
-import { X, CalendarDays, Clock, MapPin, Trophy, AlertTriangle, AlertCircle, Calendar, ArrowRight, ShieldCheck, Lock, Users, Tag, UserCheck, Plus, Building, Info, Search, CheckCircle2, MessageCircle } from 'lucide-react';
+import { X, CalendarDays, Clock, MapPin, Trophy, AlertTriangle, AlertCircle, Calendar, ArrowRight, ShieldCheck, Lock, Users, Tag, UserCheck, Plus, Building, Info, Search, CheckCircle2, MessageCircle, BookmarkPlus } from 'lucide-react';
 import { SPORTS_MAP, AGE_CATEGORIES, GENDER_MAP, DataService, getAgeCategoriesForSeason, normalizeCategoryKey, normalizeDateToYmd, EDUCATIONAL_CYCLE_LABELS, getMatchEducationalCycles, findBlockedPeriodForDate, findAllBlockedPeriodsForDate, normalizeArabicSearch, schoolNamesMatch, normalizeTournamentAffiliation, normalizeSchoolCycleType } from '../lib/dataService';
 import { useAuth, isSuperAdminEmail } from '../contexts/AuthContext';
 import { resolveHostSchoolForMatch, findRefereeContact, generateRefereeMatchNotificationMessage, getWhatsAppUrl } from '../lib/whatsappService';
@@ -105,6 +105,8 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
   const [hostSchoolCycleFilter, setHostSchoolCycleFilter] = useState<'ALL' | 'ابتدائي' | 'إعدادي' | 'تأهيلي'>('ALL');
   const [venueId, setVenueId] = useState(venues[0]?.id || 'ven-1');
   const [customVenueName, setCustomVenueName] = useState<string>('');
+  const [savedVenues, setSavedVenues] = useState<Venue[]>(venues);
+  const [isSavingCustomVenue, setIsSavingCustomVenue] = useState<boolean>(false);
   const [referees, setReferees] = useState<string[]>(['']);
   const [allReferees, setAllReferees] = useState<Referee[]>([]);
   const [allUsers, setAllUsers] = useState<User[]>([]);
@@ -144,14 +146,90 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
     }
   }, [isOpen]);
 
-  // Subscribe to blocked holidays / exam periods
+  // Subscribe to blocked holidays / exam periods and keep saved venues live
   useEffect(() => {
     if (!isOpen) return;
-    const unsub = DataService.subscribeToBlockedScheduleDates((periods) => {
+    const unsubBlocked = DataService.subscribeToBlockedScheduleDates((periods) => {
       setBlockedPeriods(periods);
     });
-    return () => unsub();
+    const unsubVenues = DataService.subscribeToVenues((liveVenues) => {
+      if (Array.isArray(liveVenues)) {
+        setSavedVenues(liveVenues);
+      }
+    });
+    return () => {
+      unsubBlocked();
+      unsubVenues();
+    };
   }, [isOpen]);
+
+  useEffect(() => {
+    if (venues && venues.length > 0) {
+      setSavedVenues(prev => {
+        const merged = [...prev];
+        const existingIds = new Set(merged.map(v => v.id));
+        venues.forEach(v => {
+          if (v && v.id && !existingIds.has(v.id)) {
+            merged.push(v);
+            existingIds.add(v.id);
+          }
+        });
+        return merged;
+      });
+    }
+  }, [venues]);
+
+  const uniqueSavedVenues = useMemo(() => {
+    const seen = new Set<string>();
+    return savedVenues.filter(v => {
+      const norm = normalizeArabicSearch(v?.name || '');
+      if (!norm || seen.has(norm)) return false;
+      seen.add(norm);
+      return true;
+    });
+  }, [savedVenues]);
+
+  const isCustomVenueAlreadySaved = useMemo(() => {
+    const norm = normalizeArabicSearch(customVenueName);
+    if (!norm) return false;
+    return uniqueSavedVenues.some(v => normalizeArabicSearch(v.name || '') === norm);
+  }, [customVenueName, uniqueSavedVenues]);
+
+  const saveCustomVenueIfNeeded = async (rawName: string, showToast = false): Promise<Venue | undefined> => {
+    const cleanName = (rawName || '').trim();
+    if (!cleanName) {
+      if (showToast) toast.error('يرجى كتابة اسم الفضاء الرياضي أولاً');
+      return undefined;
+    }
+    const norm = normalizeArabicSearch(cleanName);
+    const existing = savedVenues.find(v => normalizeArabicSearch(v.name || '') === norm);
+    if (existing) {
+      setVenueId(existing.id);
+      if (showToast) toast.success(`الفضاء "${existing.name}" محفوظ بالفعل في القائمة`);
+      return existing;
+    }
+    try {
+      setIsSavingCustomVenue(true);
+      const activeDirId = DataService.getActiveDirectorateId() || 'taourirt';
+      const created = await DataService.addVenue({
+        name: cleanName,
+        city: activeDirId === 'all' ? 'تاوريرت' : activeDirId,
+        address: 'فضاء رياضي إقليمي',
+        directorateId: activeDirId === 'all' ? 'taourirt' : activeDirId
+      });
+      setSavedVenues(prev => [created, ...prev.filter(v => v.id !== created.id)]);
+      setVenueId(created.id);
+      setCustomVenueName(created.name);
+      if (showToast) toast.success(`تم حفظ الفضاء "${cleanName}" وسيظل متاحاً للاختيار في كل مرة ✅`);
+      return created;
+    } catch (err) {
+      console.warn('Error saving custom venue:', err);
+      if (showToast) toast.error('تعذر حفظ الفضاء في قاعدة البيانات');
+      return undefined;
+    } finally {
+      setIsSavingCustomVenue(false);
+    }
+  };
 
   // Load referees and users from DataService
   useEffect(() => {
@@ -322,13 +400,13 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
     [venueMode, schools, hostSchoolId]
   );
 
-  const selectedVenue = useMemo(() => venues.find(v => v.id === venueId), [venues, venueId]);
+  const selectedVenue = useMemo(() => uniqueSavedVenues.find(v => v.id === venueId), [uniqueSavedVenues, venueId]);
 
   const effectiveVenueKey = useMemo(() => {
     if (venueMode === 'school') return hostSchoolId || '';
-    const matchedVenue = venues.find(v => v.name.trim() === customVenueName.trim() || v.id === venueId);
+    const matchedVenue = uniqueSavedVenues.find(v => normalizeArabicSearch(v.name) === normalizeArabicSearch(customVenueName) || v.id === venueId);
     return matchedVenue?.id || customVenueName.trim() || venueId;
-  }, [venueMode, hostSchoolId, venues, customVenueName, venueId]);
+  }, [venueMode, hostSchoolId, uniqueSavedVenues, customVenueName, venueId]);
 
   const effectiveVenueDisplayName = useMemo(() => {
     if (venueMode === 'school') {
@@ -709,9 +787,14 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
       const activeDirId = DataService.getActiveDirectorateId() || 'taourirt';
       const resolvedSportId = singleLockedSportId || sportId || availableTournaments.find(t => t.id === tournamentId)?.sportId || 'football';
       const hostSch = venueMode === 'school' ? schools.find(s => s.id === hostSchoolId) : undefined;
-      const matchedCustomVen = venueMode === 'custom'
-        ? venues.find(v => v.name.trim() === customVenueName.trim() || v.id === venueId)
+      let matchedCustomVen = venueMode === 'custom'
+        ? uniqueSavedVenues.find(v => normalizeArabicSearch(v.name) === normalizeArabicSearch(customVenueName) || v.id === venueId)
         : undefined;
+
+      if (venueMode === 'custom' && customVenueName.trim() && !matchedCustomVen) {
+        const newlySaved = await saveCustomVenueIfNeeded(customVenueName, false);
+        if (newlySaved) matchedCustomVen = newlySaved;
+      }
 
       const resolvedVenueId = venueMode === 'school'
         ? (hostSch?.id || hostSchoolId)
@@ -1179,8 +1262,9 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
                 type="button"
                 onClick={() => {
                   setVenueMode('custom');
-                  if (!customVenueName.trim() && venues[0]?.name) {
-                    setCustomVenueName(venues[0].name);
+                  if (!customVenueName.trim() && uniqueSavedVenues[0]?.name) {
+                    setCustomVenueName(uniqueSavedVenues[0].name);
+                    setVenueId(uniqueSavedVenues[0].id);
                   }
                 }}
                 className={`py-2 px-2.5 rounded-lg text-[11px] font-black flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
@@ -1190,7 +1274,7 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
                 }`}
               >
                 <MapPin className="h-3.5 w-3.5 shrink-0" />
-                <span>فضاء رياضي آخر (كتابة)</span>
+                <span>فضاء رياضي آخر (كتابة أو اختيار)</span>
               </button>
             </div>
 
@@ -1286,46 +1370,69 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
               </div>
             ) : (
               <div className="space-y-2">
-                <input
-                  type="text"
-                  value={customVenueName}
-                  onChange={(e) => setCustomVenueName(e.target.value)}
-                  placeholder="اكتب اسم الفضاء الرياضي (مثال: القاعة المغطاة، الملعب البلدي، حلبة ألعاب القوى...)"
-                  className={`w-full text-xs font-bold rounded-xl border px-3 py-2.5 text-slate-800 bg-white focus:outline-none focus:ring-2 ${
-                    hasConflict ? 'border-amber-400 bg-amber-50/30 ring-2 ring-amber-300' : 'border-slate-200 focus:ring-slate-900'
-                  }`}
-                />
-                {venues.length > 0 && (
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    <span className="text-[10px] font-bold text-slate-500">فضاءات مقترحة:</span>
-                    {venues.map(v => (
-                      <button
-                        key={v.id}
-                        type="button"
-                        onClick={() => {
-                          setVenueId(v.id);
-                          setCustomVenueName(v.name);
-                        }}
-                        className={`px-2 py-0.5 rounded-md text-[10px] font-bold border transition-colors cursor-pointer ${
-                          customVenueName.trim() === v.name.trim()
-                            ? 'bg-slate-900 text-white border-slate-900'
-                            : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
-                        }`}
-                      >
-                        🏟️ {v.name}
-                      </button>
-                    ))}
-                    {!venues.some(v => v.name.includes('القاعة المغطاة')) && (
-                      <button
-                        type="button"
-                        onClick={() => setCustomVenueName('القاعة المغطاة')}
-                        className="px-2 py-0.5 rounded-md text-[10px] font-bold border bg-white text-slate-700 border-slate-200 hover:bg-slate-100 cursor-pointer"
-                      >
-                        🏟️ القاعة المغطاة
-                      </button>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={customVenueName}
+                    onChange={(e) => setCustomVenueName(e.target.value)}
+                    placeholder="اكتب اسم الفضاء الرياضي (مثال: القاعة المغطاة، الملعب البلدي، حلبة ألعاب القوى...)"
+                    className={`flex-1 text-xs font-bold rounded-xl border px-3 py-2.5 text-slate-800 bg-white focus:outline-none focus:ring-2 ${
+                      hasConflict ? 'border-amber-400 bg-amber-50/30 ring-2 ring-amber-300' : 'border-slate-200 focus:ring-slate-900'
+                    }`}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => saveCustomVenueIfNeeded(customVenueName, true)}
+                    disabled={isSavingCustomVenue || !customVenueName.trim() || isCustomVenueAlreadySaved}
+                    className={`px-3 py-2.5 rounded-xl text-[11px] font-black flex items-center gap-1.5 border transition-all shrink-0 cursor-pointer disabled:cursor-default ${
+                      isCustomVenueAlreadySaved
+                        ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                        : 'bg-emerald-600 hover:bg-emerald-700 text-white border-emerald-600 shadow-2xs disabled:opacity-40'
+                    }`}
+                    title="حفظ هذا الفضاء في القائمة للرجوع إليه دون إعادة كتابته"
+                  >
+                    {isCustomVenueAlreadySaved ? (
+                      <>
+                        <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+                        <span>محفوظ ✓</span>
+                      </>
+                    ) : (
+                      <>
+                        <BookmarkPlus className="h-3.5 w-3.5 shrink-0" />
+                        <span>{isSavingCustomVenue ? 'جاري الحفظ...' : '+ حفظ الفضاء'}</span>
+                      </>
                     )}
-                  </div>
-                )}
+                  </button>
+                </div>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="text-[10px] font-bold text-slate-500">الفضاءات المحفوظة:</span>
+                  {uniqueSavedVenues.map(v => (
+                    <button
+                      key={v.id}
+                      type="button"
+                      onClick={() => {
+                        setVenueId(v.id);
+                        setCustomVenueName(v.name);
+                      }}
+                      className={`px-2 py-0.5 rounded-md text-[10px] font-bold border transition-colors cursor-pointer ${
+                        normalizeArabicSearch(customVenueName) === normalizeArabicSearch(v.name)
+                          ? 'bg-slate-900 text-white border-slate-900'
+                          : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
+                      }`}
+                    >
+                      🏟️ {v.name}
+                    </button>
+                  ))}
+                  {!uniqueSavedVenues.some(v => v.name.includes('القاعة المغطاة')) && (
+                    <button
+                      type="button"
+                      onClick={() => setCustomVenueName('القاعة المغطاة')}
+                      className="px-2 py-0.5 rounded-md text-[10px] font-bold border bg-white text-slate-700 border-slate-200 hover:bg-slate-100 cursor-pointer"
+                    >
+                      🏟️ القاعة المغطاة
+                    </button>
+                  )}
+                </div>
               </div>
             )}
           </div>

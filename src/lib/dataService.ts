@@ -1,4 +1,4 @@
-import { Tournament, Match, School, Venue, User, Referee, Student, Sport, AppNotification, RoleSidebarPermissions, Directorate, DirectorateTransferRequest, SUPER_ADMIN_EMAILS, CrossCountryCategoryResult, PodiumWinner, CustomAgeCategory, AthleticsCategoryResult, AthleticsWinner, SchoolTournamentConfirmation, SchoolWithdrawalRecord, InternalMessage, CommunicationRecipientCategory, BlockedSchedulePeriod, EducationalCycleKey, AffiliationDisplayMode, AffiliationDisplayConfig, AdministrativeCadre } from '../types';
+import { Tournament, Match, School, Venue, User, Referee, Student, Sport, AppNotification, RoleSidebarPermissions, Directorate, DirectorateTransferRequest, SUPER_ADMIN_EMAILS, CrossCountryCategoryResult, PodiumWinner, CustomAgeCategory, AthleticsCategoryResult, AthleticsWinner, SchoolTournamentConfirmation, SchoolWithdrawalRecord, InternalMessage, CommunicationRecipientCategory, BlockedSchedulePeriod, EducationalCycleKey, AffiliationDisplayMode, AffiliationDisplayConfig, AdministrativeCadre, CrossCountryBibsStatus } from '../types';
 import { INITIAL_TOURNAMENTS, INITIAL_SCHOOLS, INITIAL_VENUES, INITIAL_DIRECTORATES } from './initialData';
 import { db } from '../firebase/config';
 import {
@@ -4651,7 +4651,7 @@ export const DataService = {
       callback(localList);
     };
     const handleLocalUpdate = () => {
-      if (isCloudSyncPaused()) emitLocal();
+      emitLocal();
     };
     window.addEventListener('venuesUpdated', handleLocalUpdate);
 
@@ -6657,10 +6657,14 @@ export const DataService = {
   },
 
   async getActiveSeason(): Promise<string> {
+    const localExplicit = typeof window !== 'undefined' && localStorage.getItem('taourirt_season_explicit_v2') === 'true';
     try {
       const snap = await getDoc(doc(db, 'config', 'season'));
       if (snap.exists()) {
-        const season = snap.data().current || '2026/2027';
+        const data = snap.data();
+        const rawSeason = data.current;
+        const hasExplicitChoice = Boolean(data.explicitSeasonChoiceV2) || localExplicit;
+        const season = (rawSeason === '2025/2026' && !hasExplicitChoice) ? '2026/2027' : (rawSeason || '2026/2027');
         localStorage.setItem('taourirt_sports_season', season);
         // Sync legacy key
         localStorage.setItem('active_season', season);
@@ -6669,14 +6673,24 @@ export const DataService = {
     } catch (e) {
       console.warn("Error loading active season from Firestore:", e);
     }
-    return localStorage.getItem('taourirt_sports_season') || '2026/2027';
+    const stored = localStorage.getItem('taourirt_sports_season');
+    if (stored === '2025/2026' && !localExplicit) {
+      localStorage.setItem('taourirt_sports_season', '2026/2027');
+      localStorage.setItem('active_season', '2026/2027');
+      return '2026/2027';
+    }
+    return stored || '2026/2027';
   },
 
   subscribeToActiveSeason(callback: (season: string) => void): () => void {
     try {
       return onSnapshot(doc(db, 'config', 'season'), (docSnap) => {
         if (docSnap.exists()) {
-          const season = docSnap.data().current || '2026/2027';
+          const data = docSnap.data();
+          const localExplicit = typeof window !== 'undefined' && localStorage.getItem('taourirt_season_explicit_v2') === 'true';
+          const hasExplicitChoice = Boolean(data.explicitSeasonChoiceV2) || localExplicit;
+          const rawSeason = data.current;
+          const season = (rawSeason === '2025/2026' && !hasExplicitChoice) ? '2026/2027' : (rawSeason || '2026/2027');
           localStorage.setItem('taourirt_sports_season', season);
           localStorage.setItem('active_season', season);
           callback(season);
@@ -6693,10 +6707,12 @@ export const DataService = {
   async setActiveSeason(season: string): Promise<void> {
     localStorage.setItem('taourirt_sports_season', season);
     localStorage.setItem('active_season', season);
+    localStorage.setItem('taourirt_season_explicit_v2', 'true');
     window.dispatchEvent(new CustomEvent('seasonChanged', { detail: season }));
     try {
       await setDoc(doc(db, 'config', 'season'), {
         current: season,
+        explicitSeasonChoiceV2: true,
         updatedAt: serverTimestamp()
       }, { merge: true });
     } catch (e) {
@@ -8117,8 +8133,8 @@ export const DataService = {
         const docDirId = data.directorateId || (docSnap.id.includes('_') ? docSnap.id.substring(0, docSnap.id.lastIndexOf('_')) : docSnap.id);
         const docSeasonId = data.seasonId || '2026/2027';
         
-        // Only process results for the current active season
-        if (docSeasonId !== activeSeason) return;
+        // Only process results for the current active season (keep legacy 2025/2026 visible under 2026/2027)
+        if (docSeasonId !== activeSeason && !(activeSeason === '2026/2027' && docSeasonId === '2025/2026')) return;
 
         // Accept document for current directorate or global view
         if (!activeDirId || activeDirId === 'all' || activeDirId === 'taourirt' || docDirId === activeDirId) {
@@ -8673,8 +8689,8 @@ export const DataService = {
           const docDirId = data.directorateId || (docSnap.id.includes('_') ? docSnap.id.substring(0, docSnap.id.lastIndexOf('_')) : (effectiveDirId === 'taourirt' ? 'taourirt' : ''));
           const docSeasonId = data.seasonId || '2026/2027';
 
-          // Only process results for the current active season
-          if (docSeasonId !== activeSeason) return;
+          // Only process results for the current active season (keep legacy 2025/2026 visible under 2026/2027)
+          if (docSeasonId !== activeSeason && !(activeSeason === '2026/2027' && docSeasonId === '2025/2026')) return;
 
           if (docDirId === effectiveDirId) {
             foundAnyForDir = true;
@@ -8888,6 +8904,7 @@ export const DataService = {
       console.warn("Firestore clear CC participants error:", e);
     }
 
+    await this.setCrossCountryBibsStatus({ generated: false, totalCount: 0 }, activeDirId).catch(() => {});
     window.dispatchEvent(new CustomEvent('studentsUpdated'));
     return removedCount;
   },
@@ -9265,8 +9282,13 @@ export const DataService = {
         }
         const seasonDoc = configSnap.docs.find(d => d.id === 'season');
         if (seasonDoc && seasonDoc.data().current) {
-          localStorage.setItem('taourirt_sports_season', seasonDoc.data().current);
-          window.dispatchEvent(new CustomEvent('seasonChanged', { detail: seasonDoc.data().current }));
+          const seasonData = seasonDoc.data();
+          const localExplicit = typeof window !== 'undefined' && localStorage.getItem('taourirt_season_explicit_v2') === 'true';
+          const hasExplicitChoice = Boolean(seasonData.explicitSeasonChoiceV2) || localExplicit;
+          const normalizedSeason = (seasonData.current === '2025/2026' && !hasExplicitChoice) ? '2026/2027' : (seasonData.current || '2026/2027');
+          localStorage.setItem('taourirt_sports_season', normalizedSeason);
+          localStorage.setItem('active_season', normalizedSeason);
+          window.dispatchEvent(new CustomEvent('seasonChanged', { detail: normalizedSeason }));
         }
       }
 
@@ -11227,6 +11249,160 @@ export const DataService = {
     } catch (e) {
       console.warn('saveAffiliationDisplayConfig saved locally; Firestore sync pending:', e);
     }
+  },
+
+  // ============================================================================
+  // CROSS COUNTRY BIBS GENERATION / PUBLICATION STATUS
+  // ============================================================================
+  getCrossCountryBibsStatusSync(directorateId?: string): CrossCountryBibsStatus {
+    const activeDirId = directorateId || this.getActiveDirectorateId() || 'taourirt';
+    const effectiveDir = activeDirId === 'all' ? 'taourirt' : activeDirId;
+    const localKey = `taourirt_cc_bibs_status_${effectiveDir}`;
+    try {
+      const raw = localStorage.getItem(localKey);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed.generated === 'boolean') {
+          return {
+            directorateId: effectiveDir,
+            generated: parsed.generated,
+            generatedAt: parsed.generatedAt,
+            generatedBy: parsed.generatedBy,
+            totalCount: typeof parsed.totalCount === 'number' ? parsed.totalCount : undefined,
+            styleConfig: parsed.styleConfig && typeof parsed.styleConfig === 'object' ? parsed.styleConfig : undefined
+          };
+        }
+      }
+    } catch {}
+    return {
+      directorateId: effectiveDir,
+      generated: false
+    };
+  },
+
+  async getCrossCountryBibsStatus(directorateId?: string): Promise<CrossCountryBibsStatus> {
+    const activeDirId = directorateId || this.getActiveDirectorateId() || 'taourirt';
+    const effectiveDir = activeDirId === 'all' ? 'taourirt' : activeDirId;
+    const localKey = `taourirt_cc_bibs_status_${effectiveDir}`;
+    const localFallback = this.getCrossCountryBibsStatusSync(effectiveDir);
+
+    if (this.isCloudSyncPaused()) {
+      return localFallback;
+    }
+
+    try {
+      const snap = await fbGetDoc(doc(db, 'settings', `cross_country_bibs_${effectiveDir}`));
+      if (snap.exists()) {
+        const data = snap.data() as any;
+        const st: CrossCountryBibsStatus = {
+          directorateId: effectiveDir,
+          generated: data.generated === true,
+          generatedAt: typeof data.generatedAt === 'string' ? data.generatedAt : undefined,
+          generatedBy: typeof data.generatedBy === 'string' ? data.generatedBy : undefined,
+          totalCount: typeof data.totalCount === 'number' ? data.totalCount : undefined,
+          styleConfig: data.styleConfig && typeof data.styleConfig === 'object' ? data.styleConfig : undefined
+        };
+        try {
+          localStorage.setItem(localKey, JSON.stringify(st));
+        } catch {}
+        return st;
+      }
+    } catch (e) {
+      console.warn('Error fetching cross country bibs status:', e);
+    }
+
+    return localFallback;
+  },
+
+  subscribeToCrossCountryBibsStatus(
+    callback: (status: CrossCountryBibsStatus) => void,
+    directorateId?: string
+  ): () => void {
+    const activeDirId = directorateId || this.getActiveDirectorateId() || 'taourirt';
+    const effectiveDir = activeDirId === 'all' ? 'taourirt' : activeDirId;
+    const localKey = `taourirt_cc_bibs_status_${effectiveDir}`;
+
+    callback(this.getCrossCountryBibsStatusSync(effectiveDir));
+
+    const handleLocal = () => {
+      callback(this.getCrossCountryBibsStatusSync(effectiveDir));
+    };
+    window.addEventListener('crossCountryBibsStatusUpdated', handleLocal);
+    window.addEventListener('directorateChanged', handleLocal);
+
+    if (this.isCloudSyncPaused()) {
+      return () => {
+        window.removeEventListener('crossCountryBibsStatusUpdated', handleLocal);
+        window.removeEventListener('directorateChanged', handleLocal);
+      };
+    }
+
+    const unsub = fbOnSnapshot(
+      doc(db, 'settings', `cross_country_bibs_${effectiveDir}`),
+      (snap) => {
+        if (snap.exists()) {
+          const data = snap.data() as any;
+          const st: CrossCountryBibsStatus = {
+            directorateId: effectiveDir,
+            generated: data.generated === true,
+            generatedAt: typeof data.generatedAt === 'string' ? data.generatedAt : undefined,
+            generatedBy: typeof data.generatedBy === 'string' ? data.generatedBy : undefined,
+            totalCount: typeof data.totalCount === 'number' ? data.totalCount : undefined,
+            styleConfig: data.styleConfig && typeof data.styleConfig === 'object' ? data.styleConfig : undefined
+          };
+          try {
+            localStorage.setItem(localKey, JSON.stringify(st));
+          } catch {}
+          callback(st);
+        }
+      },
+      () => {
+        handleLocal();
+      }
+    );
+
+    return () => {
+      window.removeEventListener('crossCountryBibsStatusUpdated', handleLocal);
+      window.removeEventListener('directorateChanged', handleLocal);
+      try {
+        unsub();
+      } catch {}
+    };
+  },
+
+  async setCrossCountryBibsStatus(
+    status: Partial<CrossCountryBibsStatus> & { generated: boolean },
+    directorateId?: string
+  ): Promise<CrossCountryBibsStatus> {
+    const activeDirId = directorateId || this.getActiveDirectorateId() || 'taourirt';
+    const effectiveDir = activeDirId === 'all' ? 'taourirt' : activeDirId;
+    const localKey = `taourirt_cc_bibs_status_${effectiveDir}`;
+    const existing = this.getCrossCountryBibsStatusSync(effectiveDir);
+    const mergedStyleConfig = status.styleConfig ?? existing.styleConfig;
+
+    const cleanStatus: CrossCountryBibsStatus = {
+      directorateId: effectiveDir,
+      generated: Boolean(status.generated),
+      generatedAt: status.generated ? (status.generatedAt || new Date().toISOString()) : '',
+      generatedBy: status.generated ? (status.generatedBy || '') : '',
+      totalCount: typeof status.totalCount === 'number' ? status.totalCount : 0,
+      ...(mergedStyleConfig ? { styleConfig: mergedStyleConfig } : {})
+    };
+
+    try {
+      localStorage.setItem(localKey, JSON.stringify(cleanStatus));
+    } catch {}
+    window.dispatchEvent(new CustomEvent('crossCountryBibsStatusUpdated', { detail: cleanStatus }));
+
+    try {
+      await fbSetDoc(doc(db, 'settings', `cross_country_bibs_${effectiveDir}`), {
+        ...cleanStatus,
+        updatedAt: serverTimestamp()
+      });
+    } catch (e) {
+      console.warn('setCrossCountryBibsStatus saved locally; Firestore sync pending:', e);
+    }
+    return cleanStatus;
   },
 
   // --- ADMINISTRATIVE CADRES (الأطر الإدارية: المفتشون، رئيس مكتب التربية البدنية، إلخ) ---

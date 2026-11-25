@@ -2,7 +2,7 @@ import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { DataService, SPORTS_MAP, getAgeCategoriesForSeason, deduplicateById, getCategoryGenderLabel, isClubTournament, normalizeCategoryKey, getTournamentLevelAr, isTeacherLevelAllowedForTournament, isCrossCountryU15OpenToPrimary, parseTournamentAllowedLevels, getCustomCategoryName, getCustomCategoryDetails, isSchoolSectorAllowedForTournament, getTournamentEducationSectorsAr, normalizeTournamentEducationSectors, getSchoolEducationSector, schoolNamesMatch, normalizeCanonicalSportId, areSportIdsEquivalent, isAffiliationAllowedByDisplayConfig, resolveEffectiveAffiliationMode, getEffectiveConfirmedBranches, resolveEffectiveTeacherCadre, findMatchingSchoolForTeacher, isTrackOrCrossCountrySport } from '../lib/dataService';
-import { Tournament, User, Student, School, Sport, Match, Directorate, AffiliationDisplayConfig } from '../types';
+import { Tournament, User, Student, School, Sport, Match, Directorate, AffiliationDisplayConfig, CrossCountryBibsStatus } from '../types';
 import { CountdownTimer } from '../components/CountdownTimer';
 import * as XLSX from 'xlsx';
 import {
@@ -32,13 +32,16 @@ import {
   RefreshCw,
   RotateCcw,
   FileText,
-  Sparkles
+  Sparkles,
+  Printer
 } from 'lucide-react';
 import { CreateTournamentModal } from '../components/CreateTournamentModal';
 import { EditTournamentModal } from '../components/EditTournamentModal';
 import { ConfirmDeleteModal } from '../components/ConfirmDeleteModal';
 import { CrossCountryChampionshipModal } from '../components/CrossCountryChampionshipModal';
 import { CrossCountryDemoModal } from '../components/CrossCountryDemoModal';
+import { BibGeneratorModal } from '../components/BibGeneratorModal';
+import { filterCrossCountryStudents } from '../lib/crossCountryConfig';
 import { SportChampionshipModal } from '../components/SportChampionshipModal';
 import { AthleticsChampionshipModal } from '../components/AthleticsChampionshipModal';
 import { EditTournamentScheduleModal } from '../components/EditTournamentScheduleModal';
@@ -101,6 +104,10 @@ export const Tournaments: React.FC = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isCcModalOpen, setIsCcModalOpen] = useState(false);
   const [isCcDemoModalOpen, setIsCcDemoModalOpen] = useState(false);
+  const [isTeacherCcBibsModalOpen, setIsTeacherCcBibsModalOpen] = useState(false);
+  const [ccBibsStatus, setCcBibsStatus] = useState<CrossCountryBibsStatus>(() =>
+    DataService.getCrossCountryBibsStatusSync()
+  );
   const [filterSport, setFilterSport] = useState<string>('ALL');
   const [filterStatus, setFilterStatus] = useState<'ALL' | 'PROGRAMMED' | 'UNPROGRAMMED' | 'MY_SCHOOL'>('ALL');
 
@@ -438,6 +445,15 @@ export const Tournaments: React.FC = () => {
     };
   }, []);
 
+  useEffect(() => {
+    const unsubBibsStatus = DataService.subscribeToCrossCountryBibsStatus((st) => {
+      setCcBibsStatus(st);
+    }, activeDirObj?.id);
+    return () => {
+      if (typeof unsubBibsStatus === 'function') unsubBibsStatus();
+    };
+  }, [activeDirObj?.id]);
+
   const handleManualCloudSync = async () => {
     if (isSyncingPendingCloud) return;
     if (DataService.isCloudSyncPaused()) {
@@ -656,7 +672,7 @@ export const Tournaments: React.FC = () => {
       // Find all existing tournaments for this sport in this directorate
       const existingSportTournaments = latestTournaments.filter(t => 
         t.sportId === targetSportId && 
-        (!t.seasonId || !targetSeasonId || t.seasonId === targetSeasonId) &&
+        (!t.seasonId || !targetSeasonId || t.seasonId === targetSeasonId || (targetSeasonId === '2026/2027' && t.seasonId === '2025/2026')) &&
         (!targetDirId || !t.directorateId || (t.directorateId || 'taourirt') === (targetDirId || 'taourirt'))
       );
 
@@ -925,6 +941,32 @@ export const Tournaments: React.FC = () => {
   const canonicalTeacherSchoolId = teacherSchoolObj?.id || userProfile?.schoolId || currentTeacherProfile?.schoolId || teacherSchoolName;
   const resolvedTeacherSchoolName = teacherSchoolObj?.name || teacherSchoolName;
 
+  const teacherOwnCcRunnersCount = useMemo(() => {
+    if (!isTeacherRole) return 0;
+    const pool = filterCrossCountryStudents(allStudents);
+    const effectiveName = resolvedTeacherSchoolName || teacherSchoolName;
+    return pool.filter(s =>
+      (canonicalTeacherSchoolId && s.schoolId === canonicalTeacherSchoolId) ||
+      (effectiveName && schoolNamesMatch(s.schoolName || '', effectiveName))
+    ).length;
+  }, [isTeacherRole, allStudents, canonicalTeacherSchoolId, resolvedTeacherSchoolName, teacherSchoolName]);
+
+  const handleOpenTeacherCcBibsModal = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!ccBibsStatus.generated) {
+      toast('لم يقم المسير بتوليد صدريات البطولة بعد — ستتمكن من تحميل صدريات مؤسستك فور توليدها.', {
+        icon: '⏳',
+        duration: 4000
+      });
+      return;
+    }
+    if (teacherOwnCcRunnersCount === 0) {
+      toast.error('لا يوجد تلاميذ مسجلون لمؤسستكم في بطولة العدو الريفي بعد.');
+      return;
+    }
+    setIsTeacherCcBibsModalOpen(true);
+  };
+
   const handleDownloadTournamentTablePdf = async (sport: Sport, sportTournaments: Tournament[]) => {
     const actorProfile = currentTeacherProfile || userProfile;
     if (!canUserDownloadTournamentTablePdf(actorProfile, sport.id, sportsConfig)) {
@@ -1143,7 +1185,7 @@ export const Tournaments: React.FC = () => {
       t.sportId === sport.id &&
       t.status !== 'Draft' &&
       (t as any).isActive !== false &&
-      (!t.seasonId || t.seasonId === activeSeason) &&
+      (!t.seasonId || t.seasonId === activeSeason || (activeSeason === '2026/2027' && t.seasonId === '2025/2026')) &&
       (!t.directorateId || (t.directorateId || 'taourirt') === (activeDirObj?.id || 'taourirt'))
     );
 
@@ -1788,6 +1830,38 @@ export const Tournaments: React.FC = () => {
                       )}
                     </div>
 
+                    {isTeacherRole && !canManageThis && (
+                      <div className="px-3 py-2 bg-emerald-950/60 border-t border-white/10 flex items-center justify-between gap-2">
+                        <button
+                          type="button"
+                          onClick={handleOpenTeacherCcBibsModal}
+                          title={
+                            ccBibsStatus.generated
+                              ? 'تحميل أو طبع صدريات مؤسستك فقط بصيغة PDF'
+                              : 'ستتاح صدريات مؤسستك للتحميل والطباعة فور توليدها من طرف المسير'
+                          }
+                          className={`w-full py-2 px-3 rounded-xl text-xs font-black flex items-center justify-center gap-2 transition-all cursor-pointer border ${
+                            ccBibsStatus.generated && teacherOwnCcRunnersCount > 0
+                              ? 'bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 text-slate-950 border-amber-300 shadow-sm'
+                              : 'bg-white/5 hover:bg-white/10 text-slate-300 border-white/15'
+                          }`}
+                        >
+                          {ccBibsStatus.generated ? (
+                            <Printer className="h-4 w-4 shrink-0" />
+                          ) : (
+                            <Lock className="h-3.5 w-3.5 text-amber-300 shrink-0" />
+                          )}
+                          <span>
+                            {ccBibsStatus.generated
+                              ? teacherOwnCcRunnersCount > 0
+                                ? `تحميل / طبع صدريات مؤسستي PDF (${teacherOwnCcRunnersCount}) 🎽`
+                                : 'صدريات مؤسستي PDF (لا يوجد تلاميذ مسجلون بمؤسستك)'
+                              : 'صدريات مؤسستي PDF (متاحة بعد التوليد من المسير) 🎽'}
+                          </span>
+                        </button>
+                      </div>
+                    )}
+
                     {isCentralAdmin && (
                       <div className="px-3 py-2 bg-indigo-950/70 border-t border-white/10 flex items-center justify-between gap-2">
                         <span className="text-[10px] font-bold text-indigo-200">أداة المسير المركزي:</span>
@@ -2278,6 +2352,20 @@ export const Tournaments: React.FC = () => {
         isTeacherRole={effectiveRole === 'TEACHER'}
         teacherSchoolName={effectiveRole === 'TEACHER' && userProfile ? userProfile.workLocation : undefined}
       />
+
+      {isTeacherCcBibsModalOpen && isTeacherRole && (
+        <BibGeneratorModal
+          isOpen={true}
+          onClose={() => setIsTeacherCcBibsModalOpen(false)}
+          students={allStudents}
+          schools={schools}
+          directorateName={activeDirObj?.shortName || activeDirObj?.name || 'تاوريرت'}
+          teacherSchoolScope={{
+            schoolId: canonicalTeacherSchoolId,
+            schoolName: resolvedTeacherSchoolName || teacherSchoolName
+          }}
+        />
+      )}
 
       {isCentralAdmin && (
         <CrossCountryDemoModal

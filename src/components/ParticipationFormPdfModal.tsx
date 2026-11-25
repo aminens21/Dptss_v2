@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { Student, School, User, Sport, Directorate, SchoolTournamentConfirmation } from '../types';
-import { SPORTS_MAP, getAgeCategoriesForSeason, getCategoryGenderLabel, DataService, OfficialLogos, resolveSchoolCoach, schoolNamesMatch, coachNamesMatch, normalizeCategoryKey } from '../lib/dataService';
+import { SPORTS_MAP, getAgeCategoriesForSeason, DataService, OfficialLogos, resolveSchoolCoach, schoolNamesMatch, coachNamesMatch, normalizeCategoryKey, isTeamSport } from '../lib/dataService';
+import { resolveRunnerParticipationType } from '../lib/crossCountryConfig';
 import { isFlexibleEmailMatch } from '../lib/utils';
 import { downloadParticipationFormPdf, ParticipationPdfOptions } from '../lib/participationPdfService';
 import { useAuth } from '../contexts/AuthContext';
@@ -53,7 +54,7 @@ export const ParticipationFormPdfModal: React.FC<ParticipationFormPdfModalProps>
   schoolName,
   directorateName = 'المديرية الإقليمية بتاوريرت',
   regionName = 'الأكاديمية الجهوية للتربية والتكوين لجهة الشرق',
-  season = '2025 – 2026',
+  season = '2026/2027',
   teacher,
   students,
   preselectedCategory = 'ALL',
@@ -367,6 +368,23 @@ export const ParticipationFormPdfModal: React.FC<ParticipationFormPdfModalProps>
     }
   }, [isOpen, preselectedCategory, preselectedGender]);
 
+  const displaySeason = useMemo(() => {
+    return (season || '2026/2027')
+      .trim()
+      .replace(/\s*\/\s*/g, '-')
+      .replace(/\s*[–—-]\s*/g, '-');
+  }, [season]);
+
+  const resolvedAffiliationLabel = useMemo(() => {
+    if (selectedAffiliation === 'club_affiliated') return 'منتمين للأندية';
+    if (selectedAffiliation === 'non_club') return 'غير منتمين للأندية';
+    const hasClub = filteredStudents.some(s => s?.affiliationType === 'club_affiliated');
+    const hasNonClub = filteredStudents.some(s => !s?.affiliationType || s.affiliationType !== 'club_affiliated');
+    if (hasClub && hasNonClub) return 'منتمين وغير منتمين للأندية';
+    if (hasClub) return 'منتمين للأندية';
+    return 'غير منتمين للأندية';
+  }, [selectedAffiliation, filteredStudents]);
+
   if (!isOpen || !sport) return null;
 
   const sportName = SPORTS_MAP[sport.id]?.name || sport.name || sport.id;
@@ -383,7 +401,28 @@ export const ParticipationFormPdfModal: React.FC<ParticipationFormPdfModalProps>
 
   const getCategoryLabel = (catId: string) => {
     if (catId === 'ALL') return 'جميع الفئات';
-    return getCategoryGenderLabel(catId, selectedGender === 'ALL' ? undefined : selectedGender, season, sport.id);
+    return normalizeCategoryKey(catId);
+  };
+
+  const getStudentConciseCategoryLabel = (st: Student) => {
+    if (!st.category) return '—';
+    const normKey = normalizeCategoryKey(st.category);
+    const gStr = String(st.gender || '');
+    const gLabel = gStr === 'Female' || gStr === 'إناث' ? 'إناث' : gStr === 'Male' || gStr === 'ذكور' ? 'ذكور' : '';
+    return gLabel ? `${normKey} ${gLabel}` : normKey;
+  };
+
+  const getParticipationTypeLabel = (st: Student) => {
+    if (!st.participationType && isTeamSport(sport.id || st.sportId || '')) {
+      return 'فريق المؤسسة';
+    }
+    const resolved = resolveRunnerParticipationType({
+      studentId: st.id,
+      fullName: st.fullName || st.name,
+      participationType: st.participationType,
+      bibNumber: st.bibNumber
+    });
+    return resolved === 'school_team' ? 'فريق المؤسسة' : 'مشاركة فردية';
   };
 
   const getGenderLabel = (g: string) => {
@@ -398,9 +437,10 @@ export const ParticipationFormPdfModal: React.FC<ParticipationFormPdfModalProps>
     schoolName,
     directorateName,
     regionName,
-    season,
+    season: displaySeason,
     categoryLabel: getCategoryLabel(selectedCategory),
     genderLabel: getGenderLabel(selectedGender),
+    affiliationLabel: resolvedAffiliationLabel,
     teacher: {
       fullName: localCoachName || '—',
       workLocation: teacher?.workLocation || schoolName,
@@ -756,8 +796,12 @@ export const ParticipationFormPdfModal: React.FC<ParticipationFormPdfModalProps>
             {/* Document Title Banner */}
             <div className="border-2 border-sky-600 bg-sky-50 rounded-lg text-center p-2.5 mb-3.5">
               <h2 className="text-sm sm:text-base font-black text-sky-900 tracking-wide">
-                لائحة المشاركة في البطولة المدرسية برسم الموسم الدراسي: {season}
+                لائحة المشاركة في البطولة المدرسية برسم الموسم الدراسي:{' '}
+                <span dir="ltr" className="inline-block">{displaySeason}</span>
               </h2>
+              <p className="text-xs font-extrabold text-slate-900 mt-1">
+                صنف المشاركة: <span className="text-sky-700">{resolvedAffiliationLabel}</span>
+              </p>
             </div>
 
             {/* Info Box: Sport, Category, School, Directorate */}
@@ -773,10 +817,7 @@ export const ParticipationFormPdfModal: React.FC<ParticipationFormPdfModalProps>
                   الفئة العمرية والجنس:
                 </div>
                 <div className="col-span-3 bg-white p-1.5 font-bold text-slate-900">
-                  {selectedCategory === 'ALL'
-                    ? `${getCategoryLabel(selectedCategory)} - ${getGenderLabel(selectedGender)}`
-                    : getCategoryLabel(selectedCategory)
-                  }
+                  {`${getCategoryLabel(selectedCategory)} - ${getGenderLabel(selectedGender)}`}
                 </div>
               </div>
               <div className="grid grid-cols-12">
@@ -838,8 +879,8 @@ export const ParticipationFormPdfModal: React.FC<ParticipationFormPdfModalProps>
                     <th className="p-1.5 border-l border-sky-500 w-28">رقم مسار</th>
                     <th className="p-1.5 border-l border-sky-500">الاسم والنسب</th>
                     <th className="p-1.5 border-l border-sky-500 w-24">تاريخ الازدياد</th>
-                    <th className="p-1.5 border-l border-sky-500 w-32">الفئة العمرية (التاريخ)</th>
-                    <th className="p-1.5 border-l border-sky-500 w-28">صنف المشاركة</th>
+                    <th className="p-1.5 border-l border-sky-500 w-24">الفئة العمرية</th>
+                    <th className="p-1.5 border-l border-sky-500 w-28">نوع المشاركة</th>
                     <th className="p-1.5 border-l border-sky-500">المؤسسة</th>
                     <th className="p-1.5 w-12">الصورة</th>
                   </tr>
@@ -857,10 +898,10 @@ export const ParticipationFormPdfModal: React.FC<ParticipationFormPdfModalProps>
                           <td className="p-1.5 font-bold text-slate-900 text-center border-l border-slate-200">{st.fullName}</td>
                           <td className="p-1.5 font-mono text-slate-700 border-l border-slate-200">{st.birthDate}</td>
                           <td className="p-1.5 font-bold text-slate-900 border-l border-slate-200">
-                            {getCategoryGenderLabel(st.category, st.gender, season, sport.id)}
+                            {getStudentConciseCategoryLabel(st)}
                           </td>
-                          <td className="p-1.5 font-bold text-slate-700 text-center border-l border-slate-200">
-                            {st.affiliationType === 'club_affiliated' ? 'للمنتمين للأندية' : 'لا منتمين'}
+                          <td className="p-1.5 font-bold text-slate-800 text-center border-l border-slate-200">
+                            {getParticipationTypeLabel(st)}
                           </td>
                           <td className="p-1.5 font-semibold text-slate-700 text-center border-l border-slate-200">{st.schoolName || schoolName}</td>
                           <td className="p-1 flex items-center justify-center">

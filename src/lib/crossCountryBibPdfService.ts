@@ -395,11 +395,13 @@ export function generateBibsPrintHtml(
 /**
  * Downloads or prints the bibs using native browser high-speed typography engine.
  * Generates in less than half a second even for hundreds of runners!
- * Uses a single self-cleaning hidden iframe (zero popup windows that can hang or stay unclosable).
+ * Uses a pre-opened popup window when allowed, and seamlessly falls back to a
+ * layout-intact off-screen iframe when popups are blocked (never throws a popup error).
  */
 export async function printBibsAsNativeText(
   options: BibPrintHtmlOptions,
-  cachedQrs?: Record<string, string>
+  cachedQrs?: Record<string, string>,
+  existingPrintWindow?: Window | null
 ): Promise<void> {
   const qrMap = cachedQrs && Object.keys(cachedQrs).length > 0
     ? cachedQrs
@@ -407,24 +409,95 @@ export async function printBibsAsNativeText(
 
   const html = generateBibsPrintHtml(options, qrMap);
 
-  const printWindow = window.open('', '_blank', 'width=1150,height=850');
+  let printWindow: Window | null = existingPrintWindow || null;
   if (!printWindow) {
-    throw new Error('يرجى السماح بفتح النوافذ المنبثقة لطباعة الصدريات');
+    try {
+      printWindow = window.open('', '_blank', 'width=1150,height=850');
+    } catch {
+      printWindow = null;
+    }
   }
 
-  printWindow.document.open();
-  printWindow.document.write(html);
-  printWindow.document.close();
-
-  return new Promise((resolve) => {
-    setTimeout(() => {
+  const triggerPrintOnDocWindow = (targetWin: Window, onDone?: () => void) => {
+    const runPrint = () => {
       try {
-        printWindow.focus();
-        printWindow.print();
+        targetWin.focus();
+        targetWin.print();
       } catch (e) {
         console.error('Print failed:', e);
       }
-      resolve();
-    }, 400);
+      if (onDone) onDone();
+    };
+
+    const doc = targetWin.document;
+    const fontsReady = doc?.fonts?.ready
+      ? Promise.race([doc.fonts.ready, new Promise(res => setTimeout(res, 500))])
+      : Promise.resolve();
+
+    fontsReady.then(() => {
+      setTimeout(runPrint, 250);
+    });
+  };
+
+  if (printWindow && !printWindow.closed) {
+    try {
+      printWindow.document.open();
+      printWindow.document.write(html);
+      printWindow.document.close();
+
+      return await new Promise((resolve) => {
+        triggerPrintOnDocWindow(printWindow!, () => resolve());
+      });
+    } catch {
+      // Fall through to off-screen iframe fallback if cross-origin/closed
+    }
+  }
+
+  // Fallback when popups are blocked or inside restricted iframes:
+  // Use a layout-intact (A4-sized) off-screen iframe so browsers never render blank 0x0 pages.
+  const existingFrame = document.getElementById('cc-bib-print-iframe');
+  if (existingFrame && existingFrame.parentNode) {
+    existingFrame.parentNode.removeChild(existingFrame);
+  }
+
+  const printFrame = document.createElement('iframe');
+  printFrame.id = 'cc-bib-print-iframe';
+  printFrame.setAttribute('aria-hidden', 'true');
+  printFrame.style.position = 'fixed';
+  printFrame.style.left = '-10000px';
+  printFrame.style.top = '0';
+  printFrame.style.width = '210mm';
+  printFrame.style.height = '297mm';
+  printFrame.style.border = 'none';
+  printFrame.style.opacity = '0';
+  printFrame.style.pointerEvents = 'none';
+  document.body.appendChild(printFrame);
+
+  const frameWin = printFrame.contentWindow;
+  const frameDoc = frameWin?.document;
+  if (!frameWin || !frameDoc) {
+    throw new Error('تعذر تهيئة إطار الطباعة في المتصفح');
+  }
+
+  frameDoc.open();
+  frameDoc.write(html);
+  frameDoc.close();
+
+  return new Promise((resolve) => {
+    let cleanedUp = false;
+    const cleanup = () => {
+      if (cleanedUp) return;
+      cleanedUp = true;
+      if (printFrame.parentNode) {
+        printFrame.parentNode.removeChild(printFrame);
+      }
+    };
+
+    try {
+      frameWin.addEventListener('afterprint', cleanup, { once: true });
+    } catch {}
+    setTimeout(cleanup, 60000);
+
+    triggerPrintOnDocWindow(frameWin, () => resolve());
   });
 }

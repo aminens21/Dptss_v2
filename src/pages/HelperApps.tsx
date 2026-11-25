@@ -680,7 +680,7 @@ export const HelperApps: React.FC = () => {
                 onUpdateResult={handleSavePodiumResult}
                 onBack={() => setResultsCategory(null)}
                 canEdit={userProfile?.role === 'CENTRAL_ADMIN' || userProfile?.role === 'TECH_HEAD'}
-                activeSeason="2025/2026"
+                activeSeason="2026/2027"
                 directorateName="المديرية الإقليمية"
                 students={students}
                 schools={schools}

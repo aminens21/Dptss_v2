@@ -550,3 +550,21 @@ export interface AdministrativeCadre {
   updatedAt?: any;
   createdBy?: string;
 }
+
+export interface CrossCountryBibStyleConfig {
+  bibBgColor?: string;
+  qrScale?: number;
+  bibNumberScale?: number;
+  textScale?: number;
+  bibFont?: 'mono' | 'sans' | 'serif';
+}
+
+export interface CrossCountryBibsStatus {
+  directorateId: string;
+  generated: boolean;
+  generatedAt?: string;
+  generatedBy?: string;
+  totalCount?: number;
+  styleConfig?: CrossCountryBibStyleConfig;
+}
+

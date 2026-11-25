@@ -31,7 +31,8 @@ import {
   Award,
   MessageCircle,
   Share2,
-  Undo2
+  Undo2,
+  BookmarkPlus
 } from 'lucide-react';
 import { Tournament, School, Team, Match, User, Venue, Sport, Referee, SchoolTournamentConfirmation, BlockedSchedulePeriod, DrawSystemType } from '../types';
 import { DataService, SPORTS_MAP, GENDER_MAP, deduplicateById, normalizeCategoryKey, getCustomCategoryName, doesConfirmationMatchBranch, EDUCATIONAL_CYCLE_LABELS, getMatchEducationalCycles, findBlockedPeriodForDate, findAllBlockedPeriodsForDate, normalizeArabicSearch, normalizeDateToYmd, schoolNamesMatch, normalizeTournamentAffiliation, normalizeSchoolCycleType } from '../lib/dataService';
@@ -281,6 +282,56 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
   const [showAllRefereesFallback, setShowAllRefereesFallback] = useState<boolean>(false);
   const [diffusionTarget, setDiffusionTarget] = useState<MatchBroadcastDiffusionTarget | null>(null);
   const [blockedPeriods, setBlockedPeriods] = useState<BlockedSchedulePeriod[]>([]);
+  const [isSavingVenue, setIsSavingVenue] = useState<boolean>(false);
+
+  const uniqueSavedVenues = useMemo(() => {
+    const seen = new Set<string>();
+    return venues.filter(v => {
+      const norm = normalizeArabicSearch(v?.name || '');
+      if (!norm || seen.has(norm)) return false;
+      seen.add(norm);
+      return true;
+    });
+  }, [venues]);
+
+  const isVenueNameSaved = (rawName: string): boolean => {
+    const norm = normalizeArabicSearch(rawName || '');
+    if (!norm) return false;
+    return uniqueSavedVenues.some(v => normalizeArabicSearch(v.name || '') === norm);
+  };
+
+  const saveCustomVenueIfNeeded = async (rawName: string, showFeedback = false): Promise<Venue | undefined> => {
+    const cleanName = (rawName || '').trim();
+    if (!cleanName) {
+      if (showFeedback) toast.error('يرجى كتابة اسم الفضاء الرياضي أولاً');
+      return undefined;
+    }
+    const normTarget = normalizeArabicSearch(cleanName);
+    const existing = venues.find(v => normalizeArabicSearch(v.name || '') === normTarget);
+    if (existing) {
+      if (showFeedback) toast.success(`الفضاء "${existing.name}" محفوظ بالفعل في القائمة`);
+      return existing;
+    }
+    try {
+      setIsSavingVenue(true);
+      const activeDirId = currentUser?.directorateId || DataService.getActiveDirectorateId() || 'taourirt';
+      const created = await DataService.addVenue({
+        name: cleanName,
+        city: activeDirId === 'all' ? 'تاوريرت' : activeDirId,
+        address: 'فضاء رياضي إقليمي',
+        directorateId: activeDirId === 'all' ? 'taourirt' : activeDirId
+      });
+      setVenues(prev => [created, ...prev.filter(v => v.id !== created.id)]);
+      if (showFeedback) toast.success(`تم حفظ الفضاء "${cleanName}" وسيظل متاحاً للاختيار في كل مرة ✅`);
+      return created;
+    } catch (err) {
+      console.warn('Error saving custom venue:', err);
+      if (showFeedback) toast.error('تعذر حفظ الفضاء في القائمة');
+      return undefined;
+    } finally {
+      setIsSavingVenue(false);
+    }
+  };
 
   const isRegionalOrCentralAdmin = useMemo(() => {
     if (!currentUser) return false;
@@ -294,10 +345,18 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
 
   useEffect(() => {
     if (!isOpen) return;
-    const unsub = DataService.subscribeToBlockedScheduleDates((periods) => {
+    const unsubBlocked = DataService.subscribeToBlockedScheduleDates((periods) => {
       setBlockedPeriods(periods);
     });
-    return () => unsub();
+    const unsubVenues = DataService.subscribeToVenues((liveVenues) => {
+      if (Array.isArray(liveVenues)) {
+        setVenues(liveVenues);
+      }
+    });
+    return () => {
+      unsubBlocked();
+      unsubVenues();
+    };
   }, [isOpen]);
 
   // Load Tournaments, Referees, Teachers & Data
@@ -1111,6 +1170,16 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
       ? schools.find(s => s.id === manualHostSchoolId) || schools.find(s => s.id === t1.id)
       : undefined;
 
+    let resolvedManualVenueId = venues[0]?.id || 'custom';
+    let resolvedManualVenueName = manualVenueName.trim() || venues[0]?.name || 'القاعة المغطاة';
+    if (manualVenueMode === 'custom' && manualVenueName.trim()) {
+      const savedVen = await saveCustomVenueIfNeeded(manualVenueName, false);
+      if (savedVen) {
+        resolvedManualVenueId = savedVen.id;
+        resolvedManualVenueName = savedVen.name;
+      }
+    }
+
     const newMatch: GeneratedDrawMatch = {
       id: `manual-match-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       drawMatchNumber: resolvedMatchNumber,
@@ -1124,10 +1193,10 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
       time: manualTime || '10:00',
       venueMode: manualVenueMode === 'custom' ? 'custom' : (selectedHost ? 'school' : 'custom'),
       hostSchoolId: manualVenueMode === 'school' && selectedHost ? selectedHost.id : '',
-      venueId: manualVenueMode === 'school' && selectedHost ? selectedHost.id : (venues[0]?.id || 'custom'),
+      venueId: manualVenueMode === 'school' && selectedHost ? selectedHost.id : resolvedManualVenueId,
       venueName:
         manualVenueMode === 'custom'
-          ? (manualVenueName.trim() || venues[0]?.name || 'القاعة المغطاة')
+          ? resolvedManualVenueName
           : (selectedHost?.name || venues[0]?.name || 'القاعة المغطاة'),
       refereeIds: [],
       refereeNames: [],
@@ -1451,6 +1520,10 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
       }
     }
 
+    if (bulkVenueMode === 'custom' && bulkVenueName.trim()) {
+      void saveCustomVenueIfNeeded(bulkVenueName, false);
+    }
+
     pushMatchHistorySnapshot(generatedMatches);
     setGeneratedMatches(prev =>
       prev.map(m => {
@@ -1479,10 +1552,11 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
             nextVenueId = selectedBulkHostSchool.id;
             nextVenueName = selectedBulkHostSchool.name;
           } else if (bulkVenueMode === 'custom' && bulkVenueName.trim()) {
+            const matchedVen = uniqueSavedVenues.find(v => normalizeArabicSearch(v.name) === normalizeArabicSearch(bulkVenueName));
             nextVenueMode = 'custom';
             nextHostSchoolId = '';
-            nextVenueId = 'custom';
-            nextVenueName = bulkVenueName.trim();
+            nextVenueId = matchedVen?.id || 'custom';
+            nextVenueName = matchedVen?.name || bulkVenueName.trim();
           }
         }
 
@@ -1806,6 +1880,9 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
 
     setSavingSingleMatchId(gm.id);
     try {
+      if (gm.venueMode === 'custom' && gm.venueName?.trim()) {
+        await saveCustomVenueIfNeeded(gm.venueName, false);
+      }
       const existingFirestoreId = savedByTempId[gm.id];
       const payload = buildMatchPayloadFromGenerated(gm, savedByTempId);
 
@@ -1856,6 +1933,17 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
     const toastId = toast.loading(`جاري حفظ ${generatedMatches.length} مباراة مع تعيين الحكام في جدول البطولة...`);
 
     try {
+      const uniqueCustomVenueNames: string[] = Array.from(
+        new Set<string>(
+          generatedMatches
+            .filter(gm => gm.venueMode === 'custom' && gm.venueName?.trim())
+            .map(gm => gm.venueName.trim())
+        )
+      );
+      for (const vName of uniqueCustomVenueNames) {
+        await saveCustomVenueIfNeeded(vName, false);
+      }
+
       const createdIds: string[] = [];
       const tempIdToFirestoreId: Record<string, string> = { ...savedByTempId };
       for (const gm of generatedMatches) {
@@ -3090,13 +3178,45 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
                         </select>
                       </div>
                     ) : (
-                      <input
-                        type="text"
-                        value={bulkVenueName}
-                        onChange={(e) => setBulkVenueName(e.target.value)}
-                        placeholder="مثال: القاعة المغطاة"
-                        className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-xl font-bold text-slate-800"
-                      />
+                      <div className="space-y-1.5">
+                        {uniqueSavedVenues.length > 0 && (
+                          <select
+                            value={uniqueSavedVenues.find(v => normalizeArabicSearch(v.name) === normalizeArabicSearch(bulkVenueName))?.id || ''}
+                            onChange={(e) => {
+                              const found = uniqueSavedVenues.find(v => v.id === e.target.value);
+                              if (found) setBulkVenueName(found.name);
+                            }}
+                            className="w-full px-2.5 py-1 bg-white border border-slate-200 rounded-lg text-[10px] font-bold text-slate-700 cursor-pointer"
+                          >
+                            <option value="">-- اختر من الفضاءات المحفوظة --</option>
+                            {uniqueSavedVenues.map(v => (
+                              <option key={`bulk-ven-${v.id}`} value={v.id}>🏟️ {v.name}</option>
+                            ))}
+                          </select>
+                        )}
+                        <div className="flex items-center gap-1">
+                          <input
+                            type="text"
+                            value={bulkVenueName}
+                            onChange={(e) => setBulkVenueName(e.target.value)}
+                            placeholder="اكتب فضاءً جديداً..."
+                            className="flex-1 min-w-0 px-2.5 py-1.5 bg-white border border-slate-200 rounded-xl font-bold text-slate-800"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => saveCustomVenueIfNeeded(bulkVenueName, true)}
+                            disabled={isSavingVenue || !bulkVenueName.trim() || isVenueNameSaved(bulkVenueName)}
+                            className={`px-2 py-1.5 rounded-xl text-[10px] font-black border shrink-0 transition-all cursor-pointer disabled:cursor-default ${
+                              isVenueNameSaved(bulkVenueName)
+                                ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                : 'bg-emerald-600 hover:bg-emerald-700 text-white border-emerald-600 disabled:opacity-40'
+                            }`}
+                            title="حفظ هذا الفضاء في القائمة ليبقى متاحاً في المرات القادمة"
+                          >
+                            {isVenueNameSaved(bulkVenueName) ? 'محفوظ ✓' : '+ حفظ'}
+                          </button>
+                        </div>
+                      </div>
                     )}
                   </div>
 
@@ -3505,13 +3625,45 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
                             </select>
                           </div>
                         ) : (
-                          <input
-                            type="text"
-                            value={manualVenueName}
-                            onChange={(e) => setManualVenueName(e.target.value)}
-                            placeholder="مثال: القاعة المغطاة..."
-                            className="w-full px-2.5 py-1.5 bg-white border border-indigo-200 rounded-xl font-bold text-slate-800"
-                          />
+                          <div className="space-y-1.5">
+                            {uniqueSavedVenues.length > 0 && (
+                              <select
+                                value={uniqueSavedVenues.find(v => normalizeArabicSearch(v.name) === normalizeArabicSearch(manualVenueName))?.id || ''}
+                                onChange={(e) => {
+                                  const found = uniqueSavedVenues.find(v => v.id === e.target.value);
+                                  if (found) setManualVenueName(found.name);
+                                }}
+                                className="w-full px-2 py-1 bg-white border border-indigo-200 rounded-lg text-[10px] font-bold text-slate-700 cursor-pointer"
+                              >
+                                <option value="">-- اختر من الفضاءات المحفوظة --</option>
+                                {uniqueSavedVenues.map(v => (
+                                  <option key={`manual-ven-${v.id}`} value={v.id}>🏟️ {v.name}</option>
+                                ))}
+                              </select>
+                            )}
+                            <div className="flex items-center gap-1">
+                              <input
+                                type="text"
+                                value={manualVenueName}
+                                onChange={(e) => setManualVenueName(e.target.value)}
+                                placeholder="مثال: القاعة المغطاة..."
+                                className="flex-1 min-w-0 px-2.5 py-1.5 bg-white border border-indigo-200 rounded-xl font-bold text-slate-800"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => saveCustomVenueIfNeeded(manualVenueName, true)}
+                                disabled={isSavingVenue || !manualVenueName.trim() || isVenueNameSaved(manualVenueName)}
+                                className={`px-2 py-1.5 rounded-xl text-[10px] font-black border shrink-0 transition-all cursor-pointer disabled:cursor-default ${
+                                  isVenueNameSaved(manualVenueName)
+                                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                    : 'bg-indigo-600 hover:bg-indigo-700 text-white border-indigo-600 disabled:opacity-40'
+                                }`}
+                                title="حفظ هذا الفضاء في القائمة ليبقى متاحاً في المرات القادمة"
+                              >
+                                {isVenueNameSaved(manualVenueName) ? 'محفوظ ✓' : '+ حفظ'}
+                              </button>
+                            </div>
+                          </div>
                         )}
                       </div>
                     </div>
@@ -3889,13 +4041,72 @@ export const ElectronicDrawModal: React.FC<ElectronicDrawModalProps> = ({
                                 </select>
                               </div>
                             ) : (
-                              <input
-                                type="text"
-                                value={match.venueName}
-                                onChange={(e) => handleUpdateMatchField(match.id, 'venueName', e.target.value)}
-                                placeholder="مثال: القاعة المغطاة..."
-                                className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-xl font-bold text-slate-800"
-                              />
+                              <div className="space-y-1.5">
+                                {uniqueSavedVenues.length > 0 && (
+                                  <select
+                                    value={uniqueSavedVenues.find(v => normalizeArabicSearch(v.name) === normalizeArabicSearch(match.venueName))?.id || ''}
+                                    onChange={(e) => {
+                                      const found = uniqueSavedVenues.find(v => v.id === e.target.value);
+                                      if (found) {
+                                        pushMatchHistorySnapshot(generatedMatches);
+                                        setGeneratedMatches(prev =>
+                                          prev.map(gm =>
+                                            gm.id === match.id
+                                              ? { ...gm, venueMode: 'custom', hostSchoolId: '', venueId: found.id, venueName: found.name }
+                                              : gm
+                                          )
+                                        );
+                                      }
+                                    }}
+                                    className="w-full px-2 py-1 bg-white border border-slate-200 rounded-lg text-[10px] font-bold text-slate-700 cursor-pointer"
+                                  >
+                                    <option value="">-- اختر من الفضاءات المحفوظة --</option>
+                                    {uniqueSavedVenues.map(v => (
+                                      <option key={`row-ven-${match.id}-${v.id}`} value={v.id}>🏟️ {v.name}</option>
+                                    ))}
+                                  </select>
+                                )}
+                                <div className="flex items-center gap-1">
+                                  <input
+                                    type="text"
+                                    value={match.venueName}
+                                    onChange={(e) => handleUpdateMatchField(match.id, 'venueName', e.target.value)}
+                                    placeholder="مثال: القاعة المغطاة..."
+                                    className="flex-1 min-w-0 px-2.5 py-1.5 bg-white border border-slate-200 rounded-xl font-bold text-slate-800"
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={async () => {
+                                      const savedVen = await saveCustomVenueIfNeeded(match.venueName, true);
+                                      if (savedVen) {
+                                        setGeneratedMatches(prev =>
+                                          prev.map(gm =>
+                                            gm.id === match.id
+                                              ? { ...gm, venueId: savedVen.id, venueName: savedVen.name }
+                                              : gm
+                                          )
+                                        );
+                                      }
+                                    }}
+                                    disabled={isSavingVenue || !match.venueName?.trim() || isVenueNameSaved(match.venueName)}
+                                    className={`px-2 py-1.5 rounded-xl text-[10px] font-black border shrink-0 flex items-center gap-1 transition-all cursor-pointer disabled:cursor-default ${
+                                      isVenueNameSaved(match.venueName)
+                                        ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                        : 'bg-emerald-600 hover:bg-emerald-700 text-white border-emerald-600 disabled:opacity-40'
+                                    }`}
+                                    title="حفظ هذا الفضاء في القائمة ليبقى متاحاً في المرات القادمة"
+                                  >
+                                    {isVenueNameSaved(match.venueName) ? (
+                                      <span>محفوظ ✓</span>
+                                    ) : (
+                                      <>
+                                        <BookmarkPlus className="w-3 h-3 shrink-0" />
+                                        <span>حفظ</span>
+                                      </>
+                                    )}
+                                  </button>
+                                </div>
+                              </div>
                             )}
                           </div>
                         </div>

@@ -2,7 +2,6 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   X, 
   Printer, 
-  Download, 
   Eye, 
   Filter, 
   Palette, 
@@ -25,11 +24,13 @@ import {
   RotateCcw,
   Palette as PaletteIcon,
   Trash2,
-  Save
+  Save,
+  Lock,
+  CheckCircle2,
+  Building2
 } from 'lucide-react';
 import QRCode from 'qrcode';
-import jsPDF from 'jspdf';
-import { Student, School } from '../types';
+import { Student, School, CrossCountryBibsStatus } from '../types';
 import {
   CROSS_COUNTRY_CATEGORIES,
   CrossCountryCategoryDef,
@@ -37,7 +38,8 @@ import {
   filterCrossCountryStudents,
   computeCrossCountrySequentialBibs
 } from '../lib/crossCountryConfig';
-import { DataService } from '../lib/dataService';
+import { DataService, schoolNamesMatch } from '../lib/dataService';
+import { useAuth } from '../contexts/AuthContext';
 import { printBibsAsNativeText, pregenerateQrsForBibs } from '../lib/crossCountryBibPdfService';
 import toast from 'react-hot-toast';
 
@@ -51,6 +53,10 @@ interface BibGeneratorModalProps {
   directorateName?: string;
   initialCategoryId?: string;
   initialSelectedRaces?: string[];
+  teacherSchoolScope?: {
+    schoolId?: string;
+    schoolName: string;
+  };
 }
 
 export const BibGeneratorModal: React.FC<BibGeneratorModalProps> = ({
@@ -60,12 +66,25 @@ export const BibGeneratorModal: React.FC<BibGeneratorModalProps> = ({
   schools: propSchools,
   directorateName: propDirectorateName,
   initialCategoryId,
-  initialSelectedRaces
+  initialSelectedRaces,
+  teacherSchoolScope
 }) => {
+  const { userProfile } = useAuth();
+  const isTeacherLockedMode = Boolean(
+    teacherSchoolScope && (teacherSchoolScope.schoolName?.trim() || teacherSchoolScope.schoolId?.trim())
+  );
+  const isCentralManager = Boolean(
+    !isTeacherLockedMode &&
+    userProfile &&
+    (userProfile.role === 'CENTRAL_ADMIN' || userProfile.role === 'SUPER_ADMIN' || userProfile.isSuperAdmin)
+  );
   const [students, setStudents] = useState<Student[]>(propStudents || []);
   const [schools, setSchools] = useState<School[]>(propSchools || []);
   const [directorateName, setDirectorateName] = useState<string>(propDirectorateName || 'تاوريرت');
   const [isLoadingData, setIsLoadingData] = useState<boolean>(false);
+  const [bibsPublishStatus, setBibsPublishStatus] = useState<CrossCountryBibsStatus>(() =>
+    DataService.getCrossCountryBibsStatusSync()
+  );
 
   // Cross Country Races Multi-Selection State (كل سباق على حدا مع إمكانية تحديد أكثر من سباق)
   const [selectedRaces, setSelectedRaces] = useState<string[]>(CROSS_COUNTRY_CATEGORIES.map(c => c.id));
@@ -92,6 +111,7 @@ export const BibGeneratorModal: React.FC<BibGeneratorModalProps> = ({
   // Runner details font size scale (0.7: 70% to 1.4: 140%)
   const [textScale, setTextScale] = useState<number>(1.0);
   const [isCustomizationVisible, setIsCustomizationVisible] = useState<boolean>(false);
+  const hasSyncedInitialStyleRef = useRef<boolean>(false);
 
   // Preview Pagination
   const [previewPage, setPreviewPage] = useState<number>(1);
@@ -101,6 +121,12 @@ export const BibGeneratorModal: React.FC<BibGeneratorModalProps> = ({
 
   // Printable container ref
   const printContainerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!isCentralManager && isCustomizationVisible) {
+      setIsCustomizationVisible(false);
+    }
+  }, [isCentralManager, isCustomizationVisible]);
 
   // Allow closing via Escape key at any time
   useEffect(() => {
@@ -113,6 +139,25 @@ export const BibGeneratorModal: React.FC<BibGeneratorModalProps> = ({
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isOpen, onClose]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    hasSyncedInitialStyleRef.current = false;
+    const unsub = DataService.subscribeToCrossCountryBibsStatus((status) => {
+      setBibsPublishStatus(status);
+      if (status.styleConfig) {
+        if (!isCentralManager || !hasSyncedInitialStyleRef.current) {
+          hasSyncedInitialStyleRef.current = true;
+          if (status.styleConfig.bibBgColor) setBibBgColor(status.styleConfig.bibBgColor);
+          if (typeof status.styleConfig.qrScale === 'number') setQrScale(status.styleConfig.qrScale);
+          if (typeof status.styleConfig.bibNumberScale === 'number') setBibNumberScale(status.styleConfig.bibNumberScale);
+          if (typeof status.styleConfig.textScale === 'number') setTextScale(status.styleConfig.textScale);
+          if (status.styleConfig.bibFont) setBibFont(status.styleConfig.bibFont);
+        }
+      }
+    });
+    return () => unsub();
+  }, [isOpen, isCentralManager]);
 
   // Load data if not provided
   useEffect(() => {
@@ -172,10 +217,10 @@ export const BibGeneratorModal: React.FC<BibGeneratorModalProps> = ({
     };
   }, [students, schools, directorateName]);
 
-  // Auto-sync sequential bib numbers silently to database whenever any runner differs from stored bibNumber
+  // Auto-sync sequential bib numbers silently to database whenever any runner differs from stored bibNumber (Manager only)
   const lastAutoSyncedSigRef = useRef<string>('');
   useEffect(() => {
-    if (!isOpen || isLoadingData || allRunners.length === 0) return;
+    if (!isOpen || isLoadingData || isTeacherLockedMode || allRunners.length === 0) return;
 
     const studentMap = new Map<string, Student>();
     students.forEach(s => {
@@ -215,13 +260,26 @@ export const BibGeneratorModal: React.FC<BibGeneratorModalProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [isOpen, isLoadingData, allRunners, students]);
+  }, [isOpen, isLoadingData, isTeacherLockedMode, allRunners, students]);
+
+  // Strict school isolation in teacher mode while preserving exact canonical sequential bib numbers
+  const scopedRunners = useMemo(() => {
+    if (!isTeacherLockedMode || !teacherSchoolScope) return allRunners;
+    const targetId = String(teacherSchoolScope.schoolId || '').trim();
+    const targetName = String(teacherSchoolScope.schoolName || '').trim();
+    return allRunners.filter(runner => {
+      if (targetId && runner.schoolId && runner.schoolId === targetId) return true;
+      if (targetName && schoolNamesMatch(runner.schoolName || '', targetName)) return true;
+      return false;
+    });
+  }, [allRunners, isTeacherLockedMode, teacherSchoolScope]);
 
   // Filter runners based on selected races (multi-race selection), gender, search query, and empty state
   const filteredRunners = useMemo(() => {
     if (isEmptied) return [];
+    if (isTeacherLockedMode && !bibsPublishStatus.generated) return [];
 
-    return allRunners.filter(runner => {
+    return scopedRunners.filter(runner => {
       // Race filter (multi-race selection)
       if (selectedRaces.length > 0) {
         const matchesAnyRace = selectedRaces.some(raceId => {
@@ -260,13 +318,13 @@ export const BibGeneratorModal: React.FC<BibGeneratorModalProps> = ({
 
       return true;
     });
-  }, [allRunners, selectedRaces, selectedGender, selectedAffiliation, searchQuery, isEmptied]);
+  }, [scopedRunners, selectedRaces, selectedGender, selectedAffiliation, searchQuery, isEmptied, isTeacherLockedMode, bibsPublishStatus.generated]);
 
   // Race counts for each of the 8 individual races
   const raceCounts = useMemo(() => {
     const counts: Record<string, number> = {};
     CROSS_COUNTRY_CATEGORIES.forEach(cat => {
-      counts[cat.id] = allRunners.filter(r => {
+      counts[cat.id] = scopedRunners.filter(r => {
         return (
           r.category === cat.id ||
           (r.categoryLabel.includes(cat.titleAr.replace('سباق ', '')) && r.gender === cat.gender) ||
@@ -275,29 +333,29 @@ export const BibGeneratorModal: React.FC<BibGeneratorModalProps> = ({
       }).length;
     });
     return counts;
-  }, [allRunners]);
+  }, [scopedRunners]);
 
   // Gender counts
   const genderCounts = useMemo(() => {
-    const maleCount = allRunners.filter(r => r.gender === 'Male').length;
-    const femaleCount = allRunners.filter(r => r.gender === 'Female').length;
+    const maleCount = scopedRunners.filter(r => r.gender === 'Male').length;
+    const femaleCount = scopedRunners.filter(r => r.gender === 'Female').length;
     return {
-      ALL: allRunners.length,
+      ALL: scopedRunners.length,
       Male: maleCount,
       Female: femaleCount
     };
-  }, [allRunners]);
+  }, [scopedRunners]);
 
   // Affiliation counts
   const affiliationCounts = useMemo(() => {
-    const clubCount = allRunners.filter(r => r.affiliationType === 'club_affiliated').length;
-    const schoolCount = allRunners.filter(r => r.affiliationType === 'non_club').length;
+    const clubCount = scopedRunners.filter(r => r.affiliationType === 'club_affiliated').length;
+    const schoolCount = scopedRunners.filter(r => r.affiliationType === 'non_club').length;
     return {
-      ALL: allRunners.length,
+      ALL: scopedRunners.length,
       club_affiliated: clubCount,
       non_club: schoolCount
     };
-  }, [allRunners]);
+  }, [scopedRunners]);
 
   // Toggle single race selection
   const toggleRace = (raceId: string) => {
@@ -406,8 +464,42 @@ export const BibGeneratorModal: React.FC<BibGeneratorModalProps> = ({
     setPreviewPage(1);
   };
 
+  // Publish or unpublish bibs availability for teachers (Manager action)
+  const markBibsGeneratedForTeachers = async (generated = true, silent = true) => {
+    if (isTeacherLockedMode) return;
+    try {
+      const updated = await DataService.setCrossCountryBibsStatus({
+        generated,
+        totalCount: allRunners.length,
+        generatedBy: userProfile?.fullName || 'المسير',
+        ...(isCentralManager
+          ? {
+              styleConfig: {
+                bibBgColor,
+                qrScale,
+                bibNumberScale,
+                textScale,
+                bibFont
+              }
+            }
+          : {})
+      });
+      setBibsPublishStatus(updated);
+      if (!silent) {
+        toast.success(
+          generated
+            ? 'تمت إتاحة الصدريات للأساتذة — يمكن لكل أستاذ الآن تحميل أو طباعة صدريات مؤسسته فقط 🎽'
+            : 'تم إخفاء الصدريات عن الأساتذة مؤقتاً'
+        );
+      }
+    } catch (err) {
+      console.warn('Could not update Cross Country bibs publish status:', err);
+    }
+  };
+
   // Save / Sync assigned bib numbers to database for seamless coordination with Finish Line Scanner
   const handleSyncBibsToDatabase = async () => {
+    if (isTeacherLockedMode) return;
     if (filteredRunners.length === 0) {
       toast.error('لا توجد صدريات محددة لحفظها');
       return;
@@ -420,6 +512,7 @@ export const BibGeneratorModal: React.FC<BibGeneratorModalProps> = ({
         bibNumber: r.bibNumber
       }));
       await DataService.updateBibNumbersBulk(items);
+      await markBibsGeneratedForTeachers(true, true);
       const bibById = new Map(items.map(it => [it.id, String(it.bibNumber)]));
       setStudents(prev =>
         prev.map(s =>
@@ -429,7 +522,7 @@ export const BibGeneratorModal: React.FC<BibGeneratorModalProps> = ({
         )
       );
       toast.dismiss(toastId);
-      toast.success(`تم حفظ ومزامنة ${items.length} رقم صدرية في قاعدة البيانات بنجاح! جاهزة للمسح الآلي في تطبيق الماسح 🎯`);
+      toast.success(`تم حفظ ومزامنة ${items.length} رقم صدرية وإتاحتها للأساتذة حسب مؤسساتهم بنجاح 🎯`);
     } catch (e) {
       console.error(e);
       toast.dismiss(toastId);
@@ -509,6 +602,22 @@ export const BibGeneratorModal: React.FC<BibGeneratorModalProps> = ({
       return;
     }
 
+    // Try opening the print window synchronously during the user click gesture before any async awaits;
+    // if blocked by popup blocker or sandbox iframe, printBibsAsNativeText falls back automatically to an iframe.
+    let preOpenedWindow: Window | null = null;
+    try {
+      preOpenedWindow = window.open('', '_blank', 'width=1150,height=850');
+      if (preOpenedWindow && !preOpenedWindow.closed) {
+        preOpenedWindow.document.open();
+        preOpenedWindow.document.write(
+          '<!DOCTYPE html><html dir="rtl" lang="ar"><head><meta charset="utf-8" /><title>جاري تجهيز الصدريات...</title></head><body style="font-family: system-ui, sans-serif; display:flex; align-items:center; justify-content:center; height:100vh; margin:0; color:#0f172a;">جاري تجهيز الصدريات للطباعة...</body></html>'
+        );
+        preOpenedWindow.document.close();
+      }
+    } catch {
+      preOpenedWindow = null;
+    }
+
     setIsGeneratingPdf(true);
     const toastId = toast.loading(`جاري تجهيز الصدريات ككتابة ونصوص نقية فائقة السرعة...`);
 
@@ -524,7 +633,10 @@ export const BibGeneratorModal: React.FC<BibGeneratorModalProps> = ({
       }
 
       const layoutLabel = bibsPerPage === 1 ? 'A4' : (bibsPerPage === 6 ? 'اقتصادي' : 'A5');
-      const filename = `صدريات_العدو_الريفي_${layoutLabel}_${new Date().toISOString().slice(0, 10)}`;
+      const schoolTag = isTeacherLockedMode && teacherSchoolScope?.schoolName
+        ? `_${teacherSchoolScope.schoolName.replace(/[\\/:*?"<>|]/g, '_').trim()}`
+        : '';
+      const filename = `صدريات_العدو_الريفي${schoolTag}_${layoutLabel}_${new Date().toISOString().slice(0, 10)}`;
 
       await printBibsAsNativeText({
         runners: filteredRunners,
@@ -537,7 +649,11 @@ export const BibGeneratorModal: React.FC<BibGeneratorModalProps> = ({
         separatePagesPerRace,
         selectedRaces,
         filename
-      }, neededQrs);
+      }, neededQrs, preOpenedWindow);
+
+      if (!isTeacherLockedMode) {
+        await markBibsGeneratedForTeachers(true, true);
+      }
 
       toast.dismiss(toastId);
       toast.success('تم فتح نافذة الطباعة / الحفظ كـ PDF (كتابة ونصوص نقية) بنجاح!', {
@@ -546,344 +662,16 @@ export const BibGeneratorModal: React.FC<BibGeneratorModalProps> = ({
       });
     } catch (error) {
       console.error('Error generating fast text bibs:', error);
+      if (preOpenedWindow && !preOpenedWindow.closed) {
+        try {
+          preOpenedWindow.close();
+        } catch {}
+      }
       toast.dismiss(toastId);
       toast.error('حدث خطأ أثناء إعداد الصدريات للطباعة أو الحفظ');
     } finally {
       setIsGeneratingPdf(false);
     }
-  };
-
-  // Generate and Download PDF using Native jsPDF Drawing (Fast, High Quality, No Stretching)
-  const handleDownloadPdf = async () => {
-    if (filteredRunners.length === 0) {
-      toast.error('لا يوجد متسابقون لتوليد الصدريات حسب التصفية المحددة');
-      return;
-    }
-
-    setIsGeneratingPdf(true);
-    const toastId = toast.loading(`جاري استخراج ${filteredRunners.length} صدرية بنصوص وكتابة نقية...`);
-
-    try {
-      // If runner count is large (> 40), or if user preferred text, also offer instant native print/save
-      const pdf = new jsPDF({
-        orientation: 'portrait',
-        unit: 'mm',
-        format: 'a4',
-        compress: true
-      });
-
-      const pageWidth = 210;
-      const pageHeight = 297;
-      
-      // Re-usable single canvas instance to avoid memory bloat and garbage collection pauses
-      const sharedCanvas = document.createElement('canvas');
-      const sharedCtx = sharedCanvas.getContext('2d', { willReadFrequently: true });
-      
-      // Helper to draw text by rendering to the reusable canvas
-      const drawStyledText = async (
-        text: string, 
-        tx: number, 
-        ty: number, 
-        tw: number, 
-        th: number, 
-        fontSize: number,
-        fontWeight: string = 'bold',
-        fontFamily: string = 'Tahoma, Arial, sans-serif'
-      ) => {
-        if (!sharedCtx || !text) return;
-
-        const isNumericBib = /^\d+$/.test(text.trim());
-        const scale = 3; // Optimized scale: super sharp, 60% faster than scale 5
-        const fontPx = Math.max(16, Math.round(fontSize * scale * (isNumericBib ? 3.6 : 3.2)));
-        sharedCtx.font = `${fontWeight} ${fontPx}px ${fontFamily}`;
-        
-        const metrics = sharedCtx.measureText(text);
-        const textWidth = Math.ceil(metrics.width);
-        const textHeight = Math.ceil(fontPx * 1.35);
-
-        if (isNumericBib) {
-          const ascent = metrics.actualBoundingBoxAscent || (fontPx * 0.73);
-          const descent = metrics.actualBoundingBoxDescent || (fontPx * 0.08);
-          const left = metrics.actualBoundingBoxLeft || 0;
-          const right = metrics.actualBoundingBoxRight || textWidth;
-
-          const glyphW = Math.max(10, Math.ceil(left + right));
-          const glyphH = Math.max(10, Math.ceil(ascent + descent));
-          const padX = Math.max(4, Math.ceil(glyphW * 0.015));
-          const padY = Math.max(4, Math.ceil(glyphH * 0.015));
-
-          sharedCanvas.width = glyphW + padX * 2;
-          sharedCanvas.height = glyphH + padY * 2;
-
-          sharedCtx.font = `${fontWeight} ${fontPx}px ${fontFamily}`;
-          sharedCtx.textBaseline = 'alphabetic';
-          sharedCtx.textAlign = 'left';
-          sharedCtx.fillStyle = '#000000';
-          sharedCtx.fillText(text, padX + left, padY + ascent);
-        } else {
-          sharedCanvas.width = textWidth + 20;
-          sharedCanvas.height = textHeight + 20;
-
-          // Re-apply font after resize
-          sharedCtx.font = `${fontWeight} ${fontPx}px ${fontFamily}`;
-          sharedCtx.textBaseline = 'middle';
-          sharedCtx.textAlign = 'center';
-          sharedCtx.fillStyle = '#000000';
-          sharedCtx.fillText(text, sharedCanvas.width / 2, sharedCanvas.height / 2);
-        }
-
-        const imgData = sharedCanvas.toDataURL('image/png');
-        const aspect = sharedCanvas.width / sharedCanvas.height;
-        
-        // Target dimensions in mm
-        const maxW = isNumericBib ? tw * 0.95 : tw * 0.95;
-        const maxH = isNumericBib ? th * 0.94 : th * 0.92;
-        
-        let drawW = maxW;
-        let drawH = drawW / aspect;
-        
-        if (drawH > maxH) {
-          drawH = maxH;
-          drawW = drawH * aspect;
-        }
-
-        pdf.addImage(
-          imgData, 
-          'PNG', 
-          tx + (tw - drawW) / 2, 
-          ty + (th - drawH) / 2, 
-          drawW, 
-          drawH, 
-          undefined, 
-          'FAST'
-        );
-      };
-
-      // Draw a single Bib natively
-      const drawBibNative = async (
-        runner: BibRunnerData, 
-        bx: number, 
-        by: number, 
-        bw: number, 
-        bh: number, 
-        qrUrl: string
-      ) => {
-        // 1. Background
-        if (bibBgColor && bibBgColor.toLowerCase() !== '#ffffff') {
-          pdf.setFillColor(bibBgColor);
-          pdf.rect(bx, by, bw, bh, 'F');
-        }
-
-        // 2. Main Border
-        pdf.setDrawColor(0);
-        pdf.setLineWidth(bibsPerPage === 6 ? 0.4 : 0.7);
-        pdf.rect(bx, by, bw, bh, 'S');
-
-        // 3. Horizontal Line separating Top/Bottom
-        const topRatio = bibsPerPage === 6 ? 0.45 : 0.42;
-        const topH = bh * topRatio;
-        pdf.line(bx, by + topH, bx + bw, by + topH);
-
-        // 4. Vertical Lines for 3 columns
-        const colW = bw / 3;
-        pdf.line(bx + colW, by, bx + colW, by + topH);
-        pdf.line(bx + 2 * colW, by, bx + 2 * colW, by + topH);
-
-        // 5. Horizontal sub-lines for info rows (4 rows)
-        const rowH = topH / 4;
-        for (let i = 1; i < 4; i++) {
-          pdf.line(bx, by + i * rowH, bx + colW, by + i * rowH);
-          pdf.line(bx + 2 * colW, by + i * rowH, bx + bw, by + i * rowH);
-        }
-
-        // 6. QR Code (Native high-res) with qrScale
-        if (qrUrl) {
-          const qPad = 1.5;
-          const maxQSize = Math.min(colW, topH) - qPad * 2;
-          const qSize = maxQSize * Math.min(1.2, Math.max(0.6, qrScale));
-          
-          pdf.addImage(
-            qrUrl, 
-            'PNG', 
-            bx + colW + (colW - qSize) / 2, 
-            by + (topH - qSize) / 2, 
-            qSize, 
-            qSize, 
-            undefined, 
-            'FAST'
-          );
-        }
-
-        // 7. Arabic Text Information (Table content) with textScale
-        const baseFSize = bibsPerPage === 6 ? 2.6 : (bibsPerPage === 2 ? 3.8 : 5.2);
-        const fSize = baseFSize * textScale;
-        
-        // RIGHT COLUMN (Category, Date, Gender, Directorate)
-        await drawStyledText(runner.categoryLabel, bx + 2 * colW, by, colW, rowH, fSize);
-        await drawStyledText(runner.birthDate || String(runner.birthYear), bx + 2 * colW, by + rowH, colW, rowH, fSize);
-        await drawStyledText(runner.genderLabel, bx + 2 * colW, by + 2 * rowH, colW, rowH, fSize);
-        await drawStyledText(runner.directorateName, bx + 2 * colW, by + 3 * rowH, colW, rowH, fSize);
-
-        // LEFT COLUMN (Name, Massar, School, Commune)
-        await drawStyledText(runner.fullName, bx, by, colW, rowH, fSize);
-        await drawStyledText(runner.massarNumber, bx, by + rowH, colW, rowH, fSize);
-        await drawStyledText(runner.schoolName, bx, by + 2 * rowH, colW, rowH, fSize);
-        await drawStyledText(runner.commune || '', bx, by + 3 * rowH, colW, rowH, fSize);
-
-        // MIDDLE - BELOW QR (Participation Type)
-        await drawStyledText(runner.affiliationTypeLabel || '', bx + colW, by + topH - rowH, colW, rowH, fSize * 0.8);
-
-        // 8. Bib Number (Bottom Large) - Unconstrained, huge size for maximum legibility
-        const bibStr = String(runner.bibNumber);
-        const bibFontSize = (bibsPerPage === 6 ? 82 : (bibsPerPage === 2 ? 140 : 220)) * bibNumberScale;
-        const bottomAreaH = bh - topH;
-        
-        // Map bibFont to browser-compatible font families for the canvas rendering
-        const fontFamily = bibFont === 'mono' ? 'monospace' : (bibFont === 'serif' ? 'serif' : 'sans-serif');
-        const fontWeight = bibFont === 'sans' ? '900' : 'bold'; // 900 for font-black parity
-
-        await drawStyledText(
-          bibStr, 
-          bx, 
-          by + topH, 
-          bw, 
-          bottomAreaH, 
-          bibFontSize, 
-          fontWeight,
-          fontFamily
-        );
-      };
-
-      // Pre-generate all QR codes concurrently in parallel (10x faster)
-      const allQrs: Record<string, string> = { ...qrCodeMap };
-      const missingRunners = filteredRunners.filter(r => !allQrs[r.id]);
-      if (missingRunners.length > 0) {
-        await Promise.all(
-          missingRunners.map(async (runner) => {
-            const qrPayload = String(runner.bibNumber || runner.id || '').trim();
-            try {
-              allQrs[runner.id] = await QRCode.toDataURL(qrPayload, {
-                width: 280, // 280 is sharp and generates 3x faster than 400
-                margin: 1,
-                errorCorrectionLevel: 'M'
-              });
-            } catch (e) {
-              console.error(e);
-            }
-          })
-        );
-        setQrCodeMap(prev => ({ ...prev, ...allQrs }));
-      }
-
-      // Organize runners by race if requested
-      const activeDefs = CROSS_COUNTRY_CATEGORIES.filter(c => selectedRaces.includes(c.id));
-      const raceGroups: { catDef: CrossCountryCategoryDef; runners: BibRunnerData[] }[] = [];
-
-      if (separatePagesPerRace && activeDefs.length > 1) {
-        activeDefs.forEach(catDef => {
-          const rList = filteredRunners.filter(r =>
-            r.category === catDef.id ||
-            (r.categoryLabel.includes(catDef.titleAr.replace('سباق ', '')) && r.gender === catDef.gender) ||
-            (r.category.toUpperCase() === catDef.category.toUpperCase() && r.gender.toLowerCase() === catDef.gender.toLowerCase())
-          );
-          if (rList.length > 0) {
-            raceGroups.push({ catDef, runners: rList });
-          }
-        });
-      } else {
-        raceGroups.push({
-          catDef: activeDefs[0] || CROSS_COUNTRY_CATEGORIES[0],
-          runners: filteredRunners
-        });
-      }
-
-      let isFirstPage = true;
-
-      for (const group of raceGroups) {
-        const groupRunners = group.runners;
-        const perPage = bibsPerPage;
-        const totalPages = Math.ceil(groupRunners.length / perPage);
-
-        for (let pIdx = 0; pIdx < totalPages; pIdx++) {
-          if (!isFirstPage) pdf.addPage();
-          isFirstPage = false;
-
-          const runnersOnPage = groupRunners.slice(pIdx * perPage, (pIdx + 1) * perPage);
-
-          for (let bIdx = 0; bIdx < runnersOnPage.length; bIdx++) {
-            const runner = runnersOnPage[bIdx];
-            const qrUrl = allQrs[runner.id];
-
-            // Calculate exact position on A4 sheet
-            if (bibsPerPage === 1) {
-              const margin = 10;
-              const bw = pageWidth - margin * 2;
-              const bh = pageHeight - margin * 2;
-              await drawBibNative(runner, margin, margin, bw, bh, qrUrl);
-            } else if (bibsPerPage === 2) {
-              const margin = 10;
-              const bw = pageWidth - margin * 2;
-              const bh = (pageHeight - margin * 3) / 2;
-              const by = margin + bIdx * (bh + margin);
-              await drawBibNative(runner, margin, by, bw, bh, qrUrl);
-              
-              // Cut line
-              if (bIdx === 0 && runnersOnPage.length > 1) {
-                pdf.setDrawColor(200);
-                pdf.setLineWidth(0.2);
-                pdf.setLineDashPattern([2, 2], 0);
-                pdf.line(5, by + bh + margin / 2, pageWidth - 5, by + bh + margin / 2);
-                pdf.setLineDashPattern([], 0);
-              }
-            } else {
-              // 6 per page (2x3)
-              const mx = 8;
-              const my = 8;
-              const gx = 4;
-              const gy = 4;
-              const bw = (pageWidth - mx * 2 - gx) / 2;
-              const bh = (pageHeight - my * 2 - gy * 2) / 3;
-              
-              const col = bIdx % 2;
-              const row = Math.floor(bIdx / 2);
-              const bx = mx + col * (bw + gx);
-              const by = my + row * (bh + gy);
-              
-              await drawBibNative(runner, bx, by, bw, bh, qrUrl);
-
-              // Cut lines
-              pdf.setDrawColor(220);
-              pdf.setLineWidth(0.1);
-              pdf.setLineDashPattern([1, 1], 0);
-              if (bIdx === 0) {
-                pdf.line(pageWidth / 2, my, pageWidth / 2, pageHeight - my);
-                pdf.line(mx, my + bh + gy / 2, pageWidth - mx, my + bh + gy / 2);
-                pdf.line(mx, my + 2 * (bh + gy) - gy / 2, pageWidth - mx, my + 2 * (bh + gy) - gy / 2);
-              }
-              pdf.setLineDashPattern([], 0);
-            }
-          }
-        }
-      }
-
-      const layoutLabel = bibsPerPage === 1 ? 'A4' : (bibsPerPage === 6 ? 'اقتصادي' : 'A5');
-      const fileName = `صدريات_العدو_الريفي_${layoutLabel}_${new Date().toISOString().slice(0, 10)}.pdf`;
-      pdf.save(fileName);
-
-      toast.dismiss(toastId);
-      toast.success(`تم استخراج وتحميل الملف بنجاح!`);
-    } catch (error) {
-      console.error('Error generating PDF:', error);
-      toast.dismiss(toastId);
-      toast.error('حدث خطأ أثناء إنشاء ملف PDF');
-    } finally {
-      setIsGeneratingPdf(false);
-    }
-  };
-
-  // Direct Print Dialog with pure native text
-  const handleDirectPrint = () => {
-    handleFastTextDownloadOrPrint();
   };
 
   if (!isOpen) return null;
@@ -907,55 +695,91 @@ export const BibGeneratorModal: React.FC<BibGeneratorModalProps> = ({
                 🎽
               </div>
               <h3 className="text-xs sm:text-base font-black text-white tracking-wide">
-                إعداد وإنشاء صدريات العدو الريفي
+                {isTeacherLockedMode ? `صدريات مؤسستي — العدو الريفي (${teacherSchoolScope?.schoolName || ''})` : 'إعداد وإنشاء صدريات العدو الريفي'}
               </h3>
               <span className="hidden sm:inline-block text-[9px] sm:text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-400/30">
-                {isEmptied ? 'التطبيق مفرغ' : `${filteredRunners.length} صدرية جاهزة`}
+                {isTeacherLockedMode
+                  ? (!bibsPublishStatus.generated ? 'في انتظار التوليد' : `${filteredRunners.length} صدرية لمؤسستك`)
+                  : (isEmptied ? 'التطبيق مفرغ' : `${filteredRunners.length} صدرية جاهزة`)}
               </span>
             </div>
             {/* Details subtitle: Hidden on mobile */}
             <p className="hidden sm:block text-[10px] sm:text-xs text-slate-300 font-medium">
-              توليد وطباعة بطاقات الصدريات بدقة عالية ومطابقة للمواصفات الرسمية
+              {isTeacherLockedMode
+                ? 'تحميل وطباعة صدريات المتعلمين المسجلين بمؤسستك فقط بأرقامهم الرسمية المعتمدة'
+                : 'توليد وطباعة بطاقات الصدريات بدقة عالية ومطابقة للمواصفات الرسمية'}
             </p>
           </div>
 
           {/* Action Buttons: Centered Underneath on Mobile, Row on Desktop */}
           <div className="flex items-center justify-center gap-1.5 sm:gap-2 w-full sm:w-auto shrink-0">
-            {/* Sync with Scanner button */}
-            <button
-              type="button"
-              onClick={handleSyncBibsToDatabase}
-              disabled={isSyncingBibs || filteredRunners.length === 0}
-              className="p-2 sm:px-3 sm:py-2 bg-emerald-600/80 hover:bg-emerald-600 text-white border border-emerald-400/40 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer shadow-3xs active:scale-95 disabled:opacity-40"
-              title="مزامنة وحفظ أرقام الصدريات في قاعدة البيانات للماسح"
-              aria-label="مزامنة مع الماسح"
-            >
-              <Save className="w-3.5 sm:w-4 h-3.5 sm:h-4 text-emerald-200" />
-              <span className="hidden md:inline">{isSyncingBibs ? 'جاري المزامنة...' : 'مزامنة مع الماسح 💾'}</span>
-            </button>
+            {!isTeacherLockedMode && (
+              <>
+                {/* Toggle Availability for Teachers */}
+                <button
+                  type="button"
+                  onClick={() => markBibsGeneratedForTeachers(!bibsPublishStatus.generated, false)}
+                  className={`p-2 sm:px-3 sm:py-2 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer shadow-3xs active:scale-95 border ${
+                    bibsPublishStatus.generated
+                      ? 'bg-sky-600/85 hover:bg-sky-600 text-white border-sky-400/50'
+                      : 'bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 border-amber-400/40'
+                  }`}
+                  title={
+                    bibsPublishStatus.generated
+                      ? 'الصدريات متاحة حالياً للأساتذة لتحميل صدريات مؤسساتهم — انقر لإيقاف الإتاحة'
+                      : 'انقر لإتاحة الصدريات للأساتذة ليتمكن كل أستاذ من تحميل صدريات مؤسسته فقط'
+                  }
+                >
+                  {bibsPublishStatus.generated ? (
+                    <>
+                      <CheckCircle2 className="w-3.5 sm:w-4 h-3.5 sm:h-4 text-sky-100" />
+                      <span className="hidden lg:inline">متاحة للأساتذة ✓</span>
+                    </>
+                  ) : (
+                    <>
+                      <Lock className="w-3.5 sm:w-4 h-3.5 sm:h-4 text-amber-300" />
+                      <span className="hidden lg:inline">نشر للأساتذة</span>
+                    </>
+                  )}
+                </button>
 
-            {/* Reload Database button */}
-            <button
-              type="button"
-              onClick={handleReloadDatabase}
-              className="p-2 sm:px-3 sm:py-2 bg-white/10 hover:bg-white/20 text-slate-200 hover:text-white border border-white/20 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-3xs active:scale-95"
-              title="إعادة تعبئة وتحميل كافة بيانات المشاركين من قاعدة البيانات"
-              aria-label="إعادة تعبئة البيانات"
-            >
-              <RotateCcw className="w-3.5 sm:w-4 h-3.5 sm:h-4" />
-              <span className="hidden md:inline">إعادة تعبئة 🔄</span>
-            </button>
+                {/* Sync with Scanner button */}
+                <button
+                  type="button"
+                  onClick={handleSyncBibsToDatabase}
+                  disabled={isSyncingBibs || filteredRunners.length === 0}
+                  className="p-2 sm:px-3 sm:py-2 bg-emerald-600/80 hover:bg-emerald-600 text-white border border-emerald-400/40 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer shadow-3xs active:scale-95 disabled:opacity-40"
+                  title="مزامنة وحفظ أرقام الصدريات في قاعدة البيانات للماسح وإتاحتها للأساتذة"
+                  aria-label="مزامنة مع الماسح"
+                >
+                  <Save className="w-3.5 sm:w-4 h-3.5 sm:h-4 text-emerald-200" />
+                  <span className="hidden md:inline">{isSyncingBibs ? 'جاري المزامنة...' : 'مزامنة مع الماسح 💾'}</span>
+                </button>
 
-            {/* Clear Bib App Button - ICON ONLY without text as requested */}
-            <button
-              type="button"
-              onClick={handleClearBibApp}
-              className="p-2 sm:p-2.5 bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 hover:text-white border border-rose-400/40 rounded-xl transition-all cursor-pointer shadow-3xs active:scale-95"
-              title="تفريغ تطبيق إنشاء الصدريات وإلغاء أي تحديد سابق"
-              aria-label="تفريغ تطبيق إنشاء الصدريات"
-            >
-              <Trash2 className="w-4 h-4 text-rose-300" />
-            </button>
+                {/* Reload Database button */}
+                <button
+                  type="button"
+                  onClick={handleReloadDatabase}
+                  className="p-2 sm:px-3 sm:py-2 bg-white/10 hover:bg-white/20 text-slate-200 hover:text-white border border-white/20 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-3xs active:scale-95"
+                  title="إعادة تعبئة وتحميل كافة بيانات المشاركين من قاعدة البيانات"
+                  aria-label="إعادة تعبئة البيانات"
+                >
+                  <RotateCcw className="w-3.5 sm:w-4 h-3.5 sm:h-4" />
+                  <span className="hidden md:inline">إعادة تعبئة 🔄</span>
+                </button>
+
+                {/* Clear Bib App Button - ICON ONLY without text as requested */}
+                <button
+                  type="button"
+                  onClick={handleClearBibApp}
+                  className="p-2 sm:p-2.5 bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 hover:text-white border border-rose-400/40 rounded-xl transition-all cursor-pointer shadow-3xs active:scale-95"
+                  title="تفريغ تطبيق إنشاء الصدريات وإلغاء أي تحديد سابق"
+                  aria-label="تفريغ تطبيق إنشاء الصدريات"
+                >
+                  <Trash2 className="w-4 h-4 text-rose-300" />
+                </button>
+              </>
+            )}
 
             {/* Close Modal button */}
             <button
@@ -972,6 +796,49 @@ export const BibGeneratorModal: React.FC<BibGeneratorModalProps> = ({
 
         {/* Modal Body Container */}
         <div className="p-3 sm:p-5 overflow-y-auto flex-1 bg-slate-50 space-y-4">
+
+          {isTeacherLockedMode && !bibsPublishStatus.generated ? (
+            <div className="bg-white border border-amber-200 rounded-2xl p-8 sm:p-12 text-center max-w-xl mx-auto my-8 shadow-sm space-y-4">
+              <div className="w-16 h-16 mx-auto rounded-2xl bg-amber-50 border border-amber-200 text-amber-600 flex items-center justify-center">
+                <Lock className="w-8 h-8" />
+              </div>
+              <h4 className="text-base sm:text-lg font-black text-slate-900">
+                الصدريات غير متاحة للتحميل بعد
+              </h4>
+              <p className="text-xs sm:text-sm text-slate-600 leading-relaxed font-medium">
+                لم يقم مسير البطولة بتوليد ونشر صدريات البطولة الإقليمية المدرسية للعدو الريفي بعد. ستتمكن فور توليدها من تحميل أو طبع صدريات مؤسسة <strong className="text-slate-900">{teacherSchoolScope?.schoolName}</strong> فقط في ملف PDF.
+              </p>
+              <button
+                type="button"
+                onClick={onClose}
+                className="px-5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-black cursor-pointer"
+              >
+                إغلاق
+              </button>
+            </div>
+          ) : (
+            <>
+          {/* Teacher School Isolation Notice */}
+          {isTeacherLockedMode && (
+            <div className="bg-emerald-50 border border-emerald-200 rounded-2xl px-4 py-3 flex items-center justify-between gap-3 flex-wrap">
+              <div className="flex items-center gap-2.5 text-emerald-950">
+                <div className="w-8 h-8 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0">
+                  <Building2 className="w-4 h-4" />
+                </div>
+                <div>
+                  <div className="text-xs font-black">
+                    ملف صدريات خاص بمؤسسة: {teacherSchoolScope?.schoolName}
+                  </div>
+                  <div className="text-[11px] font-semibold text-emerald-800">
+                    يتضمن هذا الملف فقط التلاميذ المسجلين بمؤسستكم بأرقامهم التسلسلية الرسمية المعتمدة من طرف المسير.
+                  </div>
+                </div>
+              </div>
+              <span className="text-xs font-black px-3 py-1 rounded-xl bg-white border border-emerald-200 text-emerald-800">
+                {scopedRunners.length} صدرية خاصة بمؤسستك
+              </span>
+            </div>
+          )}
 
           {/* Top Control Card */}
           <div className="bg-white border border-slate-200/90 rounded-2xl p-4 sm:p-5 shadow-xs space-y-4">
@@ -1091,7 +958,7 @@ export const BibGeneratorModal: React.FC<BibGeneratorModalProps> = ({
                         }`}>
                           {cat.gender === 'Female' ? 'إناث' : 'ذكور'}
                         </span>
-                        {raceRanges[cat.id] && (
+                        {!isTeacherLockedMode && raceRanges[cat.id] && (
                           <span className="font-mono font-black text-[9.5px] px-1.5 py-0.2 rounded bg-white/90 border border-slate-300/70 text-slate-800" dir="ltr">
                             {raceRanges[cat.id].start} - {raceRanges[cat.id].end}
                           </span>
@@ -1242,7 +1109,8 @@ export const BibGeneratorModal: React.FC<BibGeneratorModalProps> = ({
               </div>
             )}
 
-            {/* Row 2: Visual Customization & Sliders (لوحة تخصيص المقاسات والألوان مع إمكانية الإظهار/الإخفاء) */}
+            {/* Row 2: Visual Customization & Sliders (خاص بالمسير المركزي فقط) */}
+            {isCentralManager && (
             <div className="pt-2 border-t border-slate-100 dark:border-slate-800 space-y-2">
               <div className="flex items-center justify-between">
                 <button
@@ -1438,6 +1306,7 @@ export const BibGeneratorModal: React.FC<BibGeneratorModalProps> = ({
                 </div>
               )}
             </div>
+            )}
 
             {/* Subtitle / Status text */}
             <div className="text-center text-xs font-bold text-slate-600 dark:text-slate-300 pt-2 border-t border-slate-100 dark:border-slate-800 flex items-center justify-center gap-2 flex-wrap">
@@ -1485,18 +1354,6 @@ export const BibGeneratorModal: React.FC<BibGeneratorModalProps> = ({
                     <span>طباعة / حفظ كـ PDF نصوص وكتابة (فائق السرعة) ⚡</span>
                   </>
                 )}
-              </button>
-
-              {/* Direct PDF File Download */}
-              <button
-                type="button"
-                onClick={handleDownloadPdf}
-                disabled={isGeneratingPdf || filteredRunners.length === 0}
-                className="px-4 sm:px-5 py-2.5 bg-blue-600 hover:bg-blue-700 active:scale-98 text-white rounded-xl text-xs font-black flex items-center justify-center gap-2 shadow-sm transition-all cursor-pointer disabled:opacity-50"
-                title="تحميل ملف PDF مباشرة إلى جهازك"
-              >
-                <Download className="w-4 h-4" />
-                <span>تحميل ملف PDF مباشر</span>
               </button>
 
               <button
@@ -1874,6 +1731,8 @@ export const BibGeneratorModal: React.FC<BibGeneratorModalProps> = ({
               </div>
             </div>
           </div>
+          </>
+          )}
 
         </div>
       </div>

@@ -112,6 +112,7 @@ export interface CrossCountryBibRunnerData {
   massarNumber: string;
   birthDate?: string;
   birthYear?: string | number;
+  schoolId?: string;
   schoolName: string;
   commune?: string;
   directorateName: string;
@@ -121,6 +122,8 @@ export interface CrossCountryBibRunnerData {
   genderLabel: string;
   affiliationType?: string;
   affiliationTypeLabel?: string;
+  participationType?: 'individual' | 'school_team';
+  participationTypeLabel?: string;
   qrDataUrl?: string;
 }
 
@@ -346,6 +349,14 @@ export function computeCrossCountrySequentialBibs(
     }
 
     const normalizedBirthYmd = normalizeBirthYmdLocal(student.birthDate);
+    const resolvedParticipation = resolveRunnerParticipationType({
+      studentId: student.id,
+      fullName: student.fullName || student.name,
+      participationType: student.participationType,
+      bibNumber: sequentialBib
+    });
+    const participationLabel = resolvedParticipation === 'school_team' ? 'فريق المؤسسة' : 'مشاركة فردية';
+
     return {
       id: runnerId,
       bibNumber: sequentialBib,
@@ -357,6 +368,7 @@ export function computeCrossCountrySequentialBibs(
       birthYear:
         (student as any).birthYear ||
         (normalizedBirthYmd ? normalizedBirthYmd.split('-')[0] : '2012'),
+      schoolId: student.schoolId || '',
       schoolName,
       commune,
       directorateName,
@@ -365,7 +377,9 @@ export function computeCrossCountrySequentialBibs(
       gender: isFemale ? 'Female' : 'Male',
       genderLabel,
       affiliationType: student.affiliationType || 'non_club',
-      affiliationTypeLabel: student.affiliationType === 'club_affiliated' ? 'منتمي لنادي' : 'غير منتمي (مدرسي)'
+      affiliationTypeLabel: student.affiliationType === 'club_affiliated' ? 'منتمي لنادي' : participationLabel,
+      participationType: resolvedParticipation,
+      participationTypeLabel: participationLabel
     };
   });
 

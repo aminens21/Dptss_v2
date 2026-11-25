@@ -1063,7 +1063,7 @@ export const SchoolParticipantsModal: React.FC<SchoolParticipantsModalProps> = (
                                           </td>
                                           <td className="p-3">
                                             <span className="px-2 py-0.5 rounded-md bg-blue-50 text-blue-900 font-black text-[10px] border border-blue-200">
-                                              {getCategoryGenderLabel(stud.category, stud.gender, '2026/2027', selectedGroup.sportId)}
+                                              {getCategoryGenderLabel(stud.category, stud.gender, activeSeason || '2026/2027', selectedGroup.sportId)}
                                             </span>
                                           </td>
                                           <td className="p-3">
@@ -1433,7 +1433,7 @@ export const SchoolParticipantsModal: React.FC<SchoolParticipantsModalProps> = (
                   >
                     {AGE_CATEGORIES.map(cat => (
                       <option key={cat.id} value={cat.id}>
-                        {getCategoryGenderLabel(cat.id, editGender, '2026/2027', editingStudent?.sportId)}
+                        {getCategoryGenderLabel(cat.id, editGender, activeSeason || '2026/2027', editingStudent?.sportId)}
                       </option>
                     ))}
                   </select>
@@ -1585,6 +1585,7 @@ export const SchoolParticipantsModal: React.FC<SchoolParticipantsModalProps> = (
             teacher={teacherProp}
             students={targetStudents}
             preselectedCategory={selectedPdfCategory}
+            season={activeSeason}
           />
         );
       })()}
