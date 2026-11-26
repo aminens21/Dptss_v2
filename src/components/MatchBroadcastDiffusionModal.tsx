@@ -447,17 +447,17 @@ export const MatchBroadcastDiffusionModal: React.FC<MatchBroadcastDiffusionModal
 
   const modalNode = (
     <div
-      className="fixed inset-0 z-[220] flex items-center justify-center p-2.5 sm:p-4 bg-slate-900/75 backdrop-blur-xs"
+      className="fixed inset-0 z-[220] flex items-center justify-center p-2 sm:p-4 bg-slate-900/75 backdrop-blur-xs overflow-hidden"
       dir="rtl"
       onClick={onClose}
     >
       <div
-        className="bg-white rounded-3xl border border-slate-200 shadow-2xl w-full max-w-xl max-h-[92vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150"
+        className="bg-white rounded-2xl sm:rounded-3xl border border-slate-200 shadow-2xl w-full max-w-xl max-h-[92dvh] sm:max-h-[92vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150"
         onClick={e => e.stopPropagation()}
       >
         {/* Header */}
         <div
-          className={`p-4 sm:p-5 text-white flex items-start justify-between gap-3 shrink-0 ${
+          className={`p-3.5 sm:p-5 text-white flex items-start justify-between gap-3 shrink-0 ${
             isResultMode
               ? 'bg-gradient-to-l from-blue-900 via-indigo-950 to-slate-900'
               : 'bg-gradient-to-l from-emerald-900 via-teal-900 to-slate-900'
@@ -483,7 +483,7 @@ export const MatchBroadcastDiffusionModal: React.FC<MatchBroadcastDiffusionModal
                   ? 'إخبار المؤطرين والمديرين وأساتذة المؤسستين بالنتيجة النهائية'
                   : 'إشعار المعنيين ببرمجة المقابلة بضغطة زر'}
               </h3>
-              <p className="text-[11px] text-emerald-100/85 mt-0.5 truncate">
+              <p className="text-[11px] text-emerald-100/85 mt-0.5 leading-snug break-words">
                 {target.team1Name} ضد {target.team2Name}
               </p>
             </div>
@@ -500,7 +500,7 @@ export const MatchBroadcastDiffusionModal: React.FC<MatchBroadcastDiffusionModal
         </div>
 
         {/* Scrollable Content */}
-        <div className="p-3.5 sm:p-5 space-y-4 overflow-y-auto flex-1 bg-slate-50/70">
+        <div className="p-3 sm:p-5 space-y-4 overflow-y-auto overscroll-contain flex-1 min-h-0 bg-slate-50/70">
           {/* Match Core Info Strip */}
           <div className="bg-white rounded-2xl border border-slate-200 p-3 space-y-2 shadow-3xs">
             <div className="flex items-center justify-between gap-2 text-xs font-black text-slate-900">

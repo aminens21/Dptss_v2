@@ -882,6 +882,7 @@ export const Tournaments: React.FC = () => {
         const sheetData = participants.length > 0 
           ? participants.map((p, index) => ({
               'الرقم الترتيبي': index + 1,
+              'رقم الصدرية': p.bibNumber || (p as any).crossCountryBibNumber || '-',
               'الاسم والنسب': p.fullName,
               'الجنس': p.gender === 'Male' ? 'ذكر' : 'أنثى',
               'تاريخ الازدياد': p.birthDate,

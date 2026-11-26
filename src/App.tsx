@@ -22,6 +22,7 @@ import { Directorates } from './pages/Directorates';
 import { PostersCertificates } from './pages/PostersCertificates';
 import { Permissions } from './pages/Permissions';
 import { HelperApps } from './pages/HelperApps';
+import { DocumentationGallery } from './pages/DocumentationGallery';
 
 import { Toaster } from 'react-hot-toast';
 
@@ -34,6 +35,7 @@ export default function App() {
             <Routes>
               <Route path="/login" element={<Login />} />
               <Route path="/results" element={<PublicResults />} />
+              <Route path="/documentation" element={<DocumentationGallery />} />
               <Route
                 path="/"
                 element={
@@ -58,6 +60,7 @@ export default function App() {
                 <Route path="tech-committee" element={<TechCommitteeHeads />} />
                 <Route path="posters-certificates" element={<PostersCertificates />} />
                 <Route path="statistics" element={<Statistics />} />
+                <Route path="documentation" element={<DocumentationGallery />} />
               </Route>
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>

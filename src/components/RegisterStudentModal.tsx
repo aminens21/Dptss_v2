@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Sport, Student, School, Tournament } from '../types';
-import { DataService, getAgeCategoriesForSeason, SPORTS_MAP, getCategoryGenderLabel, validateBirthDateForCategory, normalizeCategoryKey, isSchoolLevelAllowedForTournament, getTournamentLevelAr, isTeacherLevelAllowedForTournament, isCrossCountryU15OpenToPrimary, isSchoolSectorAllowedForTournament, getTournamentEducationSectorsAr, getSchoolEducationSector, schoolNamesMatch, resolveEffectiveTeacherCadre, isCategoryAllowedForTeacherLevel, isTrackOrCrossCountrySport, isTeamSport, isPrivateSchoolRecord } from '../lib/dataService';
+import { DataService, getAgeCategoriesForSeason, SPORTS_MAP, getCategoryGenderLabel, validateBirthDateForCategory, normalizeCategoryKey, isSchoolLevelAllowedForTournament, getTournamentLevelAr, isTeacherLevelAllowedForTournament, isCrossCountryU15OpenToPrimary, isSchoolSectorAllowedForTournament, getTournamentEducationSectorsAr, getSchoolEducationSector, schoolNamesMatch, resolveEffectiveTeacherCadre, isCategoryAllowedForTeacherLevel, isTrackOrCrossCountrySport, isTeamSport, isPrivateSchoolRecord, isRegistrationDeadlineExpired, getCrossCountryRegistrationDeadline } from '../lib/dataService';
 import { AthleticsService } from '../lib/athleticsService';
 import { useAuth } from '../contexts/AuthContext';
 import { X, GraduationCap, User, Calendar, Upload, AlertCircle, Lock, ShieldCheck, CheckCircle2, Camera } from 'lucide-react';
@@ -132,18 +132,29 @@ export const RegisterStudentModal: React.FC<RegisterStudentModalProps> = ({
     }
   }, [isOpen, preselectedSchoolName, userProfile, schools]);
 
-  const isExpired = useMemo(() => {
-    if (!registrationDeadline) return false;
-    let targetDate: Date;
-    if (typeof registrationDeadline === 'object' && registrationDeadline !== null && 'toDate' in registrationDeadline && typeof registrationDeadline.toDate === 'function') {
-      targetDate = registrationDeadline.toDate();
-    } else if (registrationDeadline instanceof Date) {
-      targetDate = registrationDeadline;
-    } else {
-      targetDate = new Date(registrationDeadline);
+  const effectiveDeadline = useMemo(() => {
+    if (registrationDeadline) return registrationDeadline;
+    if (sport?.id === 'cross_country' && tournaments && tournaments.length > 0) {
+      return getCrossCountryRegistrationDeadline(tournaments, affiliationType);
     }
-    return !isNaN(targetDate.getTime()) && targetDate.getTime() < Date.now();
-  }, [registrationDeadline]);
+    return null;
+  }, [registrationDeadline, sport?.id, tournaments, affiliationType]);
+
+  const isExpired = useMemo(() => {
+    return isRegistrationDeadlineExpired(effectiveDeadline);
+  }, [effectiveDeadline]);
+
+  const isTeam = isTeamSport(sport?.id || '');
+
+  const isAllCompleted = useMemo(() => {
+    if (!sport?.id || !tournaments || tournaments.length === 0) return false;
+    const sportTourns = tournaments.filter(
+      t => t.sportId === sport.id && t.status !== 'Draft' && (t as any).isActive !== false
+    );
+    return sportTourns.length > 0 && sportTourns.every(t => t.status === 'Completed' || t.status === 'Archived');
+  }, [tournaments, sport?.id]);
+
+  const isRegistrationBlocked = isAllCompleted || (isExpired && !isTeam);
 
   const birthDateValidation = useMemo(() => {
     if (!birthDate || !category) return { isValid: true };
@@ -283,8 +294,12 @@ export const RegisterStudentModal: React.FC<RegisterStudentModalProps> = ({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (isExpired) {
-      toast.error('انتهى أجل التسجيل المحدد لهذه البطولة ولا يمكن إضافة مشاركين جديد!');
+    if (isRegistrationBlocked) {
+      toast.error(
+        isAllCompleted
+          ? 'انتهت هذه البطولة وأُغلقت نهائياً ولا يمكن إضافة مشاركين جدد.'
+          : 'انتهى أجل التسجيل المحدد لهذه البطولة ولا يمكن إضافة مشاركين جدد!'
+      );
       return;
     }
 
@@ -324,8 +339,12 @@ export const RegisterStudentModal: React.FC<RegisterStudentModalProps> = ({
       return;
     }
 
-    if (isExpired) {
-      toast.error('انتهى آخر أجل للتسجيل المحدد لهذه البطولة ولا يمكن إضافة مشاركين جدد');
+    if (isRegistrationBlocked) {
+      toast.error(
+        isAllCompleted
+          ? 'انتهت هذه البطولة وأُغلقت نهائياً ولا يمكن إضافة مشاركين جدد.'
+          : 'انتهى آخر أجل للتسجيل المحدد لهذه البطولة ولا يمكن إضافة مشاركين جدد'
+      );
       return;
     }
 
@@ -495,18 +514,34 @@ export const RegisterStudentModal: React.FC<RegisterStudentModalProps> = ({
           </button>
         </div>
 
-        {/* Expired Warning Banner */}
-        {isExpired && (
+        {/* Expired / Completed Warning Banner */}
+        {isRegistrationBlocked ? (
           <div className="p-3 bg-red-50 dark:bg-red-950/40 border-b border-red-200 dark:border-red-900/40 flex items-center gap-2.5 text-red-900 dark:text-red-300 text-xs font-bold transition-colors">
             <Lock className="w-5 h-5 text-red-600 dark:text-red-400 shrink-0" />
             <div>
-              <p>انتهى أجل التسجيل المحدد لهذه البطولة أوتوماتيكياً.</p>
+              <p>
+                {isAllCompleted
+                  ? 'البطولة منتهية ومؤرشفة نهائياً.'
+                  : 'انتهى أجل التسجيل المحدد لهذه البطولة أوتوماتيكياً.'}
+              </p>
               <p className="text-[10px] text-red-700 dark:text-red-400/70 font-normal mt-0.5">
-                لا يمكن إضافة أو تعديل قائمة التلاميذ والفرق بعد انقضاء الوقت المحدد من طرف رئيس اللجنة التقنية.
+                {sport.id === 'cross_country'
+                  ? 'بالنسبة للعدو الريفي، لا يمكن إضافة أو تعديل أو حذف أي متسابق بعد انقضاء آخر أجل للتسجيل.'
+                  : 'لا يمكن إضافة أو تعديل قائمة التلاميذ والفرق بعد انقضاء الوقت المحدد أو انتهاء البطولة.'}
               </p>
             </div>
           </div>
-        )}
+        ) : isExpired && isTeam ? (
+          <div className="p-3 bg-blue-50 dark:bg-blue-950/40 border-b border-blue-200 dark:border-blue-900/40 flex items-center gap-2.5 text-blue-900 dark:text-blue-200 text-xs font-bold transition-colors">
+            <CheckCircle2 className="w-5 h-5 text-blue-600 dark:text-blue-400 shrink-0" />
+            <div>
+              <p>الرياضات الجماعية: إضافة وتغيير المشاركين متاحة حتى بعد انقضاء الأجل أو أثناء جريان البطولة.</p>
+              <p className="text-[10px] text-blue-700 dark:text-blue-300/80 font-normal mt-0.5">
+                يمكنكم إضافة أو تعديل أو تعويض عناصر الفريق ضمن السقف المسموح به في لائحة المشاركة.
+              </p>
+            </div>
+          </div>
+        ) : null}
 
         <form onSubmit={handleSubmit} className="p-4 sm:p-5 space-y-4">
           {/* Automatic Tournament Constraints Banner */}
@@ -540,7 +575,7 @@ export const RegisterStudentModal: React.FC<RegisterStudentModalProps> = ({
                 </label>
                 <input
                   type="text"
-                  disabled={isExpired}
+                  disabled={isRegistrationBlocked}
                   placeholder="مثال: محمد العمراوي"
                   value={fullName}
                   onChange={(e) => setFullName(e.target.value)}
@@ -561,7 +596,7 @@ export const RegisterStudentModal: React.FC<RegisterStudentModalProps> = ({
                   type="text"
                   required
                   maxLength={10}
-                  disabled={isExpired}
+                  disabled={isRegistrationBlocked}
                   placeholder="مثال: F212121212"
                   value={massarNumber}
                   onChange={(e) => setMassarNumber(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))}
@@ -595,7 +630,7 @@ export const RegisterStudentModal: React.FC<RegisterStudentModalProps> = ({
                     <span>التقاط بالكاميرا</span>
                     <input
                       type="file"
-                      disabled={isExpired}
+                      disabled={isRegistrationBlocked}
                       accept="image/*"
                       capture="environment"
                       onChange={handlePhotoUpload}
@@ -607,7 +642,7 @@ export const RegisterStudentModal: React.FC<RegisterStudentModalProps> = ({
                     <span>من الملفات</span>
                     <input
                       type="file"
-                      disabled={isExpired}
+                      disabled={isRegistrationBlocked}
                       accept="image/*"
                       onChange={handlePhotoUpload}
                       className="hidden"
@@ -616,7 +651,7 @@ export const RegisterStudentModal: React.FC<RegisterStudentModalProps> = ({
                   {photo && (
                     <button
                       type="button"
-                      disabled={isExpired}
+                      disabled={isRegistrationBlocked}
                       onClick={() => setPhoto('')}
                       className="text-[9px] text-red-500 hover:text-red-700 font-bold text-center underline"
                     >
@@ -660,7 +695,7 @@ export const RegisterStudentModal: React.FC<RegisterStudentModalProps> = ({
                 <div className="grid grid-cols-2 gap-2">
                   <button
                     type="button"
-                    disabled={isExpired}
+                    disabled={isRegistrationBlocked}
                     onClick={() => setGender('Male')}
                     className={`py-2 px-3 text-xs font-bold rounded-xl border transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
                       gender === 'Male'
@@ -673,7 +708,7 @@ export const RegisterStudentModal: React.FC<RegisterStudentModalProps> = ({
                   </button>
                   <button
                     type="button"
-                    disabled={isExpired}
+                    disabled={isRegistrationBlocked}
                     onClick={() => setGender('Female')}
                     className={`py-2 px-3 text-xs font-bold rounded-xl border transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
                       gender === 'Female'
@@ -699,7 +734,7 @@ export const RegisterStudentModal: React.FC<RegisterStudentModalProps> = ({
               </div>
               <input
                 type="date"
-                disabled={isExpired}
+                disabled={isRegistrationBlocked}
                 value={birthDate}
                 onChange={(e) => handleBirthDateChange(e.target.value)}
                 className={`w-full text-xs rounded-xl border px-3 py-2.5 text-slate-800 dark:text-slate-100 bg-slate-50 dark:bg-slate-800 focus:bg-white dark:focus:bg-slate-700 focus:outline-none focus:ring-2 font-mono transition-colors ${
@@ -772,7 +807,7 @@ export const RegisterStudentModal: React.FC<RegisterStudentModalProps> = ({
                     <button
                       type="button"
                       key={catId}
-                      disabled={isExpired}
+                      disabled={isRegistrationBlocked}
                       onClick={() => setCategory(catId)}
                       className={`px-3 py-2.5 rounded-xl text-xs font-bold border transition-all cursor-pointer text-center ${
                         isSelected
@@ -807,7 +842,7 @@ export const RegisterStudentModal: React.FC<RegisterStudentModalProps> = ({
               </div>
             ) : (
               <select
-                disabled={isExpired}
+                disabled={isRegistrationBlocked}
                 value={selectedSchoolId}
                 onChange={(e) => setSelectedSchoolId(e.target.value)}
                 className="w-full text-xs rounded-xl border border-slate-200 dark:border-slate-700 px-3 py-2 text-slate-800 dark:text-slate-100 bg-white dark:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-100 dark:disabled:bg-slate-900 transition-colors"
@@ -827,7 +862,7 @@ export const RegisterStudentModal: React.FC<RegisterStudentModalProps> = ({
                 تخصص ألعاب القوى الفرعي (حسب فئة {category}) <span className="text-red-500">*</span>
               </label>
               <select
-                disabled={isExpired}
+                disabled={isRegistrationBlocked}
                 value={athleticsSpecialty}
                 onChange={(e) => setAthleticsSpecialty(e.target.value)}
                 className="w-full text-xs rounded-xl border border-purple-200 bg-purple-50/40 px-3 py-2 text-slate-800 focus:outline-none focus:ring-2 focus:ring-purple-500"
@@ -881,7 +916,7 @@ export const RegisterStudentModal: React.FC<RegisterStudentModalProps> = ({
               <div className="grid grid-cols-2 gap-2">
                 <button
                   type="button"
-                  disabled={isExpired}
+                  disabled={isRegistrationBlocked}
                   onClick={() => setAffiliationType('non_club')}
                   className={`px-3 py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
                     affiliationType === 'non_club'
@@ -893,7 +928,7 @@ export const RegisterStudentModal: React.FC<RegisterStudentModalProps> = ({
                 </button>
                 <button
                   type="button"
-                  disabled={isExpired}
+                  disabled={isRegistrationBlocked}
                   onClick={() => setAffiliationType('club_affiliated')}
                   className={`px-3 py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
                     affiliationType === 'club_affiliated'
@@ -916,7 +951,7 @@ export const RegisterStudentModal: React.FC<RegisterStudentModalProps> = ({
               <div className="grid grid-cols-2 gap-2">
                 <button
                   type="button"
-                  disabled={isExpired}
+                  disabled={isRegistrationBlocked}
                   onClick={() => setParticipationType('individual')}
                   className={`px-3 py-2 rounded-xl text-xs font-bold border transition-all ${
                     participationType === 'individual'
@@ -928,7 +963,7 @@ export const RegisterStudentModal: React.FC<RegisterStudentModalProps> = ({
                 </button>
                 <button
                   type="button"
-                  disabled={isExpired}
+                  disabled={isRegistrationBlocked}
                   onClick={() => setParticipationType('school_team')}
                   className={`px-3 py-2 rounded-xl text-xs font-bold border transition-all ${
                     participationType === 'school_team'
@@ -960,7 +995,7 @@ export const RegisterStudentModal: React.FC<RegisterStudentModalProps> = ({
               <div>
                 <input
                   type="text"
-                  disabled={isExpired}
+                  disabled={isRegistrationBlocked}
                   placeholder="اسم ونسب الأستاذ المؤطر"
                   value={coachName}
                   onChange={(e) => setCoachName(e.target.value)}
@@ -970,7 +1005,7 @@ export const RegisterStudentModal: React.FC<RegisterStudentModalProps> = ({
               <div className="grid grid-cols-2 gap-2">
                 <input
                   type="text"
-                  disabled={isExpired}
+                  disabled={isRegistrationBlocked}
                   placeholder="رقم التأجير (SOM)"
                   value={coachLeaseNumber}
                   onChange={(e) => setCoachLeaseNumber(e.target.value)}
@@ -978,7 +1013,7 @@ export const RegisterStudentModal: React.FC<RegisterStudentModalProps> = ({
                 />
                 <input
                   type="tel"
-                  disabled={isExpired}
+                  disabled={isRegistrationBlocked}
                   placeholder="رقم الهاتف"
                   value={coachPhone}
                   onChange={(e) => setCoachPhone(e.target.value)}
@@ -999,7 +1034,7 @@ export const RegisterStudentModal: React.FC<RegisterStudentModalProps> = ({
             </button>
             <button
               type="submit"
-              disabled={isSubmitting || isExpired}
+              disabled={isSubmitting || isRegistrationBlocked}
               className="px-5 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 active:scale-95 rounded-xl transition-all shadow-md shadow-emerald-600/20 disabled:bg-slate-300 dark:disabled:bg-slate-800 disabled:cursor-not-allowed cursor-pointer flex items-center gap-1.5"
             >
               {isSubmitting ? (

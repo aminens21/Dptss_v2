@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { DataService, SPORTS_MAP, AGE_CATEGORIES, getAgeCategoriesForSeason, getCategoryGenderLabel, isClubTournament, normalizeCategoryKey, validateBirthDateForCategory, isTeacherLevelAllowedForTournament, isCrossCountryU15OpenToPrimary, getEffectiveConfirmedBranches, formatBranchLabelAr, getGenderSpecificCategoryTitle, isSchoolSectorAllowedForTournament, schoolNamesMatch, isAffiliationAllowedByDisplayConfig, resolveEffectiveTeacherCadre, isCategoryAllowedForTeacherLevel, findMatchingSchoolForTeacher, isTrackOrCrossCountrySport, isTeamSport } from '../lib/dataService';
+import { DataService, SPORTS_MAP, AGE_CATEGORIES, getAgeCategoriesForSeason, getCategoryGenderLabel, isClubTournament, normalizeCategoryKey, validateBirthDateForCategory, isTeacherLevelAllowedForTournament, isCrossCountryU15OpenToPrimary, getEffectiveConfirmedBranches, formatBranchLabelAr, getGenderSpecificCategoryTitle, isSchoolSectorAllowedForTournament, schoolNamesMatch, isAffiliationAllowedByDisplayConfig, resolveEffectiveTeacherCadre, isCategoryAllowedForTeacherLevel, findMatchingSchoolForTeacher, isTrackOrCrossCountrySport, isTeamSport, isRegistrationDeadlineExpired, getCrossCountryRegistrationDeadline, isCrossCountryRegistrationLocked } from '../lib/dataService';
 import { useSchoolConfirmations } from '../hooks/useSchoolConfirmations';
 import { Student, Sport, Tournament, School, Directorate, AffiliationDisplayConfig } from '../types';
 import { ParticipationFormPdfModal } from '../components/ParticipationFormPdfModal';
@@ -461,6 +461,23 @@ export const TeacherTeams: React.FC = () => {
     return teacherAllowedTournaments.find(t => t.sportId === sportId);
   };
 
+  const isActiveSportFullyCompleted = (sportId: string): boolean => {
+    const sportTourns = teacherAllowedTournaments.filter(t => t.sportId === sportId);
+    return sportTourns.length > 0 && sportTourns.every(t => t.status === 'Completed' || t.status === 'Archived');
+  };
+
+  const isCrossCountryBranchLocked = (aff?: string): boolean => {
+    return isCrossCountryRegistrationLocked(tournaments, aff);
+  };
+
+  const isStudentModificationLocked = (student: Student): boolean => {
+    if (isActiveSportFullyCompleted(student.sportId)) return true;
+    if (student.sportId === 'cross_country' && isCrossCountryRegistrationLocked(tournaments, student.affiliationType)) {
+      return true;
+    }
+    return false;
+  };
+
   const handleOpenNewStudentForm = (initialCat?: string, initialGender?: 'Male' | 'Female', initialAffiliation?: 'non_club' | 'club_affiliated') => {
     // Sanitize parameters in case handler is invoked as an event callback
     const cleanCat = typeof initialCat === 'string' ? initialCat : undefined;
@@ -476,9 +493,13 @@ export const TeacherTeams: React.FC = () => {
       return;
     }
 
-    const activeTourn = getSportTournament(selectedSportId);
-    if (activeTourn?.status === 'Completed' || activeTourn?.status === 'Archived') {
-      toast.error('البطولة منتهية ومؤرشفة نهائياً للنتائج، ولا يمكن إضافة تلاميذ جديدين.');
+    if (isActiveSportFullyCompleted(selectedSportId)) {
+      toast.error('البطولة منتهية ومؤرشفة نهائياً للنتائج، ولا يمكن إضافة تلاميذ جدد.');
+      return;
+    }
+
+    if (selectedSportId === 'cross_country' && isCrossCountryBranchLocked(cleanAffiliation)) {
+      toast.error('انتهى آخر أجل للتسجيل في بطولة العدو الريفي — لا يمكن إضافة أو تعديل أو حذف أي متسابق بعد نهاية التسجيل.');
       return;
     }
 
@@ -624,6 +645,14 @@ export const TeacherTeams: React.FC = () => {
       toast.error('غير مسموح لك بتعديل مشاركة لا تنتمي لمؤسستك التعليمية.');
       return;
     }
+    if (isStudentModificationLocked(student)) {
+      toast.error(
+        student.sportId === 'cross_country'
+          ? 'انتهى آخر أجل للتسجيل في العدو الريفي — لا يمكن تعديل بيانات أي متسابق بعد نهاية التسجيل.'
+          : 'البطولة منتهية ومؤرشفة نهائياً ولا يمكن تعديل بيانات المشارك.'
+      );
+      return;
+    }
     setStudentToEditConfirm(student);
   };
 
@@ -633,9 +662,12 @@ export const TeacherTeams: React.FC = () => {
       toast.error('غير مسموح لك بتعويض مشارك لا ينتمي لمؤسستك التعليمية.');
       return;
     }
-    const activeTourn = selectedSportId ? getSportTournament(selectedSportId) : undefined;
-    if (activeTourn?.status === 'Completed' || activeTourn?.status === 'Archived') {
-      toast.error('البطولة منتهية ومؤرشفة نهائياً ولا يمكن إجراء تعويض.');
+    if (isStudentModificationLocked(student)) {
+      toast.error(
+        student.sportId === 'cross_country'
+          ? 'انتهى آخر أجل للتسجيل في العدو الريفي — لا يمكن تعويض أو تغيير أي متسابق بعد نهاية التسجيل.'
+          : 'البطولة منتهية ومؤرشفة نهائياً ولا يمكن إجراء تعويض.'
+      );
       return;
     }
 
@@ -678,6 +710,15 @@ export const TeacherTeams: React.FC = () => {
 
   // Step 2: Proceed with loading data into the form after confirmation
   const confirmStartEdit = (student: Student) => {
+    if (isStudentModificationLocked(student)) {
+      toast.error(
+        student.sportId === 'cross_country'
+          ? 'انتهى آخر أجل للتسجيل في العدو الريفي — لا يمكن تعديل بيانات أي متسابق بعد نهاية التسجيل.'
+          : 'البطولة منتهية ومؤرشفة نهائياً ولا يمكن تعديل بيانات المشارك.'
+      );
+      setStudentToEditConfirm(null);
+      return;
+    }
     setReplacingStudentName(null);
     setEditingStudentId(student.id);
     setFullName(student.fullName);
@@ -834,6 +875,16 @@ export const TeacherTeams: React.FC = () => {
     if (!activeSportConfig || !isSportProgrammed(activeSportConfig)) {
       const sportName = SPORTS_MAP[selectedSportId]?.name || selectedSportId;
       toast.error(`خطأ في التسجيل: البطولة الخاصة بـ (${sportName}) في طور الإعداد حالياً وغير مفتوحة للتسجيل.`);
+      return;
+    }
+
+    if (isActiveSportFullyCompleted(selectedSportId)) {
+      toast.error('البطولة منتهية ومؤرشفة نهائياً ولا يمكن إضافة أو تعديل المشاركين.');
+      return;
+    }
+
+    if (selectedSportId === 'cross_country' && isCrossCountryBranchLocked(affiliationType)) {
+      toast.error('انتهى آخر أجل للتسجيل في بطولة العدو الريفي — لا يمكن إضافة أو تعديل أي متسابق بعد نهاية التسجيل.');
       return;
     }
 
@@ -1064,11 +1115,28 @@ export const TeacherTeams: React.FC = () => {
       toast.error('غير مسموح لك بحذف مشاركة لا تنتمي لمؤسستك التعليمية.');
       return;
     }
+    if (isStudentModificationLocked(student)) {
+      toast.error(
+        student.sportId === 'cross_country'
+          ? 'انتهى آخر أجل للتسجيل في العدو الريفي — لا يمكن حذف أي متسابق بعد نهاية التسجيل.'
+          : 'البطولة منتهية ومؤرشفة نهائياً ولا يمكن حذف المشاركين.'
+      );
+      return;
+    }
     setStudentToDelete(student);
   };
 
   const executeDeleteStudent = async () => {
     if (!studentToDelete) return;
+    if (isStudentModificationLocked(studentToDelete)) {
+      toast.error(
+        studentToDelete.sportId === 'cross_country'
+          ? 'انتهى آخر أجل للتسجيل في العدو الريفي — لا يمكن حذف أي متسابق بعد نهاية التسجيل.'
+          : 'البطولة منتهية ومؤرشفة نهائياً ولا يمكن حذف المشاركين.'
+      );
+      setStudentToDelete(null);
+      return;
+    }
     setIsDeletingStudent(true);
     const toastId = toast.loading(`جاري حذف المشارك(ة) ${studentToDelete.fullName}...`);
     try {
@@ -1668,25 +1736,29 @@ export const TeacherTeams: React.FC = () => {
                       <span>عرض لائحة المشاركة</span>
                     </button>
 
-                    {hasParticipationInBranch && (
+                    {hasParticipationInBranch && (() => {
+                      const isBranchCcLocked = selectedSportId === 'cross_country' && isCrossCountryBranchLocked(parsed.affiliationType);
+                      const isFullyCompleted = selectedSportId ? isActiveSportFullyCompleted(selectedSportId) : false;
+                      const isBranchActionDisabled = !activeSportCategories || activeSportCategories.length === 0 || !activeSportConfig || !isSportProgrammed(activeSportConfig) || isBranchCcLocked || isFullyCompleted;
+                      return (
                       <>
                         {selectedSportId === 'cross_country' ? (
                           <button
                             type="button"
                             onClick={() => handleOpenCrossCountryBulk(selectedCategoryKey, parsed.affiliationType)}
-                            disabled={!activeSportCategories || activeSportCategories.length === 0 || !activeSportConfig || !isSportProgrammed(activeSportConfig)}
-                            title="تسجيل 8 مشاركين في آن واحد (3 فردي + 5 فريق المؤسسة)"
+                            disabled={isBranchActionDisabled}
+                            title={isBranchCcLocked ? 'انتهى آخر أجل للتسجيل في العدو الريفي' : 'تسجيل 8 مشاركين في آن واحد (3 فردي + 5 فريق المؤسسة)'}
                             className="bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 text-slate-950 font-black text-xs px-4 py-2 rounded-xl shadow-xs flex items-center gap-1.5 transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer hover:scale-102 active:scale-98"
                           >
-                            <Sparkles className="h-4 w-4 text-slate-950" />
-                            <span>تسجيل دفعة واحدة ⚡</span>
+                            {isBranchCcLocked ? <Lock className="h-4 w-4 text-slate-800" /> : <Sparkles className="h-4 w-4 text-slate-950" />}
+                            <span>{isBranchCcLocked ? 'انتهى أجل التسجيل 🔒' : 'تسجيل دفعة واحدة ⚡'}</span>
                           </button>
                         ) : (
                           <button
                             type="button"
                             onClick={() => setIsSportBulkOpen(true)}
-                            disabled={!activeSportCategories || activeSportCategories.length === 0 || !activeSportConfig || !isSportProgrammed(activeSportConfig)}
-                            title="تسجيل عدة مشاركين دفعة واحدة لتوفير الوقت"
+                            disabled={isBranchActionDisabled}
+                            title="تسجيل أو تغيير أو حذف عدة مشاركين دفعة واحدة"
                             className="bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 text-slate-950 font-black text-xs px-4 py-2 rounded-xl shadow-xs flex items-center gap-1.5 transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer hover:scale-102 active:scale-98"
                           >
                             <Sparkles className="h-4 w-4 text-slate-950" />
@@ -1698,15 +1770,22 @@ export const TeacherTeams: React.FC = () => {
                           onClick={() => {
                             handleOpenNewStudentForm(parsed.catId, parsed.gender, parsed.affiliationType);
                           }}
-                          disabled={!activeSportCategories || activeSportCategories.length === 0 || !activeSportConfig || !isSportProgrammed(activeSportConfig)}
-                          title={activeSportConfig && !isSportProgrammed(activeSportConfig) ? 'هذه البطولة في طور الإعداد وغير مفتوحة للتسجيل' : 'إضافة تلميذ جديد'}
+                          disabled={isBranchActionDisabled}
+                          title={
+                            isBranchCcLocked
+                              ? 'انتهى آخر أجل للتسجيل في العدو الريفي'
+                              : activeSportConfig && !isSportProgrammed(activeSportConfig)
+                              ? 'هذه البطولة في طور الإعداد وغير مفتوحة للتسجيل'
+                              : 'إضافة تلميذ جديد'
+                          }
                           className="bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs px-4 py-2 rounded-xl shadow-xs flex items-center gap-1.5 transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
                         >
-                          <Plus className="h-4 w-4" />
+                          {isBranchCcLocked ? <Lock className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
                           <span>تسجيل واحد تلو الآخر</span>
                         </button>
                       </>
-                    )}
+                      );
+                    })()}
                   </>
                 );
               })()}
@@ -1726,28 +1805,16 @@ export const TeacherTeams: React.FC = () => {
             </div>
           )}
 
-          {/* Status Banners: Open (🟢), Ongoing (🔵), Completed (🏆) */}
+          {/* Status Banners: Cross Country Deadline Locked (🔒), Open (🟢), Ongoing (🔵), Completed (🏆) */}
           {activeSportConfig && isSportProgrammed(activeSportConfig) && (() => {
-            const activeTourn = getSportTournament(selectedSportId);
-            const statusVal = activeTourn?.status || 'Scheduled';
+            const sportTourns = teacherAllowedTournaments.filter(t => t.sportId === selectedSportId);
+            const allCompleted = sportTourns.length > 0 && sportTourns.every(t => t.status === 'Completed' || t.status === 'Archived');
+            const anyOngoing = sportTourns.some(t => t.status === 'Ongoing');
+            const isTeam = selectedSportId ? isTeamSport(selectedSportId) : false;
+            const parsedBanner = parseBranchKey(selectedCategoryKey);
+            const isCcLocked = selectedSportId === 'cross_country' && isCrossCountryBranchLocked(parsedBanner.affiliationType);
 
-            if (statusVal === 'Ongoing') {
-              return (
-                <div className="p-4 bg-blue-50 border border-blue-200 rounded-2xl flex items-start gap-3 text-blue-950 text-xs leading-relaxed shadow-3xs">
-                  <RefreshCw className="h-5 w-5 shrink-0 text-blue-600 mt-0.5" />
-                  <div>
-                    <p className="font-extrabold text-sm text-blue-950">🔵 البطولة جارية حالياً — إمكانية تعويض المشاركين متاحة</p>
-                    <p className="mt-1 text-blue-900 font-medium">
-                      يمكن للأستاذ(ة) تعويض أي مشارك أو مشاركة في لائحة المشاركة لمؤسسته(ا) حتى بعد انطلاق البطولة، شريطة عدم تجاوز العدد الأقصى المسموح به في لائحة كل فرع
-                      {activeSportConfig?.studentLimit && activeSportConfig.studentLimit > 0
-                        ? ` (${activeSportConfig.studentLimit} مشارك)`
-                        : ''}
-                      {' '}والمحدد من طرف رئيس اللجنة التقنية.
-                    </p>
-                  </div>
-                </div>
-              );
-            } else if (statusVal === 'Completed' || statusVal === 'Archived') {
+            if (allCompleted) {
               return (
                 <div className="p-4 bg-amber-50 border border-amber-300 rounded-2xl flex items-start gap-3 text-amber-950 text-xs leading-relaxed shadow-3xs">
                   <Trophy className="h-5 w-5 shrink-0 text-amber-600 mt-0.5" />
@@ -1755,6 +1822,38 @@ export const TeacherTeams: React.FC = () => {
                     <p className="font-extrabold text-sm text-amber-950">🏆 بطولة منتهية ومؤرشفة للنتائج (Completed)</p>
                     <p className="mt-1 text-amber-900 font-medium">
                       هذه البطولة منتهية ومؤرشفة نهائياً لعرض نتائج المباريات والتتويجات، وتم إغلاق التسجيل نهائياً لجميع المستخدمين.
+                    </p>
+                  </div>
+                </div>
+              );
+            } else if (isCcLocked) {
+              return (
+                <div className="p-4 bg-red-50 border border-red-200 rounded-2xl flex items-start gap-3 text-red-950 text-xs leading-relaxed shadow-3xs">
+                  <Lock className="h-5 w-5 shrink-0 text-red-600 mt-0.5" />
+                  <div>
+                    <p className="font-extrabold text-sm text-red-950">🔒 انتهى آخر أجل للتسجيل في بطولة العدو الريفي</p>
+                    <p className="mt-1 text-red-800 font-medium">
+                      بالنسبة للعدو الريفي، لا يمكن إضافة أو تعديل أو تعويض أو حذف أي متسابق بعد انقضاء آخر أجل للتسجيل المحدد.
+                    </p>
+                  </div>
+                </div>
+              );
+            } else if (anyOngoing) {
+              return (
+                <div className="p-4 bg-blue-50 border border-blue-200 rounded-2xl flex items-start gap-3 text-blue-950 text-xs leading-relaxed shadow-3xs">
+                  <RefreshCw className="h-5 w-5 shrink-0 text-blue-600 mt-0.5" />
+                  <div>
+                    <p className="font-extrabold text-sm text-blue-950">
+                      🔵 البطولة جارية حالياً — {isTeam ? 'إمكانية تغيير وحذف وإضافة المشاركين متاحة' : 'إمكانية تعويض المشاركين متاحة'}
+                    </p>
+                    <p className="mt-1 text-blue-900 font-medium">
+                      {isTeam
+                        ? 'بالنسبة للرياضات الجماعية، يمكن للأستاذ(ة) تغيير أو تعديل أو حذف أو إضافة أي مشارك(ة) في لائحة مؤسسته حتى بعد انتهاء الأجل أو أثناء جريان البطولة، شريطة عدم تجاوز السقف الأقصى المسموح به'
+                        : 'يمكن للأستاذ(ة) تعويض أي مشارك أو مشاركة في لائحة المشاركة لمؤسسته(ا) حتى بعد انطلاق البطولة، شريطة عدم تجاوز العدد الأقصى المسموح به في لائحة كل فرع'}
+                      {activeSportConfig?.studentLimit && activeSportConfig.studentLimit > 0
+                        ? ` (${activeSportConfig.studentLimit} مشارك)`
+                        : ''}
+                      {' '}والمحدد من طرف رئيس اللجنة التقنية.
                     </p>
                   </div>
                 </div>
@@ -1770,7 +1869,11 @@ export const TeacherTeams: React.FC = () => {
                         ? `${activeSportConfig.studentLimit} مشارك(ة)`
                         : 'غير محدود'}
                     </strong>{' '}
-                    مع إمكانية تعويض أي مشارك(ة) ضمن السقف المسموح به.
+                    {isTeam
+                      ? '— مع إمكانية تغيير أو حذف أي مشارك حتى وإن كانت البطولة جارية.'
+                      : selectedSportId === 'cross_country'
+                      ? '— ينقفل التسجيل والتعديل والحذف نهائياً عند انتهاء آخر أجل للتسجيل.'
+                      : 'مع إمكانية تعويض أي مشارك(ة) ضمن السقف المسموح به.'}
                   </p>
                 </div>
               );
@@ -2636,13 +2739,18 @@ export const TeacherTeams: React.FC = () => {
                             </button>
                           )}
 
-                          {matchingStudents.length > 0 && (
+                          {matchingStudents.length > 0 && !(selectedSportId === 'cross_country' && isCrossCountryBranchLocked(aff)) && !(selectedSportId && isActiveSportFullyCompleted(selectedSportId)) && (
                             categoryKeyToDelete === key ? (
                               <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
                                 <button
                                   type="button"
                                   onClick={async (e) => {
                                     e.stopPropagation();
+                                    if (selectedSportId === 'cross_country' && isCrossCountryBranchLocked(aff)) {
+                                      toast.error('انتهى آخر أجل للتسجيل في العدو الريفي ولا يمكن حذف المتسابقين.');
+                                      setCategoryKeyToDelete(null);
+                                      return;
+                                    }
                                     setCategoryKeyToDelete(null);
                                     const toastId = toast.loading(`جاري حذف فئة ${label}...`);
                                     try {
@@ -2703,7 +2811,11 @@ export const TeacherTeams: React.FC = () => {
                             )
                           )}
 
-                          {!isEditing && (
+                          {!isEditing && (() => {
+                            const isCardCcLocked = selectedSportId === 'cross_country' && isCrossCountryBranchLocked(aff);
+                            const isCardCompleted = selectedSportId ? isActiveSportFullyCompleted(selectedSportId) : false;
+                            const isCardLocked = isCardCcLocked || isCardCompleted;
+                            return (
                             <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
                               <button
                                 type="button"
@@ -2718,33 +2830,46 @@ export const TeacherTeams: React.FC = () => {
                               >
                                 <span>تعديل المؤطر</span>
                               </button>
-                              {selectedSportId === 'cross_country' && (
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleOpenCrossCountryBulk(`${catId}_${g}`, aff as any);
-                                  }}
-                                  className="text-[10px] text-amber-900 hover:text-amber-950 font-black flex items-center gap-1 px-2 py-1 rounded bg-amber-100 hover:bg-amber-200 border border-amber-300 cursor-pointer transition-colors shadow-3xs"
-                                  title="تسجيل 8 مشاركين في هذه الفئة (3 فردي + 5 فريق المؤسسة)"
+                              {isCardLocked ? (
+                                <span
+                                  className="text-[10px] text-red-700 font-bold flex items-center gap-1 px-2 py-1 rounded bg-red-50 border border-red-200"
+                                  title={isCardCcLocked ? 'انتهى آخر أجل للتسجيل في العدو الريفي' : 'البطولة منتهية ومؤرشفة'}
                                 >
-                                  <Sparkles className="w-3 h-3 text-amber-700" />
-                                  <span>تسجيل 8 ⚡</span>
-                                </button>
+                                  <Lock className="w-3 h-3" />
+                                  <span>التسجيل مقفل</span>
+                                </span>
+                              ) : (
+                                <>
+                                  {selectedSportId === 'cross_country' && (
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleOpenCrossCountryBulk(`${catId}_${g}`, aff as any);
+                                      }}
+                                      className="text-[10px] text-amber-900 hover:text-amber-950 font-black flex items-center gap-1 px-2 py-1 rounded bg-amber-100 hover:bg-amber-200 border border-amber-300 cursor-pointer transition-colors shadow-3xs"
+                                      title="تسجيل 8 مشاركين في هذه الفئة (3 فردي + 5 فريق المؤسسة)"
+                                    >
+                                      <Sparkles className="w-3 h-3 text-amber-700" />
+                                      <span>تسجيل 8 ⚡</span>
+                                    </button>
+                                  )}
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      const defaultAff = aff || (isCategoryClub ? 'club_affiliated' : 'non_club');
+                                      handleOpenNewStudentForm(catId, g, defaultAff as any);
+                                    }}
+                                    className="text-[10px] text-green-700 hover:text-green-900 font-extrabold flex items-center gap-1 px-2 py-1 rounded bg-green-50 border border-green-200 cursor-pointer transition-colors shadow-3xs"
+                                  >
+                                    <span>إضافة مشارك</span>
+                                  </button>
+                                </>
                               )}
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  const defaultAff = aff || (isCategoryClub ? 'club_affiliated' : 'non_club');
-                                  handleOpenNewStudentForm(catId, g, defaultAff as any);
-                                }}
-                                className="text-[10px] text-green-700 hover:text-green-900 font-extrabold flex items-center gap-1 px-2 py-1 rounded bg-green-50 border border-green-200 cursor-pointer transition-colors shadow-3xs"
-                              >
-                                <span>إضافة مشارك</span>
-                              </button>
                             </div>
-                          )}
+                            );
+                          })()}
                         </div>
                       </div>
 
@@ -2921,7 +3046,16 @@ export const TeacherTeams: React.FC = () => {
                     </button>
                     {selectedSportId === 'cross_country' && (() => {
                       const parsedCC = parseBranchKey(selectedCategoryKey);
-                      return (
+                      const isCcLocked = isCrossCountryBranchLocked(parsedCC.affiliationType);
+                      return isCcLocked ? (
+                        <span
+                          className="text-[10px] font-bold bg-red-50 text-red-700 border border-red-200 px-3 py-1.5 rounded-lg flex items-center gap-1.5"
+                          title="انتهى آخر أجل للتسجيل في العدو الريفي"
+                        >
+                          <Lock className="w-3.5 h-3.5" />
+                          <span>التسجيل والتعديل مقفل بعد انتهاء الأجل</span>
+                        </span>
+                      ) : (
                         <>
                           <button
                             type="button"
@@ -3063,35 +3197,45 @@ export const TeacherTeams: React.FC = () => {
                             {/* Actions */}
                             <div className="flex items-center gap-1 shrink-0 mr-auto">
                               {canTeacherManageStudent(stud) && (
-                                <>
-                                  <button
-                                    type="button"
-                                    onClick={() => handleStartReplaceStudent(stud)}
-                                    title="تعويض هذا المشارك(ة) بمشارك آخر ضمن لائحة المشاركة"
-                                    className="px-2 py-1.5 text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded-lg transition-colors cursor-pointer inline-flex items-center gap-1 text-[10px] font-black"
+                                isStudentModificationLocked(stud) ? (
+                                  <span
+                                    className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-red-50 text-red-700 border border-red-200 text-[10px] font-bold"
+                                    title={stud.sportId === 'cross_country' ? 'انتهى آخر أجل للتسجيل في العدو الريفي' : 'البطولة منتهية ومؤرشفة'}
                                   >
-                                    <RefreshCw className="h-3 w-3 shrink-0" />
-                                    <span>تعويض</span>
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => handleRequestEditStudent(stud)}
-                                    title="تعديل بيانات التلميذ"
-                                    className="p-1.5 text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors cursor-pointer inline-flex items-center"
-                                  >
-                                    <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                                    </svg>
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => handleRequestDeleteStudent(stud)}
-                                    title="حذف التلميذ"
-                                    className="p-1.5 text-red-600 bg-red-50 hover:bg-red-100 rounded-lg transition-colors cursor-pointer inline-flex items-center"
-                                  >
-                                    <Trash2 className="h-3.5 w-3.5" />
-                                  </button>
-                                </>
+                                    <Lock className="w-3 h-3" />
+                                    <span>مقفل</span>
+                                  </span>
+                                ) : (
+                                  <>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleStartReplaceStudent(stud)}
+                                      title="تعويض هذا المشارك(ة) بمشارك آخر ضمن لائحة المشاركة"
+                                      className="px-2 py-1.5 text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded-lg transition-colors cursor-pointer inline-flex items-center gap-1 text-[10px] font-black"
+                                    >
+                                      <RefreshCw className="h-3 w-3 shrink-0" />
+                                      <span>تعويض</span>
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleRequestEditStudent(stud)}
+                                      title="تعديل بيانات التلميذ"
+                                      className="p-1.5 text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors cursor-pointer inline-flex items-center"
+                                    >
+                                      <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                      </svg>
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleRequestDeleteStudent(stud)}
+                                      title="حذف التلميذ"
+                                      className="p-1.5 text-red-600 bg-red-50 hover:bg-red-100 rounded-lg transition-colors cursor-pointer inline-flex items-center"
+                                    >
+                                      <Trash2 className="h-3.5 w-3.5" />
+                                    </button>
+                                  </>
+                                )
                               )}
                             </div>
                           </div>
@@ -3228,35 +3372,45 @@ export const TeacherTeams: React.FC = () => {
                               <td className="p-4 whitespace-nowrap text-left">
                                 <div className="flex items-center justify-end gap-1.5">
                                   {canTeacherManageStudent(stud) && (
-                                    <>
-                                      <button
-                                        type="button"
-                                        onClick={() => handleStartReplaceStudent(stud)}
-                                        title="تعويض هذا المشارك(ة) بمشارك آخر ضمن لائحة المشاركة"
-                                        className="px-2 py-1 text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded-lg transition-colors cursor-pointer inline-flex items-center gap-1 text-[10px] font-black"
+                                    isStudentModificationLocked(stud) ? (
+                                      <span
+                                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-red-50 text-red-700 border border-red-200 text-[10px] font-bold"
+                                        title={stud.sportId === 'cross_country' ? 'انتهى آخر أجل للتسجيل في العدو الريفي' : 'البطولة منتهية ومؤرشفة'}
                                       >
-                                        <RefreshCw className="h-3.5 w-3.5 shrink-0" />
-                                        <span>تعويض</span>
-                                      </button>
-                                      <button
-                                        type="button"
-                                        onClick={() => handleRequestEditStudent(stud)}
-                                        title="تعديل بيانات التلميذ"
-                                        className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer inline-flex items-center"
-                                      >
-                                        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                                        </svg>
-                                      </button>
-                                      <button
-                                        type="button"
-                                        onClick={() => handleRequestDeleteStudent(stud)}
-                                        title="حذف التلميذ"
-                                        className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer inline-flex items-center"
-                                      >
-                                        <Trash2 className="h-4 w-4" />
-                                      </button>
-                                    </>
+                                        <Lock className="w-3 h-3" />
+                                        <span>مقفل</span>
+                                      </span>
+                                    ) : (
+                                      <>
+                                        <button
+                                          type="button"
+                                          onClick={() => handleStartReplaceStudent(stud)}
+                                          title="تعويض هذا المشارك(ة) بمشارك آخر ضمن لائحة المشاركة"
+                                          className="px-2 py-1 text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded-lg transition-colors cursor-pointer inline-flex items-center gap-1 text-[10px] font-black"
+                                        >
+                                          <RefreshCw className="h-3.5 w-3.5 shrink-0" />
+                                          <span>تعويض</span>
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => handleRequestEditStudent(stud)}
+                                          title="تعديل بيانات التلميذ"
+                                          className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer inline-flex items-center"
+                                        >
+                                          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                          </svg>
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => handleRequestDeleteStudent(stud)}
+                                          title="حذف التلميذ"
+                                          className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer inline-flex items-center"
+                                        >
+                                          <Trash2 className="h-4 w-4" />
+                                        </button>
+                                      </>
+                                    )
                                   )}
                                 </div>
                               </td>

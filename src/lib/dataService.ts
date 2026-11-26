@@ -926,6 +926,50 @@ export function isTeamSport(sportIdOrName: string): boolean {
   return false;
 }
 
+export function isRegistrationDeadlineExpired(deadline: any): boolean {
+  if (!deadline) return false;
+  try {
+    let targetDate: Date;
+    if (typeof deadline === 'object' && deadline !== null && 'toDate' in deadline && typeof deadline.toDate === 'function') {
+      targetDate = deadline.toDate();
+    } else if (deadline instanceof Date) {
+      targetDate = deadline;
+    } else {
+      targetDate = new Date(deadline);
+    }
+    return !isNaN(targetDate.getTime()) && targetDate.getTime() < Date.now();
+  } catch {
+    return false;
+  }
+}
+
+export function getCrossCountryRegistrationDeadline(tournaments: Tournament[], affiliationType?: string): any {
+  if (!tournaments || tournaments.length === 0) return null;
+  const ccTourns = tournaments.filter(
+    t => t.sportId === 'cross_country' && t.status !== 'Draft' && (t as any).isActive !== false
+  );
+  if (ccTourns.length === 0) return null;
+
+  if (affiliationType) {
+    const normAff = affiliationType === 'club_affiliated' ? 'club_affiliated' : 'non_club';
+    const matching = ccTourns.find(t => {
+      if (!t.registrationDeadline) return false;
+      const tAff = t.affiliationType as string | undefined;
+      if (!tAff) return normAff === 'non_club';
+      if (tAff === 'open' || tAff === 'both') return true;
+      return tAff === normAff;
+    });
+    if (matching?.registrationDeadline) return matching.registrationDeadline;
+  }
+
+  return ccTourns.find(t => t.registrationDeadline)?.registrationDeadline || null;
+}
+
+export function isCrossCountryRegistrationLocked(tournaments: Tournament[], affiliationType?: string): boolean {
+  const deadline = getCrossCountryRegistrationDeadline(tournaments, affiliationType);
+  return isRegistrationDeadlineExpired(deadline);
+}
+
 export function getDefaultTeamAgeCategories(season: string): CustomAgeCategory[] {
   const match = season.match(/(\d{4})/);
   const startYear = match ? parseInt(match[1], 10) : 2026;
@@ -11705,6 +11749,172 @@ export const DataService = {
         unsub();
       } catch {}
     };
+  },
+
+  async exportPlatformBackupJson(options?: {
+    scope?: 'all' | 'active_directorate';
+    exportedBy?: string;
+  }): Promise<{
+    backup: Record<string, any>;
+    source: 'cloud' | 'hybrid' | 'local';
+    totalRecords: number;
+    counts: Record<string, number>;
+    activeDirectorateId: string;
+    activeSeason: string;
+  }> {
+    const scope = options?.scope || 'all';
+    const activeDirId = this.getActiveDirectorateId() || 'taourirt';
+    const activeSeason = await this.getActiveSeason().catch(() => '2026/2027');
+
+    const serializeValueForBackup = (val: any, depth = 0): any => {
+      if (val === null || val === undefined) return val;
+      if (depth > 15) return String(val);
+      if (typeof val === 'object') {
+        if (typeof val.toDate === 'function') {
+          try {
+            return val.toDate().toISOString();
+          } catch {
+            return String(val);
+          }
+        }
+        if (val instanceof Date) {
+          return isNaN(val.getTime()) ? null : val.toISOString();
+        }
+        if (Array.isArray(val)) {
+          return val.map(item => serializeValueForBackup(item, depth + 1));
+        }
+        const out: Record<string, any> = {};
+        for (const [k, v] of Object.entries(val)) {
+          if (typeof v !== 'function' && v !== undefined) {
+            out[k] = serializeValueForBackup(v, depth + 1);
+          }
+        }
+        return out;
+      }
+      return val;
+    };
+
+    const collectionSpecs: Array<{ name: string; localKey?: string; directorateScoped?: boolean }> = [
+      { name: 'directorates', localKey: STORAGE_KEYS.DIRECTORATES },
+      { name: 'sports' },
+      { name: 'tournaments', localKey: STORAGE_KEYS.TOURNAMENTS, directorateScoped: true },
+      { name: 'schools', localKey: STORAGE_KEYS.SCHOOLS, directorateScoped: true },
+      { name: 'students', localKey: 'taourirt_students_data', directorateScoped: true },
+      { name: 'matches', localKey: STORAGE_KEYS.MATCHES, directorateScoped: true },
+      { name: 'venues', localKey: STORAGE_KEYS.VENUES, directorateScoped: true },
+      { name: 'referees', localKey: 'taourirt_referees_data', directorateScoped: true },
+      { name: 'users', localKey: 'taourirt_users_data', directorateScoped: true },
+      { name: 'administrative_cadres', localKey: STORAGE_KEYS.ADMINISTRATIVE_CADRES, directorateScoped: true },
+      { name: 'school_confirmations', localKey: STORAGE_KEYS.CONFIRMATIONS, directorateScoped: true },
+      { name: 'school_withdrawals', localKey: STORAGE_KEYS.WITHDRAWALS, directorateScoped: true },
+      { name: 'cross_country_results', directorateScoped: true },
+      { name: 'athletics_results', directorateScoped: true },
+      { name: 'announcements', localKey: 'taourirt_announcements_data', directorateScoped: true },
+      { name: 'notifications', localKey: 'taourirt_notifications_data', directorateScoped: true },
+      { name: 'settings' },
+      { name: 'config' }
+    ];
+
+    let cloudHits = 0;
+    let fallbackHits = 0;
+    const collectionsData: Record<string, any[]> = {};
+
+    await Promise.all(
+      collectionSpecs.map(async (spec) => {
+        let items: any[] | null = null;
+        if (!isCloudSyncPaused()) {
+          try {
+            const snap: any = await withCloudTimeout(fbGetDocs(collection(db, spec.name)), 12000);
+            if (snap && Array.isArray(snap.docs)) {
+              items = snap.docs.map((d: any) =>
+                serializeValueForBackup({ id: d.id, ...(d.data() || {}) })
+              );
+              cloudHits += 1;
+            }
+          } catch {
+            items = null;
+          }
+        }
+
+        if (items === null) {
+          fallbackHits += 1;
+          if (spec.name === 'sports') {
+            const spList = await this.getSportsConfig().catch(() => []);
+            items = serializeValueForBackup(spList);
+          } else if (spec.localKey) {
+            items = serializeValueForBackup(getLocal<any>(spec.localKey, []));
+          } else {
+            items = [];
+          }
+        }
+
+        if (scope === 'active_directorate' && Array.isArray(items)) {
+          if (spec.name === 'directorates') {
+            items = items.filter((d: any) => (d?.id || 'taourirt') === activeDirId);
+          } else if (spec.name === 'settings') {
+            items = items.filter((d: any) => {
+              const docId = String(d?.id || '');
+              const hasKnownSuffix =
+                docId.startsWith('blocked_schedule_dates_') ||
+                docId.startsWith('affiliation_display_') ||
+                docId.startsWith('cross_country_bibs_');
+              return !hasKnownSuffix || docId.endsWith(`_${activeDirId}`);
+            });
+          } else if (spec.directorateScoped) {
+            items = items.filter((item: any) => (item?.directorateId || 'taourirt') === activeDirId);
+          }
+        }
+
+        collectionsData[spec.name] = Array.isArray(items) ? items : [];
+      })
+    );
+
+    // Include documentation photos stored locally
+    try {
+      const rawDocs = localStorage.getItem('taourirt_documentation_photos');
+      const parsedDocs = rawDocs ? JSON.parse(rawDocs) : [];
+      const docPhotos = Array.isArray(parsedDocs) ? parsedDocs : [];
+      collectionsData.documentation_photos =
+        scope === 'active_directorate'
+          ? docPhotos.filter((p: any) => (p?.directorateId || 'taourirt') === activeDirId)
+          : docPhotos;
+    } catch {
+      collectionsData.documentation_photos = [];
+    }
+
+    const counts: Record<string, number> = {};
+    let totalRecords = 0;
+    Object.entries(collectionsData).forEach(([key, arr]) => {
+      const len = Array.isArray(arr) ? arr.length : 0;
+      counts[key] = len;
+      totalRecords += len;
+    });
+
+    const source: 'cloud' | 'hybrid' | 'local' =
+      fallbackHits === 0 ? 'cloud' : cloudHits === 0 ? 'local' : 'hybrid';
+
+    const backup = {
+      backupFormat: 'school-sports-platform-backup-v1',
+      platformName: 'منظومة تدبير الأنشطة الرياضية المدرسية',
+      exportedAt: new Date().toISOString(),
+      exportedBy: options?.exportedBy || 'المسير المركزي',
+      scope,
+      activeDirectorateId: activeDirId,
+      activeSeason,
+      source,
+      totalRecords,
+      counts,
+      collections: collectionsData
+    };
+
+    return {
+      backup,
+      source,
+      totalRecords,
+      counts,
+      activeDirectorateId: activeDirId,
+      activeSeason
+    };
   }
 };
 
@@ -12245,6 +12455,92 @@ export function isAffiliationAllowedByDisplayConfig(
   if (mode === 'club_affiliated') return aff === 'club_affiliated';
   return true;
 }
+
+export interface DocumentationPhoto {
+  id: string;
+  title: string;
+  sportId: string; // 'ALL' or specific sport id
+  imageCode: string; // compressed base64 / data URL code
+  description?: string;
+  date: string;
+  authorName: string;
+  authorEmail?: string;
+  directorateId?: string;
+}
+
+export function compressImageFileToCode(file: File, maxWidth = 800, quality = 0.6): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        let width = img.width;
+        let height = img.height;
+        if (width > maxWidth) {
+          height = Math.round((height * maxWidth) / width);
+          width = maxWidth;
+        }
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          resolve(e.target?.result as string || '');
+          return;
+        }
+        ctx.drawImage(img, 0, 0, width, height);
+        const dataUrl = canvas.toDataURL('image/jpeg', quality);
+        resolve(dataUrl);
+      };
+      img.onerror = () => reject(new Error('Failed to load image'));
+      img.src = e.target?.result as string;
+    };
+    reader.onerror = (err) => reject(err);
+    reader.readAsDataURL(file);
+  });
+}
+
+// In DataService extension or class static methods
+export class DocumentationService {
+  static async getDocumentationPhotos(directorateId = 'taourirt'): Promise<DocumentationPhoto[]> {
+    try {
+      const local = localStorage.getItem('taourirt_documentation_photos');
+      if (local) {
+        const parsed = JSON.parse(local);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch (e) {}
+    return [];
+  }
+
+  static async saveDocumentationPhoto(photo: DocumentationPhoto): Promise<void> {
+    const photos = await this.getDocumentationPhotos(photo.directorateId || 'taourirt');
+    const existingIndex = photos.findIndex(p => p.id === photo.id);
+    if (existingIndex >= 0) {
+      photos[existingIndex] = photo;
+    } else {
+      photos.unshift(photo);
+    }
+    try {
+      localStorage.setItem('taourirt_documentation_photos', JSON.stringify(photos));
+      window.dispatchEvent(new Event('taourirt_documentation_updated'));
+    } catch (e) {
+      console.error("Error saving documentation photo:", e);
+    }
+  }
+
+  static async deleteDocumentationPhoto(id: string, directorateId = 'taourirt'): Promise<void> {
+    const photos = await this.getDocumentationPhotos(directorateId);
+    const filtered = photos.filter(p => p.id !== id);
+    try {
+      localStorage.setItem('taourirt_documentation_photos', JSON.stringify(filtered));
+      window.dispatchEvent(new Event('taourirt_documentation_updated'));
+    } catch (e) {
+      console.error("Error deleting documentation photo:", e);
+    }
+  }
+}
+
 
 
 

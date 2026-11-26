@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { School, Student, User, Tournament } from '../types';
-import { DataService, validateBirthDateForCategory, normalizeCategoryKey, getCategoryGenderLabel, getCategoryYearsLabel, isSchoolLevelAllowedForTournament, getTournamentLevelAr, isTeacherLevelAllowedForTournament, isCrossCountryU15OpenToPrimary, isSchoolSectorAllowedForTournament, getTournamentEducationSectorsAr, getSchoolEducationSector, schoolNamesMatch, resolveEffectiveTeacherCadre, isCategoryAllowedForTeacherLevel, findMatchingSchoolForTeacher, isPrivateSchoolRecord } from '../lib/dataService';
+import { DataService, validateBirthDateForCategory, normalizeCategoryKey, getCategoryGenderLabel, getCategoryYearsLabel, isSchoolLevelAllowedForTournament, getTournamentLevelAr, isTeacherLevelAllowedForTournament, isCrossCountryU15OpenToPrimary, isSchoolSectorAllowedForTournament, getTournamentEducationSectorsAr, getSchoolEducationSector, schoolNamesMatch, resolveEffectiveTeacherCadre, isCategoryAllowedForTeacherLevel, findMatchingSchoolForTeacher, isPrivateSchoolRecord, isRegistrationDeadlineExpired, getCrossCountryRegistrationDeadline } from '../lib/dataService';
 import { CROSS_COUNTRY_CATEGORIES, CrossCountryCategoryDef } from '../lib/crossCountryConfig';
 import { useAuth } from '../contexts/AuthContext';
 import * as XLSX from 'xlsx';
@@ -50,6 +50,7 @@ interface CrossCountryBulkRegisterModalProps {
   currentSeason?: string;
   affiliationType?: 'non_club' | 'club_affiliated' | 'open';
   tournaments?: Tournament[];
+  registrationDeadline?: any;
 }
 
 export const CrossCountryBulkRegisterModal: React.FC<CrossCountryBulkRegisterModalProps> = ({
@@ -63,7 +64,8 @@ export const CrossCountryBulkRegisterModal: React.FC<CrossCountryBulkRegisterMod
   onRegistered,
   currentSeason: initialSeason = '2026/2027',
   affiliationType = 'non_club',
-  tournaments = []
+  tournaments = [],
+  registrationDeadline
 }) => {
   const { userProfile } = useAuth();
   const isTeacher = userProfile?.role === 'TEACHER';
@@ -136,6 +138,20 @@ export const CrossCountryBulkRegisterModal: React.FC<CrossCountryBulkRegisterMod
   }, [ccTourns]);
 
   const [selectedAffiliation, setSelectedAffiliation] = useState<'non_club' | 'club_affiliated'>('non_club');
+
+  const effectiveDeadline = useMemo(() => {
+    return registrationDeadline ?? getCrossCountryRegistrationDeadline(tournaments, selectedAffiliation);
+  }, [registrationDeadline, tournaments, selectedAffiliation]);
+
+  const isExpired = useMemo(() => {
+    return isRegistrationDeadlineExpired(effectiveDeadline);
+  }, [effectiveDeadline]);
+
+  const isAllCompleted = useMemo(() => {
+    return ccTourns.length > 0 && ccTourns.every(t => t.status === 'Completed' || t.status === 'Archived');
+  }, [ccTourns]);
+
+  const isLocked = isExpired || isAllCompleted;
 
   const wasOpenForSelectionRef = useRef(false);
   const wasOpenForSchoolRef = useRef(false);
@@ -422,6 +438,7 @@ export const CrossCountryBulkRegisterModal: React.FC<CrossCountryBulkRegisterMod
 
   // Update a single slot
   const handleUpdateSlot = (slotIndex: number, field: 'fullName' | 'massarNumber' | 'birthDate' | 'photoUrl', value: string | undefined) => {
+    if (isLocked) return;
     setSlots(prev => prev.map(s => {
       if (s.slotIndex !== slotIndex) return s;
       if (field === 'massarNumber') {
@@ -435,6 +452,10 @@ export const CrossCountryBulkRegisterModal: React.FC<CrossCountryBulkRegisterMod
   // Process selected image or camera picture, compressing client-side
   const handleImageFile = (file: File, slotIndex: number) => {
     if (!file) return;
+    if (isLocked) {
+      toast.error('انتهى آخر أجل للتسجيل في العدو الريفي ولا يمكن تعديل أو إضافة صور المتسابقين.');
+      return;
+    }
     
     const reader = new FileReader();
     reader.onload = (event) => {
@@ -474,6 +495,10 @@ export const CrossCountryBulkRegisterModal: React.FC<CrossCountryBulkRegisterMod
 
   // Clear a single slot
   const handleClearSlot = (slotIndex: number) => {
+    if (isLocked) {
+      toast.error('انتهى آخر أجل للتسجيل في العدو الريفي ولا يمكن حذف أي متسابق.');
+      return;
+    }
     setSlots(prev => prev.map(s => {
       if (s.slotIndex !== slotIndex) return s;
       return { ...s, fullName: '', massarNumber: '', birthDate: '', existingStudentId: undefined, photoUrl: undefined };
@@ -522,6 +547,10 @@ export const CrossCountryBulkRegisterModal: React.FC<CrossCountryBulkRegisterMod
 
   // Quick Paste parsing
   const handleApplyPaste = () => {
+    if (isLocked) {
+      toast.error('انتهى آخر أجل للتسجيل في العدو الريفي ولا يمكن إضافة أو تعديل المتسابقين.');
+      return;
+    }
     if (!pasteText.trim()) {
       toast.error('يرجى لصق بيانات التلاميذ أولاً');
       return;
@@ -758,6 +787,11 @@ export const CrossCountryBulkRegisterModal: React.FC<CrossCountryBulkRegisterMod
 
   // Upload and Parse Excel File
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (isLocked) {
+      toast.error('انتهى آخر أجل للتسجيل في العدو الريفي ولا يمكن استيراد أو تعديل المتسابقين.');
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      return;
+    }
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -837,6 +871,15 @@ export const CrossCountryBulkRegisterModal: React.FC<CrossCountryBulkRegisterMod
   // SAVE AND SUBMIT ALL 8 PARTICIPANTS
   const handleSubmitAll = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (isLocked) {
+      toast.error(
+        isAllCompleted
+          ? 'بطولة العدو الريفي منتهية ومؤرشفة نهائياً ولا يمكن تعديل المشاركين.'
+          : 'انتهى آخر أجل للتسجيل في العدو الريفي — لا يمكن إضافة أو تعديل أو حذف أي متسابق بعد نهاية التسجيل.'
+      );
+      return;
+    }
 
     // 1. Gather all slots that have at least one field filled
     const filledSlots = slots.filter(s => s.fullName.trim() || s.massarNumber.trim() || s.birthDate.trim());
@@ -1092,6 +1135,23 @@ export const CrossCountryBulkRegisterModal: React.FC<CrossCountryBulkRegisterMod
           </div>
         </div>
 
+        {/* Locked after deadline warning banner */}
+        {isLocked && (
+          <div className="px-4 sm:px-6 py-3 bg-red-50 border-b border-red-200 flex items-center gap-2.5 text-red-900 text-xs font-bold shrink-0">
+            <Lock className="w-5 h-5 text-red-600 shrink-0" />
+            <div>
+              <p className="font-black">
+                {isAllCompleted
+                  ? 'بطولة العدو الريفي منتهية ومؤرشفة نهائياً 🔒'
+                  : 'انتهى آخر أجل للتسجيل في بطولة العدو الريفي 🔒'}
+              </p>
+              <p className="text-[11px] text-red-700 font-medium mt-0.5">
+                لا يمكن إضافة أو تعديل أو حذف أي متسابق بعد نهاية التسجيل. تبقى اللوائح متاحة للمعاينة والتصدير إلى Excel فقط.
+              </p>
+            </div>
+          </div>
+        )}
+
         {/* Main Body Form */}
         <form onSubmit={handleSubmitAll} className="p-4 sm:p-6 space-y-5 overflow-y-auto max-h-[calc(88vh-140px)]">
           
@@ -1216,30 +1276,33 @@ export const CrossCountryBulkRegisterModal: React.FC<CrossCountryBulkRegisterMod
                     <label className="block text-[10px] font-bold text-slate-600 mb-1">اسم الأستاذ المؤطر</label>
                     <input
                       type="text"
+                      disabled={isLocked}
                       value={coachName}
                       onChange={(e) => setCoachName(e.target.value)}
                       placeholder="مثال: يوسف العلوي"
-                      className="w-full text-xs px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg font-medium"
+                      className="w-full text-xs px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg font-medium disabled:opacity-60"
                     />
                   </div>
                   <div>
                     <label className="block text-[10px] font-bold text-slate-600 mb-1">رقم التأجير (PPR)</label>
                     <input
                       type="text"
+                      disabled={isLocked}
                       value={coachLeaseNumber}
                       onChange={(e) => setCoachLeaseNumber(e.target.value)}
                       placeholder="مثال: 1234567"
-                      className="w-full text-xs px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg font-mono font-bold"
+                      className="w-full text-xs px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg font-mono font-bold disabled:opacity-60"
                     />
                   </div>
                   <div>
                     <label className="block text-[10px] font-bold text-slate-600 mb-1">رقم الهاتف للتواصل</label>
                     <input
                       type="text"
+                      disabled={isLocked}
                       value={coachPhone}
                       onChange={(e) => setCoachPhone(e.target.value)}
                       placeholder="مثال: 0612345678"
-                      className="w-full text-xs px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg font-mono font-bold"
+                      className="w-full text-xs px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg font-mono font-bold disabled:opacity-60"
                     />
                   </div>
                 </div>
@@ -1307,7 +1370,7 @@ export const CrossCountryBulkRegisterModal: React.FC<CrossCountryBulkRegisterMod
                             مسجل مسبقاً
                           </span>
                         )}
-                        {!val.isBlank && (
+                        {!val.isBlank && !isLocked && (
                           <button
                             type="button"
                             onClick={() => handleClearSlot(slot.slotIndex)}
@@ -1327,11 +1390,12 @@ export const CrossCountryBulkRegisterModal: React.FC<CrossCountryBulkRegisterMod
                       </label>
                       <input
                         type="text"
+                        disabled={isLocked}
                         placeholder="مثال: G123456789"
                         maxLength={10}
                         value={slot.massarNumber}
                         onChange={(e) => handleUpdateSlot(slot.slotIndex, 'massarNumber', e.target.value)}
-                        className="w-full text-xs font-mono font-bold px-3 py-2 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 uppercase shadow-3xs"
+                        className="w-full text-xs font-mono font-bold px-3 py-2 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 uppercase shadow-3xs disabled:bg-slate-100 disabled:text-slate-500"
                       />
                     </div>
 
@@ -1342,10 +1406,11 @@ export const CrossCountryBulkRegisterModal: React.FC<CrossCountryBulkRegisterMod
                       </label>
                       <input
                         type="text"
+                        disabled={isLocked}
                         placeholder="مثال: عمر البقالي"
                         value={slot.fullName}
                         onChange={(e) => handleUpdateSlot(slot.slotIndex, 'fullName', e.target.value)}
-                        className="w-full text-xs font-semibold px-3 py-2 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 shadow-3xs"
+                        className="w-full text-xs font-semibold px-3 py-2 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 shadow-3xs disabled:bg-slate-100 disabled:text-slate-500"
                       />
                     </div>
 
@@ -1356,9 +1421,10 @@ export const CrossCountryBulkRegisterModal: React.FC<CrossCountryBulkRegisterMod
                       </label>
                       <input
                         type="date"
+                        disabled={isLocked}
                         value={slot.birthDate}
                         onChange={(e) => handleUpdateSlot(slot.slotIndex, 'birthDate', e.target.value)}
-                        className="w-full text-xs font-mono font-bold px-3 py-2 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 shadow-3xs text-slate-800"
+                        className="w-full text-xs font-mono font-bold px-3 py-2 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 shadow-3xs text-slate-800 disabled:bg-slate-100 disabled:text-slate-500"
                       />
                     </div>
 
@@ -1389,46 +1455,48 @@ export const CrossCountryBulkRegisterModal: React.FC<CrossCountryBulkRegisterMod
                         </div>
 
                         {/* Action buttons */}
-                        <div className="flex gap-1.5 flex-1">
-                          {slot.photoUrl ? (
-                            <button
-                              type="button"
-                              onClick={() => handleUpdateSlot(slot.slotIndex, 'photoUrl', undefined)}
-                              className="text-[10px] font-bold bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 px-2 py-1 rounded-lg transition-colors cursor-pointer w-full text-center"
-                            >
-                              حذف 🗑️
-                            </button>
-                          ) : (
-                            <>
-                              <label className="text-[10px] font-bold bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 px-2.5 py-1.5 rounded-lg transition-colors cursor-pointer flex-1 text-center flex items-center justify-center gap-1">
-                                <Upload className="w-3 h-3" />
-                                <span>ملف</span>
-                                <input
-                                  type="file"
-                                  accept="image/*"
-                                  onChange={(e) => {
-                                    const file = e.target.files?.[0];
-                                    if (file) handleImageFile(file, slot.slotIndex);
-                                  }}
-                                  className="hidden"
-                                />
-                              </label>
-                              <label className="text-[10px] font-bold bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 px-2.5 py-1.5 rounded-lg transition-colors cursor-pointer flex-1 text-center flex items-center justify-center gap-1">
-                                <span>📸 كاميرا</span>
-                                <input
-                                  type="file"
-                                  accept="image/*"
-                                  capture="environment"
-                                  onChange={(e) => {
-                                    const file = e.target.files?.[0];
-                                    if (file) handleImageFile(file, slot.slotIndex);
-                                  }}
-                                  className="hidden"
-                                />
-                              </label>
-                            </>
-                          )}
-                        </div>
+                        {!isLocked && (
+                          <div className="flex gap-1.5 flex-1">
+                            {slot.photoUrl ? (
+                              <button
+                                type="button"
+                                onClick={() => handleUpdateSlot(slot.slotIndex, 'photoUrl', undefined)}
+                                className="text-[10px] font-bold bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 px-2 py-1 rounded-lg transition-colors cursor-pointer w-full text-center"
+                              >
+                                حذف 🗑️
+                              </button>
+                            ) : (
+                              <>
+                                <label className="text-[10px] font-bold bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 px-2.5 py-1.5 rounded-lg transition-colors cursor-pointer flex-1 text-center flex items-center justify-center gap-1">
+                                  <Upload className="w-3 h-3" />
+                                  <span>ملف</span>
+                                  <input
+                                    type="file"
+                                    accept="image/*"
+                                    onChange={(e) => {
+                                      const file = e.target.files?.[0];
+                                      if (file) handleImageFile(file, slot.slotIndex);
+                                    }}
+                                    className="hidden"
+                                  />
+                                </label>
+                                <label className="text-[10px] font-bold bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 px-2.5 py-1.5 rounded-lg transition-colors cursor-pointer flex-1 text-center flex items-center justify-center gap-1">
+                                  <span>📸 كاميرا</span>
+                                  <input
+                                    type="file"
+                                    accept="image/*"
+                                    capture="environment"
+                                    onChange={(e) => {
+                                      const file = e.target.files?.[0];
+                                      if (file) handleImageFile(file, slot.slotIndex);
+                                    }}
+                                    className="hidden"
+                                  />
+                                </label>
+                              </>
+                            )}
+                          </div>
+                        )}
                       </div>
                     </div>
 
@@ -1496,7 +1564,7 @@ export const CrossCountryBulkRegisterModal: React.FC<CrossCountryBulkRegisterMod
                             مسجل
                           </span>
                         )}
-                        {!val.isBlank && (
+                        {!val.isBlank && !isLocked && (
                           <button
                             type="button"
                             onClick={() => handleClearSlot(slot.slotIndex)}
@@ -1516,11 +1584,12 @@ export const CrossCountryBulkRegisterModal: React.FC<CrossCountryBulkRegisterMod
                       </label>
                       <input
                         type="text"
+                        disabled={isLocked}
                         placeholder="G123456789"
                         maxLength={10}
                         value={slot.massarNumber}
                         onChange={(e) => handleUpdateSlot(slot.slotIndex, 'massarNumber', e.target.value)}
-                        className="w-full text-xs font-mono font-bold px-2.5 py-1.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 uppercase shadow-3xs"
+                        className="w-full text-xs font-mono font-bold px-2.5 py-1.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 uppercase shadow-3xs disabled:bg-slate-100 disabled:text-slate-500"
                       />
                     </div>
 
@@ -1531,10 +1600,11 @@ export const CrossCountryBulkRegisterModal: React.FC<CrossCountryBulkRegisterMod
                       </label>
                       <input
                         type="text"
+                        disabled={isLocked}
                         placeholder="الاسم والنسب"
                         value={slot.fullName}
                         onChange={(e) => handleUpdateSlot(slot.slotIndex, 'fullName', e.target.value)}
-                        className="w-full text-xs font-semibold px-2.5 py-1.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 shadow-3xs"
+                        className="w-full text-xs font-semibold px-2.5 py-1.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 shadow-3xs disabled:bg-slate-100 disabled:text-slate-500"
                       />
                     </div>
 
@@ -1545,9 +1615,10 @@ export const CrossCountryBulkRegisterModal: React.FC<CrossCountryBulkRegisterMod
                       </label>
                       <input
                         type="date"
+                        disabled={isLocked}
                         value={slot.birthDate}
                         onChange={(e) => handleUpdateSlot(slot.slotIndex, 'birthDate', e.target.value)}
-                        className="w-full text-xs font-mono font-bold px-2 py-1.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 shadow-3xs text-slate-800"
+                        className="w-full text-xs font-mono font-bold px-2 py-1.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 shadow-3xs text-slate-800 disabled:bg-slate-100 disabled:text-slate-500"
                       />
                     </div>
 
@@ -1583,46 +1654,48 @@ export const CrossCountryBulkRegisterModal: React.FC<CrossCountryBulkRegisterMod
                         </div>
 
                         {/* Action buttons */}
-                        <div className="flex gap-1 flex-1">
-                          {slot.photoUrl ? (
-                            <button
-                              type="button"
-                              onClick={() => handleUpdateSlot(slot.slotIndex, 'photoUrl', undefined)}
-                              className="text-[9px] font-bold bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 px-1.5 py-1 rounded-lg transition-colors cursor-pointer w-full text-center"
-                            >
-                              حذف 🗑️
-                            </button>
-                          ) : (
-                            <>
-                              <label className="text-[9px] font-bold bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 px-1.5 py-1 rounded-lg transition-colors cursor-pointer flex-1 text-center flex items-center justify-center gap-0.5">
-                                <Upload className="w-2.5 h-2.5" />
-                                <span>ملف</span>
-                                <input
-                                  type="file"
-                                  accept="image/*"
-                                  onChange={(e) => {
-                                    const file = e.target.files?.[0];
-                                    if (file) handleImageFile(file, slot.slotIndex);
-                                  }}
-                                  className="hidden"
-                                />
-                              </label>
-                              <label className="text-[9px] font-bold bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 px-1.5 py-1 rounded-lg transition-colors cursor-pointer flex-1 text-center flex items-center justify-center gap-0.5">
-                                <span>📸 كاميرا</span>
-                                <input
-                                  type="file"
-                                  accept="image/*"
-                                  capture="environment"
-                                  onChange={(e) => {
-                                    const file = e.target.files?.[0];
-                                    if (file) handleImageFile(file, slot.slotIndex);
-                                  }}
-                                  className="hidden"
-                                />
-                              </label>
-                            </>
-                          )}
-                        </div>
+                        {!isLocked && (
+                          <div className="flex gap-1 flex-1">
+                            {slot.photoUrl ? (
+                              <button
+                                type="button"
+                                onClick={() => handleUpdateSlot(slot.slotIndex, 'photoUrl', undefined)}
+                                className="text-[9px] font-bold bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 px-1.5 py-1 rounded-lg transition-colors cursor-pointer w-full text-center"
+                              >
+                                حذف 🗑️
+                              </button>
+                            ) : (
+                              <>
+                                <label className="text-[9px] font-bold bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 px-1.5 py-1 rounded-lg transition-colors cursor-pointer flex-1 text-center flex items-center justify-center gap-0.5">
+                                  <Upload className="w-2.5 h-2.5" />
+                                  <span>ملف</span>
+                                  <input
+                                    type="file"
+                                    accept="image/*"
+                                    onChange={(e) => {
+                                      const file = e.target.files?.[0];
+                                      if (file) handleImageFile(file, slot.slotIndex);
+                                    }}
+                                    className="hidden"
+                                  />
+                                </label>
+                                <label className="text-[9px] font-bold bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 px-1.5 py-1 rounded-lg transition-colors cursor-pointer flex-1 text-center flex items-center justify-center gap-0.5">
+                                  <span>📸 كاميرا</span>
+                                  <input
+                                    type="file"
+                                    accept="image/*"
+                                    capture="environment"
+                                    onChange={(e) => {
+                                      const file = e.target.files?.[0];
+                                      if (file) handleImageFile(file, slot.slotIndex);
+                                    }}
+                                    className="hidden"
+                                  />
+                                </label>
+                              </>
+                            )}
+                          </div>
+                        )}
                       </div>
                     </div>
 
@@ -1656,10 +1729,15 @@ export const CrossCountryBulkRegisterModal: React.FC<CrossCountryBulkRegisterMod
 
               <button
                 type="submit"
-                disabled={isSubmitting || filledSlotsCount === 0}
+                disabled={isSubmitting || filledSlotsCount === 0 || isLocked}
                 className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-black text-xs rounded-xl shadow-md transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
               >
-                {isSubmitting ? (
+                {isLocked ? (
+                  <>
+                    <Lock className="w-4 h-4" />
+                    <span>التسجيل والتعديل مقفل (انتهى الأجل)</span>
+                  </>
+                ) : isSubmitting ? (
                   <>
                     <RefreshCw className="w-4 h-4 animate-spin" />
                     <span>جاري الحفظ والتسجيل...</span>

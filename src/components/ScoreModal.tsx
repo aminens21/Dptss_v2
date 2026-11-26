@@ -225,41 +225,45 @@ export const ScoreModal: React.FC<ScoreModalProps> = ({
   };
 
   const modalContent = (
-    <div className="fixed inset-0 z-[150] flex items-center justify-center p-3 sm:p-4 bg-slate-900/60 backdrop-blur-xs" dir="rtl">
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-lg w-full max-h-[92vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150 relative z-[151]">
+    <div className="fixed inset-0 z-[150] flex items-center justify-center p-2 sm:p-4 bg-slate-900/60 backdrop-blur-xs overflow-hidden" dir="rtl">
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-lg w-full max-h-[92dvh] sm:max-h-[90vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150 relative z-[151]">
         {/* Header */}
-        <div className={`flex items-center justify-between p-4 md:p-5 border-b border-slate-200 text-white shrink-0 ${
+        <div className={`flex items-center justify-between gap-2 p-3 sm:p-4 md:p-5 border-b border-slate-200 text-white shrink-0 ${
           effectiveCanApprove
             ? 'bg-gradient-to-r from-emerald-800 via-teal-900 to-slate-900'
             : 'bg-gradient-to-r from-amber-700 via-amber-800 to-slate-900'
         }`}>
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-white/15 border border-white/20 text-white flex items-center justify-center shadow-inner text-xl">
+          <div className="flex items-center gap-2.5 sm:gap-3 min-w-0 flex-1">
+            <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-white/15 border border-white/20 text-white flex items-center justify-center shadow-inner text-lg sm:text-xl shrink-0">
               {sportInfo.icon}
             </div>
-            <div>
-              <div className="flex items-center gap-2 flex-wrap">
-                <h3 className="text-xs md:text-sm font-black text-white">
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
+                <h3 className="text-xs sm:text-sm font-black text-white leading-snug">
                   {effectiveCanApprove ? 'تسجيل والمصادقة على النتيجة النهائية' : 'تدوين النتيجة الأولية للمقابلة'}
                 </h3>
-                <span className="text-[10px] font-bold px-2 py-0.5 bg-white/15 text-white border border-white/25 rounded-md">
+                <span className="text-[10px] font-bold px-2 py-0.5 bg-white/15 text-white border border-white/25 rounded-md shrink-0">
                   {sportInfo.name}
                 </span>
               </div>
-              <p className="text-[11px] text-white/80 font-medium mt-0.5">
+              <p className="text-[11px] text-white/80 font-medium mt-0.5 leading-snug break-words">
                 {match.stage || 'مباراة رسمية'}
               </p>
             </div>
           </div>
-          <button onClick={onClose} className="p-1.5 text-white/80 hover:text-white rounded-lg hover:bg-white/10 transition-colors cursor-pointer">
+          <button
+            type="button"
+            onClick={onClose}
+            className="p-1.5 text-white/80 hover:text-white rounded-lg hover:bg-white/10 transition-colors cursor-pointer shrink-0"
+          >
             <X className="h-5 w-5" />
           </button>
         </div>
 
         {/* Category, Gender & Schedule Notify Quick Action Bar */}
-        <div className="bg-slate-100/90 px-4 py-2 border-b border-slate-200/70 flex flex-wrap items-center justify-between gap-2 text-xs shrink-0">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="font-bold text-blue-700 bg-white px-2 py-0.5 rounded border border-slate-200">
+        <div className="bg-slate-100/90 px-3 sm:px-4 py-2 border-b border-slate-200/70 flex flex-wrap items-center justify-between gap-2 text-xs shrink-0">
+          <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
+            <span className="font-bold text-blue-700 bg-white px-2 py-0.5 rounded border border-slate-200 text-[11px]">
               🏷️ {match.ageCategory || 'غير محددة'}
             </span>
             {genderInfo && (
@@ -278,282 +282,280 @@ export const ScoreModal: React.FC<ScoreModalProps> = ({
               className="px-2.5 py-1 rounded-lg bg-green-600 hover:bg-green-700 text-white text-[11px] font-black flex items-center gap-1.5 shadow-2xs transition-all cursor-pointer"
               title="إشعار المعنيين بتاريخ وساعة ومكان برمجة المقابلة عبر واتساب"
             >
-              <CalendarClock className="w-3.5 h-3.5" />
+              <CalendarClock className="w-3.5 h-3.5 shrink-0" />
               <span>إشعار المعنيين ببرمجة المقابلة</span>
             </button>
           )}
         </div>
 
-        {/* Body Form */}
-        <form onSubmit={handleSubmit} className="p-4 sm:p-5 space-y-3.5 overflow-y-auto flex-1">
-          {/* Provisional vs Homologation Role Banner */}
-          {!canEnterThisMatchScore ? (
-            <div className="p-3 bg-rose-50 border border-rose-300 rounded-xl flex items-start gap-2.5 text-xs text-rose-950">
-              <ShieldAlert className="h-4 w-4 text-rose-600 shrink-0 mt-0.5" />
-              <div className="leading-relaxed">
-                <span className="font-black">غير مصرح بإدخال النتيجة:</span> إدخال نتائج المباريات مقتصر فقط على{' '}
-                <span className="underline font-black">الحكام المعينين في هذه المباراة</span> أو{' '}
-                <span className="underline font-black">رئيس اللجنة التقنية المختص</span>.
+        {/* Form Container with Scrollable Body + Pinned Footer */}
+        <form onSubmit={handleSubmit} className="flex flex-col flex-1 min-h-0 overflow-hidden">
+          <div className="p-3 sm:p-5 space-y-3 sm:space-y-3.5 overflow-y-auto overscroll-contain flex-1 min-h-0">
+            {/* Provisional vs Homologation Role Banner */}
+            {!canEnterThisMatchScore ? (
+              <div className="p-2.5 sm:p-3 bg-rose-50 border border-rose-300 rounded-xl flex items-start gap-2 text-[11px] sm:text-xs text-rose-950">
+                <ShieldAlert className="h-4 w-4 text-rose-600 shrink-0 mt-0.5" />
+                <div className="leading-relaxed">
+                  <span className="font-black">غير مصرح بإدخال النتيجة:</span> إدخال نتائج المباريات مقتصر فقط على{' '}
+                  <span className="underline font-black">الحكام المعينين في هذه المباراة</span> أو{' '}
+                  <span className="underline font-black">رئيس اللجنة التقنية المختص</span>.
+                </div>
               </div>
-            </div>
-          ) : !effectiveCanApprove ? (
-            <div className="p-3 bg-amber-50 border border-amber-300 rounded-xl flex items-start gap-2.5 text-xs text-amber-950">
-              <ShieldAlert className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
-              <div className="leading-relaxed">
-                <span className="font-black">نتيجة أولية (حكم المقابلة):</span> ستظهر النتيجة المدونة كـ{' '}
-                <span className="underline font-black">نتيجة أولية</span> إلى حين المصادقة النهائية عليها من طرف رئيس اللجنة التقنية المختص.
+            ) : !effectiveCanApprove ? (
+              <div className="p-2.5 sm:p-3 bg-amber-50 border border-amber-300 rounded-xl flex items-start gap-2 text-[11px] sm:text-xs text-amber-950">
+                <ShieldAlert className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
+                <div className="leading-relaxed">
+                  <span className="font-black">نتيجة أولية (حكم المقابلة):</span> ستظهر النتيجة المدونة كـ{' '}
+                  <span className="underline font-black">نتيجة أولية</span> إلى حين المصادقة النهائية عليها من طرف رئيس اللجنة التقنية المختص.
+                </div>
               </div>
-            </div>
-          ) : match.approvalStatus === 'provisional' ? (
-            <div className="p-3 bg-blue-50 border border-blue-300 rounded-xl flex items-start gap-2.5 text-xs text-blue-950">
-              <ShieldCheck className="h-4 w-4 text-blue-600 shrink-0 mt-0.5" />
-              <div className="leading-relaxed">
-                <span className="font-black">نتيجة أولية في انتظار مصادقتكم:</span> تم تدوين هذه النتيجة من طرف{' '}
-                <span className="font-black">{match.recordedByName || 'حكم المقابلة'}</span>. اضغط على زر المصادقة أدناه لاعتمادها رسمياً وإخبار المعنيين بها.
+            ) : match.approvalStatus === 'provisional' ? (
+              <div className="p-2.5 sm:p-3 bg-blue-50 border border-blue-300 rounded-xl flex items-start gap-2 text-[11px] sm:text-xs text-blue-950">
+                <ShieldCheck className="h-4 w-4 text-blue-600 shrink-0 mt-0.5" />
+                <div className="leading-relaxed">
+                  <span className="font-black">نتيجة أولية في انتظار مصادقتكم:</span> تم تدوين هذه النتيجة من طرف{' '}
+                  <span className="font-black">{match.recordedByName || 'حكم المقابلة'}</span>. اضغط على زر المصادقة أدناه لاعتمادها رسمياً وإخبار المعنيين بها.
+                </div>
               </div>
-            </div>
-          ) : null}
+            ) : null}
 
-          {/* Main Score Board */}
-          <div className="bg-gradient-to-b from-slate-50 to-slate-100/60 p-4 rounded-2xl border border-slate-200 space-y-3">
-            <div className="grid grid-cols-5 items-center gap-2">
-              {/* Team 1 */}
-              <div className={`col-span-2 text-center p-2.5 sm:p-3 rounded-xl border transition-all ${
-                score1 > score2 ? 'bg-emerald-50/80 border-emerald-300 ring-2 ring-emerald-200' : 'bg-white border-slate-200'
-              }`}>
-                <p className="text-xs font-bold text-slate-800 line-clamp-2 min-h-[32px] mb-2">{team1}</p>
-                <div className="flex items-center justify-center gap-1 sm:gap-1.5">
-                  <button
-                    type="button"
-                    onClick={() => adjustScore1(-1)}
-                    className="w-7 h-7 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-bold flex items-center justify-center cursor-pointer"
-                  >
-                    <Minus className="h-3.5 w-3.5" />
-                  </button>
-                  <input
-                    type="number"
-                    min="0"
-                    value={score1}
-                    onChange={(e) => setScore1(Math.max(0, parseInt(e.target.value) || 0))}
-                    className="w-14 sm:w-16 h-11 sm:h-12 text-center text-xl sm:text-2xl font-black bg-white border-2 border-slate-300 rounded-xl focus:border-emerald-500 focus:outline-none"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => adjustScore1(1)}
-                    className="w-7 h-7 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-bold flex items-center justify-center cursor-pointer"
-                  >
-                    <Plus className="h-3.5 w-3.5" />
-                  </button>
+            {/* Main Score Board */}
+            <div className="bg-gradient-to-b from-slate-50 to-slate-100/60 p-2.5 sm:p-4 rounded-2xl border border-slate-200 space-y-3">
+              <div className="grid grid-cols-[1fr_auto_1fr] items-stretch gap-1.5 sm:gap-2.5">
+                {/* Team 1 */}
+                <div className={`text-center p-2 sm:p-3 rounded-xl border transition-all flex flex-col justify-between ${
+                  score1 > score2 ? 'bg-emerald-50/80 border-emerald-300 ring-2 ring-emerald-200' : 'bg-white border-slate-200'
+                }`}>
+                  <p className="text-[11px] sm:text-xs font-bold text-slate-800 leading-snug break-words min-h-[32px] mb-2 flex items-center justify-center">
+                    {team1}
+                  </p>
+                  <div className="flex items-center justify-center gap-1 sm:gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => adjustScore1(-1)}
+                      className="w-6 h-8 sm:w-7 sm:h-7 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-bold flex items-center justify-center cursor-pointer shrink-0"
+                    >
+                      <Minus className="h-3.5 w-3.5" />
+                    </button>
+                    <input
+                      type="number"
+                      min="0"
+                      value={score1}
+                      onChange={(e) => setScore1(Math.max(0, parseInt(e.target.value) || 0))}
+                      className="w-11 sm:w-16 h-10 sm:h-12 text-center text-lg sm:text-2xl font-black bg-white border-2 border-slate-300 rounded-xl focus:border-emerald-500 focus:outline-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => adjustScore1(1)}
+                      className="w-6 h-8 sm:w-7 sm:h-7 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-bold flex items-center justify-center cursor-pointer shrink-0"
+                    >
+                      <Plus className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+
+                  {isBasketball && (
+                    <div className="flex items-center justify-center gap-1 mt-2">
+                      <button type="button" onClick={() => adjustScore1(2)} className="text-[10px] font-bold px-1.5 py-0.5 bg-blue-50 text-blue-700 rounded hover:bg-blue-100 cursor-pointer">+2</button>
+                      <button type="button" onClick={() => adjustScore1(3)} className="text-[10px] font-bold px-1.5 py-0.5 bg-blue-50 text-blue-700 rounded hover:bg-blue-100 cursor-pointer">+3</button>
+                    </div>
+                  )}
+
+                  {score1 > score2 && (
+                    <span className="inline-block mt-2 text-[10px] font-black text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full">
+                      👑 الفريق الفائز
+                    </span>
+                  )}
                 </div>
 
-                {isBasketball && (
-                  <div className="flex items-center justify-center gap-1 mt-2">
-                    <button type="button" onClick={() => adjustScore1(2)} className="text-[10px] font-bold px-1.5 py-0.5 bg-blue-50 text-blue-700 rounded hover:bg-blue-100 cursor-pointer">+2</button>
-                    <button type="button" onClick={() => adjustScore1(3)} className="text-[10px] font-bold px-1.5 py-0.5 bg-blue-50 text-blue-700 rounded hover:bg-blue-100 cursor-pointer">+3</button>
-                  </div>
-                )}
-
-                {score1 > score2 && (
-                  <span className="inline-block mt-2 text-[10px] font-black text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full">
-                    👑 الفريق الفائز
+                {/* VS Divider */}
+                <div className="flex flex-col items-center justify-center px-0.5 sm:px-1 text-center shrink-0">
+                  <span className="inline-block px-1.5 sm:px-2 py-1 text-[10px] sm:text-xs font-black text-slate-400 bg-slate-200/80 rounded-full">
+                    VS
                   </span>
-                )}
-              </div>
-
-              {/* VS Divider */}
-              <div className="col-span-1 text-center">
-                <span className="inline-block px-2 py-1 text-xs font-black text-slate-400 bg-slate-200/80 rounded-full">
-                  VS
-                </span>
-                {score1 === score2 && (
-                  <p className="text-[10px] font-bold text-amber-600 mt-1">تعادل</p>
-                )}
-              </div>
-
-              {/* Team 2 */}
-              <div className={`col-span-2 text-center p-2.5 sm:p-3 rounded-xl border transition-all ${
-                score2 > score1 ? 'bg-emerald-50/80 border-emerald-300 ring-2 ring-emerald-200' : 'bg-white border-slate-200'
-              }`}>
-                <p className="text-xs font-bold text-slate-800 line-clamp-2 min-h-[32px] mb-2">{team2}</p>
-                <div className="flex items-center justify-center gap-1 sm:gap-1.5">
-                  <button
-                    type="button"
-                    onClick={() => adjustScore2(-1)}
-                    className="w-7 h-7 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-bold flex items-center justify-center cursor-pointer"
-                  >
-                    <Minus className="h-3.5 w-3.5" />
-                  </button>
-                  <input
-                    type="number"
-                    min="0"
-                    value={score2}
-                    onChange={(e) => setScore2(Math.max(0, parseInt(e.target.value) || 0))}
-                    className="w-14 sm:w-16 h-11 sm:h-12 text-center text-xl sm:text-2xl font-black bg-white border-2 border-slate-300 rounded-xl focus:border-emerald-500 focus:outline-none"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => adjustScore2(1)}
-                    className="w-7 h-7 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-bold flex items-center justify-center cursor-pointer"
-                  >
-                    <Plus className="h-3.5 w-3.5" />
-                  </button>
+                  {score1 === score2 && (
+                    <p className="text-[10px] font-bold text-amber-600 mt-1">تعادل</p>
+                  )}
                 </div>
 
-                {isBasketball && (
-                  <div className="flex items-center justify-center gap-1 mt-2">
-                    <button type="button" onClick={() => adjustScore2(2)} className="text-[10px] font-bold px-1.5 py-0.5 bg-blue-50 text-blue-700 rounded hover:bg-blue-100 cursor-pointer">+2</button>
-                    <button type="button" onClick={() => adjustScore2(3)} className="text-[10px] font-bold px-1.5 py-0.5 bg-blue-50 text-blue-700 rounded hover:bg-blue-100 cursor-pointer">+3</button>
+                {/* Team 2 */}
+                <div className={`text-center p-2 sm:p-3 rounded-xl border transition-all flex flex-col justify-between ${
+                  score2 > score1 ? 'bg-emerald-50/80 border-emerald-300 ring-2 ring-emerald-200' : 'bg-white border-slate-200'
+                }`}>
+                  <p className="text-[11px] sm:text-xs font-bold text-slate-800 leading-snug break-words min-h-[32px] mb-2 flex items-center justify-center">
+                    {team2}
+                  </p>
+                  <div className="flex items-center justify-center gap-1 sm:gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => adjustScore2(-1)}
+                      className="w-6 h-8 sm:w-7 sm:h-7 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-bold flex items-center justify-center cursor-pointer shrink-0"
+                    >
+                      <Minus className="h-3.5 w-3.5" />
+                    </button>
+                    <input
+                      type="number"
+                      min="0"
+                      value={score2}
+                      onChange={(e) => setScore2(Math.max(0, parseInt(e.target.value) || 0))}
+                      className="w-11 sm:w-16 h-10 sm:h-12 text-center text-lg sm:text-2xl font-black bg-white border-2 border-slate-300 rounded-xl focus:border-emerald-500 focus:outline-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => adjustScore2(1)}
+                      className="w-6 h-8 sm:w-7 sm:h-7 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-bold flex items-center justify-center cursor-pointer shrink-0"
+                    >
+                      <Plus className="h-3.5 w-3.5" />
+                    </button>
                   </div>
-                )}
 
-                {score2 > score1 && (
-                  <span className="inline-block mt-2 text-[10px] font-black text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full">
-                    👑 الفريق الفائز
-                  </span>
-                )}
+                  {isBasketball && (
+                    <div className="flex items-center justify-center gap-1 mt-2">
+                      <button type="button" onClick={() => adjustScore2(2)} className="text-[10px] font-bold px-1.5 py-0.5 bg-blue-50 text-blue-700 rounded hover:bg-blue-100 cursor-pointer">+2</button>
+                      <button type="button" onClick={() => adjustScore2(3)} className="text-[10px] font-bold px-1.5 py-0.5 bg-blue-50 text-blue-700 rounded hover:bg-blue-100 cursor-pointer">+3</button>
+                    </div>
+                  )}
+
+                  {score2 > score1 && (
+                    <span className="inline-block mt-2 text-[10px] font-black text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full">
+                      👑 الفريق الفائز
+                    </span>
+                  )}
+                </div>
               </div>
-            </div>
 
-            {/* Penalties / Tie-breaker Toggle */}
-            <div className="pt-2 border-t border-slate-200/70">
-              <div className="flex items-center justify-between gap-2 flex-wrap">
-                <button
-                  type="button"
-                  onClick={() => setShowPenalties(!showPenalties)}
-                  className="text-xs font-bold text-blue-600 hover:text-blue-800 flex items-center gap-1 cursor-pointer"
-                >
-                  <span>{showPenalties ? '− إخفاء ضربات الجزاء / الترجيح' : '+ إضافة ضربات الجزاء (في حالة التعادل)'}</span>
-                </button>
+              {/* Penalties / Tie-breaker Toggle */}
+              <div className="pt-2 border-t border-slate-200/70">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <button
+                    type="button"
+                    onClick={() => setShowPenalties(!showPenalties)}
+                    className="text-xs font-bold text-blue-600 hover:text-blue-800 flex items-center gap-1 cursor-pointer"
+                  >
+                    <span>{showPenalties ? '− إخفاء ضربات الجزاء / الترجيح' : '+ إضافة ضربات الجزاء (في حالة التعادل)'}</span>
+                  </button>
+                  {requiresPenaltyOnDraw && Number(score1) === Number(score2) && status === 'Completed' && (
+                    <span className="text-[10px] font-black text-rose-700 bg-rose-50 border border-rose-200 px-2 py-0.5 rounded-full">
+                      إلزامي عند التعادل
+                    </span>
+                  )}
+                </div>
+
                 {requiresPenaltyOnDraw && Number(score1) === Number(score2) && status === 'Completed' && (
-                  <span className="text-[10px] font-black text-rose-700 bg-rose-50 border border-rose-200 px-2 py-0.5 rounded-full">
-                    إلزامي عند التعادل
-                  </span>
+                  <div className="mt-2 p-2.5 rounded-xl bg-amber-50 border border-amber-300 text-[11px] font-bold text-amber-950 leading-relaxed">
+                    {isKnockoutDrawMatch
+                      ? '⚖️ نظام المجموعات إقصاء مباشر: يتم الاحتكام مباشرة لضربات الجزاء في كل مقابلة عند التعادل لتحديد الفائز.'
+                      : '⚖️ الأدوار النهائية: في حالة التعادل يتم الاحتكام إلى ضربات الجزاء لتحديد المتأهل.'}
+                  </div>
+                )}
+
+                {showPenalties && (
+                  <div className="grid grid-cols-2 gap-2.5 sm:gap-3 mt-2.5 p-2.5 sm:p-3 bg-white rounded-xl border border-blue-100">
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-600 mb-1 leading-snug break-words">
+                        ضربات جزاء {team1}
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        value={penalty1 ?? ''}
+                        onChange={(e) => setPenalty1(e.target.value === '' ? undefined : parseInt(e.target.value) || 0)}
+                        placeholder="0"
+                        className="w-full text-xs rounded-lg border border-slate-200 p-2 text-center font-bold"
+                      />
+                      {Number(score1) === Number(score2) && penalty1 !== undefined && penalty2 !== undefined && Number(penalty1) > Number(penalty2) && (
+                        <span className="inline-block mt-1 text-[10px] font-black text-emerald-700">
+                          👑 المتأهل بضربات الجزاء
+                        </span>
+                      )}
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-600 mb-1 leading-snug break-words">
+                        ضربات جزاء {team2}
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        value={penalty2 ?? ''}
+                        onChange={(e) => setPenalty2(e.target.value === '' ? undefined : parseInt(e.target.value) || 0)}
+                        placeholder="0"
+                        className="w-full text-xs rounded-lg border border-slate-200 p-2 text-center font-bold"
+                      />
+                      {Number(score1) === Number(score2) && penalty1 !== undefined && penalty2 !== undefined && Number(penalty2) > Number(penalty1) && (
+                        <span className="inline-block mt-1 text-[10px] font-black text-emerald-700">
+                          👑 المتأهل بضربات الجزاء
+                        </span>
+                      )}
+                    </div>
+                  </div>
                 )}
               </div>
-
-              {requiresPenaltyOnDraw && Number(score1) === Number(score2) && status === 'Completed' && (
-                <div className="mt-2 p-2.5 rounded-xl bg-amber-50 border border-amber-300 text-[11px] font-bold text-amber-950">
-                  {isKnockoutDrawMatch
-                    ? '⚖️ نظام المجموعات إقصاء مباشر: يتم الاحتكام مباشرة لضربات الجزاء في كل مقابلة عند التعادل لتحديد الفائز.'
-                    : '⚖️ الأدوار النهائية: في حالة التعادل يتم الاحتكام إلى ضربات الجزاء لتحديد المتأهل.'}
-                </div>
-              )}
-
-              {showPenalties && (
-                <div className="grid grid-cols-2 gap-3 mt-2.5 p-3 bg-white rounded-xl border border-blue-100">
-                  <div>
-                    <label className="block text-[11px] font-bold text-slate-600 mb-1">
-                      ضربات جزاء {team1}
-                    </label>
-                    <input
-                      type="number"
-                      min="0"
-                      value={penalty1 ?? ''}
-                      onChange={(e) => setPenalty1(e.target.value === '' ? undefined : parseInt(e.target.value) || 0)}
-                      placeholder="0"
-                      className="w-full text-xs rounded-lg border border-slate-200 p-2 text-center font-bold"
-                    />
-                    {Number(score1) === Number(score2) && penalty1 !== undefined && penalty2 !== undefined && Number(penalty1) > Number(penalty2) && (
-                      <span className="inline-block mt-1 text-[10px] font-black text-emerald-700">
-                        👑 المتأهل بضربات الجزاء
-                      </span>
-                    )}
-                  </div>
-                  <div>
-                    <label className="block text-[11px] font-bold text-slate-600 mb-1">
-                      ضربات جزاء {team2}
-                    </label>
-                    <input
-                      type="number"
-                      min="0"
-                      value={penalty2 ?? ''}
-                      onChange={(e) => setPenalty2(e.target.value === '' ? undefined : parseInt(e.target.value) || 0)}
-                      placeholder="0"
-                      className="w-full text-xs rounded-lg border border-slate-200 p-2 text-center font-bold"
-                    />
-                    {Number(score1) === Number(score2) && penalty1 !== undefined && penalty2 !== undefined && Number(penalty2) > Number(penalty1) && (
-                      <span className="inline-block mt-1 text-[10px] font-black text-emerald-700">
-                        👑 المتأهل بضربات الجزاء
-                      </span>
-                    )}
-                  </div>
-                </div>
-              )}
             </div>
-          </div>
 
-          {/* Status Selection */}
-          <div className="space-y-2">
+            {/* Status Selection */}
+            <div className="space-y-2">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">حالة المقابلة</label>
+                <select
+                  value={status}
+                  onChange={(e) => setStatus(e.target.value as any)}
+                  className="w-full text-xs rounded-lg border border-slate-200 px-3 py-2.5 text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500 font-bold"
+                >
+                  <option value="Completed">
+                    {effectiveCanApprove
+                      ? '✅ انتهت المقابلة (المصادقة وتثبيت النتيجة النهائية)'
+                      : '⏳ انتهت المقابلة (حفظ كـ نتيجة أولية في انتظار المصادقة)'}
+                  </option>
+                  <option value="Ongoing">⏱️ جارية حالياً (تحديث النتيجة المؤقتة مباشرة)</option>
+                  <option value="Scheduled">🗓️ مبرمجة (لم تنطلق بعد)</option>
+                  <option value="Postponed">⏸️ مؤجلة</option>
+                  <option value="Cancelled">❌ ملغاة</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Scorers / Highlights */}
             <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">حالة المقابلة</label>
-              <select
-                value={status}
-                onChange={(e) => setStatus(e.target.value as any)}
-                className="w-full text-xs rounded-lg border border-slate-200 px-3 py-2 text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500 font-bold"
-              >
-                <option value="Completed">
-                  {effectiveCanApprove
-                    ? '✅ انتهت المقابلة (المصادقة وتثبيت النتيجة النهائية)'
-                    : '⏳ انتهت المقابلة (حفظ كـ نتيجة أولية في انتظار المصادقة)'}
-                </option>
-                <option value="Ongoing">⏱️ جارية حالياً (تحديث النتيجة المؤقتة مباشرة)</option>
-                <option value="Scheduled">🗓️ مبرمجة (لم تنطلق بعد)</option>
-                <option value="Postponed">⏸️ مؤجلة</option>
-                <option value="Cancelled">❌ ملغاة</option>
-              </select>
+              <label className="block text-xs font-bold text-slate-700 mb-1">مسجلو الأهداف أو النقاط (اختياري)</label>
+              <input
+                type="text"
+                value={scorers}
+                onChange={(e) => setScorers(e.target.value)}
+                placeholder="مثال: أحمد ب. (د 23)، يوسف ع. (د 68)"
+                className="w-full text-xs rounded-lg border border-slate-200 px-3 py-2.5 text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              />
+            </div>
+
+            {/* Technical Notes / Report */}
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">ملاحظات الحكام والتقرير التقني (اختياري)</label>
+              <textarea
+                rows={2}
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                placeholder="أي ملاحظات حول التحكيم أو الروح الرياضية أو القرارات التقنية..."
+                className="w-full text-xs rounded-lg border border-slate-200 px-3 py-2 text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 resize-none"
+              />
+            </div>
+
+            {/* Database Synchronization Notice */}
+            <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl flex items-center gap-2 text-[11px] text-slate-700">
+              <Database className="h-4 w-4 text-emerald-600 shrink-0" />
+              <span className="leading-snug">
+                {effectiveCanApprove
+                  ? 'بعد المصادقة على النتيجة النهائية، يمكنك إخبار المؤطرين ومديري وأساتذة المؤسستين عبر الواتساب بضغطة زر.'
+                  : 'سيتم حفظ النتيجة كـ "نتيجة أولية" ليطلع عليها رئيس اللجنة التقنية والمسير المركزي للمصادقة عليها.'}
+              </span>
             </div>
           </div>
 
-          {/* Scorers / Highlights */}
-          <div>
-            <label className="block text-xs font-bold text-slate-700 mb-1">مسجلو الأهداف أو النقاط (اختياري)</label>
-            <input
-              type="text"
-              value={scorers}
-              onChange={(e) => setScorers(e.target.value)}
-              placeholder="مثال: أحمد ب. (د 23)، يوسف ع. (د 68)"
-              className="w-full text-xs rounded-lg border border-slate-200 px-3 py-2 text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-            />
-          </div>
-
-          {/* Technical Notes / Report */}
-          <div>
-            <label className="block text-xs font-bold text-slate-700 mb-1">ملاحظات الحكام والتقرير التقني (اختياري)</label>
-            <textarea
-              rows={2}
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              placeholder="أي ملاحظات حول التحكيم أو الروح الرياضية أو القرارات التقنية..."
-              className="w-full text-xs rounded-lg border border-slate-200 px-3 py-2 text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 resize-none"
-            />
-          </div>
-
-          {/* Database Synchronization Notice */}
-          <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl flex items-center gap-2 text-[11px] text-slate-700">
-            <Database className="h-4 w-4 text-emerald-600 shrink-0" />
-            <span>
-              {effectiveCanApprove
-                ? 'بعد المصادقة على النتيجة النهائية، يمكنك إخبار المؤطرين ومديري وأساتذة المؤسستين عبر الواتساب بضغطة زر.'
-                : 'سيتم حفظ النتيجة كـ "نتيجة أولية" ليطلع عليها رئيس اللجنة التقنية والمسير المركزي للمصادقة عليها.'}
-            </span>
-          </div>
-
-          {/* Footer Buttons */}
-          <div className="flex flex-col sm:flex-row sm:items-center justify-end gap-2 pt-3 border-t border-slate-100">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer order-3 sm:order-1"
-            >
-              إلغاء
-            </button>
-
+          {/* Pinned Footer Action Buttons */}
+          <div className="shrink-0 px-3 py-2.5 sm:px-5 sm:py-3.5 bg-slate-50 border-t border-slate-200 flex flex-col sm:flex-row sm:items-center justify-end gap-2">
             {canEnterThisMatchScore && effectiveCanApprove && onNotifyApprovedResult && (
               <button
                 type="button"
                 disabled={isSubmitting}
                 onClick={handleApproveAndNotify}
-                className="px-4 py-2.5 text-xs font-black text-white bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 active:scale-95 rounded-xl transition-all shadow-md cursor-pointer flex items-center justify-center gap-1.5 order-1 sm:order-2"
+                className="w-full sm:w-auto px-4 py-2.5 text-xs font-black text-white bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 active:scale-95 rounded-xl transition-all shadow-md cursor-pointer flex items-center justify-center gap-1.5 order-1 sm:order-2"
               >
                 <Megaphone className="h-4 w-4 shrink-0" />
                 <span>مصادقة وإخبار المعنيين بالنتيجة</span>
@@ -563,7 +565,7 @@ export const ScoreModal: React.FC<ScoreModalProps> = ({
             <button
               type="submit"
               disabled={isSubmitting || !canEnterThisMatchScore}
-              className={`px-4 py-2.5 text-xs font-black text-white active:scale-95 rounded-xl transition-all shadow-md flex items-center justify-center gap-1.5 order-2 sm:order-3 disabled:opacity-50 disabled:cursor-not-allowed ${
+              className={`w-full sm:w-auto px-4 py-2.5 text-xs font-black text-white active:scale-95 rounded-xl transition-all shadow-md flex items-center justify-center gap-1.5 order-2 sm:order-3 disabled:opacity-50 disabled:cursor-not-allowed ${
                 !canEnterThisMatchScore
                   ? 'bg-slate-400 cursor-not-allowed'
                   : effectiveCanApprove
@@ -581,6 +583,14 @@ export const ScoreModal: React.FC<ScoreModalProps> = ({
                   ? 'مصادقة وحفظ النتيجة'
                   : 'حفظ كـ نتيجة أولية'}
               </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={onClose}
+              className="w-full sm:w-auto px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-200/70 bg-white sm:bg-transparent border border-slate-200 sm:border-0 rounded-xl transition-colors cursor-pointer order-3 sm:order-1"
+            >
+              إلغاء
             </button>
           </div>
         </form>

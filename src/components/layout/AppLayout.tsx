@@ -44,7 +44,8 @@ import {
   Sun,
   Moon,
   Trash2,
-  BellOff
+  BellOff,
+  Camera
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import toast from 'react-hot-toast';
@@ -565,11 +566,11 @@ export const AppLayout: React.FC = () => {
     : (userProfile?.role as RoleKey) || 'TEACHER';
 
   const defaultRoleHrefs: Record<RoleKey, string[]> = {
-    CENTRAL_ADMIN: ['/dashboard', '/schools', '/tournaments', '/teachers', '/tech-committee', '/referees', '/matches', '/helper-apps', '/posters-certificates', '/statistics', '/sports-config', '/permissions'],
-    TECH_COMMITTEE_HEAD: ['/dashboard', '/schools', '/tournaments', '/teachers', '/tech-committee', '/referees', '/matches', '/helper-apps', '/posters-certificates', '/statistics', '/sports-config'],
-    SPORT_MANAGER: ['/dashboard', '/schools', '/tournaments', '/teachers', '/referees', '/matches', '/helper-apps', '/posters-certificates', '/statistics'],
-    TEACHER: ['/dashboard', '/schools', '/tournaments', '/matches', '/posters-certificates', '/statistics'],
-    REFEREE: ['/dashboard', '/matches', '/statistics']
+    CENTRAL_ADMIN: ['/dashboard', '/schools', '/tournaments', '/teachers', '/tech-committee', '/referees', '/matches', '/documentation', '/helper-apps', '/posters-certificates', '/statistics', '/sports-config', '/permissions'],
+    TECH_COMMITTEE_HEAD: ['/dashboard', '/schools', '/tournaments', '/teachers', '/tech-committee', '/referees', '/matches', '/documentation', '/helper-apps', '/posters-certificates', '/statistics', '/sports-config'],
+    SPORT_MANAGER: ['/dashboard', '/schools', '/tournaments', '/teachers', '/referees', '/matches', '/documentation', '/helper-apps', '/posters-certificates', '/statistics'],
+    TEACHER: ['/dashboard', '/schools', '/tournaments', '/matches', '/documentation', '/posters-certificates', '/statistics'],
+    REFEREE: ['/dashboard', '/matches', '/documentation', '/statistics']
   };
 
   const rawHrefs = Array.isArray(rolePermissions?.[userRoleKey])
@@ -586,6 +587,7 @@ export const AppLayout: React.FC = () => {
     { name: 'رؤساء اللجن التقنية', href: '/tech-committee', icon: ShieldCheck },
     { name: 'الحكام', href: '/referees', icon: UserCheck },
     { name: 'المباريات والنتائج', href: '/matches', icon: CalendarDays },
+    { name: 'فضاء التوثيق والأنشطة', href: '/documentation', icon: Camera },
     { name: 'تطبيقات مساعدة', href: '/helper-apps', icon: Boxes },
     { name: 'الملصقات والشواهد التقديرية', href: '/posters-certificates', icon: Award },
     { name: 'إحصائيات عامة', href: '/statistics', icon: BarChart3 },

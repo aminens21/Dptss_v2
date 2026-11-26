@@ -5,7 +5,7 @@ import { resolveMatchRefereesInfo, resolveMatchAffiliation, getOrdinalRefLabel }
 import { Match, School, Venue, CrossCountryCategoryResult, AthleticsCategoryResult, Student, Directorate, Sport, Tournament, Referee, User, AffiliationDisplayConfig } from '../types';
 import { CROSS_COUNTRY_CATEGORIES } from '../lib/crossCountryConfig';
 import { AthleticsService } from '../lib/athleticsService';
-import { MapPin, Trophy, Goal, Users, Award, Calendar, ChevronDown, X, Medal, Sparkles, Filter, Activity, Building2, Search, CheckCircle2, Clock, ShieldCheck } from 'lucide-react';
+import { MapPin, Trophy, Goal, Users, Award, Calendar, ChevronDown, X, Medal, Sparkles, Filter, Activity, Building2, Search, CheckCircle2, Clock, ShieldCheck, Camera } from 'lucide-react';
 import { cn, formatMatchDate, parseDateToTimestampMs } from '../lib/utils';
 import toast from 'react-hot-toast';
 
@@ -444,8 +444,8 @@ export const PublicResults: React.FC = () => {
             استعراض النتائج المعتمدة، منصات التتويج، وبرمجة المباريات الرياضية الإقليمية
           </p>
           
-          {/* Directorate Selector */}
-          <div className="flex items-center justify-center gap-2 pt-2">
+          {/* Directorate Selector & Documentation Link */}
+          <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
             <div className="inline-flex items-center gap-2 px-3 py-1.5 bg-white border border-slate-200 rounded-2xl shadow-3xs">
               <Building2 className="w-4 h-4 text-emerald-600" />
               <span className="text-xs font-bold text-slate-600">المديرية الإقليمية:</span>
@@ -461,6 +461,14 @@ export const PublicResults: React.FC = () => {
                 ))}
               </select>
             </div>
+
+            <a
+              href="/documentation"
+              className="inline-flex items-center gap-2 px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl text-xs font-black shadow-md transition-colors"
+            >
+              <Camera className="w-4 h-4" />
+              <span>فضاء التوثيق والأرشيف المرئي</span>
+            </a>
           </div>
         </div>
 

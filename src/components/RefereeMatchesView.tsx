@@ -225,31 +225,31 @@ export const RefereeMatchesView: React.FC<RefereeMatchesViewProps> = ({
   }, [userProfile]);
 
   return (
-    <div className="space-y-6 dir-rtl text-right">
+    <div className="space-y-4 sm:space-y-6 dir-rtl text-right">
       {/* Athletics Committee Assignments (مهامي التحكيمية في ألعاب القوى) */}
       {athleticsAssignments.length > 0 && (
-        <div className="bg-gradient-to-r from-amber-500/10 via-orange-500/10 to-amber-600/10 border border-amber-500/30 rounded-3xl p-5 shadow-md">
+        <div className="bg-gradient-to-r from-amber-500/10 via-orange-500/10 to-amber-600/10 border border-amber-500/30 rounded-2xl sm:rounded-3xl p-3.5 sm:p-5 shadow-md">
           <div className="flex items-center gap-3 mb-3">
-            <div className="w-10 h-10 rounded-2xl bg-amber-500 text-slate-950 flex items-center justify-center font-bold text-lg shadow-sm">
+            <div className="w-10 h-10 rounded-2xl bg-amber-500 text-slate-950 flex items-center justify-center font-bold text-lg shadow-sm shrink-0">
               🏃‍♂️
             </div>
-            <div>
-              <h3 className="text-sm font-black text-slate-900 dark:text-white">
+            <div className="min-w-0">
+              <h3 className="text-xs sm:text-sm font-black text-slate-900 dark:text-white leading-snug">
                 مهامك وصفاتك التحكيمية الرسمية في بطولات ألعاب القوى المدرسية
               </h3>
-              <p className="text-xs text-slate-600 dark:text-slate-400 font-medium">
+              <p className="text-[11px] sm:text-xs text-slate-600 dark:text-slate-400 font-medium mt-0.5">
                 تم تعيينك رسمياً في اللجان التقنية والتحكيمية التالية لسباقات ألعاب القوى:
               </p>
             </div>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 mt-3">
             {athleticsAssignments.map((assign, idx) => (
-              <div key={idx} className="bg-white dark:bg-slate-900 border border-amber-500/30 rounded-2xl p-4 shadow-xs space-y-2.5">
-                <div className="flex items-center justify-between">
+              <div key={idx} className="bg-white dark:bg-slate-900 border border-amber-500/30 rounded-2xl p-3.5 sm:p-4 shadow-xs space-y-2.5">
+                <div className="flex items-center justify-between gap-2">
                   <span className="text-[11px] font-black px-2.5 py-0.5 rounded-lg bg-amber-500/20 text-amber-700 dark:text-amber-300">
                     {assign.committeeTitle}
                   </span>
-                  <span className="text-xl">🥇</span>
+                  <span className="text-xl shrink-0">🥇</span>
                 </div>
                 <div>
                   <span className="text-[10px] font-bold text-slate-400 block">الصفة أو المهمة:</span>
@@ -283,48 +283,48 @@ export const RefereeMatchesView: React.FC<RefereeMatchesViewProps> = ({
       )}
 
       {/* Welcome Card & Referee Profile Summary */}
-      <div className="p-6 rounded-3xl bg-gradient-to-br from-slate-900 via-blue-950 to-slate-900 text-white border border-slate-800 shadow-xl overflow-hidden relative">
+      <div className="p-4 sm:p-6 rounded-2xl sm:rounded-3xl bg-gradient-to-br from-slate-900 via-blue-950 to-slate-900 text-white border border-slate-800 shadow-xl overflow-hidden relative">
         <div className="absolute top-0 left-0 right-0 h-1.5 bg-linear-to-r from-amber-400 via-yellow-500 to-amber-600" />
-        <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-5 relative z-10">
-          <div className="flex items-center gap-4">
-            <div className="w-14 h-14 rounded-2xl bg-white/10 backdrop-blur-xs text-3xl flex items-center justify-center border border-white/20 shadow-lg">
+        <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 sm:gap-5 relative z-10">
+          <div className="flex items-start sm:items-center gap-3 sm:gap-4">
+            <div className="w-11 h-11 sm:w-14 sm:h-14 rounded-2xl bg-white/10 backdrop-blur-xs text-2xl sm:text-3xl flex items-center justify-center border border-white/20 shadow-lg shrink-0">
               🏁
             </div>
-            <div>
+            <div className="min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-[10px] font-black px-2.5 py-0.5 rounded-md bg-amber-500/20 text-amber-300 border border-amber-400/30">
                   لوحة تحكيم الحكم المعتمد
                 </span>
                 <span className="text-[10px] text-slate-300 font-bold">الموسم الحالي</span>
               </div>
-              <h2 className="text-xl font-black text-white mt-1">
+              <h2 className="text-base sm:text-xl font-black text-white mt-1 leading-snug">
                 الكابتن: {userProfile?.fullName || refereeName}
               </h2>
-              <p className="text-xs text-slate-300 font-medium mt-1 leading-relaxed">
+              <p className="text-[11px] sm:text-xs text-slate-300 font-medium mt-1 leading-relaxed">
                 مرحباً بك في فضائك الرقمي للتحكيم. يمكنك هنا متابعة جميع مبارياتك المبرمجة وتسجيل نتائجها مباشرة وبسرعة.
               </p>
             </div>
           </div>
 
-          <div className="flex flex-wrap gap-2.5 bg-white/5 border border-white/10 p-3.5 rounded-2xl md:self-auto self-stretch justify-around md:justify-end">
-            <div className="text-center px-4 border-l border-white/10 last:border-0">
+          <div className="grid grid-cols-3 gap-1 sm:gap-2.5 bg-white/5 border border-white/10 p-2.5 sm:p-3.5 rounded-2xl md:self-auto self-stretch">
+            <div className="text-center px-2 sm:px-4 border-l border-white/10 last:border-0">
               <span className="text-[10px] text-slate-400 font-bold block">إجمالي مبارياتك</span>
-              <span className="text-2xl font-black text-amber-400">{refereeMatches.length}</span>
+              <span className="text-xl sm:text-2xl font-black text-amber-400">{refereeMatches.length}</span>
             </div>
-            <div className="text-center px-4 border-l border-white/10 last:border-0">
+            <div className="text-center px-2 sm:px-4 border-l border-white/10 last:border-0">
               <span className="text-[10px] text-slate-400 font-bold block">قيد الانتظار</span>
-              <span className="text-2xl font-black text-blue-300">{scheduledCount}</span>
+              <span className="text-xl sm:text-2xl font-black text-blue-300">{scheduledCount}</span>
             </div>
-            <div className="text-center px-4 border-l border-white/10 last:border-0">
+            <div className="text-center px-2 sm:px-4 border-l border-white/10 last:border-0">
               <span className="text-[10px] text-slate-400 font-bold block">منتهية</span>
-              <span className="text-2xl font-black text-emerald-400">{completedCount}</span>
+              <span className="text-xl sm:text-2xl font-black text-emerald-400">{completedCount}</span>
             </div>
           </div>
         </div>
       </div>
 
       {/* KPI Stats Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
         <div className="bg-white p-4.5 rounded-2xl border border-slate-200 shadow-3xs flex items-center justify-between">
           <div>
             <span className="text-[10px] font-extrabold text-blue-700 uppercase block">المباريات المجدولة</span>
@@ -423,24 +423,24 @@ export const RefereeMatchesView: React.FC<RefereeMatchesViewProps> = ({
             return (
               <div
                 key={m.id}
-                className="bg-white rounded-2xl border border-slate-200/90 shadow-3xs p-4 flex flex-col justify-between space-y-3.5 hover:shadow-xs hover:border-blue-200 transition-all duration-200 group"
+                className="bg-white rounded-2xl border border-slate-200/90 shadow-3xs p-3.5 sm:p-4 flex flex-col justify-between space-y-3 hover:shadow-xs hover:border-blue-200 transition-all duration-200 group"
               >
                 {/* Header: Sport Icon, Name, Stage & Status */}
-                <div className="flex items-center justify-between text-[11px] font-bold pb-2 border-b border-slate-100">
-                  <div className="flex items-center gap-2">
-                    <span className="w-7 h-7 rounded-lg bg-blue-50 text-blue-700 flex items-center justify-center border border-blue-100/60 text-sm">
+                <div className="flex items-start justify-between gap-2 text-[11px] font-bold pb-2.5 border-b border-slate-100">
+                  <div className="flex items-start gap-2 min-w-0 flex-1">
+                    <span className="w-7 h-7 rounded-lg bg-blue-50 text-blue-700 flex items-center justify-center border border-blue-100/60 text-sm shrink-0 mt-0.5">
                       {sport.icon}
                     </span>
-                    <div>
+                    <div className="min-w-0 leading-snug">
                       <span className="text-slate-800 font-extrabold text-[12px]">{sport.name}</span>
                       <span className="mx-1 text-slate-300">•</span>
-                      <span className="text-slate-500 font-bold">{m.stage || 'دور المجموعات'}</span>
+                      <span className="text-slate-500 font-bold break-words">{m.stage || 'دور المجموعات'}</span>
                     </div>
                   </div>
 
                   <span
                     className={cn(
-                      "px-2.5 py-1 rounded-full text-[10px] font-black inline-flex items-center gap-1 border",
+                      "px-2.5 py-1 rounded-full text-[10px] font-black inline-flex items-center gap-1 border shrink-0 whitespace-nowrap",
                       isOngoing
                         ? "bg-red-50 text-red-700 border-red-200 animate-pulse"
                         : isCompleted && m.approvalStatus === 'provisional'
@@ -454,24 +454,24 @@ export const RefereeMatchesView: React.FC<RefereeMatchesViewProps> = ({
                     {isOngoing
                       ? '🔴 جارية الآن'
                       : isCompleted && m.approvalStatus === 'provisional'
-                      ? '⏳ نتيجة أولية (بانتظار المصادقة)'
+                      ? '⏳ نتيجة أولية'
                       : isCompleted
                       ? '✅ نتيجة مصادق عليها'
                       : '📅 مبرمجة'}
                   </span>
                 </div>
 
-                {/* Scoreboard Block */}
-                <div className="py-3 px-3 bg-slate-50/60 rounded-xl border border-slate-100/80">
-                  <div className="flex items-center justify-between">
+                {/* Scoreboard Block (wraps cleanly on mobile without truncating school names) */}
+                <div className="py-2.5 px-2.5 sm:px-3 bg-slate-50/70 rounded-xl border border-slate-100/80">
+                  <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
                     {/* Team 1 hosting */}
-                    <div className="w-[43%] flex items-center gap-1.5 min-w-0 justify-start text-right">
+                    <div className="flex items-center gap-1.5 min-w-0 justify-start text-right">
                       <span className="w-5 h-5 rounded-full bg-blue-50 text-blue-700 text-[10px] flex items-center justify-center border border-blue-100 shrink-0 font-bold">
                         🏫
                       </span>
                       <span
                         className={cn(
-                          "text-xs font-black text-slate-800 truncate leading-none",
+                          "text-[11px] sm:text-xs font-black text-slate-800 leading-snug break-words",
                           isT1Winner && "text-blue-700"
                         )}
                         title={t1Name}
@@ -484,7 +484,7 @@ export const RefereeMatchesView: React.FC<RefereeMatchesViewProps> = ({
                     </div>
 
                     {/* Scores container */}
-                    <div className="w-[14%] flex flex-col items-center justify-center shrink-0">
+                    <div className="flex flex-col items-center justify-center shrink-0">
                       {isCompleted || isOngoing ? (
                         <div className="bg-white px-2 py-1 rounded-lg border border-slate-200 shadow-3xs font-mono font-black text-xs text-slate-800 flex items-center gap-1">
                           <span className={cn(isT1Winner && "text-blue-600")}>{s1}</span>
@@ -497,13 +497,13 @@ export const RefereeMatchesView: React.FC<RefereeMatchesViewProps> = ({
                     </div>
 
                     {/* Team 2 guest */}
-                    <div className="w-[43%] flex items-center gap-1.5 min-w-0 justify-end text-left">
+                    <div className="flex items-center gap-1.5 min-w-0 justify-end text-left">
                       {isT2Winner && (
                         <Trophy className="w-3.5 h-3.5 text-amber-500 fill-amber-400 shrink-0" />
                       )}
                       <span
                         className={cn(
-                          "text-xs font-black text-slate-800 truncate leading-none",
+                          "text-[11px] sm:text-xs font-black text-slate-800 leading-snug break-words",
                           isT2Winner && "text-blue-700"
                         )}
                         title={t2Name}
@@ -526,7 +526,7 @@ export const RefereeMatchesView: React.FC<RefereeMatchesViewProps> = ({
                       </span>
                     )}
                     {m.scorers && (
-                      <span className="truncate">
+                      <span className="break-words leading-relaxed">
                         ⚽ الهدافون: <strong className="font-semibold text-slate-600">{m.scorers}</strong>
                       </span>
                     )}
@@ -534,13 +534,15 @@ export const RefereeMatchesView: React.FC<RefereeMatchesViewProps> = ({
                 )}
 
                 {/* Info Card: Venue, Date, Other Referees */}
-                <div className="bg-slate-50/30 border border-slate-100/70 p-3 rounded-xl text-slate-600 space-y-1.5 text-[11px] font-medium">
-                  <div className="flex items-center gap-1.5">
-                    <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                    <span className="truncate" title={venueName}>المكان: <strong className="font-bold text-slate-800">{venueName}</strong></span>
+                <div className="bg-slate-50/40 border border-slate-100/80 p-2.5 sm:p-3 rounded-xl text-slate-600 space-y-1.5 text-[11px] font-medium">
+                  <div className="flex items-start gap-1.5">
+                    <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0 mt-0.5" />
+                    <span className="leading-snug break-words" title={venueName}>
+                      المكان: <strong className="font-bold text-slate-800">{venueName}</strong>
+                    </span>
                   </div>
 
-                  <div className="flex items-center gap-1.5">
+                  <div className="flex items-center flex-wrap gap-x-2 gap-y-1">
                     <Calendar className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                     <span>التاريخ: <strong className="font-bold text-slate-800">{formatMatchDate(m.date)}</strong></span>
                     {m.startTime && (
@@ -557,25 +559,25 @@ export const RefereeMatchesView: React.FC<RefereeMatchesViewProps> = ({
                     const extraOtherRefs = allRefs.filter(name => !categorizedSet.has(name));
                     if (fieldRefs.length === 0 && tableRefs.length === 0 && extraOtherRefs.length === 0) return null;
                     return (
-                      <div className="space-y-1 pt-1.5 border-t border-slate-100/60">
+                      <div className="space-y-1.5 pt-1.5 border-t border-slate-100/60">
                         {fieldRefs.length > 0 && (
-                          <div className="flex items-center gap-1.5 flex-wrap">
-                            <span className="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 text-[10px] font-black">حكام الساحة</span>
-                            <strong className="font-bold text-slate-700">{fieldRefs.join(' • ')}</strong>
+                          <div className="flex items-start gap-1.5 flex-wrap">
+                            <span className="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 text-[10px] font-black shrink-0">حكام الساحة</span>
+                            <strong className="font-bold text-slate-700 leading-relaxed break-words">{fieldRefs.join(' • ')}</strong>
                           </div>
                         )}
                         {tableRefs.length > 0 && (
-                          <div className="flex items-center gap-1.5 flex-wrap">
-                            <span className="px-1.5 py-0.5 rounded bg-sky-100 text-sky-800 text-[10px] font-black">حكام الطاولة</span>
-                            <strong className="font-bold text-slate-700">{tableRefs.join(' • ')}</strong>
+                          <div className="flex items-start gap-1.5 flex-wrap">
+                            <span className="px-1.5 py-0.5 rounded bg-sky-100 text-sky-800 text-[10px] font-black shrink-0">حكام الطاولة</span>
+                            <strong className="font-bold text-slate-700 leading-relaxed break-words">{tableRefs.join(' • ')}</strong>
                           </div>
                         )}
                         {extraOtherRefs.length > 0 && (
-                          <div className="flex items-center gap-1.5 flex-wrap">
-                            <span className="px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-800 text-[10px] font-black">
+                          <div className="flex items-start gap-1.5 flex-wrap">
+                            <span className="px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-800 text-[10px] font-black shrink-0">
                               {fieldRefs.length === 0 && tableRefs.length === 0 ? 'طاقم التحكيم' : 'حكام إضافيون'}
                             </span>
-                            <strong className="font-bold text-slate-700">{extraOtherRefs.join(' • ')}</strong>
+                            <strong className="font-bold text-slate-700 leading-relaxed break-words">{extraOtherRefs.join(' • ')}</strong>
                           </div>
                         )}
                       </div>
@@ -584,7 +586,7 @@ export const RefereeMatchesView: React.FC<RefereeMatchesViewProps> = ({
                 </div>
 
                 {/* Match Actions for Referee */}
-                <div className="pt-2 border-t border-slate-100 flex items-center justify-between gap-2">
+                <div className="pt-2.5 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                   <span className="text-[10px] text-slate-400 font-bold">
                     {isCompleted && m.approvalStatus === 'approved'
                       ? `تمت المصادقة النهائية (${m.approvedByName || 'رئيس اللجنة'})`
@@ -592,17 +594,17 @@ export const RefereeMatchesView: React.FC<RefereeMatchesViewProps> = ({
                   </span>
 
                   {isCompleted && m.approvalStatus === 'approved' ? (
-                    <span className="inline-flex items-center gap-1 px-3 py-1.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-xl text-[11px] font-black">
-                      <CheckCircle className="w-3.5 h-3.5" />
+                    <span className="inline-flex items-center justify-center gap-1 px-3 py-1.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-xl text-[11px] font-black w-full sm:w-auto">
+                      <CheckCircle className="w-3.5 h-3.5 shrink-0" />
                       <span>نتيجة معتمدة رسمياً</span>
                     </span>
                   ) : (
                     <button
                       type="button"
                       onClick={() => onEditScore(m)}
-                      className="inline-flex items-center gap-1.5 px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-black shadow-3xs hover:shadow-xs transition-all cursor-pointer"
+                      className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 sm:py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-black shadow-3xs hover:shadow-xs transition-all cursor-pointer w-full sm:w-auto whitespace-nowrap"
                     >
-                      <Edit3 className="w-3.5 h-3.5" />
+                      <Edit3 className="w-3.5 h-3.5 shrink-0" />
                       <span>{isCompleted ? 'تعديل النتيجة الأولية' : 'تدوين النتيجة الأولية 📝'}</span>
                     </button>
                   )}

@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { Tournament, Student, School, User, Sport, AffiliationDisplayConfig, CrossCountryBibsStatus } from '../types';
-import { DataService, SPORTS_MAP, getAgeCategoriesForSeason, validateBirthDateForCategory, resolveSchoolCoach, schoolNamesMatch, resolveEffectiveAffiliationMode, isAffiliationAllowedByDisplayConfig, normalizeCategoryKey, resolveEffectiveTeacherCadre, isTeacherLevelAllowedForTournament, isCategoryAllowedForTeacherLevel, isCrossCountryU15OpenToPrimary, isSchoolSectorAllowedForTournament, findMatchingSchoolForTeacher, parseTournamentAllowedLevels, getTournamentLevelAr } from '../lib/dataService';
+import { DataService, SPORTS_MAP, getAgeCategoriesForSeason, validateBirthDateForCategory, resolveSchoolCoach, schoolNamesMatch, resolveEffectiveAffiliationMode, isAffiliationAllowedByDisplayConfig, normalizeCategoryKey, resolveEffectiveTeacherCadre, isTeacherLevelAllowedForTournament, isCategoryAllowedForTeacherLevel, isCrossCountryU15OpenToPrimary, isSchoolSectorAllowedForTournament, findMatchingSchoolForTeacher, parseTournamentAllowedLevels, getTournamentLevelAr, isRegistrationDeadlineExpired } from '../lib/dataService';
 import { canUserDownloadTournamentTablePdf, buildParticipationTableRows, downloadTournamentParticipationTablePdf, formatTournamentRedBannerTitle } from '../lib/tournamentTablePdfService';
 import { useAuth } from '../contexts/AuthContext';
 import { useRolePermissions } from '../hooks/useRolePermissions';
@@ -305,6 +305,13 @@ export const CrossCountryChampionshipModal: React.FC<CrossCountryChampionshipMod
     };
   }, [ccTournaments, selectedAffiliationFilter, hasClubTournament, hasNonClubTournament]);
 
+  const isDeadlineExpired = useMemo(() => isRegistrationDeadlineExpired(currentDeadline), [currentDeadline]);
+  const isCcCompleted = useMemo(
+    () => ccTournaments.length > 0 && ccTournaments.every(t => t.status === 'Completed' || t.status === 'Archived'),
+    [ccTournaments]
+  );
+  const isCcRegistrationLocked = isDeadlineExpired || isCcCompleted;
+
   const ccSportObject: Sport = useMemo(() => ({
     id: 'cross_country',
     name: 'العدو الريفي',
@@ -431,6 +438,11 @@ export const CrossCountryChampionshipModal: React.FC<CrossCountryChampionshipMod
 
   const executeDeleteStudent = async () => {
     if (!studentToDelete) return;
+    if (isCcRegistrationLocked) {
+      toast.error('انتهى آخر أجل للتسجيل في العدو الريفي — لا يمكن حذف أي متسابق بعد نهاية التسجيل.');
+      setStudentToDelete(null);
+      return;
+    }
     setIsDeletingStudent(true);
     const toastId = toast.loading(`جاري حذف المشارك(ة) ${studentToDelete.fullName}...`);
     try {
@@ -452,6 +464,11 @@ export const CrossCountryChampionshipModal: React.FC<CrossCountryChampionshipMod
   const handleSaveEditedStudent = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingStudent) return;
+    if (isCcRegistrationLocked) {
+      toast.error('انتهى آخر أجل للتسجيل في العدو الريفي — لا يمكن تعديل بيانات أي متسابق بعد نهاية التسجيل.');
+      setEditingStudent(null);
+      return;
+    }
     if (!editFullName.trim()) {
       toast.error('يرجى إدخال اسم ونسب المشارك(ة)');
       return;
@@ -598,6 +615,7 @@ export const CrossCountryChampionshipModal: React.FC<CrossCountryChampionshipMod
 
     const excelData = participants.map((p, index) => ({
       'الرقم الترتيبي': index + 1,
+      'رقم الصدرية': p.bibNumber || (p as any).crossCountryBibNumber || '-',
       'الاسم والنسب': p.fullName,
       'رقم مسار': p.massarNumber || '—',
       'الجنس': p.gender === 'Male' ? 'ذكر' : 'أنثى',
@@ -632,6 +650,7 @@ export const CrossCountryChampionshipModal: React.FC<CrossCountryChampionshipMod
       const sheetData = participants.length > 0
         ? participants.map((p, index) => ({
             'الرقم الترتيبي': index + 1,
+            'رقم الصدرية': p.bibNumber || (p as any).crossCountryBibNumber || '-',
             'الاسم والنسب': p.fullName,
             'رقم مسار': p.massarNumber || '—',
             'الجنس': p.gender === 'Male' ? 'ذكر' : 'أنثى',
@@ -935,6 +954,22 @@ export const CrossCountryChampionshipModal: React.FC<CrossCountryChampionshipMod
             </div>
 
             {/* Registration action buttons directly below the 8 categories */}
+            {isCcRegistrationLocked && (
+              <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded-xl flex items-center gap-2.5 text-red-900 text-xs font-bold">
+                <Lock className="w-4 h-4 text-red-600 shrink-0" />
+                <div>
+                  <span className="font-black">
+                    {isCcCompleted
+                      ? 'بطولة العدو الريفي منتهية ومؤرشفة نهائياً 🔒'
+                      : 'انتهى آخر أجل للتسجيل في العدو الريفي 🔒'}
+                  </span>
+                  <span className="text-[11px] text-red-700 font-medium mr-1.5">
+                    — لا يمكن إضافة أو تعديل أو حذف أي متسابق بعد نهاية التسجيل.
+                  </span>
+                </div>
+              </div>
+            )}
+
             <div className="mt-3 pt-2.5 border-t border-slate-200 flex flex-wrap items-center justify-between gap-2.5 px-1 bg-white/70 rounded-xl p-2">
               <div className="text-xs text-slate-700 font-bold flex items-center gap-1.5 flex-wrap">
                 <span>التسجيل في منافسات العدو الريفي:</span>
@@ -959,32 +994,65 @@ export const CrossCountryChampionshipModal: React.FC<CrossCountryChampionshipMod
                   ) : (
                     <button
                       type="button"
-                      onClick={() => setIsConfirmModalOpen(true)}
-                      className="px-3.5 py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer flex items-center gap-1.5 bg-gradient-to-r from-emerald-600 to-emerald-700 text-white border-emerald-600 hover:from-emerald-500 hover:to-emerald-600 shadow-sm animate-pulse"
+                      disabled={isCcRegistrationLocked}
+                      onClick={() => {
+                        if (isCcRegistrationLocked) {
+                          toast.error('انتهى أجل التسجيل وتأكيد المشاركة في بطولة العدو الريفي 🔒');
+                          return;
+                        }
+                        setIsConfirmModalOpen(true);
+                      }}
+                      className={`px-3.5 py-2 rounded-xl text-xs font-bold border transition-all flex items-center gap-1.5 ${
+                        isCcRegistrationLocked
+                          ? 'bg-slate-200 text-slate-500 border-slate-300 cursor-not-allowed opacity-80'
+                          : 'cursor-pointer bg-gradient-to-r from-emerald-600 to-emerald-700 text-white border-emerald-600 hover:from-emerald-500 hover:to-emerald-600 shadow-sm animate-pulse'
+                      }`}
                     >
-                      <CheckCircle2 className="w-3.5 h-3.5" />
-                      <span>تأكيد مشاركة المؤسسة أولاً 📋</span>
+                      {isCcRegistrationLocked ? <Lock className="w-3.5 h-3.5" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
+                      <span>{isCcRegistrationLocked ? 'انتهى أجل التسجيل والتأكيد 🔒' : 'تأكيد مشاركة المؤسسة أولاً 📋'}</span>
                     </button>
                   )
                 )}
 
                 <button
                   type="button"
-                  onClick={() => setIsRegisterModalOpen(true)}
-                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black shadow-xs transition-all cursor-pointer flex items-center gap-1.5 hover:scale-102 active:scale-98"
-                  title="تسجيل مشارك واحد تلو الآخر في الفئة المحددة"
+                  disabled={isCcRegistrationLocked}
+                  onClick={() => {
+                    if (isCcRegistrationLocked) {
+                      toast.error('انتهى آخر أجل للتسجيل في العدو الريفي ولا يمكن إضافة متسابقين جدد.');
+                      return;
+                    }
+                    setIsRegisterModalOpen(true);
+                  }}
+                  className={`px-4 py-2 rounded-xl text-xs font-black shadow-xs transition-all flex items-center gap-1.5 ${
+                    isCcRegistrationLocked
+                      ? 'bg-slate-200 text-slate-500 cursor-not-allowed opacity-75'
+                      : 'bg-blue-600 hover:bg-blue-700 text-white cursor-pointer hover:scale-102 active:scale-98'
+                  }`}
+                  title={isCcRegistrationLocked ? 'انتهى آخر أجل للتسجيل في العدو الريفي' : 'تسجيل مشارك واحد تلو الآخر في الفئة المحددة'}
                 >
-                  <UserPlus className="w-4 h-4" />
+                  {isCcRegistrationLocked ? <Lock className="w-3.5 h-3.5" /> : <UserPlus className="w-4 h-4" />}
                   <span>تسجيل واحد تلو الآخر</span>
                 </button>
 
                 <button
                   type="button"
-                  onClick={() => setIsBulkRegisterModalOpen(true)}
-                  className="px-4 py-2 bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 text-slate-950 rounded-xl text-xs font-black shadow-xs transition-all cursor-pointer flex items-center gap-2 hover:scale-102 active:scale-98"
-                  title="تسجيل 8 مشاركين دفعة واحدة (3 فردي + 5 فريق المؤسسة)"
+                  disabled={isCcRegistrationLocked}
+                  onClick={() => {
+                    if (isCcRegistrationLocked) {
+                      toast.error('انتهى آخر أجل للتسجيل في العدو الريفي ولا يمكن إضافة أو تعديل المتسابقين.');
+                      return;
+                    }
+                    setIsBulkRegisterModalOpen(true);
+                  }}
+                  className={`px-4 py-2 rounded-xl text-xs font-black shadow-xs transition-all flex items-center gap-2 ${
+                    isCcRegistrationLocked
+                      ? 'bg-slate-200 text-slate-500 cursor-not-allowed opacity-75'
+                      : 'bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 text-slate-950 cursor-pointer hover:scale-102 active:scale-98'
+                  }`}
+                  title={isCcRegistrationLocked ? 'انتهى آخر أجل للتسجيل في العدو الريفي' : 'تسجيل 8 مشاركين دفعة واحدة (3 فردي + 5 فريق المؤسسة)'}
                 >
-                  <Sparkles className="w-4 h-4 text-slate-950" />
+                  {isCcRegistrationLocked ? <Lock className="w-3.5 h-3.5" /> : <Sparkles className="w-4 h-4 text-slate-950" />}
                   <span>تسجيل 8 مشاركين (3 فردي + 5 فريق) ⚡</span>
                 </button>
 
@@ -1324,24 +1392,34 @@ export const CrossCountryChampionshipModal: React.FC<CrossCountryChampionshipMod
                                 <td className="py-2.5 px-3 text-center whitespace-nowrap">
                                   <div className="flex items-center justify-center gap-1.5">
                                     {canManageThisStudent(runner) && (
-                                      <>
-                                        <button
-                                          type="button"
-                                          onClick={() => setStudentToEditConfirm(runner)}
-                                          className="p-1.5 text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors cursor-pointer inline-flex items-center"
-                                          title="تعديل بيانات العداء(ة)"
+                                      isCcRegistrationLocked ? (
+                                        <span
+                                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-red-50 text-red-700 border border-red-200 text-[10px] font-bold"
+                                          title="انتهى آخر أجل للتسجيل في العدو الريفي ولا يمكن تعديل أو حذف المتسابقين"
                                         >
-                                          <Edit className="h-3.5 w-3.5" />
-                                        </button>
-                                        <button
-                                          type="button"
-                                          onClick={() => setStudentToDelete(runner)}
-                                          className="p-1.5 text-red-600 bg-red-50 hover:bg-red-100 rounded-lg transition-colors cursor-pointer inline-flex items-center"
-                                          title="حذف العداء(ة)"
-                                        >
-                                          <Trash2 className="h-3.5 w-3.5" />
-                                        </button>
-                                      </>
+                                          <Lock className="h-3 w-3" />
+                                          <span>مقفل</span>
+                                        </span>
+                                      ) : (
+                                        <>
+                                          <button
+                                            type="button"
+                                            onClick={() => setStudentToEditConfirm(runner)}
+                                            className="p-1.5 text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors cursor-pointer inline-flex items-center"
+                                            title="تعديل بيانات العداء(ة)"
+                                          >
+                                            <Edit className="h-3.5 w-3.5" />
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={() => setStudentToDelete(runner)}
+                                            className="p-1.5 text-red-600 bg-red-50 hover:bg-red-100 rounded-lg transition-colors cursor-pointer inline-flex items-center"
+                                            title="حذف العداء(ة)"
+                                          >
+                                            <Trash2 className="h-3.5 w-3.5" />
+                                          </button>
+                                        </>
+                                      )
                                     )}
                                   </div>
                                 </td>
@@ -1429,24 +1507,34 @@ export const CrossCountryChampionshipModal: React.FC<CrossCountryChampionshipMod
                               
                               <div className="flex items-center gap-1.5">
                                 {canManageThisStudent(runner) && (
-                                  <>
-                                    <button
-                                      type="button"
-                                      onClick={() => setStudentToEditConfirm(runner)}
-                                      className="p-1.5 text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors cursor-pointer inline-flex items-center"
-                                      title="تعديل بيانات العداء(ة)"
+                                  isCcRegistrationLocked ? (
+                                    <span
+                                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-red-50 text-red-700 border border-red-200 text-[10px] font-bold"
+                                      title="انتهى آخر أجل للتسجيل في العدو الريفي ولا يمكن تعديل أو حذف المتسابقين"
                                     >
-                                      <Edit className="h-3.5 w-3.5" />
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={() => setStudentToDelete(runner)}
-                                      className="p-1.5 text-red-600 bg-red-50 hover:bg-red-100 rounded-lg transition-colors cursor-pointer inline-flex items-center"
-                                      title="حذف العداء(ة)"
-                                    >
-                                      <Trash2 className="h-3.5 w-3.5" />
-                                    </button>
-                                  </>
+                                      <Lock className="h-3 w-3" />
+                                      <span>مقفل</span>
+                                    </span>
+                                  ) : (
+                                    <>
+                                      <button
+                                        type="button"
+                                        onClick={() => setStudentToEditConfirm(runner)}
+                                        className="p-1.5 text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors cursor-pointer inline-flex items-center"
+                                        title="تعديل بيانات العداء(ة)"
+                                      >
+                                        <Edit className="h-3.5 w-3.5" />
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => setStudentToDelete(runner)}
+                                        className="p-1.5 text-red-600 bg-red-50 hover:bg-red-100 rounded-lg transition-colors cursor-pointer inline-flex items-center"
+                                        title="حذف العداء(ة)"
+                                      >
+                                        <Trash2 className="h-3.5 w-3.5" />
+                                      </button>
+                                    </>
+                                  )
                                 )}
                               </div>
                             </div>
@@ -1548,6 +1636,7 @@ export const CrossCountryChampionshipModal: React.FC<CrossCountryChampionshipMod
         currentSeason={activeSeason}
         affiliationType={selectedAffiliationFilter === 'club_affiliated' ? 'club_affiliated' : (selectedAffiliationFilter === 'non_club' ? 'non_club' : (hasClubTournament && !hasNonClubTournament ? 'club_affiliated' : 'non_club'))}
         tournaments={tournaments}
+        registrationDeadline={currentDeadline}
         onRegistered={() => {
           if (onRefreshData) onRefreshData();
         }}
@@ -1679,6 +1768,11 @@ export const CrossCountryChampionshipModal: React.FC<CrossCountryChampionshipMod
               <button
                 type="button"
                 onClick={() => {
+                  if (isCcRegistrationLocked) {
+                    toast.error('انتهى آخر أجل للتسجيل في العدو الريفي — لا يمكن تعديل بيانات المتسابقين.');
+                    setStudentToEditConfirm(null);
+                    return;
+                  }
                   setEditingStudent(studentToEditConfirm);
                   setStudentToEditConfirm(null);
                 }}

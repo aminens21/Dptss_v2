@@ -605,14 +605,240 @@ export function buildAllCalendarEvents(
   return list;
 }
 
+export type ProgramSortCriterion = 'date' | 'category' | 'matchNumber' | 'sport';
+
 export interface ProgramHtmlOptions {
   events: CalendarExportEvent[];
   selectedSportIds: string[]; // empty or ['ALL'] means all sports
   scopeFilter: 'ALL' | 'provincial' | 'regional' | 'national';
   affiliationFilter?: ProgramAffiliationFilter;
   categoryFilter?: string; // 'ALL' or '<catKey>__<genderKey>' e.g. 'U15__Female'
+  categoryFilters?: string[]; // multi-select category keys ('<catKey>__<genderKey>')
+  selectedDates?: string[]; // specific 'YYYY-MM-DD' dates
+  dateFrom?: string; // inclusive start 'YYYY-MM-DD'
+  dateTo?: string; // inclusive end 'YYYY-MM-DD'
+  matchNumberQuery?: string; // single, comma-separated, or range e.g. '5', '1-8', '2, 5, 9'
+  sortBy?: ProgramSortCriterion;
   activeSeason: string;
   customTitle?: string;
+}
+
+export function normalizeDigitsToAscii(input: string): string {
+  return (input || '')
+    .replace(/[٠-٩]/g, d => String(d.charCodeAt(0) - 0x0660))
+    .replace(/[۰-۹]/g, d => String(d.charCodeAt(0) - 0x06f0));
+}
+
+export interface ParsedMatchNumberQuery {
+  hasQuery: boolean;
+  isValid: boolean;
+  matchesNumber: (num: number) => boolean;
+  normalizedDisplay: string;
+}
+
+export function parseMatchNumberQuery(query?: string): ParsedMatchNumberQuery {
+  const raw = (query || '').trim();
+  if (!raw) {
+    return {
+      hasQuery: false,
+      isValid: true,
+      matchesNumber: () => true,
+      normalizedDisplay: ''
+    };
+  }
+
+  const ascii = normalizeDigitsToAscii(raw)
+    .replace(/[#№]/g, ' ')
+    .replace(/مباراة|مقابلة|رقم|من/g, ' ')
+    .replace(/إلى|الى|\.\.|[–—]/g, '-')
+    .replace(/[،;؛]/g, ',')
+    .replace(/\s*-\s*/g, '-')
+    .trim();
+
+  const tokens = ascii.split(/[\s,]+/).filter(Boolean);
+  const exactSet = new Set<number>();
+  const ranges: [number, number][] = [];
+  const displayParts: string[] = [];
+
+  for (const token of tokens) {
+    const rangeMatch = token.match(/^(\d+)-(\d+)$/);
+    if (rangeMatch) {
+      const a = Number(rangeMatch[1]);
+      const b = Number(rangeMatch[2]);
+      if (Number.isFinite(a) && Number.isFinite(b) && a > 0 && b > 0) {
+        const lo = Math.min(a, b);
+        const hi = Math.max(a, b);
+        ranges.push([lo, hi]);
+        displayParts.push(lo === hi ? String(lo) : `${lo}-${hi}`);
+      }
+      continue;
+    }
+
+    const singleMatch = token.match(/^(\d+)$/);
+    if (singleMatch) {
+      const n = Number(singleMatch[1]);
+      if (Number.isFinite(n) && n > 0) {
+        exactSet.add(n);
+        displayParts.push(String(n));
+      }
+    }
+  }
+
+  if (exactSet.size === 0 && ranges.length === 0) {
+    return {
+      hasQuery: true,
+      isValid: false,
+      matchesNumber: () => false,
+      normalizedDisplay: raw
+    };
+  }
+
+  return {
+    hasQuery: true,
+    isValid: true,
+    matchesNumber: (num: number) =>
+      exactSet.has(num) || ranges.some(([lo, hi]) => num >= lo && num <= hi),
+    normalizedDisplay: displayParts.join('، ')
+  };
+}
+
+export interface FilteredCalendarEventsResult {
+  filtered: CalendarExportEvent[];
+  resolvedMatchNumbers: Map<string, number>;
+  selectedCategoryLabels: string[];
+  parsedMatchQuery: ParsedMatchNumberQuery;
+  normalizedSelectedDates: string[];
+}
+
+export function filterCalendarEvents(
+  options: Omit<ProgramHtmlOptions, 'activeSeason' | 'customTitle'>
+): FilteredCalendarEventsResult {
+  const {
+    events,
+    selectedSportIds,
+    scopeFilter,
+    affiliationFilter = 'ALL',
+    categoryFilter = 'ALL',
+    categoryFilters,
+    selectedDates = [],
+    dateFrom = '',
+    dateTo = '',
+    matchNumberQuery = '',
+    sortBy = 'category'
+  } = options;
+
+  let list = events.slice();
+
+  // 1. Sport Filter
+  const isAllSports = selectedSportIds.length === 0 || selectedSportIds.includes('ALL');
+  if (!isAllSports) {
+    list = list.filter(ev => selectedSportIds.includes(ev.sportId));
+  }
+
+  // 2. Scope Filter
+  if (scopeFilter !== 'ALL') {
+    list = list.filter(ev => ev.scope === scopeFilter);
+  }
+
+  // 3. Affiliation / Tournament Class Filter
+  if (affiliationFilter !== 'ALL') {
+    list = list.filter(ev => (ev.affiliationType || 'non_club') === affiliationFilter);
+  }
+
+  // 4. Category & Gender Filter (supports multi-select categoryFilters OR legacy single categoryFilter)
+  const activeCatKeys =
+    Array.isArray(categoryFilters) && categoryFilters.length > 0
+      ? categoryFilters.filter(k => k && k !== 'ALL')
+      : categoryFilter && categoryFilter !== 'ALL'
+      ? [categoryFilter]
+      : [];
+
+  const categoryLabelMap = new Map<string, string>();
+  if (activeCatKeys.length > 0) {
+    const activeCatSet = new Set(activeCatKeys);
+    list = list.filter(ev => {
+      const tuple = getEventCategoryGenderTuple(ev);
+      if (activeCatSet.has(tuple.filterKey)) {
+        if (!categoryLabelMap.has(tuple.filterKey)) {
+          categoryLabelMap.set(tuple.filterKey, tuple.label);
+        }
+        return true;
+      }
+      return false;
+    });
+
+    activeCatKeys.forEach(key => {
+      if (!categoryLabelMap.has(key)) {
+        const [catPart, genderPart] = key.split('__');
+        categoryLabelMap.set(
+          key,
+          formatTargetCategoryWithGender(
+            catPart,
+            genderPart,
+            !isAllSports && selectedSportIds.length === 1 ? selectedSportIds[0] : undefined
+          )
+        );
+      }
+    });
+  }
+
+  // 5. Date & Date-Range Filter
+  const normalizedSelectedDates = Array.from(
+    new Set(
+      (selectedDates || [])
+        .map(d => normalizeDateToYmd(d) || d.trim())
+        .filter(Boolean)
+    )
+  ).sort((a, b) => a.localeCompare(b));
+
+  const normFrom = dateFrom ? (normalizeDateToYmd(dateFrom) || dateFrom.trim()) : '';
+  const normTo = dateTo ? (normalizeDateToYmd(dateTo) || dateTo.trim()) : '';
+
+  if (normalizedSelectedDates.length > 0) {
+    const dateSet = new Set(normalizedSelectedDates);
+    list = list.filter(ev => {
+      const evDate = normalizeDateToYmd(ev.date) || ev.date || '';
+      return dateSet.has(evDate);
+    });
+  } else if (normFrom || normTo) {
+    const lo = normFrom && normTo && normFrom > normTo ? normTo : normFrom;
+    const hi = normFrom && normTo && normFrom > normTo ? normFrom : normTo;
+    list = list.filter(ev => {
+      const evDate = normalizeDateToYmd(ev.date) || ev.date || '';
+      if (!evDate) return false;
+      if (lo && evDate < lo) return false;
+      if (hi && evDate > hi) return false;
+      return true;
+    });
+  }
+
+  // Sort deterministically before resolving fallback match numbers and applying match-number filter
+  const sortedBeforeMatchNum = sortCalendarEvents(list, sortBy);
+  const resolvedMatchNumbers = new Map<string, number>();
+  sortedBeforeMatchNum.forEach((ev, idx) => {
+    const num =
+      typeof ev.matchNumber === 'number' && !Number.isNaN(ev.matchNumber) && ev.matchNumber > 0
+        ? ev.matchNumber
+        : idx + 1;
+    resolvedMatchNumbers.set(ev.id, num);
+  });
+
+  // 6. Match Number Filter
+  const parsedMatchQuery = parseMatchNumberQuery(matchNumberQuery);
+  const filtered = parsedMatchQuery.hasQuery
+    ? sortedBeforeMatchNum.filter(ev => {
+        const num = resolvedMatchNumbers.get(ev.id) ?? 0;
+        return parsedMatchQuery.matchesNumber(num);
+      })
+    : sortedBeforeMatchNum;
+
+  return {
+    filtered,
+    resolvedMatchNumbers,
+    selectedCategoryLabels: activeCatKeys.map(k => categoryLabelMap.get(k) || k),
+    parsedMatchQuery,
+    normalizedSelectedDates
+  };
 }
 
 const AGE_CATEGORY_ORDER: Record<string, number> = {
@@ -753,47 +979,90 @@ export function getEventCategoryGenderTuple(ev: {
   };
 }
 
-export function sortCalendarEvents(events: CalendarExportEvent[]): CalendarExportEvent[] {
+function parseTimeMinutesForSort(timeStr?: string): number {
+  if (!timeStr) return Number.MAX_SAFE_INTEGER;
+  const ascii = normalizeDigitsToAscii(timeStr);
+  const match = ascii.match(/(\d{1,2})\s*:\s*(\d{2})/);
+  if (!match) return Number.MAX_SAFE_INTEGER;
+  const hh = Number(match[1]);
+  const mm = Number(match[2]);
+  if (!Number.isFinite(hh) || !Number.isFinite(mm)) return Number.MAX_SAFE_INTEGER;
+  return hh * 60 + mm;
+}
+
+export function sortCalendarEvents(
+  events: CalendarExportEvent[],
+  sortBy: ProgramSortCriterion = 'category'
+): CalendarExportEvent[] {
   return events.slice().sort((a, b) => {
-    const tA = getEventCategoryGenderTuple(a);
-    const tB = getEventCategoryGenderTuple(b);
-
-    // 1. Gender priority: Female (إناث) first, then Male (ذكور), then Mixed
-    if (tA.genderRank !== tB.genderRank) {
-      return tA.genderRank - tB.genderRank;
-    }
-
-    // 2. Age category priority: U12 -> U15 -> U17 -> U18 -> U20 -> other
-    if (tA.ageRank !== tB.ageRank) {
-      return tA.ageRank - tB.ageRank;
-    }
-    if (tA.categoryKey !== tB.categoryKey) {
-      return tA.categoryKey.localeCompare(tB.categoryKey, 'ar');
-    }
-
-    // 3. Keep events of the same sport grouped within the same category
-    const sportCmp = (a.sportId || '').localeCompare(b.sportId || '');
-    if (sportCmp !== 0) {
-      return sportCmp;
-    }
-
-    // 4. Match number ascending
     const numA = typeof a.matchNumber === 'number' && !Number.isNaN(a.matchNumber)
       ? a.matchNumber
       : Number.MAX_SAFE_INTEGER;
     const numB = typeof b.matchNumber === 'number' && !Number.isNaN(b.matchNumber)
       ? b.matchNumber
       : Number.MAX_SAFE_INTEGER;
+    const dateA = a.date || '9999-99-99';
+    const dateB = b.date || '9999-99-99';
+    const timeA = parseTimeMinutesForSort(a.time);
+    const timeB = parseTimeMinutesForSort(b.time);
+    const tA = getEventCategoryGenderTuple(a);
+    const tB = getEventCategoryGenderTuple(b);
+
+    if (sortBy === 'date') {
+      const dateCmp = dateA.localeCompare(dateB);
+      if (dateCmp !== 0) return dateCmp;
+      if (timeA !== timeB) return timeA - timeB;
+      if (numA !== numB) return numA - numB;
+      if (tA.genderRank !== tB.genderRank) return tA.genderRank - tB.genderRank;
+      if (tA.ageRank !== tB.ageRank) return tA.ageRank - tB.ageRank;
+      return (a.sportId || '').localeCompare(b.sportId || '');
+    }
+
+    if (sortBy === 'matchNumber') {
+      if (numA !== numB) return numA - numB;
+      const dateCmp = dateA.localeCompare(dateB);
+      if (dateCmp !== 0) return dateCmp;
+      if (timeA !== timeB) return timeA - timeB;
+      if (tA.genderRank !== tB.genderRank) return tA.genderRank - tB.genderRank;
+      if (tA.ageRank !== tB.ageRank) return tA.ageRank - tB.ageRank;
+      return (a.sportId || '').localeCompare(b.sportId || '');
+    }
+
+    if (sortBy === 'sport') {
+      const sportNameCmp = (a.sportName || a.sportId || '').localeCompare(b.sportName || b.sportId || '', 'ar');
+      if (sportNameCmp !== 0) return sportNameCmp;
+      const sportIdCmp = (a.sportId || '').localeCompare(b.sportId || '');
+      if (sportIdCmp !== 0) return sportIdCmp;
+      if (tA.genderRank !== tB.genderRank) return tA.genderRank - tB.genderRank;
+      if (tA.ageRank !== tB.ageRank) return tA.ageRank - tB.ageRank;
+      if (numA !== numB) return numA - numB;
+      const dateCmp = dateA.localeCompare(dateB);
+      if (dateCmp !== 0) return dateCmp;
+      return timeA - timeB;
+    }
+
+    // Default ('category'): Gender -> Age category -> Sport -> Match number -> Date -> Time
+    if (tA.genderRank !== tB.genderRank) {
+      return tA.genderRank - tB.genderRank;
+    }
+    if (tA.ageRank !== tB.ageRank) {
+      return tA.ageRank - tB.ageRank;
+    }
+    if (tA.categoryKey !== tB.categoryKey) {
+      return tA.categoryKey.localeCompare(tB.categoryKey, 'ar');
+    }
+    const sportCmp = (a.sportId || '').localeCompare(b.sportId || '');
+    if (sportCmp !== 0) {
+      return sportCmp;
+    }
     if (numA !== numB) {
       return numA - numB;
     }
-
-    // 5. Chronological tie-breaker (date, then time)
-    const dateCmp = (a.date || '').localeCompare(b.date || '');
+    const dateCmp = dateA.localeCompare(dateB);
     if (dateCmp !== 0) {
       return dateCmp;
     }
-    return (a.time || '').localeCompare(b.time || '');
+    return timeA - timeB;
   });
 }
 
@@ -843,55 +1112,69 @@ export function generateProgramHtml({
   scopeFilter,
   affiliationFilter = 'ALL',
   categoryFilter = 'ALL',
+  categoryFilters,
+  selectedDates = [],
+  dateFrom = '',
+  dateTo = '',
+  matchNumberQuery = '',
+  sortBy = 'category',
   activeSeason,
   customTitle
 }: ProgramHtmlOptions): { html: string; title: string; filenameBase: string } {
   const activeDirInfo = getActiveDirectorateSync();
 
-  // 1. Filter events
-  let filtered = events.slice();
-
-  // Sport Filter
   const isAllSports = selectedSportIds.length === 0 || selectedSportIds.includes('ALL');
-  if (!isAllSports) {
-    filtered = filtered.filter(ev => selectedSportIds.includes(ev.sportId));
-  }
-
-  // Scope Filter
-  if (scopeFilter !== 'ALL') {
-    filtered = filtered.filter(ev => ev.scope === scopeFilter);
-  }
-
-  // Affiliation / Tournament Class Filter
-  if (affiliationFilter !== 'ALL') {
-    filtered = filtered.filter(ev => (ev.affiliationType || 'non_club') === affiliationFilter);
-  }
-
-  // Category & Gender Filter
-  let selectedCategoryLabel = '';
-  if (categoryFilter && categoryFilter !== 'ALL') {
-    filtered = filtered.filter(ev => {
-      const tuple = getEventCategoryGenderTuple(ev);
-      if (tuple.filterKey === categoryFilter) {
-        if (!selectedCategoryLabel) selectedCategoryLabel = tuple.label;
-        return true;
-      }
-      return false;
-    });
-    if (!selectedCategoryLabel) {
-      const [catPart, genderPart] = categoryFilter.split('__');
-      selectedCategoryLabel = formatTargetCategoryWithGender(
-        catPart,
-        genderPart,
-        !isAllSports && selectedSportIds.length === 1 ? selectedSportIds[0] : undefined
-      );
-    }
-  }
-
-  // Sort by gender (females first), age category, sport, match number, and date/time
-  filtered = sortCalendarEvents(filtered);
+  const {
+    filtered,
+    resolvedMatchNumbers,
+    selectedCategoryLabels,
+    parsedMatchQuery,
+    normalizedSelectedDates
+  } = filterCalendarEvents({
+    events,
+    selectedSportIds,
+    scopeFilter,
+    affiliationFilter,
+    categoryFilter,
+    categoryFilters,
+    selectedDates,
+    dateFrom,
+    dateTo,
+    matchNumberQuery,
+    sortBy
+  });
 
   const affiliationLabel = affiliationFilter !== 'ALL' ? AFFILIATION_LABELS[affiliationFilter] : '';
+
+  const normFrom = dateFrom ? (normalizeDateToYmd(dateFrom) || dateFrom.trim()) : '';
+  const normTo = dateTo ? (normalizeDateToYmd(dateTo) || dateTo.trim()) : '';
+  const orderedFrom = normFrom && normTo && normFrom > normTo ? normTo : normFrom;
+  const orderedTo = normFrom && normTo && normFrom > normTo ? normFrom : normTo;
+
+  let dateFilterLabel = '';
+  let dateFileSlug = '';
+  if (normalizedSelectedDates.length === 1) {
+    const dmy = formatYmdToDmy(normalizedSelectedDates[0]);
+    dateFilterLabel = `بتاريخ ${dmy}`;
+    dateFileSlug = `بتاريخ_${dmy}`;
+  } else if (normalizedSelectedDates.length > 1) {
+    const dmyList = normalizedSelectedDates.map(d => formatYmdToDmy(d));
+    dateFilterLabel = `بتواريخ: ${dmyList.join(' • ')}`;
+    dateFileSlug = `تواريخ_محددة`;
+  } else if (orderedFrom && orderedTo) {
+    dateFilterLabel = `من ${formatYmdToDmy(orderedFrom)} إلى ${formatYmdToDmy(orderedTo)}`;
+    dateFileSlug = `من_${formatYmdToDmy(orderedFrom)}_الى_${formatYmdToDmy(orderedTo)}`;
+  } else if (orderedFrom) {
+    dateFilterLabel = `ابتداءً من ${formatYmdToDmy(orderedFrom)}`;
+    dateFileSlug = `من_${formatYmdToDmy(orderedFrom)}`;
+  } else if (orderedTo) {
+    dateFilterLabel = `إلى غاية ${formatYmdToDmy(orderedTo)}`;
+    dateFileSlug = `الى_${formatYmdToDmy(orderedTo)}`;
+  }
+
+  const matchFilterLabel = parsedMatchQuery.hasQuery
+    ? `رقم المقابلة: ${parsedMatchQuery.normalizedDisplay}`
+    : '';
 
   // Determine Title & Subtitle
   let title = customTitle || '';
@@ -933,9 +1216,22 @@ export function generateProgramHtml({
       filenameBase = `${filenameBase}_${affiliationFilter}`;
     }
 
-    if (selectedCategoryLabel) {
-      title = `${title} — فئة ${selectedCategoryLabel}`;
-      filenameBase = `${filenameBase}_${selectedCategoryLabel.replace(/\s+/g, '_')}`;
+    if (selectedCategoryLabels.length === 1) {
+      title = `${title} — فئة ${selectedCategoryLabels[0]}`;
+      filenameBase = `${filenameBase}_${selectedCategoryLabels[0].replace(/\s+/g, '_')}`;
+    } else if (selectedCategoryLabels.length > 1) {
+      title = `${title} — الفئات: ${selectedCategoryLabels.join(' • ')}`;
+      filenameBase = `${filenameBase}_فئات_مختارة`;
+    }
+
+    if (dateFilterLabel) {
+      title = `${title} — ${dateFilterLabel}`;
+      filenameBase = `${filenameBase}_${dateFileSlug}`;
+    }
+
+    if (matchFilterLabel) {
+      title = `${title} — ${matchFilterLabel}`;
+      filenameBase = `${filenameBase}_مقابلة_${parsedMatchQuery.normalizedDisplay.replace(/[،\s]+/g, '_')}`;
     }
   }
 
@@ -945,7 +1241,8 @@ export function generateProgramHtml({
 
   const rowsHtml = filtered.length > 0 ? filtered.map((ev, index) => {
     const targetCategoryDisplay = formatTargetCategoryWithGender(ev.category, ev.gender, ev.sportId);
-    const matchNumDisplay = ev.matchNumber ? String(ev.matchNumber) : String(index + 1);
+    const resolvedNum = ev.matchNumber ?? resolvedMatchNumbers.get(ev.id);
+    const matchNumDisplay = resolvedNum ? String(resolvedNum) : String(index + 1);
 
     return `
       <tr style="background-color: ${index % 2 === 0 ? '#ffffff' : '#f8fafc'};">

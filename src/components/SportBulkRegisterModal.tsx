@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { School, Student, Sport, User, Tournament } from '../types';
-import { DataService, validateBirthDateForCategory, normalizeCategoryKey, getCategoryGenderLabel, getCategoryYearsLabel, isSchoolLevelAllowedForTournament, getTournamentLevelAr, isTeacherLevelAllowedForTournament, isSchoolSectorAllowedForTournament, getTournamentEducationSectorsAr, getSchoolEducationSector, schoolNamesMatch, resolveEffectiveTeacherCadre, isCategoryAllowedForTeacherLevel, isPrivateSchoolRecord } from '../lib/dataService';
+import { DataService, validateBirthDateForCategory, normalizeCategoryKey, getCategoryGenderLabel, getCategoryYearsLabel, isSchoolLevelAllowedForTournament, getTournamentLevelAr, isTeacherLevelAllowedForTournament, isSchoolSectorAllowedForTournament, getTournamentEducationSectorsAr, getSchoolEducationSector, schoolNamesMatch, resolveEffectiveTeacherCadre, isCategoryAllowedForTeacherLevel, isPrivateSchoolRecord, isTeamSport, isRegistrationDeadlineExpired, isCrossCountryRegistrationLocked } from '../lib/dataService';
 import { AthleticsService } from '../lib/athleticsService';
 import { useAuth } from '../contexts/AuthContext';
 import * as XLSX from 'xlsx';
@@ -102,6 +102,26 @@ export const SportBulkRegisterModal: React.FC<SportBulkRegisterModalProps> = ({
     preselectedAffiliation === 'club_affiliated' ? 'club_affiliated' : 'non_club'
   );
   const isAffiliationLocked = preselectedAffiliation === 'non_club' || preselectedAffiliation === 'club_affiliated';
+
+  const isTeam = isTeamSport(sport?.id || '');
+  const sportTourns = useMemo(
+    () => (tournaments || []).filter(t => (!sport?.id || t.sportId === sport.id) && t.status !== 'Draft' && (t as any).isActive !== false),
+    [tournaments, sport?.id]
+  );
+  const isAllCompleted = useMemo(
+    () => sportTourns.length > 0 && sportTourns.every(t => t.status === 'Completed' || t.status === 'Archived'),
+    [sportTourns]
+  );
+  const isDeadlineExpired = useMemo(
+    () => sportTourns.some(t => t.registrationDeadline && isRegistrationDeadlineExpired(t.registrationDeadline)),
+    [sportTourns]
+  );
+  const isOngoing = useMemo(
+    () => sportTourns.some(t => t.status === 'Ongoing'),
+    [sportTourns]
+  );
+  const isCrossCountryLocked = sport?.id === 'cross_country' && isCrossCountryRegistrationLocked(tournaments || [], selectedAffiliation);
+  const isBulkModificationBlocked = isAllCompleted || isCrossCountryLocked;
 
   const wasOpenForSelectionRef = useRef(false);
   const wasOpenForSchoolRef = useRef(false);
@@ -593,6 +613,15 @@ export const SportBulkRegisterModal: React.FC<SportBulkRegisterModalProps> = ({
 
     if (!sport) return;
 
+    if (isBulkModificationBlocked) {
+      toast.error(
+        isAllCompleted
+          ? 'هذه البطولة منتهية ومؤرشفة نهائياً ولا يمكن تعديل أو حذف المشاركين.'
+          : 'انتهى آخر أجل للتسجيل في العدو الريفي — لا يمكن إضافة أو تعديل أو حذف أي متسابق بعد نهاية التسجيل.'
+      );
+      return;
+    }
+
     const filledSlots = slots.filter(s => s.fullName.trim() || s.massarNumber.trim() || s.birthDate.trim());
 
     if (filledSlots.length === 0) {
@@ -871,6 +900,24 @@ export const SportBulkRegisterModal: React.FC<SportBulkRegisterModalProps> = ({
               </label>
             </div>
           </div>
+
+          {isBulkModificationBlocked ? (
+            <div className="bg-red-50 px-6 py-3 border-b border-red-200 flex items-center gap-2 text-xs text-red-900 font-bold shrink-0">
+              <Lock className="w-4 h-4 text-red-600 shrink-0" />
+              <span>
+                {isAllCompleted
+                  ? 'هذه البطولة منتهية ومؤرشفة نهائياً 🔒 — لا يمكن إضافة أو تعديل أو حذف المشاركين.'
+                  : 'انتهى آخر أجل للتسجيل في العدو الريفي 🔒 — لا يمكن إضافة أو تعديل أو حذف أي متسابق بعد نهاية التسجيل.'}
+              </span>
+            </div>
+          ) : isTeam && (isDeadlineExpired || isOngoing) ? (
+            <div className="bg-emerald-50 px-6 py-2.5 border-b border-emerald-200 flex items-center gap-2 text-xs text-emerald-900 font-bold shrink-0">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+              <span>
+                الرياضات الجماعية: يمكنكم إضافة أو تغيير أو تعديل أو حذف أي مشارك في اللائحة حتى بعد انتهاء الأجل أو أثناء جريان البطولة (مع مسح الخانة لحذف مشارك).
+              </span>
+            </div>
+          ) : null}
 
           <form onSubmit={handleSubmitAll} className="flex flex-col flex-1 overflow-hidden">
             {/* Scrollable Container */}
@@ -1210,8 +1257,8 @@ export const SportBulkRegisterModal: React.FC<SportBulkRegisterModalProps> = ({
                 </button>
                 <button
                   type="submit"
-                  disabled={isSubmitting}
-                  className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black shadow-md cursor-pointer transition-all flex items-center gap-1.5 disabled:opacity-50"
+                  disabled={isSubmitting || isBulkModificationBlocked}
+                  className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black shadow-md cursor-pointer transition-all flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {isSubmitting ? (
                     <span>جاري حفظ البيانات ومزامنتها... ⚙️</span>

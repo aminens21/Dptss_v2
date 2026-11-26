@@ -153,14 +153,14 @@ const PodiumRunnerCard: React.FC<PodiumRunnerCardProps> = ({
         </div>
 
         {winner ? (
-          <div className="w-full flex-1 flex flex-col items-center justify-center my-1 sm:my-2">
+          <div className="w-full flex-1 flex flex-col items-center justify-center my-1 sm:my-2 min-w-0">
             {/* Athlete Name */}
-            <h4 className="text-[11px] sm:text-lg md:text-xl font-black text-[#facc15] mt-1 sm:mt-2 tracking-normal sm:tracking-wide line-clamp-1 w-full px-0.5" title={winner.fullName}>
+            <h4 className="text-[10.5px] sm:text-lg md:text-xl font-black text-[#facc15] mt-1 sm:mt-2 tracking-normal sm:tracking-wide line-clamp-2 leading-tight w-full px-0.5 break-words" title={winner.fullName}>
               {winner.fullName}
             </h4>
 
             {/* School Name */}
-            <p className="text-[9px] sm:text-xs md:text-sm font-bold text-slate-100 mt-0.5 sm:mt-1 line-clamp-1 w-full px-0.5" title={winner.schoolName}>
+            <p className="text-[8.5px] sm:text-xs md:text-sm font-bold text-slate-100 mt-0.5 sm:mt-1 line-clamp-2 leading-tight w-full px-0.5 break-words" title={winner.schoolName}>
               {winner.schoolName}
             </p>
 
@@ -862,24 +862,24 @@ export const CrossCountryPodiumView: React.FC<CrossCountryPodiumViewProps> = ({
   }, [results]);
 
   return (
-    <div className="space-y-6 animate-fadeIn pb-12">
+    <div className="space-y-3.5 sm:space-y-6 animate-fadeIn pb-6 sm:pb-12 w-full min-w-0 max-w-full overflow-x-hidden">
       {/* Top Banner & Breadcrumb Header - with Hide / Show capability */}
       {!showHeaderBanner ? (
         /* Compact Bar when Header is hidden */
-        <div className="bg-gradient-to-r from-slate-900 via-blue-950 to-slate-900 rounded-2xl p-3 sm:p-4 text-white shadow-md border border-slate-800 flex flex-wrap items-center justify-between gap-3 animate-fadeIn">
-          <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
+        <div className="bg-gradient-to-r from-slate-900 via-blue-950 to-slate-900 rounded-2xl p-2.5 sm:p-4 text-white shadow-md border border-slate-800 flex flex-wrap items-center justify-between gap-2 sm:gap-3 animate-fadeIn">
+          <div className="flex items-center gap-2 sm:gap-3 flex-wrap min-w-0">
             <button
               onClick={onBack}
-              className="inline-flex items-center gap-1.5 text-xs font-bold text-blue-300 hover:text-white bg-white/10 hover:bg-white/20 px-3 py-1.5 rounded-xl transition-all border border-white/10 cursor-pointer"
+              className="inline-flex items-center gap-1 text-[11px] sm:text-xs font-bold text-blue-300 hover:text-white bg-white/10 hover:bg-white/20 px-2.5 py-1.5 rounded-xl transition-all border border-white/10 cursor-pointer shrink-0"
             >
-              <ArrowRight className="w-4 h-4" />
+              <ArrowRight className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
               <span className="hidden sm:inline">العودة إلى دليل البطولات</span>
               <span className="sm:hidden">عودة</span>
             </button>
 
-            <div className="flex items-center gap-2">
-              <span className="text-xl">🏃‍♂️</span>
-              <span className="text-xs sm:text-sm font-black text-white">
+            <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
+              <span className="text-lg sm:text-xl shrink-0">🏃‍♂️</span>
+              <span className="text-xs sm:text-sm font-black text-white truncate">
                 البطولة الإقليمية للعدو الريفي
               </span>
               <span className="hidden md:inline-flex bg-amber-400/20 text-amber-300 border border-amber-400/30 text-[10px] font-black px-2 py-0.5 rounded-full items-center gap-1">
@@ -888,12 +888,12 @@ export const CrossCountryPodiumView: React.FC<CrossCountryPodiumViewProps> = ({
             </div>
           </div>
 
-          <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap justify-end w-full sm:w-auto">
             {!isTeacher && (
               <>
                 <button
                   onClick={() => exportQualifiedListExcel(results, activeSeason, directorateName)}
-                  className="flex items-center gap-1 px-2.5 py-1.5 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 font-bold text-xs rounded-xl border border-amber-400/30 transition-colors cursor-pointer"
+                  className="flex items-center gap-1 px-2.5 py-1.5 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 font-bold text-[11px] sm:text-xs rounded-xl border border-amber-400/30 transition-colors cursor-pointer"
                   title="تصدير لائحة المتأهلين للبطولة الجهوية"
                 >
                   <Trophy className="w-3.5 h-3.5 text-amber-400" />
@@ -902,7 +902,7 @@ export const CrossCountryPodiumView: React.FC<CrossCountryPodiumViewProps> = ({
 
                 <button
                   onClick={() => exportFullResultsExcel(results, activeSeason, directorateName)}
-                  className="flex items-center gap-1 px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl shadow-xs transition-colors cursor-pointer"
+                  className="flex items-center gap-1 px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[11px] sm:text-xs rounded-xl shadow-xs transition-colors cursor-pointer"
                   title="تصدير النتائج الشاملة"
                 >
                   <Download className="w-3.5 h-3.5" />
@@ -911,7 +911,7 @@ export const CrossCountryPodiumView: React.FC<CrossCountryPodiumViewProps> = ({
 
                 <button
                   onClick={handlePrint}
-                  className="flex items-center gap-1 px-2.5 py-1.5 bg-white/10 hover:bg-white/20 text-white font-bold text-xs rounded-xl border border-white/15 transition-colors cursor-pointer"
+                  className="flex items-center gap-1 px-2.5 py-1.5 bg-white/10 hover:bg-white/20 text-white font-bold text-[11px] sm:text-xs rounded-xl border border-white/15 transition-colors cursor-pointer"
                   title="طباعة محضر النتائج"
                 >
                   <Printer className="w-3.5 h-3.5 text-blue-300" />
@@ -922,7 +922,7 @@ export const CrossCountryPodiumView: React.FC<CrossCountryPodiumViewProps> = ({
 
             <button
               onClick={toggleHeaderBanner}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs rounded-xl shadow-sm transition-all cursor-pointer"
+              className="flex items-center gap-1 px-2.5 sm:px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-[11px] sm:text-xs rounded-xl shadow-sm transition-all cursor-pointer"
               title="إظهار الترويسة وبطاقات الإحصائيات بالكامل"
             >
               <Eye className="w-3.5 h-3.5 text-slate-950" />
@@ -932,25 +932,26 @@ export const CrossCountryPodiumView: React.FC<CrossCountryPodiumViewProps> = ({
         </div>
       ) : (
         /* Full Expanded Hero Header */
-        <div className="bg-gradient-to-r from-slate-900 via-blue-950 to-slate-900 rounded-3xl p-5 md:p-7 text-white shadow-xl border border-slate-800 relative overflow-hidden animate-fadeIn">
-          <div className="absolute top-0 right-0 w-96 h-96 bg-amber-500/10 rounded-full blur-3xl pointer-events-none -mr-20 -mt-20"></div>
-          <div className="absolute bottom-0 left-0 w-80 h-80 bg-blue-500/10 rounded-full blur-3xl pointer-events-none -ml-20 -mb-20"></div>
+        <div className="bg-gradient-to-r from-slate-900 via-blue-950 to-slate-900 rounded-2xl sm:rounded-3xl p-3 sm:p-5 md:p-7 text-white shadow-xl border border-slate-800 relative overflow-hidden animate-fadeIn">
+          <div className="hidden sm:block absolute top-0 right-0 w-96 h-96 bg-amber-500/10 rounded-full blur-3xl pointer-events-none -mr-20 -mt-20"></div>
+          <div className="hidden sm:block absolute bottom-0 left-0 w-80 h-80 bg-blue-500/10 rounded-full blur-3xl pointer-events-none -ml-20 -mb-20"></div>
 
-          <div className="relative z-10 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-            <div className="space-y-2">
-              <div className="flex items-center gap-2 flex-wrap">
+          <div className="relative z-10 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 sm:gap-4 w-full">
+            <div className="space-y-2 w-full md:w-auto min-w-0">
+              <div className="flex items-center justify-between sm:justify-start gap-2 flex-wrap w-full">
                 <button
                   onClick={onBack}
-                  className="inline-flex items-center gap-1.5 text-xs font-bold text-blue-300 hover:text-white bg-white/10 hover:bg-white/20 px-3 py-1.5 rounded-xl transition-all border border-white/10 cursor-pointer"
+                  className="inline-flex items-center gap-1 text-[11px] sm:text-xs font-bold text-blue-300 hover:text-white bg-white/10 hover:bg-white/20 px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-xl transition-all border border-white/10 cursor-pointer"
                 >
-                  <ArrowRight className="w-4 h-4" />
-                  <span>العودة إلى دليل البطولات والمباريات</span>
+                  <ArrowRight className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                  <span className="sm:hidden">العودة للدليل</span>
+                  <span className="hidden sm:inline">العودة إلى دليل البطولات والمباريات</span>
                 </button>
 
                 {/* Hide Header Button */}
                 <button
                   onClick={toggleHeaderBanner}
-                  className="inline-flex items-center gap-1.5 text-xs font-bold text-amber-300 hover:text-amber-200 bg-amber-500/10 hover:bg-amber-500/20 px-3 py-1.5 rounded-xl transition-all border border-amber-400/30 cursor-pointer"
+                  className="inline-flex items-center gap-1 text-[11px] sm:text-xs font-bold text-amber-300 hover:text-amber-200 bg-amber-500/10 hover:bg-amber-500/20 px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-xl transition-all border border-amber-400/30 cursor-pointer"
                   title="إخفاء الترويسة لتوفير مساحة وتكبير عرض النتائج"
                 >
                   <EyeOff className="w-3.5 h-3.5" />
@@ -958,22 +959,22 @@ export const CrossCountryPodiumView: React.FC<CrossCountryPodiumViewProps> = ({
                 </button>
               </div>
 
-              <div className="flex items-center gap-3 pt-1">
-                <div className="w-13 h-13 rounded-2xl bg-gradient-to-br from-amber-400 to-yellow-600 text-3xl flex items-center justify-center shadow-lg border border-amber-300/40 shrink-0">
+              <div className="flex items-center gap-2.5 sm:gap-3 pt-0.5">
+                <div className="w-10 h-10 sm:w-13 sm:h-13 rounded-xl sm:rounded-2xl bg-gradient-to-br from-amber-400 to-yellow-600 text-xl sm:text-3xl flex items-center justify-center shadow-lg border border-amber-300/40 shrink-0">
                   🏃‍♂️
                 </div>
-                <div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <h1 className="text-xl md:text-2xl font-black text-white tracking-tight">
+                <div className="min-w-0 flex-1 text-right">
+                  <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+                    <h1 className="text-sm sm:text-xl md:text-2xl font-black text-white tracking-tight leading-snug">
                       البطولة الإقليمية المدرسية للعدو الريفي
                     </h1>
-                    <span className="bg-amber-400/20 text-amber-300 border border-amber-400/30 text-xs font-black px-2.5 py-0.5 rounded-full flex items-center gap-1">
-                      <Trophy className="w-3.5 h-3.5 text-amber-400" />
-                      منصة التتويج والبوديوم
+                    <span className="bg-amber-400/20 text-amber-300 border border-amber-400/30 text-[10px] sm:text-xs font-black px-2 sm:px-2.5 py-0.5 rounded-full inline-flex items-center gap-1 whitespace-nowrap">
+                      <Trophy className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-amber-400" />
+                      <span>منصة التتويج والبوديوم</span>
                     </span>
                   </div>
-                  <p className="text-xs md:text-sm text-slate-300 font-medium mt-1">
-                    النتائج الرسمية، التوقيت، والمؤهلون للبطولة الجهوية • الفرع الإقليمي لـ {directorateName} • الموسم الرياضي {activeSeason}
+                  <p className="text-[11px] sm:text-xs md:text-sm text-slate-300 font-medium mt-0.5 sm:mt-1 leading-snug">
+                    النتائج الرسمية والتأهيل الجهوي • {directorateName} • {activeSeason}
                   </p>
                 </div>
               </div>
@@ -981,78 +982,80 @@ export const CrossCountryPodiumView: React.FC<CrossCountryPodiumViewProps> = ({
 
             {/* Action buttons - Hidden for teacher accounts */}
             {!isTeacher && (
-              <div className="flex flex-wrap items-center gap-2 self-stretch md:self-auto justify-end">
+              <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-1.5 sm:gap-2 w-full md:w-auto justify-end shrink-0">
                 <button
                   onClick={() => exportQualifiedListExcel(results, activeSeason, directorateName)}
-                  className="flex items-center gap-1.5 px-3 py-2 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 font-bold text-xs rounded-xl border border-amber-400/30 transition-colors cursor-pointer"
+                  className="flex items-center justify-center gap-1 sm:gap-1.5 px-2.5 sm:px-3 py-1.5 sm:py-2 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 font-bold text-[11px] sm:text-xs rounded-xl border border-amber-400/30 transition-colors cursor-pointer whitespace-nowrap"
                   title="تصدير لائحة المتأهلين للبطولة الجهوية (خاص بالمسؤول المركزي ورئيس اللجنة)"
                 >
-                  <Trophy className="w-4 h-4 text-amber-400" />
-                  <span>تصدير المؤهلين (Excel)</span>
+                  <Trophy className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-amber-400 shrink-0" />
+                  <span className="sm:hidden">المؤهلين (Excel)</span>
+                  <span className="hidden sm:inline">تصدير المؤهلين (Excel)</span>
                 </button>
 
                 <button
                   onClick={() => exportFullResultsExcel(results, activeSeason, directorateName)}
-                  className="flex items-center gap-1.5 px-3 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl shadow-xs transition-colors cursor-pointer"
+                  className="flex items-center justify-center gap-1 sm:gap-1.5 px-2.5 sm:px-3 py-1.5 sm:py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[11px] sm:text-xs rounded-xl shadow-xs transition-colors cursor-pointer whitespace-nowrap"
                   title="تصدير لائحة النتائج الكاملة لجميع الفئات وترتيب الفرق"
                 >
-                  <Download className="w-4 h-4" />
-                  <span>تصدير النتائج الشاملة (Excel)</span>
+                  <Download className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
+                  <span className="sm:hidden">النتائج (Excel)</span>
+                  <span className="hidden sm:inline">تصدير النتائج الشاملة (Excel)</span>
                 </button>
 
                 <button
                   onClick={handlePrint}
-                  className="flex items-center gap-1.5 px-3 py-2 bg-white/10 hover:bg-white/20 text-white font-bold text-xs rounded-xl border border-white/15 transition-colors cursor-pointer"
+                  className="col-span-2 sm:col-span-1 flex items-center justify-center gap-1.5 px-3 py-1.5 sm:py-2 bg-white/10 hover:bg-white/20 text-white font-bold text-[11px] sm:text-xs rounded-xl border border-white/15 transition-colors cursor-pointer whitespace-nowrap"
                   title="طباعة محضر النتائج"
                 >
-                  <Printer className="w-4 h-4 text-blue-300" />
-                  <span className="hidden sm:inline">طباعة المحضر</span>
+                  <Printer className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-blue-300 shrink-0" />
+                  <span>طباعة المحضر</span>
                 </button>
               </div>
             )}
           </div>
 
           {/* Global summary stats bar with collapse/expand option */}
-          <div className="mt-6 pt-4 border-t border-slate-800/80">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-[11px] font-bold text-slate-400">إحصائيات السباقات المعتمدة والتأهيل:</span>
+          <div className="mt-3 sm:mt-6 pt-3 sm:pt-4 border-t border-slate-800/80">
+            <div className="flex items-center justify-between gap-2 mb-2">
+              <span className="text-[10px] sm:text-[11px] font-bold text-slate-400">إحصائيات السباقات والتأهيل:</span>
               <button
                 type="button"
                 onClick={toggleStatsStrip}
-                className="text-[11px] text-blue-300 hover:text-white flex items-center gap-1 cursor-pointer transition-colors bg-white/5 hover:bg-white/10 px-2 py-0.5 rounded-lg border border-white/10"
+                className="text-[10px] sm:text-[11px] text-blue-300 hover:text-white flex items-center gap-1 cursor-pointer transition-colors bg-white/5 hover:bg-white/10 px-2 py-0.5 rounded-lg border border-white/10 shrink-0"
                 title={showStatsStrip ? 'طي بطاقات الإحصائيات' : 'إظهار بطاقات الإحصائيات'}
               >
                 {showStatsStrip ? (
                   <>
-                    <span>طي بطاقات الإحصائيات</span>
-                    <ChevronUp className="w-3.5 h-3.5" />
+                    <span>طي الإحصائيات</span>
+                    <ChevronUp className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
                   </>
                 ) : (
                   <>
-                    <span>إظهار بطاقات الإحصائيات</span>
-                    <ChevronDown className="w-3.5 h-3.5" />
+                    <span>إظهار الإحصائيات</span>
+                    <ChevronDown className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
                   </>
                 )}
               </button>
             </div>
 
             {showStatsStrip && (
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs animate-fadeIn">
-                <div className="bg-white/5 rounded-xl p-2.5 border border-white/10">
-                  <span className="text-[10px] text-slate-400 block font-medium">عدد الفئات المعتمدة</span>
-                  <span className="text-base font-black text-white">8 سباقات رسمية</span>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3 text-xs animate-fadeIn">
+                <div className="bg-white/5 rounded-xl p-2 sm:p-2.5 border border-white/10">
+                  <span className="text-[9.5px] sm:text-[10px] text-slate-400 block font-medium">الفئات المعتمدة</span>
+                  <span className="text-xs sm:text-base font-black text-white">8 سباقات رسمية</span>
                 </div>
-                <div className="bg-white/5 rounded-xl p-2.5 border border-white/10">
-                  <span className="text-[10px] text-slate-400 block font-medium">الفئات المكتملة التتويج</span>
-                  <span className="text-base font-black text-amber-400">{totalCategoriesWithResults} من أصل 8</span>
+                <div className="bg-white/5 rounded-xl p-2 sm:p-2.5 border border-white/10">
+                  <span className="text-[9.5px] sm:text-[10px] text-slate-400 block font-medium">المكتملة التتويج</span>
+                  <span className="text-xs sm:text-base font-black text-amber-400">{totalCategoriesWithResults} من أصل 8</span>
                 </div>
-                <div className="bg-white/5 rounded-xl p-2.5 border border-white/10">
-                  <span className="text-[10px] text-slate-400 block font-medium">مكان إجراء المنافسات</span>
-                  <span className="text-base font-black text-slate-200 truncate block">حلبة ألعاب القوى</span>
+                <div className="bg-white/5 rounded-xl p-2 sm:p-2.5 border border-white/10">
+                  <span className="text-[9.5px] sm:text-[10px] text-slate-400 block font-medium">مكان المنافسات</span>
+                  <span className="text-xs sm:text-base font-black text-slate-200 truncate block">حلبة ألعاب القوى</span>
                 </div>
-                <div className="bg-white/5 rounded-xl p-2.5 border border-white/10">
-                  <span className="text-[10px] text-slate-400 block font-medium">التأهيل المباشر</span>
-                  <span className="text-base font-black text-emerald-400">المراكز 1، 2 و 3 جهوياً</span>
+                <div className="bg-white/5 rounded-xl p-2 sm:p-2.5 border border-white/10">
+                  <span className="text-[9.5px] sm:text-[10px] text-slate-400 block font-medium">التأهيل المباشر</span>
+                  <span className="text-xs sm:text-base font-black text-emerald-400">المراكز 1، 2 و 3</span>
                 </div>
               </div>
             )}
@@ -1062,32 +1065,34 @@ export const CrossCountryPodiumView: React.FC<CrossCountryPodiumViewProps> = ({
 
       {/* Affiliation Branch Selector Toggle */}
       {(allowNonClubCC || allowClubCC) && (
-        <div className="bg-white rounded-2xl p-3 border border-slate-200 shadow-xs">
-          <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
-              <Trophy className="w-4 h-4 text-amber-500" />
+        <div className="bg-white rounded-2xl p-2.5 sm:p-3 border border-slate-200 shadow-xs">
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 sm:gap-3">
+            <div className="flex items-center gap-1.5 sm:gap-2">
+              <Trophy className="w-4 h-4 text-amber-500 shrink-0" />
               <span className="text-xs sm:text-sm font-black text-slate-900">
                 صنف البطولة والنتائج للعدو الريفي:
               </span>
             </div>
 
-            <div className="flex items-center gap-2 w-full sm:w-auto">
+            <div className="flex flex-col xs:flex-row sm:flex-row items-stretch sm:items-center gap-1.5 sm:gap-2 w-full sm:w-auto">
               {allowNonClubCC && (
                 <button
                   type="button"
                   onClick={() => setSelectedAffiliation('non_club')}
-                  className={`flex-1 sm:flex-none py-2 px-4 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-2 border cursor-pointer ${
+                  className={`flex-1 sm:flex-none py-2 px-3 sm:px-4 rounded-xl text-[11px] sm:text-xs font-black transition-all flex items-center justify-between sm:justify-center gap-1.5 sm:gap-2 border cursor-pointer ${
                     selectedAffiliation === 'non_club'
                       ? 'bg-blue-600 text-white border-blue-700 shadow-md ring-2 ring-blue-300'
                       : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
                   }`}
                 >
-                  <span>⚪</span>
-                  <span>بطولة غير المنتمين للأندية</span>
-                  <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${
+                  <span className="flex items-center gap-1.5 min-w-0">
+                    <span className="shrink-0">⚪</span>
+                    <span className="truncate sm:overflow-visible">غير المنتمين للأندية</span>
+                  </span>
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold shrink-0 ${
                     selectedAffiliation === 'non_club' ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-700'
                   }`}>
-                    {nonClubCompletedCount}/8 فئات
+                    {nonClubCompletedCount}/8
                   </span>
                 </button>
               )}
@@ -1096,18 +1101,20 @@ export const CrossCountryPodiumView: React.FC<CrossCountryPodiumViewProps> = ({
                 <button
                   type="button"
                   onClick={() => setSelectedAffiliation('club_affiliated')}
-                  className={`flex-1 sm:flex-none py-2 px-4 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-2 border cursor-pointer ${
+                  className={`flex-1 sm:flex-none py-2 px-3 sm:px-4 rounded-xl text-[11px] sm:text-xs font-black transition-all flex items-center justify-between sm:justify-center gap-1.5 sm:gap-2 border cursor-pointer ${
                     selectedAffiliation === 'club_affiliated'
                       ? 'bg-amber-500 text-slate-950 border-amber-600 shadow-md ring-2 ring-amber-300'
                       : 'bg-amber-50 text-amber-900 border-amber-200 hover:bg-amber-100'
                   }`}
                 >
-                  <span>🟡</span>
-                  <span>بطولة المنتمين للأندية والجمعيات</span>
-                  <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${
+                  <span className="flex items-center gap-1.5 min-w-0">
+                    <span className="shrink-0">🟡</span>
+                    <span className="truncate sm:overflow-visible">المنتمين للأندية</span>
+                  </span>
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold shrink-0 ${
                     selectedAffiliation === 'club_affiliated' ? 'bg-slate-950/20 text-slate-950' : 'bg-amber-200 text-amber-950'
                   }`}>
-                    {clubCompletedCount}/8 فئات
+                    {clubCompletedCount}/8
                   </span>
                 </button>
               )}
@@ -1117,25 +1124,25 @@ export const CrossCountryPodiumView: React.FC<CrossCountryPodiumViewProps> = ({
       )}
 
       {/* Category selector strip */}
-      <div className="bg-white rounded-2xl p-3 border border-slate-200 shadow-xs">
-        <div className="flex items-center justify-between gap-3 mb-2 px-1">
-          <div className="flex items-center gap-2">
-            <Flame className="w-4 h-4 text-amber-500" />
+      <div className="bg-white rounded-2xl p-2.5 sm:p-3 border border-slate-200 shadow-xs">
+        <div className="flex flex-wrap items-center justify-between gap-2 mb-2 px-0.5 sm:px-1">
+          <div className="flex items-center gap-1.5 min-w-0">
+            <Flame className="w-4 h-4 text-amber-500 shrink-0" />
             <h2 className="text-xs md:text-sm font-black text-slate-900">
-              اختر الفئة العمرية والسباق المعتمد (8 فئات):
+              اختر الفئة العمرية (8 فئات):
             </h2>
           </div>
 
           <button
             onClick={() => setViewAllCategories(!viewAllCategories)}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+            className={`flex items-center gap-1 px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-xl text-[11px] sm:text-xs font-bold transition-all cursor-pointer shrink-0 ${
               viewAllCategories
                 ? 'bg-blue-600 text-white shadow-xs'
                 : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
             }`}
           >
-            <LayoutGrid className="w-3.5 h-3.5" />
-            <span>{viewAllCategories ? 'العودة للبوديوم الفردي' : 'عرض منصات جميع الفئات (8)'}</span>
+            <LayoutGrid className="w-3.5 h-3.5 shrink-0" />
+            <span>{viewAllCategories ? 'العودة للبوديوم الفردي' : 'عرض جميع الفئات (8)'}</span>
           </button>
         </div>
 
@@ -1380,31 +1387,31 @@ export const CrossCountryPodiumView: React.FC<CrossCountryPodiumViewProps> = ({
         </div>
       ) : (
         /* SINGLE DETAILED PODIUM VIEW FOR SELECTED CATEGORY */
-        <div className="space-y-6">
+        <div className="space-y-4 sm:space-y-6">
           {/* Active Category Header Card */}
-          <div className="bg-white rounded-2xl p-4 md:p-5 border border-slate-200 shadow-xs space-y-3">
+          <div className="bg-white rounded-2xl p-3 sm:p-5 border border-slate-200 shadow-xs space-y-3">
             <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
-              <div className="flex items-center gap-3">
-                <div className="w-12 h-12 rounded-2xl bg-amber-50 text-amber-600 border border-amber-200 flex items-center justify-center text-2xl shadow-xs">
+              <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
+                <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl sm:rounded-2xl bg-amber-50 text-amber-600 border border-amber-200 flex items-center justify-center text-xl sm:text-2xl shadow-xs shrink-0">
                   {selectedCategoryDef.icon}
                 </div>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <h2 className="text-base md:text-lg font-black text-slate-900">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+                    <h2 className="text-sm sm:text-base md:text-lg font-black text-slate-900 leading-snug">
                       {selectedCategoryDef.titleAr}
                     </h2>
-                    <span className="bg-blue-50 text-blue-700 border border-blue-200 text-[11px] font-black px-2.5 py-0.5 rounded-full">
+                    <span className="bg-blue-50 text-blue-700 border border-blue-200 text-[10px] sm:text-[11px] font-black px-2 sm:px-2.5 py-0.5 rounded-full whitespace-nowrap">
                       المسافة: {selectedCategoryDef.distance}
                     </span>
                   </div>
-                  <p className="text-xs text-slate-500 font-medium mt-0.5">
-                    مكان السباق: {currentCategoryResult.venueName || 'مضمار حلبة ألعاب القوى'} • نتائج الترتيب الفردي، ترتيب الفرق، ومحضر التأهل الجهوي
+                  <p className="text-[11px] sm:text-xs text-slate-500 font-medium mt-0.5 leading-snug">
+                    مكان السباق: {currentCategoryResult.venueName || 'مضمار حلبة ألعاب القوى'}
                   </p>
                 </div>
               </div>
 
               {/* Race Status & Homologation Controls */}
-              <div className="flex flex-wrap items-center gap-2 self-stretch md:self-auto justify-end">
+              <div className="flex flex-wrap items-center gap-2 w-full md:w-auto justify-end">
                 {currentCategoryResult.status === 'running' && (
                   <div className="bg-emerald-50 text-emerald-700 border border-emerald-200 px-3 py-1.5 rounded-xl flex items-center gap-2 animate-pulse shadow-sm">
                     <div className="w-2 h-2 rounded-full bg-emerald-600 shadow-[0_0_8px_rgba(16,185,129,0.6)]"></div>
@@ -1413,14 +1420,14 @@ export const CrossCountryPodiumView: React.FC<CrossCountryPodiumViewProps> = ({
                 )}
 
                 {currentCategoryResult.podium?.length > 0 && currentCategoryResult.approvalStatus === 'provisional' && (
-                  <span className="px-3 py-1.5 rounded-xl bg-amber-50 text-amber-800 border border-amber-300 text-xs font-black flex items-center gap-1.5">
+                  <span className="px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-xl bg-amber-50 text-amber-800 border border-amber-300 text-[11px] sm:text-xs font-black flex items-center gap-1.5">
                     ⏳ نتائج أولية (في انتظار المصادقة)
                   </span>
                 )}
 
                 {currentCategoryResult.podium?.length > 0 && currentCategoryResult.approvalStatus === 'approved' && (
-                  <span className="px-3 py-1.5 rounded-xl bg-emerald-50 text-emerald-800 border border-emerald-200 text-xs font-black flex items-center gap-1.5">
-                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                  <span className="px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-xl bg-emerald-50 text-emerald-800 border border-emerald-200 text-[11px] sm:text-xs font-black flex items-center gap-1.5">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
                     <span>نتائج مصادق عليها رسمياً</span>
                   </span>
                 )}
@@ -1429,20 +1436,20 @@ export const CrossCountryPodiumView: React.FC<CrossCountryPodiumViewProps> = ({
                   <button
                     type="button"
                     onClick={() => handleApproveCategoryInline(currentCategoryResult)}
-                    className="flex items-center gap-1.5 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs rounded-xl shadow-xs transition-colors cursor-pointer"
+                    className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-3 sm:px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs rounded-xl shadow-xs transition-colors cursor-pointer"
                   >
-                    <CheckCircle2 className="w-4 h-4" />
-                    <span>المصادقة النهائية على النتائج</span>
+                    <CheckCircle2 className="w-4 h-4 shrink-0" />
+                    <span>المصادقة النهائية</span>
                   </button>
                 )}
 
                 {canEdit && (
                   <button
                     onClick={() => handleOpenEdit(selectedCatId)}
-                    className="flex items-center gap-2 px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-xl shadow-xs transition-colors justify-center cursor-pointer"
+                    className="flex-1 sm:flex-none flex items-center gap-1.5 px-3 sm:px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-xl shadow-xs transition-colors justify-center cursor-pointer"
                   >
-                    <Edit3 className="w-4 h-4 text-amber-400" />
-                    <span>تعديل نتائج هذه الفئة</span>
+                    <Edit3 className="w-4 h-4 text-amber-400 shrink-0" />
+                    <span>تعديل نتائج الفئة</span>
                   </button>
                 )}
               </div>
@@ -1450,78 +1457,78 @@ export const CrossCountryPodiumView: React.FC<CrossCountryPodiumViewProps> = ({
 
             {/* Winning Team Banner inside Category Header Card */}
             {winningTeam ? (
-              <div className="p-3.5 rounded-2xl bg-gradient-to-r from-blue-950 via-slate-900 to-indigo-950 text-white border border-blue-700/80 shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-                <div className="flex items-center gap-3 min-w-0">
-                  <div className="w-10 h-10 rounded-xl bg-amber-400 text-slate-950 flex items-center justify-center font-black text-xl shadow-xs shrink-0">
+              <div className="p-3 sm:p-3.5 rounded-2xl bg-gradient-to-r from-blue-950 via-slate-900 to-indigo-950 text-white border border-blue-700/80 shadow-sm flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5 sm:gap-3">
+                <div className="flex items-start sm:items-center gap-2.5 sm:gap-3 min-w-0">
+                  <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-amber-400 text-slate-950 flex items-center justify-center font-black text-lg sm:text-xl shadow-xs shrink-0">
                     🏆
                   </div>
                   <div className="min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-[10px] font-black text-amber-300 bg-amber-400/20 px-2.5 py-0.5 rounded-full border border-amber-400/30">
-                        الفريق الفائز بالمرتبة الأولى (بطل الفئة)
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="text-[10px] font-black text-amber-300 bg-amber-400/20 px-2 py-0.5 rounded-full border border-amber-400/30">
+                        الفريق الفائز (بطل الفئة)
                       </span>
-                      <span className="text-[10px] font-black text-emerald-300 bg-emerald-500/20 px-2 py-0.5 rounded-full border border-emerald-400/30 flex items-center gap-1">
-                        <CheckCircle2 className="w-3 h-3 text-emerald-400" />
-                        متأهل جماعياً للبطولة الجهوية
+                      <span className="text-[10px] font-black text-emerald-300 bg-emerald-500/20 px-2 py-0.5 rounded-full border border-emerald-400/30 inline-flex items-center gap-1">
+                        <CheckCircle2 className="w-3 h-3 text-emerald-400 shrink-0" />
+                        <span>متأهل جماعياً جهوياً</span>
                       </span>
                     </div>
-                    <h3 className="text-sm md:text-base font-black text-white mt-1 truncate">
+                    <h3 className="text-sm md:text-base font-black text-white mt-1 break-words leading-snug">
                       {winningTeam.schoolName}
                     </h3>
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2 text-xs self-end sm:self-auto shrink-0 bg-blue-900/60 px-3 py-1.5 rounded-xl border border-blue-700/50">
-                  <span className="text-blue-200 font-bold">مجموع نقاط أسرع 4 عداءين:</span>
+                <div className="flex items-center justify-between sm:justify-start gap-2 text-xs w-full sm:w-auto shrink-0 bg-blue-900/60 px-3 py-1.5 rounded-xl border border-blue-700/50">
+                  <span className="text-blue-200 font-bold text-[11px] sm:text-xs">مجموع نقاط أسرع 4:</span>
                   <span className="text-xs font-mono font-black text-amber-300 bg-slate-950 px-2.5 py-1 rounded-lg border border-slate-800">
                     {winningTeam.totalPoints} نقطة
                   </span>
                 </div>
               </div>
             ) : currentCategoryResult.podium && currentCategoryResult.podium.length > 0 ? (
-              <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 text-xs font-bold flex items-center gap-2">
-                <Info className="w-4 h-4 text-amber-600 shrink-0" />
+              <div className="p-2.5 sm:p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 text-[11px] sm:text-xs font-bold flex items-start sm:items-center gap-2">
+                <Info className="w-4 h-4 text-amber-600 shrink-0 mt-0.5 sm:mt-0" />
                 <span>الفريق الفائز بالمرتبة الأولى: لم تتوفر التغطية الكاملة لـ 4 عداءين أوايل من نفس المؤسسة.</span>
               </div>
             ) : null}
           </div>
 
           {/* SUB-TABS NAVIGATION: Individual / Team / Regional */}
-          <div className="flex flex-wrap items-center gap-2 bg-slate-100 p-1.5 rounded-2xl border border-slate-200">
+          <div className="grid grid-cols-3 sm:flex items-stretch sm:items-center gap-1.5 sm:gap-2 bg-slate-100 p-1 sm:p-1.5 rounded-2xl border border-slate-200">
             <button
               onClick={() => setActiveSubTab('individual')}
-              className={`flex-1 min-w-[140px] flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl text-xs md:text-sm font-black transition-all ${
+              className={`sm:flex-1 flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-2 py-2 px-1.5 sm:px-4 rounded-xl text-[10px] sm:text-xs md:text-sm font-black transition-all cursor-pointer leading-tight ${
                 activeSubTab === 'individual'
                   ? 'bg-white text-slate-900 shadow-sm border border-slate-200'
                   : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
               }`}
             >
-              <Trophy className={`w-4 h-4 ${activeSubTab === 'individual' ? 'text-amber-500' : 'text-slate-400'}`} />
-              <span>🏅 الترتيب الفردي والبوديوم</span>
+              <Trophy className={`w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0 ${activeSubTab === 'individual' ? 'text-amber-500' : 'text-slate-400'}`} />
+              <span>الترتيب الفردي</span>
             </button>
 
             <button
               onClick={() => setActiveSubTab('team')}
-              className={`flex-1 min-w-[140px] flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl text-xs md:text-sm font-black transition-all ${
+              className={`sm:flex-1 flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-2 py-2 px-1.5 sm:px-4 rounded-xl text-[10px] sm:text-xs md:text-sm font-black transition-all cursor-pointer leading-tight ${
                 activeSubTab === 'team'
                   ? 'bg-white text-blue-900 shadow-sm border border-blue-200'
                   : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
               }`}
             >
-              <Users className={`w-4 h-4 ${activeSubTab === 'team' ? 'text-blue-600' : 'text-slate-400'}`} />
-              <span>🏫 ترتيب الفرق للمؤسسات ({teamRankings.length})</span>
+              <Users className={`w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0 ${activeSubTab === 'team' ? 'text-blue-600' : 'text-slate-400'}`} />
+              <span>الفرق ({teamRankings.length})</span>
             </button>
 
             <button
               onClick={() => setActiveSubTab('regional')}
-              className={`flex-1 min-w-[140px] flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl text-xs md:text-sm font-black transition-all ${
+              className={`sm:flex-1 flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-2 py-2 px-1.5 sm:px-4 rounded-xl text-[10px] sm:text-xs md:text-sm font-black transition-all cursor-pointer leading-tight ${
                 activeSubTab === 'regional'
                   ? 'bg-white text-emerald-900 shadow-sm border border-emerald-200'
                   : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
               }`}
             >
-              <ShieldCheck className={`w-4 h-4 ${activeSubTab === 'regional' ? 'text-emerald-600' : 'text-slate-400'}`} />
-              <span>📜 محضر التأهل الجهوي والبدلاء</span>
+              <ShieldCheck className={`w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0 ${activeSubTab === 'regional' ? 'text-emerald-600' : 'text-slate-400'}`} />
+              <span>التأهل الجهوي</span>
             </button>
           </div>
 
@@ -1678,10 +1685,10 @@ export const CrossCountryPodiumView: React.FC<CrossCountryPodiumViewProps> = ({
                             </span>
                           </div>
                           <div>
-                            <p className="text-xs font-black text-white truncate" title={runner.fullName}>
+                            <p className="text-xs font-black text-white break-words leading-snug" title={runner.fullName}>
                               {runner.fullName}
                             </p>
-                            <p className="text-[10px] text-blue-200 truncate mt-0.5" title={runner.schoolName}>
+                            <p className="text-[10px] text-blue-200 break-words mt-0.5 leading-snug" title={runner.schoolName}>
                               {runner.schoolName} 🏫
                             </p>
                           </div>
@@ -1724,69 +1731,117 @@ export const CrossCountryPodiumView: React.FC<CrossCountryPodiumViewProps> = ({
                 </div>
 
                 {teamRankings.length > 0 ? (
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-right text-xs">
-                      <thead className="bg-slate-50 text-slate-600 border-b border-slate-200 font-bold">
-                        <tr>
-                          <th className="py-3 px-4 w-16 text-center">الترتيب</th>
-                          <th className="py-3 px-4">المؤسسة التعليمية</th>
-                          <th className="py-3 px-4 text-center">حالة الفريق</th>
-                          <th className="py-3 px-4 text-center">مجموع النقاط</th>
-                          <th className="py-3 px-4 text-center">رتبة العداء الرابع (حسم)</th>
-                          <th className="py-3 px-4">أعضاء الفريق المحتسبون (أسرع 4)</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100">
-                        {teamRankings.map((team, idx) => {
-                          const is1st = team.rank === 1;
-                          return (
-                            <tr key={idx} className={is1st ? 'bg-amber-50/40 font-bold' : 'hover:bg-slate-50'}>
-                              <td className="py-3 px-4 text-center">
-                                {is1st ? (
-                                  <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-amber-400 text-slate-950 font-black text-xs shadow-xs">
-                                    🥇 1
-                                  </span>
-                                ) : team.rank === 2 ? (
-                                  <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-slate-300 text-slate-900 font-black text-xs">
-                                    🥈 2
-                                  </span>
-                                ) : team.rank === 3 ? (
-                                  <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-amber-700 text-white font-black text-xs">
-                                    🥉 3
-                                  </span>
-                                ) : (
-                                  <span className="font-bold text-slate-700">#{team.rank}</span>
-                                )}
-                              </td>
-                              <td className="py-3 px-4 font-black text-slate-900">
-                                {team.schoolName}
-                              </td>
-                              <td className="py-3 px-4 text-center">
-                                {team.isValidTeam ? (
-                                  <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-bold">
-                                    فريق مكتمل (4+) ✅
-                                  </span>
-                                ) : (
-                                  <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 text-[10px] font-bold">
-                                    غير مكتمل ({team.runners.length}/4) ⏳
-                                  </span>
-                                )}
-                              </td>
-                              <td className="py-3 px-4 text-center font-mono font-black text-amber-600 text-sm">
+                  <>
+                    {/* Mobile Cards for Team Rankings */}
+                    <div className="sm:hidden divide-y divide-slate-100">
+                      {teamRankings.map((team, idx) => {
+                        const is1st = team.rank === 1;
+                        return (
+                          <div key={idx} className={`p-3 space-y-2 ${is1st ? 'bg-amber-50/40' : 'bg-white'}`}>
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="flex items-start gap-2 min-w-0">
+                                <span className={`inline-flex items-center justify-center w-7 h-7 rounded-full text-xs font-black shrink-0 ${
+                                  is1st ? 'bg-amber-400 text-slate-950' : team.rank === 2 ? 'bg-slate-300 text-slate-900' : team.rank === 3 ? 'bg-amber-700 text-white' : 'bg-slate-100 text-slate-700'
+                                }`}>
+                                  {is1st ? '🥇1' : team.rank === 2 ? '🥈2' : team.rank === 3 ? '🥉3' : `#${team.rank}`}
+                                </span>
+                                <div className="min-w-0">
+                                  <p className="text-xs font-black text-slate-900 break-words leading-snug">{team.schoolName}</p>
+                                  <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                                    {team.isValidTeam ? (
+                                      <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-bold">
+                                        مكتمل (4+) ✅
+                                      </span>
+                                    ) : (
+                                      <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 text-[10px] font-bold">
+                                        غير مكتمل ({team.runners.length}/4)
+                                      </span>
+                                    )}
+                                    {team.fourthRunnerRank < 9999 && (
+                                      <span className="text-[10px] font-bold text-slate-500">
+                                        العداء 4: رتبة {team.fourthRunnerRank}
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                              <span className="font-mono font-black text-amber-700 bg-amber-50 border border-amber-200 px-2 py-1 rounded-lg text-xs shrink-0">
                                 {team.totalPoints} ن
-                              </td>
-                              <td className="py-3 px-4 text-center font-mono text-slate-700 font-bold">
-                                {team.fourthRunnerRank < 9999 ? `الرتبة ${team.fourthRunnerRank}` : '—'}
-                              </td>
-                              <td className="py-3 px-4 text-slate-600">
-                                {team.top4Runners.map(r => `${r.fullName} (#${r.rank})`).join(' ، ')}
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
+                              </span>
+                            </div>
+                            <p className="text-[11px] text-slate-600 bg-slate-50 rounded-lg p-2 leading-relaxed">
+                              {team.top4Runners.map(r => `${r.fullName} (#${r.rank})`).join(' ، ')}
+                            </p>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    {/* Desktop Table for Team Rankings */}
+                    <div className="hidden sm:block overflow-x-auto">
+                      <table className="w-full text-right text-xs">
+                        <thead className="bg-slate-50 text-slate-600 border-b border-slate-200 font-bold">
+                          <tr>
+                            <th className="py-3 px-4 w-16 text-center">الترتيب</th>
+                            <th className="py-3 px-4">المؤسسة التعليمية</th>
+                            <th className="py-3 px-4 text-center">حالة الفريق</th>
+                            <th className="py-3 px-4 text-center">مجموع النقاط</th>
+                            <th className="py-3 px-4 text-center">رتبة العداء الرابع (حسم)</th>
+                            <th className="py-3 px-4">أعضاء الفريق المحتسبون (أسرع 4)</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {teamRankings.map((team, idx) => {
+                            const is1st = team.rank === 1;
+                            return (
+                              <tr key={idx} className={is1st ? 'bg-amber-50/40 font-bold' : 'hover:bg-slate-50'}>
+                                <td className="py-3 px-4 text-center">
+                                  {is1st ? (
+                                    <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-amber-400 text-slate-950 font-black text-xs shadow-xs">
+                                      🥇 1
+                                    </span>
+                                  ) : team.rank === 2 ? (
+                                    <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-slate-300 text-slate-900 font-black text-xs">
+                                      🥈 2
+                                    </span>
+                                  ) : team.rank === 3 ? (
+                                    <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-amber-700 text-white font-black text-xs">
+                                      🥉 3
+                                    </span>
+                                  ) : (
+                                    <span className="font-bold text-slate-700">#{team.rank}</span>
+                                  )}
+                                </td>
+                                <td className="py-3 px-4 font-black text-slate-900">
+                                  {team.schoolName}
+                                </td>
+                                <td className="py-3 px-4 text-center">
+                                  {team.isValidTeam ? (
+                                    <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-bold">
+                                      فريق مكتمل (4+) ✅
+                                    </span>
+                                  ) : (
+                                    <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 text-[10px] font-bold">
+                                      غير مكتمل ({team.runners.length}/4) ⏳
+                                    </span>
+                                  )}
+                                </td>
+                                <td className="py-3 px-4 text-center font-mono font-black text-amber-600 text-sm">
+                                  {team.totalPoints} ن
+                                </td>
+                                <td className="py-3 px-4 text-center font-mono text-slate-700 font-bold">
+                                  {team.fourthRunnerRank < 9999 ? `الرتبة ${team.fourthRunnerRank}` : '—'}
+                                </td>
+                                <td className="py-3 px-4 text-slate-600">
+                                  {team.top4Runners.map(r => `${r.fullName} (#${r.rank})`).join(' ، ')}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </>
                 ) : (
                   <div className="p-6 text-center text-slate-400 text-xs">
                     لا توجد فرق مسجلة بعد لهذه الفئة.
@@ -1813,125 +1868,183 @@ export const CrossCountryPodiumView: React.FC<CrossCountryPodiumViewProps> = ({
                 </div>
 
                 {currentCategoryResult.podium.length > 0 ? (
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-right text-xs">
-                      <thead className="bg-slate-50 text-slate-600 border-b border-slate-200 font-bold">
-                        <tr>
-                          <th className="py-3 px-4 w-16 text-center">الوصول العام</th>
-                          <th className="py-3 px-4 text-center">الترتيب الفردي</th>
-                          <th className="py-3 px-4 text-center">الصورة</th>
-                          <th className="py-3 px-4">الاسم</th>
-                          <th className="py-3 px-4 text-center">نوع المشاركة</th>
-                          <th className="py-3 px-4">المؤسسة</th>
-                          <th className="py-3 px-4">المديرية</th>
-                          <th className="py-3 px-4">الأكاديمية</th>
-                          <th className="py-3 px-4 w-20 text-center">الصدرية</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100">
-                        {currentCategoryResult.podium.map((winner, idx) => {
-                          const isGold = winner.rank === 1;
-                          const isSilver = winner.rank === 2;
-                          const isBronze = winner.rank === 3;
-                          const isTeam = resolveRunnerParticipationType(winner, students) === 'school_team';
-
-                          return (
-                            <tr
-                              key={idx}
-                              className={`hover:bg-slate-50 transition-colors ${
-                                isGold
-                                  ? 'bg-amber-50/40 font-bold'
-                                  : isSilver
-                                  ? 'bg-slate-50/60'
-                                  : isBronze
-                                  ? 'bg-amber-50/20'
-                                  : ''
-                              }`}
-                            >
-                              {/* General Finish Rank */}
-                              <td className="py-3 px-4 text-center">
-                                {isGold ? (
-                                  <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-amber-400 text-slate-950 font-black text-xs shadow-xs">
-                                    🥇 1
-                                  </span>
-                                ) : isSilver ? (
-                                  <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-slate-300 text-slate-900 font-black text-xs shadow-xs">
-                                    🥈 2
-                                  </span>
-                                ) : isBronze ? (
-                                  <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-amber-700 text-white font-black text-xs shadow-xs">
-                                    🥉 3
-                                  </span>
-                                ) : (
-                                  <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-slate-100 text-slate-700 font-bold text-xs">
-                                    {winner.rank}
-                                  </span>
-                                )}
-                              </td>
-
-                              {/* Individual Rank Status */}
-                              <td className="py-3 px-4 text-center">
-                                <span className={`px-2.5 py-0.5 rounded text-[11px] font-bold ${isTeam ? 'bg-amber-100 text-amber-900' : 'bg-slate-100 text-slate-700'}`}>
-                                  {isTeam ? 'ضمن فريق' : `${winner.rank} فردي`}
-                                </span>
-                              </td>
-
-                              {/* Photo Placeholder */}
-                              <td className="py-3 px-4 text-center">
-                                <button
-                                  type="button"
-                                  className="w-8 h-8 rounded-full bg-slate-100 text-slate-500 hover:bg-slate-200 flex items-center justify-center mx-auto transition-colors"
-                                  title="صورة العداء"
-                                >
-                                  <Camera className="w-4 h-4" />
-                                </button>
-                              </td>
-
-                              {/* Full Name */}
-                              <td className="py-3 px-4">
-                                <span className="font-black text-slate-900 text-sm">
+                  <>
+                    {/* Mobile Cards for Individual Finish Line */}
+                    <div className="sm:hidden divide-y divide-slate-100">
+                      {currentCategoryResult.podium.map((winner, idx) => {
+                        const isGold = winner.rank === 1;
+                        const isSilver = winner.rank === 2;
+                        const isBronze = winner.rank === 3;
+                        const isTeam = resolveRunnerParticipationType(winner, students) === 'school_team';
+                        return (
+                          <div
+                            key={idx}
+                            className={`p-3 flex items-start justify-between gap-2.5 ${
+                              isGold ? 'bg-amber-50/40' : isSilver ? 'bg-slate-50/60' : isBronze ? 'bg-amber-50/20' : 'bg-white'
+                            }`}
+                          >
+                            <div className="flex items-start gap-2.5 min-w-0">
+                              <span
+                                className={`inline-flex items-center justify-center w-7 h-7 rounded-full text-xs font-black shrink-0 ${
+                                  isGold
+                                    ? 'bg-amber-400 text-slate-950'
+                                    : isSilver
+                                    ? 'bg-slate-300 text-slate-900'
+                                    : isBronze
+                                    ? 'bg-amber-700 text-white'
+                                    : 'bg-slate-100 text-slate-700'
+                                }`}
+                              >
+                                {isGold ? '🥇1' : isSilver ? '🥈2' : isBronze ? '🥉3' : winner.rank}
+                              </span>
+                              <div className="min-w-0 space-y-1">
+                                <p className="font-black text-slate-900 text-xs break-words leading-snug">
                                   {winner.fullName}
-                                </span>
-                              </td>
+                                </p>
+                                <p className="text-[11px] font-bold text-slate-600 break-words leading-snug">
+                                  🏫 {winner.schoolName}
+                                </p>
+                                <div className="flex flex-wrap items-center gap-1.5">
+                                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${isTeam ? 'bg-amber-100 text-amber-900' : 'bg-emerald-100 text-emerald-900'}`}>
+                                    {isTeam ? '👥 فريق المؤسسة' : '👤 مشاركة فردية'}
+                                  </span>
+                                  {winner.time && (
+                                    <span className="text-[10px] font-mono font-bold text-slate-600 bg-slate-100 px-1.5 py-0.5 rounded">
+                                      ⏱️ {winner.time}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                            <span className="font-mono font-black text-[11px] text-slate-700 bg-slate-100 border border-slate-200 px-2 py-0.5 rounded-lg shrink-0">
+                              {winner.bibNumber ? `#${winner.bibNumber}` : '—'}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
 
-                              {/* Participation Type */}
-                              <td className="py-3 px-4 text-center">
-                                <span className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold ${isTeam ? 'bg-amber-100 text-amber-900' : 'bg-emerald-100 text-emerald-900'}`}>
-                                  {isTeam ? '👥 فريق المؤسسة' : '👤 مشاركة فردية'}
-                                </span>
-                              </td>
+                    {/* Desktop Table for Individual Finish Line */}
+                    <div className="hidden sm:block overflow-x-auto">
+                      <table className="w-full text-right text-xs">
+                        <thead className="bg-slate-50 text-slate-600 border-b border-slate-200 font-bold">
+                          <tr>
+                            <th className="py-3 px-4 w-16 text-center">الوصول العام</th>
+                            <th className="py-3 px-4 text-center">الترتيب الفردي</th>
+                            <th className="py-3 px-4 text-center">الصورة</th>
+                            <th className="py-3 px-4">الاسم</th>
+                            <th className="py-3 px-4 text-center">نوع المشاركة</th>
+                            <th className="py-3 px-4">المؤسسة</th>
+                            <th className="py-3 px-4">المديرية</th>
+                            <th className="py-3 px-4">الأكاديمية</th>
+                            <th className="py-3 px-4 w-20 text-center">الصدرية</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {currentCategoryResult.podium.map((winner, idx) => {
+                            const isGold = winner.rank === 1;
+                            const isSilver = winner.rank === 2;
+                            const isBronze = winner.rank === 3;
+                            const isTeam = resolveRunnerParticipationType(winner, students) === 'school_team';
 
-                              {/* School */}
-                              <td className="py-3 px-4 text-slate-700 font-bold">
-                                {winner.schoolName}
-                              </td>
+                            return (
+                              <tr
+                                key={idx}
+                                className={`hover:bg-slate-50 transition-colors ${
+                                  isGold
+                                    ? 'bg-amber-50/40 font-bold'
+                                    : isSilver
+                                    ? 'bg-slate-50/60'
+                                    : isBronze
+                                    ? 'bg-amber-50/20'
+                                    : ''
+                                }`}
+                              >
+                                {/* General Finish Rank */}
+                                <td className="py-3 px-4 text-center">
+                                  {isGold ? (
+                                    <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-amber-400 text-slate-950 font-black text-xs shadow-xs">
+                                      🥇 1
+                                    </span>
+                                  ) : isSilver ? (
+                                    <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-slate-300 text-slate-900 font-black text-xs shadow-xs">
+                                      🥈 2
+                                    </span>
+                                  ) : isBronze ? (
+                                    <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-amber-700 text-white font-black text-xs shadow-xs">
+                                      🥉 3
+                                    </span>
+                                  ) : (
+                                    <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-slate-100 text-slate-700 font-bold text-xs">
+                                      {winner.rank}
+                                    </span>
+                                  )}
+                                </td>
 
-                              {/* Directorate */}
-                              <td className="py-3 px-4 text-slate-600 font-medium">
-                                {winner.directorateName || directorateName}
-                              </td>
+                                {/* Individual Rank Status */}
+                                <td className="py-3 px-4 text-center">
+                                  <span className={`px-2.5 py-0.5 rounded text-[11px] font-bold ${isTeam ? 'bg-amber-100 text-amber-900' : 'bg-slate-100 text-slate-700'}`}>
+                                    {isTeam ? 'ضمن فريق' : `${winner.rank} فردي`}
+                                  </span>
+                                </td>
 
-                              {/* Academy */}
-                              <td className="py-3 px-4 text-slate-600 font-medium">
-                                {winner.academyName || 'الشرق'}
-                              </td>
+                                {/* Photo Placeholder */}
+                                <td className="py-3 px-4 text-center">
+                                  <button
+                                    type="button"
+                                    className="w-8 h-8 rounded-full bg-slate-100 text-slate-500 hover:bg-slate-200 flex items-center justify-center mx-auto transition-colors"
+                                    title="صورة العداء"
+                                  >
+                                    <Camera className="w-4 h-4" />
+                                  </button>
+                                </td>
 
-                              {/* Bib */}
-                              <td className="py-3 px-4 text-center font-mono font-bold text-slate-700">
-                                {winner.bibNumber ? `#${winner.bibNumber}` : '-'}
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
+                                {/* Full Name */}
+                                <td className="py-3 px-4">
+                                  <span className="font-black text-slate-900 text-sm">
+                                    {winner.fullName}
+                                  </span>
+                                </td>
+
+                                {/* Participation Type */}
+                                <td className="py-3 px-4 text-center">
+                                  <span className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold ${isTeam ? 'bg-amber-100 text-amber-900' : 'bg-emerald-100 text-emerald-900'}`}>
+                                    {isTeam ? '👥 فريق المؤسسة' : '👤 مشاركة فردية'}
+                                  </span>
+                                </td>
+
+                                {/* School */}
+                                <td className="py-3 px-4 text-slate-700 font-bold">
+                                  {winner.schoolName}
+                                </td>
+
+                                {/* Directorate */}
+                                <td className="py-3 px-4 text-slate-600 font-medium">
+                                  {winner.directorateName || directorateName}
+                                </td>
+
+                                {/* Academy */}
+                                <td className="py-3 px-4 text-slate-600 font-medium">
+                                  {winner.academyName || 'الشرق'}
+                                </td>
+
+                                {/* Bib */}
+                                <td className="py-3 px-4 text-center font-mono font-bold text-slate-700">
+                                  {winner.bibNumber ? `#${winner.bibNumber}` : '-'}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </>
                 ) : (
-                  <div className="p-8 text-center text-slate-400 space-y-2">
+                  <div className="p-6 sm:p-8 text-center text-slate-400 space-y-2">
                     <Trophy className="w-10 h-10 mx-auto text-slate-300" />
                     <p className="text-sm font-bold text-slate-600">لم يتم تسجيل نتائج هذا السباق بعد</p>
                     <p className="text-xs text-slate-400">
-                      يمكن للمسؤولين تسجيل نتائج التتويج من خلال زر "تعديل نتائج هذه الفئة" أعلاه.
+                      يمكن للمسؤولين تسجيل نتائج التتويج من خلال زر "تعديل نتائج الفئة" أعلاه.
                     </p>
                   </div>
                 )}
@@ -2152,63 +2265,101 @@ export const CrossCountryPodiumView: React.FC<CrossCountryPodiumViewProps> = ({
                 </div>
 
                 {regionalQualifications.length > 0 ? (
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-right text-xs">
-                      <thead className="bg-slate-50 text-slate-600 border-b border-slate-200 font-bold">
-                        <tr>
-                          <th className="py-3 px-4 text-center w-16">مقعد التأهل</th>
-                          <th className="py-3 px-4">اسم العداء(ة)</th>
-                          <th className="py-3 px-4">المؤسسة التعليمية</th>
-                          <th className="py-3 px-4 text-center">الرتبة في السباق</th>
-                          <th className="py-3 px-4">صفة التأهل والتوضيح</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100">
-                        {regionalQualifications.map((q, idx) => {
-                          return (
-                            <tr
-                              key={idx}
-                              className={`hover:bg-slate-50 transition-colors ${
-                                q.isReplacement ? 'bg-amber-50/40' : 'bg-emerald-50/20'
-                              }`}
-                            >
-                              <td className="py-3 px-4 text-center">
-                                <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-slate-900 text-amber-400 font-black text-xs shadow-xs">
-                                  #{q.qualifyingRank}
-                                </span>
-                              </td>
+                  <>
+                    {/* Mobile Cards for Regional Qualifications */}
+                    <div className="sm:hidden divide-y divide-slate-100">
+                      {regionalQualifications.map((q, idx) => (
+                        <div key={idx} className={`p-3 space-y-2 ${q.isReplacement ? 'bg-amber-50/40' : 'bg-emerald-50/20'}`}>
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="flex items-start gap-2 min-w-0">
+                              <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-slate-900 text-amber-400 font-black text-xs shrink-0">
+                                #{q.qualifyingRank}
+                              </span>
+                              <div className="min-w-0">
+                                <p className="font-black text-slate-900 text-xs break-words leading-snug">{q.runner.fullName}</p>
+                                <p className="text-[11px] font-bold text-slate-600 break-words leading-snug mt-0.5">🏫 {q.runner.schoolName}</p>
+                              </div>
+                            </div>
+                            <span className="font-mono font-black text-[11px] text-slate-700 bg-white border border-slate-200 px-2 py-0.5 rounded-lg shrink-0">
+                              المركز {q.originalFinishRank}
+                            </span>
+                          </div>
+                          <div>
+                            {q.isReplacement ? (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl text-[10.5px] font-black bg-amber-100 text-amber-900 border border-amber-300 leading-snug">
+                                <span>🎯</span>
+                                <span>{q.reasonAr}</span>
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl text-[10.5px] font-black bg-emerald-100 text-emerald-900 border border-emerald-300 leading-snug">
+                                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                                <span>{q.reasonAr}</span>
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
 
-                              <td className="py-3 px-4 font-black text-slate-900 text-sm">
-                                {q.runner.fullName}
-                              </td>
-
-                              <td className="py-3 px-4 text-slate-700 font-bold">
-                                {q.runner.schoolName}
-                              </td>
-
-                              <td className="py-3 px-4 text-center font-mono font-black text-slate-800">
-                                المركز {q.originalFinishRank}
-                              </td>
-
-                              <td className="py-3 px-4">
-                                {q.isReplacement ? (
-                                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl text-xs font-black bg-amber-100 text-amber-900 border border-amber-300">
-                                    <span>🎯</span>
-                                    <span>{q.reasonAr}</span>
+                    {/* Desktop Table for Regional Qualifications */}
+                    <div className="hidden sm:block overflow-x-auto">
+                      <table className="w-full text-right text-xs">
+                        <thead className="bg-slate-50 text-slate-600 border-b border-slate-200 font-bold">
+                          <tr>
+                            <th className="py-3 px-4 text-center w-16">مقعد التأهل</th>
+                            <th className="py-3 px-4">اسم العداء(ة)</th>
+                            <th className="py-3 px-4">المؤسسة التعليمية</th>
+                            <th className="py-3 px-4 text-center">الرتبة في السباق</th>
+                            <th className="py-3 px-4">صفة التأهل والتوضيح</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {regionalQualifications.map((q, idx) => {
+                            return (
+                              <tr
+                                key={idx}
+                                className={`hover:bg-slate-50 transition-colors ${
+                                  q.isReplacement ? 'bg-amber-50/40' : 'bg-emerald-50/20'
+                                }`}
+                              >
+                                <td className="py-3 px-4 text-center">
+                                  <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-slate-900 text-amber-400 font-black text-xs shadow-xs">
+                                    #{q.qualifyingRank}
                                   </span>
-                                ) : (
-                                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl text-xs font-black bg-emerald-100 text-emerald-900 border border-emerald-300">
-                                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                                    <span>{q.reasonAr}</span>
-                                  </span>
-                                )}
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
+                                </td>
+
+                                <td className="py-3 px-4 font-black text-slate-900 text-sm">
+                                  {q.runner.fullName}
+                                </td>
+
+                                <td className="py-3 px-4 text-slate-700 font-bold">
+                                  {q.runner.schoolName}
+                                </td>
+
+                                <td className="py-3 px-4 text-center font-mono font-black text-slate-800">
+                                  المركز {q.originalFinishRank}
+                                </td>
+
+                                <td className="py-3 px-4">
+                                  {q.isReplacement ? (
+                                    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl text-xs font-black bg-amber-100 text-amber-900 border border-amber-300">
+                                      <span>🎯</span>
+                                      <span>{q.reasonAr}</span>
+                                    </span>
+                                  ) : (
+                                    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl text-xs font-black bg-emerald-100 text-emerald-900 border border-emerald-300">
+                                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                                      <span>{q.reasonAr}</span>
+                                    </span>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </>
                 ) : (
                   <p className="p-6 text-center text-xs text-slate-400 font-medium">
                     يرجى تسجيل نتائج السباق لعرض محضر التأهل الجهوي وقائمة البدلاء الصاعدين.
@@ -2222,33 +2373,33 @@ export const CrossCountryPodiumView: React.FC<CrossCountryPodiumViewProps> = ({
 
       {/* EDIT / RECORD RESULTS MODAL */}
       {isEditModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs overflow-y-auto animate-fadeIn">
-          <div className="bg-white rounded-3xl max-w-6xl w-full border border-slate-200 shadow-2xl overflow-hidden my-6">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-1.5 sm:p-4 bg-slate-950/70 backdrop-blur-xs overflow-hidden animate-fadeIn">
+          <div className="bg-white rounded-2xl sm:rounded-3xl max-w-6xl w-full border border-slate-200 shadow-2xl overflow-hidden my-auto max-h-[94dvh] sm:max-h-[92vh] flex flex-col">
             {/* Modal Header */}
-            <div className="p-5 bg-gradient-to-r from-slate-900 to-blue-950 text-white flex items-center justify-between">
-              <div className="flex items-center gap-2.5">
-                <div className="w-10 h-10 rounded-xl bg-amber-400 text-slate-950 flex items-center justify-center font-black text-xl shadow-sm">
+            <div className="p-3 sm:p-5 bg-gradient-to-r from-slate-900 to-blue-950 text-white flex items-center justify-between gap-2 shrink-0">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-amber-400 text-slate-950 flex items-center justify-center font-black text-lg sm:text-xl shadow-sm shrink-0">
                   🏆
                 </div>
-                <div>
-                  <h3 className="text-base font-black">
-                    لوحة تعديل وترتيب نتائج السباق (جدول تفاعلي)
+                <div className="min-w-0">
+                  <h3 className="text-sm sm:text-base font-black leading-snug">
+                    لوحة تعديل وترتيب نتائج السباق
                   </h3>
-                  <p className="text-xs text-slate-300">
+                  <p className="text-[11px] sm:text-xs text-slate-300 truncate">
                     {CROSS_COUNTRY_CATEGORIES.find(c => c.id === editingCategoryId)?.titleAr}
                   </p>
                 </div>
               </div>
               <button
                 onClick={() => setIsEditModalOpen(false)}
-                className="p-1.5 rounded-xl hover:bg-white/10 text-slate-300 hover:text-white transition-colors cursor-pointer"
+                className="p-1.5 rounded-xl hover:bg-white/10 text-slate-300 hover:text-white transition-colors cursor-pointer shrink-0"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
             {/* Modal Body */}
-            <div className="p-5 space-y-4 max-h-[75vh] overflow-y-auto">
+            <div className="p-3 sm:p-5 space-y-3.5 sm:space-y-4 flex-1 min-h-0 overflow-y-auto overscroll-contain">
               {/* Category Selector inside modal */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-slate-50 p-4 rounded-2xl border border-slate-200">
                 <div>
@@ -2570,11 +2721,11 @@ export const CrossCountryPodiumView: React.FC<CrossCountryPodiumViewProps> = ({
             </div>
 
             {/* Modal Footer */}
-            <div className="p-4 bg-slate-50 border-t border-slate-200 flex items-center justify-between">
+            <div className="p-3 sm:p-4 bg-slate-50 border-t border-slate-200 flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-between gap-2 shrink-0">
               <button
                 type="button"
                 onClick={() => setIsEditModalOpen(false)}
-                className="px-4 py-2 text-xs font-bold text-slate-600 hover:text-slate-900 cursor-pointer"
+                className="px-4 py-2 text-xs font-bold text-slate-600 hover:text-slate-900 bg-white sm:bg-transparent border border-slate-200 sm:border-0 rounded-xl cursor-pointer text-center"
               >
                 إلغاء وتراجع
               </button>
@@ -2583,9 +2734,9 @@ export const CrossCountryPodiumView: React.FC<CrossCountryPodiumViewProps> = ({
                 type="button"
                 onClick={handleSaveWinners}
                 disabled={isSaving}
-                className="flex items-center gap-2 px-6 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-700 hover:from-blue-700 hover:to-indigo-850 text-white font-black text-xs md:text-sm rounded-xl shadow-md transition-transform active:scale-95 disabled:opacity-50 cursor-pointer"
+                className="flex items-center justify-center gap-2 px-5 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-700 hover:from-blue-700 hover:to-indigo-850 text-white font-black text-xs md:text-sm rounded-xl shadow-md transition-transform active:scale-95 disabled:opacity-50 cursor-pointer"
               >
-                <Save className="w-4 h-4" />
+                <Save className="w-4 h-4 shrink-0" />
                 <span>{isSaving ? 'جاري حفظ التعديلات...' : 'حفظ النتائج وتثبيت الترتيب الجديد 🏆'}</span>
               </button>
             </div>

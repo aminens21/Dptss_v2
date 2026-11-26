@@ -33,7 +33,10 @@ import {
   Edit2,
   Edit3,
   Target,
-  Play
+  Play,
+  Download,
+  Database,
+  FileJson
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -459,6 +462,17 @@ export const SportsConfig: React.FC = () => {
   );
   const [savingAffiliationDisplay, setSavingAffiliationDisplay] = useState(false);
 
+  // Platform JSON Backup State (Central Admin Only)
+  const [exportingBackup, setExportingBackup] = useState(false);
+  const [backupScope, setBackupScope] = useState<'all' | 'active_directorate'>('all');
+  const [lastBackupMeta, setLastBackupMeta] = useState<{
+    exportedAt: string;
+    totalRecords: number;
+    sizeLabel: string;
+    source: 'cloud' | 'hybrid' | 'local';
+    fileName: string;
+  } | null>(null);
+
   // Official Logos State
   const [ministryLogo, setMinistryLogo] = useState<string>('');
   const [frmssLogo, setFrmssLogo] = useState<string>('');
@@ -678,6 +692,58 @@ export const SportsConfig: React.FC = () => {
       toast.error('تعذر حفظ إعدادات عرض الأصناف');
     } finally {
       setSavingAffiliationDisplay(false);
+    }
+  };
+
+  const handleDownloadPlatformBackupJson = async (scopeOverride?: 'all' | 'active_directorate') => {
+    if (!isCentralAdmin) {
+      toast.error('عفواً، صلاحية حفظ نسخة احتياطية من المنصة مخصصة للمسير المركزي فقط.');
+      return;
+    }
+    const effectiveScope = scopeOverride || backupScope;
+    setExportingBackup(true);
+    try {
+      const result = await DataService.exportPlatformBackupJson({
+        scope: effectiveScope,
+        exportedBy: userProfile?.fullName || userProfile?.email || 'المسير المركزي'
+      });
+      const jsonText = JSON.stringify(result.backup, null, 2);
+      const blob = new Blob([jsonText], { type: 'application/json;charset=utf-8' });
+      const sizeBytes = blob.size;
+      const sizeLabel =
+        sizeBytes >= 1024 * 1024
+          ? `${(sizeBytes / (1024 * 1024)).toFixed(2)} MB`
+          : `${Math.max(1, Math.round(sizeBytes / 1024))} KB`;
+
+      const now = new Date();
+      const pad = (n: number) => String(n).padStart(2, '0');
+      const stamp = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}_${pad(now.getHours())}-${pad(now.getMinutes())}`;
+      const scopeTag = effectiveScope === 'all' ? 'full_platform' : result.activeDirectorateId;
+      const fileName = `school_sports_backup_${scopeTag}_${stamp}.json`;
+
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+
+      setLastBackupMeta({
+        exportedAt: now.toLocaleTimeString('ar-MA', { hour: '2-digit', minute: '2-digit' }),
+        totalRecords: result.totalRecords,
+        sizeLabel,
+        source: result.source,
+        fileName
+      });
+
+      toast.success(`تم حفظ وتحميل نسخة المنصة بصيغة JSON بنجاح (${result.totalRecords} سجل • ${sizeLabel})`);
+    } catch (error) {
+      console.error('Error exporting platform JSON backup:', error);
+      toast.error('حدث خطأ أثناء تصدير نسخة المنصة بصيغة JSON');
+    } finally {
+      setExportingBackup(false);
     }
   };
 
@@ -1158,7 +1224,25 @@ export const SportsConfig: React.FC = () => {
           </p>
         </div>
 
-        <div className="flex items-center gap-2 shrink-0 self-start sm:self-auto">
+        <div className="flex flex-wrap items-center gap-2 shrink-0 self-start sm:self-auto">
+          {/* Save Platform JSON Backup Button - CENTRAL ADMIN ONLY */}
+          {isCentralAdmin && (
+            <button
+              type="button"
+              onClick={() => handleDownloadPlatformBackupJson('all')}
+              disabled={exportingBackup}
+              className="flex items-center gap-1.5 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold cursor-pointer transition-all shadow-xs disabled:opacity-60"
+              title="حفظ نسخة احتياطية كاملة من بيانات المنصة بصيغة ملف JSON"
+            >
+              {exportingBackup ? (
+                <RefreshCw className="h-4 w-4 animate-spin" />
+              ) : (
+                <FileJson className="h-4 w-4" />
+              )}
+              <span>{exportingBackup ? 'جاري تجهيز النسخة...' : 'حفظ نسخة المنصة (JSON)'}</span>
+            </button>
+          )}
+
           {/* Add New Sport Button - CENTRAL ADMIN ONLY */}
           {isCentralAdmin && (
             <button
@@ -2281,6 +2365,82 @@ export const SportsConfig: React.FC = () => {
                 );
               })}
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Platform Backup Export Card (Central Admin Only) */}
+      {isCentralAdmin && (
+        <div className="bg-gradient-to-r from-emerald-50/80 via-teal-50/60 to-slate-50 p-5 rounded-2xl border border-emerald-200/90 shadow-xs space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-2xs">
+                <Database className="h-5 w-5" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h3 className="text-xs md:text-sm font-black text-slate-900">
+                    حفظ نسخة احتياطية من بيانات المنصة (ملف JSON)
+                  </h3>
+                  <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300">
+                    خاص بالمسير المركزي 🔒
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-600 mt-1 leading-relaxed">
+                  تحميل نسخة كاملة بصيغة JSON تشمل البطولات، المؤسسات، التلاميذ المشاركين، المباريات، النتائج، الملاعب، الحكام، الأطر، الإعدادات والضوابط.
+                </p>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              disabled={exportingBackup}
+              onClick={() => handleDownloadPlatformBackupJson()}
+              className="self-end sm:self-auto px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black rounded-xl shadow-xs transition-all flex items-center gap-2 cursor-pointer disabled:opacity-60 shrink-0"
+            >
+              {exportingBackup ? (
+                <RefreshCw className="h-4 w-4 animate-spin" />
+              ) : (
+                <Download className="h-4 w-4" />
+              )}
+              <span>{exportingBackup ? 'جاري حفظ النسخة...' : 'تحميل النسخة الاحتياطية (.json)'}</span>
+            </button>
+          </div>
+
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2 border-t border-emerald-200/60">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-[11px] font-bold text-slate-700">نطاق النسخة المحفوظة:</span>
+              <button
+                type="button"
+                onClick={() => setBackupScope('all')}
+                className={`px-3 py-1.5 rounded-xl text-[11px] font-bold border transition-all cursor-pointer ${
+                  backupScope === 'all'
+                    ? 'bg-emerald-600 text-white border-emerald-700 shadow-2xs'
+                    : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                }`}
+              >
+                النسخة الشاملة لجميع المديريات والبيانات
+              </button>
+              <button
+                type="button"
+                onClick={() => setBackupScope('active_directorate')}
+                className={`px-3 py-1.5 rounded-xl text-[11px] font-bold border transition-all cursor-pointer ${
+                  backupScope === 'active_directorate'
+                    ? 'bg-emerald-600 text-white border-emerald-700 shadow-2xs'
+                    : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                }`}
+              >
+                نسخة المديرية النشطة فقط
+              </button>
+            </div>
+
+            {lastBackupMeta && (
+              <div className="text-[11px] font-bold text-emerald-900 bg-white px-3 py-1.5 rounded-xl border border-emerald-200 flex items-center gap-2 flex-wrap">
+                <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
+                <span>آخر حفظ ({lastBackupMeta.exportedAt}):</span>
+                <span className="font-mono text-emerald-700" dir="ltr">{lastBackupMeta.totalRecords} records • {lastBackupMeta.sizeLabel}</span>
+              </div>
+            )}
           </div>
         </div>
       )}

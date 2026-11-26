@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { Tournament, Student, School, User, Sport, Match, AffiliationDisplayConfig } from '../types';
-import { SPORTS_MAP, getAgeCategoriesForSeason, normalizeCategoryKey, DataService, getCategoryYearsLabel, isTeacherLevelAllowedForTournament, isCrossCountryU15OpenToPrimary, parseTournamentAllowedLevels, getTournamentLevelAr, doesConfirmationMatchBranch, getEffectiveConfirmedBranches, formatBranchLabelAr, isSchoolSectorAllowedForTournament, getTournamentEducationSectorsAr, getSchoolEducationSector, resolveSchoolCoach, schoolNamesMatch, normalizeArabicSearch, normalizeArabicMatchText, normalizeTournamentAffiliation, isAffiliationAllowedByDisplayConfig, resolveEffectiveTeacherCadre, findMatchingSchoolForTeacher } from '../lib/dataService';
+import { SPORTS_MAP, getAgeCategoriesForSeason, normalizeCategoryKey, DataService, getCategoryYearsLabel, isTeacherLevelAllowedForTournament, isCrossCountryU15OpenToPrimary, parseTournamentAllowedLevels, getTournamentLevelAr, doesConfirmationMatchBranch, getEffectiveConfirmedBranches, formatBranchLabelAr, isSchoolSectorAllowedForTournament, getTournamentEducationSectorsAr, getSchoolEducationSector, resolveSchoolCoach, schoolNamesMatch, normalizeArabicSearch, normalizeArabicMatchText, normalizeTournamentAffiliation, isAffiliationAllowedByDisplayConfig, resolveEffectiveTeacherCadre, findMatchingSchoolForTeacher, isTeamSport, isRegistrationDeadlineExpired } from '../lib/dataService';
 import { canUserDownloadTournamentTablePdf, buildParticipationTableRows, downloadTournamentParticipationTablePdf, formatTournamentRedBannerTitle } from '../lib/tournamentTablePdfService';
 import { useAuth, isSuperAdminEmail } from '../contexts/AuthContext';
 import { AppLogo } from './AppLogo';
@@ -426,6 +426,15 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
   // Function to execute student deletion
   const confirmDeleteStudent = async () => {
     if (!studentToDelete) return;
+    if (isSportModificationLocked) {
+      toast.error(
+        isAllSportCompleted
+          ? 'البطولة منتهية ومؤرشفة نهائياً ولا يمكن حذف المشاركين.'
+          : 'انتهى آخر أجل للتسجيل في العدو الريفي ولا يمكن حذف أي متسابق بعد نهاية التسجيل.'
+      );
+      setStudentToDelete(null);
+      return;
+    }
     setIsDeletingStudent(true);
     const toastId = toast.loading(`جاري حذف المشارك(ة) ${studentToDelete.fullName}...`);
     try {
@@ -448,6 +457,15 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
   const handleSaveEditedStudent = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingStudent) return;
+    if (isSportModificationLocked) {
+      toast.error(
+        isAllSportCompleted
+          ? 'البطولة منتهية ومؤرشفة نهائياً ولا يمكن تعديل المشاركين.'
+          : 'انتهى آخر أجل للتسجيل في العدو الريفي ولا يمكن تعديل بيانات أي متسابق بعد نهاية التسجيل.'
+      );
+      setEditingStudent(null);
+      return;
+    }
     if (!editFullName.trim()) {
       toast.error('يرجى إدخال اسم ونسب المشارك(ة)');
       return;
@@ -507,6 +525,15 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
   // Function to execute category deletion
   const confirmDeleteCategory = async () => {
     if (!categoryToDelete || !selectedSchoolNameForView || !sport) return;
+    if (isSportModificationLocked) {
+      toast.error(
+        isAllSportCompleted
+          ? 'البطولة منتهية ومؤرشفة نهائياً ولا يمكن حذف الفئات.'
+          : 'انتهى آخر أجل للتسجيل في العدو الريفي ولا يمكن حذف المتسابقين بعد نهاية التسجيل.'
+      );
+      setCategoryToDelete(null);
+      return;
+    }
     setIsDeletingCategory(true);
     const toastId = toast.loading(`جاري حذف فئة ${categoryToDelete.label}...`);
     try {
@@ -567,14 +594,20 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
   }, [tournaments, sport]);
 
   const isDeadlineExpired = useMemo(() => {
-    if (!currentDeadline) return false;
-    try {
-      const d = (currentDeadline as any)?.toDate ? (currentDeadline as any).toDate() : new Date(currentDeadline);
-      return !isNaN(d.getTime()) && d.getTime() < Date.now();
-    } catch {
-      return false;
-    }
+    return isRegistrationDeadlineExpired(currentDeadline);
   }, [currentDeadline]);
+
+  const isTeam = isTeamSport(sport?.id || '');
+
+  const isAllSportCompleted = useMemo(() => {
+    if (!sport) return false;
+    const active = tournaments.filter(t => t.sportId === sport.id && t.status !== 'Draft' && (t as any).isActive !== false);
+    return active.length > 0 && active.every(t => t.status === 'Completed' || t.status === 'Archived');
+  }, [tournaments, sport]);
+
+  const isSportModificationLocked = Boolean(
+    isAllSportCompleted || (sport?.id === 'cross_country' && isDeadlineExpired)
+  );
 
   // Head of Technical Committee assigned to this sport
   const techHead = useMemo(() => {
@@ -1953,7 +1986,9 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
                         </div>
                         <p className="text-[11px] mt-0.5 leading-relaxed text-slate-600">
                           {isSchoolCurrentlyConfirmed
-                            ? 'تم إدراج مؤسستك حصرياً في الفروع المؤكدة أدناه. يمكنك إضافة وتعديل أسماء التلاميذ قبل حلول آخر أجل للتسجيل.'
+                            ? isTeam
+                              ? 'تم إدراج مؤسستك في الفروع المؤكدة أدناه. بالنسبة للرياضات الجماعية، يمكنكم إضافة أو تغيير أو حذف المشاركين حتى بعد انقضاء الأجل أو أثناء جريان البطولة.'
+                              : 'تم إدراج مؤسستك حصرياً في الفروع المؤكدة أدناه. يمكنك إضافة وتعديل أسماء التلاميذ قبل حلول آخر أجل للتسجيل.'
                             : 'يمكنك تأكيد رغبة المؤسسة وتحديد الفروع الدقيقة التي ستشارك فيها فقط، ثم استكمال إضافة أسماء التلاميذ لاحقاً.'}
                         </p>
                         {isSchoolCurrentlyConfirmed && currentConfirmationRecord && (
@@ -1999,23 +2034,38 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
                           />
                            <button
                             type="button"
+                            disabled={isSportModificationLocked}
                             onClick={() => {
                               if (isBlockedByImpersonationScope) {
                                 toast.error('عذراً، في وضع الدخول بصفة أستاذ آخر، صلاحيتك محصورة في رياضتك التقنية فقط.');
                                 return;
                               }
-                              const allCompleted = tournaments.length > 0 && tournaments.every(t => t.status === 'Completed' || t.status === 'Archived');
+                              const allCompleted = sportTournaments.length > 0 && sportTournaments.every(t => t.status === 'Completed' || t.status === 'Archived');
                               if (allCompleted) {
                                 toast.error('عذراً، هذه البطولة منتهية ومؤرشفة نهائياً 🔒');
+                                return;
+                              }
+                              if (sport.id === 'cross_country' && isDeadlineExpired) {
+                                toast.error('عذراً، انتهى آخر أجل للتسجيل في العدو الريفي ولا يمكن إضافة أو تعديل أو حذف المتسابقين 🔒');
                                 return;
                               }
                               if (isProgrammed) {
                                 setIsBulkRegisterOpen(true);
                               }
                             }}
-                            className="px-4 py-2 rounded-xl text-xs font-black shadow-3xs transition-all cursor-pointer flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white"
+                            className={`px-4 py-2 rounded-xl text-xs font-black shadow-3xs transition-all flex items-center gap-1.5 ${
+                              isSportModificationLocked
+                                ? 'bg-slate-200 text-slate-500 cursor-not-allowed opacity-80'
+                                : 'bg-blue-600 hover:bg-blue-700 text-white cursor-pointer'
+                            }`}
                           >
-                            <span>{isDeadlineExpired ? 'تعويض / تحيين لائحة المشاركة 🔄' : 'تسجيل / تعويض المشاركين 👥'}</span>
+                            <span>
+                              {sport.id === 'cross_country' && isDeadlineExpired
+                                ? 'انتهى أجل التسجيل في العدو الريفي 🔒'
+                                : isDeadlineExpired
+                                ? 'تغيير / حذف / تحيين لائحة المشاركة 🔄'
+                                : 'تسجيل / تعويض المشاركين 👥'}
+                            </span>
                           </button>
                         </>
                       ) : (
@@ -3223,7 +3273,7 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
                                   {grp.students.length} تلميذ(ة) مشارك
                                 </span>
 
-                                {selectedSchoolNameForView && canManageSchool(selectedSchoolNameForView) && (
+                                {selectedSchoolNameForView && canManageSchool(selectedSchoolNameForView) && !isSportModificationLocked && (
                                   <button
                                     type="button"
                                     onClick={() => setCategoryToDelete({
@@ -3274,24 +3324,34 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
                                       )}
                                       <td className="p-3 text-center">
                                         {canManageThisStudent(stud) ? (
-                                          <div className="flex items-center justify-center gap-1.5">
-                                            <button
-                                              type="button"
-                                              onClick={() => setEditingStudent(stud)}
-                                              className="p-1.5 text-blue-600 hover:text-blue-800 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
-                                              title="تعديل بيانات المشارك(ة)"
+                                          isSportModificationLocked ? (
+                                            <span
+                                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-red-50 text-red-700 border border-red-200 text-[10px] font-bold"
+                                              title={isAllSportCompleted ? 'البطولة منتهية ومؤرشفة' : 'مقفل بعد انتهاء آخر أجل للتسجيل'}
                                             >
-                                              <Edit className="w-3.5 h-3.5" />
-                                            </button>
-                                            <button
-                                              type="button"
-                                              onClick={() => setStudentToDelete(stud)}
-                                              className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
-                                              title="حذف هذا المشارك(ة)"
-                                            >
-                                              <Trash2 className="w-3.5 h-3.5" />
-                                            </button>
-                                          </div>
+                                              <Lock className="w-3 h-3" />
+                                              <span>مقفل</span>
+                                            </span>
+                                          ) : (
+                                            <div className="flex items-center justify-center gap-1.5">
+                                              <button
+                                                type="button"
+                                                onClick={() => setEditingStudent(stud)}
+                                                className="p-1.5 text-blue-600 hover:text-blue-800 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
+                                                title="تعديل بيانات المشارك(ة)"
+                                              >
+                                                <Edit className="w-3.5 h-3.5" />
+                                              </button>
+                                              <button
+                                                type="button"
+                                                onClick={() => setStudentToDelete(stud)}
+                                                className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
+                                                title="حذف هذا المشارك(ة)"
+                                              >
+                                                <Trash2 className="w-3.5 h-3.5" />
+                                              </button>
+                                            </div>
+                                          )
                                         ) : (
                                           <div className="flex items-center justify-center">
                                             <span

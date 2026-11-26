@@ -84,6 +84,7 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
     if (initialRaceIds && initialRaceIds.length > 0) return initialRaceIds;
     return [initialRaceId || 'u15_male'];
   });
+  const [multiRaceMode, setMultiRaceMode] = useState<boolean>(() => Boolean(initialRaceIds && initialRaceIds.length > 1));
 
   // Primary focused category (for fallback or single-view references)
   const [selectedRaceId, setSelectedRaceId] = useState<string>(initialRaceId || 'u15_male');
@@ -106,10 +107,15 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
   const [manualName, setManualName] = useState<string>('');
   const [manualSchool, setManualSchool] = useState<string>('');
 
-  // Race Timer State
+  // Race Timer State (Master clock + independent per-race clocks for simultaneous multi-race timing)
+  type RaceTimerEntry = { running: boolean; elapsedMs: number };
   const [timerRunning, setTimerRunning] = useState<boolean>(false);
   const [elapsedMs, setElapsedMs] = useState<number>(0);
+  const [raceTimers, setRaceTimers] = useState<Record<string, RaceTimerEntry>>({});
   const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const raceTimersRef = useRef<Record<string, RaceTimerEntry>>({});
+  const raceStartBaseRef = useRef<Record<string, number>>({});
+  const masterStartBaseRef = useRef<number | null>(null);
 
   // Audio Beep
   const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
@@ -143,11 +149,13 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
     if (!isOpen) return;
     if (initialRaceIds && initialRaceIds.length > 0) {
       setSelectedRaceIds(initialRaceIds);
+      setMultiRaceMode(initialRaceIds.length > 1);
       setSelectedRaceId(initialRaceIds[0]);
       setManualCategory(initialRaceIds[0]);
       setSummaryCategoryTab(initialRaceIds[0]);
     } else if (initialRaceId) {
       setSelectedRaceIds([initialRaceId]);
+      setMultiRaceMode(false);
       setSelectedRaceId(initialRaceId);
       setManualCategory(initialRaceId);
       setSummaryCategoryTab(initialRaceId);
@@ -185,6 +193,26 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
     elapsedMsRef.current = elapsedMs;
   }, [elapsedMs]);
 
+  const selectedRaceIdsRef = useRef<string[]>(selectedRaceIds);
+  useEffect(() => {
+    selectedRaceIdsRef.current = selectedRaceIds;
+  }, [selectedRaceIds]);
+
+  const raceAffiliationRef = useRef<'non_club' | 'club_affiliated'>(raceAffiliation);
+  useEffect(() => {
+    raceAffiliationRef.current = raceAffiliation;
+  }, [raceAffiliation]);
+
+  const manualCategoryRef = useRef<string>(manualCategory);
+  useEffect(() => {
+    manualCategoryRef.current = manualCategory;
+  }, [manualCategory]);
+
+  const phaseRef = useRef<'setup' | 'running' | 'summary'>(phase);
+  useEffect(() => {
+    phaseRef.current = phase;
+  }, [phase]);
+
   const handleQrScanSuccessRef = useRef<(scannedText: string) => void>(() => {});
   const manualBibInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -192,30 +220,41 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
   const barcodeBufferRef = useRef<string>('');
   const lastKeyTimeRef = useRef<number>(0);
 
-  // Multi-race selection toggle helpers
+  // Multi-race selection toggle helpers (pure top-level updates — never nest setState/toast inside updater callbacks)
   const toggleRaceSelection = (catId: string) => {
-    setSelectedRaceIds(prev => {
-      let next: string[];
-      if (prev.includes(catId)) {
-        if (prev.length <= 1) {
-          toast.error('يجب الإبقاء على سباق واحد على الأقل محدد');
-          return prev;
-        }
-        next = prev.filter(id => id !== catId);
-      } else {
-        next = [...prev, catId];
+    const prev = selectedRaceIdsRef.current;
+    let next: string[];
+    if (prev.includes(catId)) {
+      if (prev.length <= 1) {
+        toast.error('يجب الإبقاء على سباق واحد على الأقل محدد');
+        return;
       }
-      if (!next.includes(selectedRaceId)) {
-        setSelectedRaceId(next[0]);
-      }
-      if (!next.includes(manualCategory)) {
-        setManualCategory(next[0]);
-      }
-      return next;
-    });
+      next = prev.filter(id => id !== catId);
+    } else {
+      next = [...prev, catId];
+    }
+
+    selectedRaceIdsRef.current = next;
+    setSelectedRaceIds(next);
+
+    if (next.length > 1) {
+      setMultiRaceMode(true);
+    }
+    if (!next.includes(selectedRaceId)) {
+      setSelectedRaceId(next[0]);
+    }
+    if (!next.includes(manualCategory)) {
+      manualCategoryRef.current = next[0];
+      setManualCategory(next[0]);
+    }
+    if (!next.includes(summaryCategoryTab)) {
+      setSummaryCategoryTab(next[0]);
+    }
   };
 
   const selectSingleRace = (catId: string) => {
+    selectedRaceIdsRef.current = [catId];
+    manualCategoryRef.current = catId;
     setSelectedRaceIds([catId]);
     setSelectedRaceId(catId);
     setManualCategory(catId);
@@ -225,23 +264,38 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
 
   const selectAllRaces = () => {
     const allIds = CROSS_COUNTRY_CATEGORIES.map(c => c.id);
+    selectedRaceIdsRef.current = allIds;
     setSelectedRaceIds(allIds);
-    toast.success('تم تحديد جميع السباقات الـ 8 (انطلاق مشترك مع نتائج منفصلة لكل فئة)');
+    setMultiRaceMode(true);
+    setSummaryCategoryTab(allIds[0]);
+    toast.success('تم تحديد جميع السباقات الـ 8 (توقيت مشترك مع نتائج منفصلة لكل فئة)');
   };
 
   const selectMaleRaces = () => {
     const maleIds = CROSS_COUNTRY_CATEGORIES.filter(c => c.gender.toLowerCase() === 'male').map(c => c.id);
+    selectedRaceIdsRef.current = maleIds;
     setSelectedRaceIds(maleIds);
+    setMultiRaceMode(true);
     if (!maleIds.includes(selectedRaceId)) setSelectedRaceId(maleIds[0]);
-    if (!maleIds.includes(manualCategory)) setManualCategory(maleIds[0]);
+    if (!maleIds.includes(manualCategory)) {
+      manualCategoryRef.current = maleIds[0];
+      setManualCategory(maleIds[0]);
+    }
+    if (!maleIds.includes(summaryCategoryTab)) setSummaryCategoryTab(maleIds[0]);
     toast.success('تم تحديد فئات الذكور (4 سباقات مشتركة مع نتائج منفصلة)');
   };
 
   const selectFemaleRaces = () => {
     const femaleIds = CROSS_COUNTRY_CATEGORIES.filter(c => c.gender.toLowerCase() === 'female').map(c => c.id);
+    selectedRaceIdsRef.current = femaleIds;
     setSelectedRaceIds(femaleIds);
+    setMultiRaceMode(true);
     if (!femaleIds.includes(selectedRaceId)) setSelectedRaceId(femaleIds[0]);
-    if (!femaleIds.includes(manualCategory)) setManualCategory(femaleIds[0]);
+    if (!femaleIds.includes(manualCategory)) {
+      manualCategoryRef.current = femaleIds[0];
+      setManualCategory(femaleIds[0]);
+    }
+    if (!femaleIds.includes(summaryCategoryTab)) setSummaryCategoryTab(femaleIds[0]);
     toast.success('تم تحديد فئات الإناث (4 سباقات مشتركة مع نتائج منفصلة)');
   };
 
@@ -332,6 +386,24 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
     return resolveStudentCategoryId({ category: categoryAr, gender: genderAr as any });
   };
 
+  const normalizeBaseCatId = (catId?: string) => (catId || '').replace(/_club(_affiliated)?$/, '');
+
+  const recomputeArrivalRanks = (list: PodiumWinner[], fallbackCatId: string): PodiumWinner[] => {
+    const catCounters: Record<string, number> = {};
+    return list.map((item, idx) => {
+      const baseCat = normalizeBaseCatId(item.categoryId) || fallbackCatId;
+      const catRank = (catCounters[baseCat] || 0) + 1;
+      catCounters[baseCat] = catRank;
+      return {
+        ...item,
+        categoryId: baseCat,
+        rank: catRank,
+        overallRank: idx + 1,
+        notes: catRank <= 3 ? `مؤهل(ة) للبطولة الجهوية ${catRank === 1 ? '🥇' : catRank === 2 ? '🥈' : '🥉'}` : ''
+      };
+    });
+  };
+
   // Track initial load to prevent clobbering arrivals during active scanning
   const isInitialLoadDone = useRef<boolean>(false);
 
@@ -358,16 +430,22 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
         }
 
         const combinedArrivals: PodiumWinner[] = [];
+        const seenKeys = new Set<string>();
         selectedRaceIds.forEach(catId => {
           const targetKey = raceAffiliation === 'club_affiliated' ? `${catId}_club` : catId;
           const catRes = liveResults[targetKey];
           const catDef = CROSS_COUNTRY_CATEGORIES.find(c => c.id === catId);
           if (catRes && catRes.podium && catRes.podium.length > 0) {
             catRes.podium.forEach((item, idx) => {
+              const itemBaseCat = normalizeBaseCatId(item.categoryId);
+              if (itemBaseCat && itemBaseCat !== catId) return;
+              const dedupKey = `${catId}::${item.studentId || item.bibNumber || item.fullName || idx}`;
+              if (seenKeys.has(dedupKey)) return;
+              seenKeys.add(dedupKey);
               combinedArrivals.push({
                 ...item,
                 rank: item.rank || (idx + 1),
-                categoryId: item.categoryId || targetKey,
+                categoryId: catId,
                 categoryTitle: item.categoryTitle || catDef?.titleAr || catRes.titleAr,
                 affiliationType: item.affiliationType || raceAffiliation
               });
@@ -375,11 +453,18 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
           }
         });
 
-        const mappedArrivals = combinedArrivals.map((arr, i) => ({
+        combinedArrivals.sort((a, b) => {
+          const oa = a.overallRank ?? Number.MAX_SAFE_INTEGER;
+          const ob = b.overallRank ?? Number.MAX_SAFE_INTEGER;
+          if (oa !== ob) return oa - ob;
+          return (a.rank || 0) - (b.rank || 0);
+        });
+
+        const withParticipation = combinedArrivals.map((arr) => ({
           ...arr,
-          overallRank: arr.overallRank || (i + 1),
           participationType: resolveRunnerParticipationType(arr, allStudentsRef.current)
         }));
+        const mappedArrivals = recomputeArrivalRanks(withParticipation, activeCategory.id);
         
         if (phase !== 'running') {
           setArrivals(mappedArrivals);
@@ -422,12 +507,39 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
     }
   }, [isOpen]);
 
-  // Race Stopwatch logic
+  // Unified Race Stopwatch logic (supports synchronized & independent clocks across multiple selected races)
+  const anyRaceTimerRunning = timerRunning || Object.keys(raceTimers).some(id => raceTimers[id]?.running);
+
   useEffect(() => {
-    if (timerRunning) {
-      const startTime = Date.now() - elapsedMs;
+    if (anyRaceTimerRunning) {
+      const now = Date.now();
+      if (timerRunning && masterStartBaseRef.current === null) {
+        masterStartBaseRef.current = now - elapsedMsRef.current;
+      }
       timerRef.current = setInterval(() => {
-        setElapsedMs(Date.now() - startTime);
+        const tickNow = Date.now();
+        if (masterStartBaseRef.current !== null) {
+          const nextMaster = tickNow - masterStartBaseRef.current;
+          elapsedMsRef.current = nextMaster;
+          setElapsedMs(nextMaster);
+        }
+        const curTimers = raceTimersRef.current;
+        const keys = Object.keys(curTimers);
+        let changed = false;
+        const nextTimers: Record<string, RaceTimerEntry> = { ...curTimers };
+        for (const id of keys) {
+          if (curTimers[id]?.running) {
+            const base = raceStartBaseRef.current[id];
+            if (typeof base === 'number') {
+              nextTimers[id] = { running: true, elapsedMs: tickNow - base };
+              changed = true;
+            }
+          }
+        }
+        if (changed) {
+          raceTimersRef.current = nextTimers;
+          setRaceTimers(nextTimers);
+        }
       }, 100);
     } else if (timerRef.current) {
       clearInterval(timerRef.current);
@@ -435,7 +547,112 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
     };
-  }, [timerRunning]);
+  }, [anyRaceTimerRunning, timerRunning]);
+
+  const getRaceElapsedMs = (catId: string): number => {
+    const entry = raceTimersRef.current[catId];
+    if (entry?.running && typeof raceStartBaseRef.current[catId] === 'number') {
+      return Math.max(0, Date.now() - raceStartBaseRef.current[catId]);
+    }
+    if (entry && typeof entry.elapsedMs === 'number') {
+      return entry.elapsedMs;
+    }
+    if (masterStartBaseRef.current !== null) {
+      return Math.max(0, Date.now() - masterStartBaseRef.current);
+    }
+    return elapsedMsRef.current;
+  };
+
+  const toggleMasterTimer = () => {
+    const now = Date.now();
+    const currentlyRunning = timerRunning || selectedRaceIdsRef.current.some(id => raceTimersRef.current[id]?.running);
+    if (currentlyRunning) {
+      // Pause master & all selected race timers
+      if (masterStartBaseRef.current !== null) {
+        const finalMaster = now - masterStartBaseRef.current;
+        elapsedMsRef.current = finalMaster;
+        setElapsedMs(finalMaster);
+        masterStartBaseRef.current = null;
+      }
+      setTimerRunning(false);
+      const nextTimers: Record<string, RaceTimerEntry> = { ...raceTimersRef.current };
+      Object.keys(nextTimers).forEach(id => {
+        if (nextTimers[id].running) {
+          const base = raceStartBaseRef.current[id];
+          const val = typeof base === 'number' ? now - base : nextTimers[id].elapsedMs;
+          delete raceStartBaseRef.current[id];
+          nextTimers[id] = { running: false, elapsedMs: val };
+        }
+      });
+      raceTimersRef.current = nextTimers;
+      setRaceTimers(nextTimers);
+    } else {
+      // Start/resume master & all selected race timers simultaneously
+      masterStartBaseRef.current = now - elapsedMsRef.current;
+      setTimerRunning(true);
+      const nextTimers: Record<string, RaceTimerEntry> = { ...raceTimersRef.current };
+      selectedRaceIdsRef.current.forEach(id => {
+        const prevElapsed = nextTimers[id]?.elapsedMs ?? elapsedMsRef.current;
+        raceStartBaseRef.current[id] = now - prevElapsed;
+        nextTimers[id] = { running: true, elapsedMs: prevElapsed };
+      });
+      raceTimersRef.current = nextTimers;
+      setRaceTimers(nextTimers);
+    }
+  };
+
+  const resetMasterTimer = () => {
+    masterStartBaseRef.current = null;
+    setTimerRunning(false);
+    elapsedMsRef.current = 0;
+    setElapsedMs(0);
+    const nextTimers: Record<string, RaceTimerEntry> = {};
+    selectedRaceIdsRef.current.forEach(id => {
+      delete raceStartBaseRef.current[id];
+      nextTimers[id] = { running: false, elapsedMs: 0 };
+    });
+    raceTimersRef.current = nextTimers;
+    setRaceTimers(nextTimers);
+  };
+
+  const toggleSingleRaceTimer = (catId: string) => {
+    const now = Date.now();
+    const cur = raceTimersRef.current[catId] || { running: false, elapsedMs: elapsedMsRef.current };
+    const nextTimers: Record<string, RaceTimerEntry> = { ...raceTimersRef.current };
+    if (cur.running) {
+      const base = raceStartBaseRef.current[catId];
+      const val = typeof base === 'number' ? now - base : cur.elapsedMs;
+      delete raceStartBaseRef.current[catId];
+      nextTimers[catId] = { running: false, elapsedMs: val };
+    } else {
+      raceStartBaseRef.current[catId] = now - cur.elapsedMs;
+      nextTimers[catId] = { running: true, elapsedMs: cur.elapsedMs };
+      if (!timerRunning) {
+        masterStartBaseRef.current = now - elapsedMsRef.current;
+        setTimerRunning(true);
+      }
+    }
+    raceTimersRef.current = nextTimers;
+    setRaceTimers(nextTimers);
+    const anyStillRunning = Object.keys(nextTimers).some(id => nextTimers[id]?.running);
+    if (!anyStillRunning && masterStartBaseRef.current !== null) {
+      const finalMaster = now - masterStartBaseRef.current;
+      elapsedMsRef.current = finalMaster;
+      setElapsedMs(finalMaster);
+      masterStartBaseRef.current = null;
+      setTimerRunning(false);
+    }
+  };
+
+  const resetSingleRaceTimer = (catId: string) => {
+    delete raceStartBaseRef.current[catId];
+    const nextTimers: Record<string, RaceTimerEntry> = {
+      ...raceTimersRef.current,
+      [catId]: { running: false, elapsedMs: 0 }
+    };
+    raceTimersRef.current = nextTimers;
+    setRaceTimers(nextTimers);
+  };
 
   const formatElapsedTime = (ms: number) => {
     const totalSeconds = Math.floor(ms / 1000);
@@ -626,12 +843,10 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
         }
 
         const newStudents = await DataService.addStudentsBulk(importedList);
-        setAllStudents(prev => {
-          const merged = [...newStudents, ...prev];
-          allStudentsRef.current = merged;
-          canonicalBibByStudentIdRef.current = computeCrossCountrySequentialBibs(merged, allSchools).bibByStudentId;
-          return merged;
-        });
+        const merged = [...newStudents, ...allStudentsRef.current];
+        allStudentsRef.current = merged;
+        canonicalBibByStudentIdRef.current = computeCrossCountrySequentialBibs(merged, allSchools).bibByStudentId;
+        setAllStudents(merged);
         toast.success(`تم استيراد وحفظ ${newStudents.length} عداء(ة) بنجاح في قاعدة البيانات! 📂🔥`);
       } catch (error) {
         console.error('Error importing Excel:', error);
@@ -770,8 +985,8 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
     if (!scannedText) return;
     const now = Date.now();
 
-    // If modal is in setup phase, auto-activate race so the scan registers immediately!
-    if (phase === 'setup') {
+    // If modal is in setup phase, auto-activate selected races so the scan registers immediately!
+    if (phaseRef.current === 'setup') {
       handleStartRace(false);
     }
 
@@ -795,10 +1010,25 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
 
   // Main Logic: Record Runner Arrival & SAVE LIVE INSTANTLY
   const processArrival = async (bibInput: string, nameInput = '', schoolInput = '') => {
-    // If modal was in setup phase, activate running race mode immediately
-    if (phase === 'setup') {
+    const activeRaceIds = selectedRaceIdsRef.current;
+    const activeAff = raceAffiliationRef.current;
+    const fallbackManualCat = manualCategoryRef.current || activeCategory.id;
+
+    // If modal was in setup phase, activate running race mode & all selected timers immediately
+    if (phaseRef.current === 'setup') {
+      const now = Date.now();
       setPhase('running');
+      phaseRef.current = 'running';
+      masterStartBaseRef.current = now - elapsedMsRef.current;
       setTimerRunning(true);
+      const nextTimers: Record<string, RaceTimerEntry> = { ...raceTimersRef.current };
+      activeRaceIds.forEach(id => {
+        const prevElapsed = nextTimers[id]?.elapsedMs ?? elapsedMsRef.current;
+        raceStartBaseRef.current[id] = now - prevElapsed;
+        nextTimers[id] = { running: true, elapsedMs: prevElapsed };
+      });
+      raceTimersRef.current = nextTimers;
+      setRaceTimers(nextTimers);
     }
 
     const { bib: cleanBib, nameOverride, schoolOverride } = extractBibNumber(bibInput);
@@ -824,7 +1054,8 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
     if (existingIndex !== -1) {
       playBeep();
       const existing = currentArrivals[existingIndex];
-      toast.error(`رقم الصدرية #${cleanBib} (${existing.fullName}) مسجل مسبقاً في قائمة الواصلين بالمرتبة #${existingIndex + 1}!`, {
+      const existingRank = existing.rank || (existingIndex + 1);
+      toast.error(`رقم الصدرية #${cleanBib} (${existing.fullName}) مسجل مسبقاً في قائمة الواصلين بالمرتبة #${existingRank}!`, {
         id: `dup-${cleanBib}`,
         duration: 4000
       });
@@ -874,14 +1105,14 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
 
     const inSelectedRacesAff = studentsPool.filter(s => {
       const resolvedCatId = resolveStudentCategoryId(s);
-      if (!selectedRaceIds.includes(resolvedCatId)) return false;
+      if (!activeRaceIds.includes(resolvedCatId)) return false;
       const sAff = s.affiliationType || 'non_club';
-      return sAff === raceAffiliation;
+      return sAff === activeAff;
     });
 
     const inSelectedRacesAnyAff = studentsPool.filter(s => {
       const resolvedCatId = resolveStudentCategoryId(s);
-      return selectedRaceIds.includes(resolvedCatId);
+      return activeRaceIds.includes(resolvedCatId);
     });
 
     let matchedResult = findMatchingStudent(inSelectedRacesAff);
@@ -907,13 +1138,9 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
       );
     }
 
-    const nextRank = currentArrivals.length + 1;
-    const currentMs = elapsedMsRef.current;
-    const currentTimeStr = currentMs > 0 ? formatElapsedTime(currentMs) : (elapsedMs > 0 ? formatElapsedTime(elapsedMs) : '00:00.0');
-
     const studentCatId = matchedStudent 
-      ? resolveStudentCategoryId(matchedStudent, manualCategory || activeCategory.id)
-      : (manualCategory || activeCategory.id);
+      ? resolveStudentCategoryId(matchedStudent, fallbackManualCat)
+      : fallbackManualCat;
 
     const targetCatDef = CROSS_COUNTRY_CATEGORIES.find(c => c.id === studentCatId) || activeCategory;
 
@@ -925,15 +1152,15 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
           : (storedMatchedBib || canonicalMatchedBib || cleanBib))
       : cleanBib;
 
-    // 🛑 VALIDATION 1: Check category and gender mismatch!
+    // 🛑 VALIDATION 1: Check category and gender mismatch against all active selected races!
     if (matchedStudent) {
-      const isCategoryAllowed = selectedRaceIds.includes(studentCatId);
+      const isCategoryAllowed = activeRaceIds.includes(studentCatId);
       if (!isCategoryAllowed) {
         playErrorTone();
         if (typeof navigator !== 'undefined' && navigator.vibrate) {
           try { navigator.vibrate([300, 100, 300]); } catch (e) {}
         }
-        const activeRaceTitles = selectedRaceIds
+        const activeRaceTitles = activeRaceIds
           .map(id => CROSS_COUNTRY_CATEGORIES.find(c => c.id === id)?.titleAr || id)
           .join(' أو ');
         const studentCatDef = CROSS_COUNTRY_CATEGORIES.find(c => c.id === studentCatId) || targetCatDef;
@@ -953,12 +1180,12 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
 
       // 🛑 VALIDATION 2: Check affiliation mismatch (non_club vs club_affiliated)
       const studentAff = matchedStudent.affiliationType || 'non_club';
-      if (raceAffiliation && studentAff !== raceAffiliation) {
+      if (activeAff && studentAff !== activeAff) {
         playErrorTone();
         if (typeof navigator !== 'undefined' && navigator.vibrate) {
           try { navigator.vibrate([300, 100, 300]); } catch (e) {}
         }
-        const expectedAffLabel = raceAffiliation === 'club_affiliated' ? 'المنتمين للأندية 🟡' : 'غير المنتمين للأندية ⚪';
+        const expectedAffLabel = activeAff === 'club_affiliated' ? 'المنتمين للأندية 🟡' : 'غير المنتمين للأندية ⚪';
         const actualAffLabel = studentAff === 'club_affiliated' ? 'المنتمين للأندية 🟡' : 'غير المنتمين للأندية ⚪';
         toast.error(
           `🚫 خطأ في الصنف: الصدرية #${displayBib} (${matchedStudent.fullName}) مسجل في صنف "${actualAffLabel}"، بينما السباق الحالي مخصص لصنف "${expectedAffLabel}". يتنافس المنتمين لوحدهم وغير المنتمين لوحدهم ولا يمكن احتساب نتائج صنف مع صنف آخر!`,
@@ -990,9 +1217,15 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
       return;
     }
 
+    const raceElapsedMs = getRaceElapsedMs(studentCatId);
+    const currentTimeStr = raceElapsedMs > 0 ? formatElapsedTime(raceElapsedMs) : '00:00.0';
+    const nextCatRank =
+      currentArrivals.filter(a => (normalizeBaseCatId(a.categoryId) || activeCategory.id) === studentCatId).length + 1;
+    const nextOverallRank = currentArrivals.length + 1;
+
     const newArrival: PodiumWinner = {
-      rank: nextRank,
-      overallRank: nextRank,
+      rank: nextCatRank,
+      overallRank: nextOverallRank,
       studentId: matchedStudent?.id || '',
       categoryId: studentCatId,
       categoryTitle: targetCatDef.titleAr,
@@ -1006,16 +1239,16 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
           fullName: finalName,
           participationType: (matchedStudent as any)?.participationType
         },
-        allStudents
+        studentsPool
       ),
-      affiliationType: matchedStudent?.affiliationType || raceAffiliation,
+      affiliationType: matchedStudent?.affiliationType || activeAff,
       directorateName: matchedStudent?.directorateName || 'مديرية تاوريرت',
       academyName: matchedStudent?.academyName || 'الأكاديمية الجهوية',
       supervisorName: matchedStudent?.coachName || '-',
-      notes: nextRank <= 3 ? `مؤهل(ة) للبطولة الجهوية ${nextRank === 1 ? '🥇' : nextRank === 2 ? '🥈' : '🥉'}` : ''
+      notes: nextCatRank <= 3 ? `مؤهل(ة) للبطولة الجهوية ${nextCatRank === 1 ? '🥇' : nextCatRank === 2 ? '🥈' : '🥉'}` : ''
     };
 
-    const updatedArrivals = [...currentArrivals, newArrival];
+    const updatedArrivals = recomputeArrivalRanks([...currentArrivals, newArrival], activeCategory.id);
     arrivalsRef.current = updatedArrivals;
     setArrivals(updatedArrivals);
     playBeep();
@@ -1026,12 +1259,15 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
       } catch (e) {}
     }
 
-    toast.success(`🏁 وصل العداء #${displayBib}: ${newArrival.fullName} (المرتبة #${nextRank})`, {
-      icon: '🏃‍♂️',
-      duration: 3500
-    });
+    toast.success(
+      `🏁 وصل العداء #${displayBib}: ${newArrival.fullName} (المرتبة #${nextCatRank}${activeRaceIds.length > 1 ? ` • ${targetCatDef.shortLabel}` : ''})`,
+      {
+        icon: '🏃‍♂️',
+        duration: 3500
+      }
+    );
 
-    // Save LIVE to database immediately
+    // Save LIVE to database immediately (strictly isolated per category)
     try {
       await saveLiveResults(updatedArrivals);
     } catch (saveErr) {
@@ -1049,12 +1285,8 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
 
   // Remove Arrival Item & SAVE LIVE INSTANTLY
   const handleRemoveArrival = async (index: number) => {
-    const updated = arrivalsRef.current.filter((_, i) => i !== index).map((arr, i) => ({
-      ...arr,
-      rank: i + 1,
-      overallRank: i + 1,
-      notes: (i + 1) <= 3 ? `مؤهل(ة) للبطولة الجهوية ${i + 1 === 1 ? '🥇' : i + 1 === 2 ? '🥈' : '🥉'}` : ''
-    }));
+    const filtered = arrivalsRef.current.filter((_, i) => i !== index);
+    const updated = recomputeArrivalRanks(filtered, activeCategory.id);
     arrivalsRef.current = updated;
     setArrivals(updated);
     toast.success('تم حذف العداء وإعادة ترتيب الواصلين');
@@ -1063,45 +1295,58 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
     await saveLiveResults(updated);
   };
 
-  // Move Arrival Up or Down & SAVE LIVE INSTANTLY
+  // Move Arrival Up or Down (within same category when filtered by category tab) & SAVE LIVE INSTANTLY
   const handleMoveArrival = async (index: number, direction: 'up' | 'down') => {
-    if (direction === 'up' && index === 0) return;
-    if (direction === 'down' && index === arrivals.length - 1) return;
+    const list = arrivalsRef.current;
+    if (index < 0 || index >= list.length) return;
 
-    const targetIndex = direction === 'up' ? index - 1 : index + 1;
-    const updated = [...arrivals];
+    let targetIndex = -1;
+    if (viewCategoryFilter !== 'ALL') {
+      const targetCat = normalizeBaseCatId(list[index].categoryId) || activeCategory.id;
+      const step = direction === 'up' ? -1 : 1;
+      for (let i = index + step; i >= 0 && i < list.length; i += step) {
+        if ((normalizeBaseCatId(list[i].categoryId) || activeCategory.id) === targetCat) {
+          targetIndex = i;
+          break;
+        }
+      }
+    } else {
+      targetIndex = direction === 'up' ? index - 1 : index + 1;
+    }
+
+    if (targetIndex < 0 || targetIndex >= list.length) return;
+
+    const updated = [...list];
     const temp = updated[index];
     updated[index] = updated[targetIndex];
     updated[targetIndex] = temp;
 
-    const reordered = updated.map((arr, i) => ({
-      ...arr,
-      rank: i + 1,
-      notes: (i + 1) <= 3 ? `مؤهل(ة) للبطولة الجهوية ${i + 1 === 1 ? '🥇' : i + 1 === 2 ? '🥈' : '🥉'}` : ''
-    }));
-
+    const reordered = recomputeArrivalRanks(updated, activeCategory.id);
+    arrivalsRef.current = reordered;
     setArrivals(reordered);
+
     // Save LIVE
     await saveLiveResults(reordered);
   };
 
-  // Save Results Live to Database for All Arrived Runners
+  // Save Results Live to Database for All Active Categories (isolated per category — never mixes races)
   const [isSavingLive, setIsSavingLive] = useState<boolean>(false);
   const saveLiveResults = async (updatedArrivals: PodiumWinner[], showSuccessToast = false, statusOverride?: CrossCountryCategoryResult['status']) => {
     setIsSavingLive(true);
     try {
       const activeSeason = await DataService.getActiveSeason();
+      const activeAff = raceAffiliationRef.current;
+      const activeRaceIds = selectedRaceIdsRef.current;
 
       // Determine final status
       let finalStatus: CrossCountryCategoryResult['status'] = statusOverride;
       if (!finalStatus) {
-        if (phase === 'running') finalStatus = 'running';
-        else if (phase === 'summary') finalStatus = 'completed';
+        if (phaseRef.current === 'running') finalStatus = 'running';
+        else if (phaseRef.current === 'summary') finalStatus = 'completed';
         else finalStatus = 'setup';
       }
 
-      const targetActiveKey = raceAffiliation === 'club_affiliated' ? `${activeCategory.id}_club` : activeCategory.id;
-      const affSuffix = raceAffiliation === 'club_affiliated' ? ' (المنتمين للأندية)' : ' (مدرسي)';
+      const affSuffix = activeAff === 'club_affiliated' ? ' (المنتمين للأندية)' : ' (مدرسي)';
       const canApproveCC = canUserApproveSportResult(userProfile, 'cross_country');
       const actorName = userProfile?.fullName || userProfile?.email || (canApproveCC ? 'رئيس اللجنة التقنية' : 'حكم خط الوصول');
       const approvalMeta = canApproveCC
@@ -1116,111 +1361,69 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
             recordedByRole: userProfile?.role || 'REFEREE'
           };
 
-      // 1. Save all arrivals for the activeCategory
-      const categoryResult: CrossCountryCategoryResult = {
-        categoryId: targetActiveKey,
-        category: activeCategory.category,
-        gender: activeCategory.gender,
-        titleAr: `${activeCategory.titleAr}${affSuffix}`,
-        distance: activeCategory.distance,
-        seasonId: activeSeason,
-        affiliationType: raceAffiliation,
-        podium: updatedArrivals,
-        status: finalStatus,
-        ...approvalMeta,
-        updatedAt: new Date().toISOString()
-      };
+      const arrivalCatIds = updatedArrivals
+        .map(a => normalizeBaseCatId(a.categoryId))
+        .filter(Boolean);
+      const raceIdsToPersist = Array.from(new Set([...activeRaceIds, ...arrivalCatIds]));
 
-      await DataService.saveCrossCountryCategoryResult(categoryResult);
+      const updatedResultsBatch: Record<string, CrossCountryCategoryResult> = {};
 
-      // Also update local resultsMap state for instant UI feedback
-      setResultsMap(prev => ({
-        ...prev,
-        [targetActiveKey]: categoryResult
-      }));
+      for (const raceId of raceIdsToPersist) {
+        const catDef = CROSS_COUNTRY_CATEGORIES.find(c => c.id === raceId);
+        if (!catDef) continue;
 
-      // 2. Also distribute to each category found in the arrivals
-      const categoriesInArrivals = Array.from(new Set(updatedArrivals.map(a => a.categoryId).filter(Boolean)));
-      for (const catId of categoriesInArrivals) {
-        if (!catId) continue;
-        const cleanBaseId = catId.replace(/_club(_affiliated)?$/, '');
-        if (cleanBaseId === activeCategory.id) continue;
-        const targetMultiKey = raceAffiliation === 'club_affiliated' ? `${cleanBaseId}_club` : cleanBaseId;
-        const catDef = CROSS_COUNTRY_CATEGORIES.find(c => c.id === cleanBaseId);
-        if (catDef) {
-          const catArrivals = updatedArrivals.filter(a => (a.categoryId || '').replace(/_club(_affiliated)?$/, '') === cleanBaseId);
-          if (catArrivals.length > 0) {
-            const multiRes: CrossCountryCategoryResult = {
-              categoryId: targetMultiKey,
-              category: catDef.category,
-              gender: catDef.gender,
-              titleAr: `${catDef.titleAr}${affSuffix}`,
-              distance: catDef.distance,
-              seasonId: activeSeason,
-              affiliationType: raceAffiliation,
-              podium: catArrivals.map((arr, i) => ({ ...arr, rank: i + 1 })),
-              status: finalStatus,
-              ...approvalMeta,
-              updatedAt: new Date().toISOString()
-            };
-            await DataService.saveCrossCountryCategoryResult(multiRes);
-            setResultsMap(prev => ({ ...prev, [targetMultiKey]: multiRes }));
-          }
+        const targetKey = activeAff === 'club_affiliated' ? `${raceId}_club` : raceId;
+        const rawCatArrivals = updatedArrivals.filter(a => {
+          const base = normalizeBaseCatId(a.categoryId);
+          return base === raceId || (!base && raceId === activeCategory.id);
+        });
+
+        // Re-index cleanly within this specific category
+        const catPodium: PodiumWinner[] = rawCatArrivals.map((arr, i) => ({
+          ...arr,
+          categoryId: raceId,
+          categoryTitle: arr.categoryTitle || catDef.titleAr,
+          rank: i + 1,
+          notes: (i + 1) <= 3 ? `مؤهل(ة) للبطولة الجهوية ${i + 1 === 1 ? '🥇' : i + 1 === 2 ? '🥈' : '🥉'}` : ''
+        }));
+
+        // Persist if category has arrivals, OR is actively selected in this session (when running/completed/primary)
+        const shouldSave =
+          catPodium.length > 0 ||
+          raceId === activeCategory.id ||
+          (activeRaceIds.includes(raceId) && (finalStatus === 'running' || finalStatus === 'completed'));
+
+        if (!shouldSave) continue;
+
+        const categoryResult: CrossCountryCategoryResult = {
+          categoryId: targetKey,
+          category: catDef.category,
+          gender: catDef.gender,
+          titleAr: `${catDef.titleAr}${affSuffix}`,
+          distance: catDef.distance,
+          seasonId: activeSeason,
+          affiliationType: activeAff,
+          podium: catPodium,
+          status: finalStatus,
+          ...approvalMeta,
+          updatedAt: new Date().toISOString()
+        };
+
+        await DataService.saveCrossCountryCategoryResult(categoryResult);
+        updatedResultsBatch[targetKey] = categoryResult;
+
+        try {
+          localStorage.setItem(`cc_scanner_arrivals_${targetKey}`, JSON.stringify(catPodium));
+        } catch (e) {
+          console.warn('Local storage backup error:', e);
         }
       }
 
-      // 4. Propagate final status to all selected race IDs
-      // This ensures all categories in a multi-race run show the same status (running or completed)
-      if (finalStatus === 'running' || finalStatus === 'completed') {
-        for (const raceId of selectedRaceIds) {
-          if (raceId === activeCategory.id) continue;
-          
-          const targetPropKey = raceAffiliation === 'club_affiliated' ? `${raceId}_club` : raceId;
-          const catDef = CROSS_COUNTRY_CATEGORIES.find(c => c.id === raceId);
-          if (catDef) {
-            const catArrivals = updatedArrivals.filter(a => (a.categoryId || '').replace(/_club(_affiliated)?$/, '') === raceId);
-            
-            // Only update if there are actual arrivals matching this category to avoid creating false duplicates
-            if (catArrivals.length > 0) {
-              await DataService.saveCrossCountryCategoryResult({
-                categoryId: targetPropKey,
-                category: catDef.category,
-                gender: catDef.gender,
-                titleAr: `${catDef.titleAr}${affSuffix}`,
-                distance: catDef.distance,
-                seasonId: activeSeason,
-                affiliationType: raceAffiliation,
-                podium: catArrivals.map((arr, i) => ({ ...arr, rank: i + 1 })),
-                status: finalStatus,
-                ...approvalMeta,
-                updatedAt: new Date().toISOString()
-              });
-              // Update local resultsMap for instant feedback
-              setResultsMap(prev => ({
-                ...prev,
-                [targetPropKey]: {
-                  categoryId: targetPropKey,
-                  category: catDef.category,
-                  gender: catDef.gender,
-                  titleAr: `${catDef.titleAr}${affSuffix}`,
-                  distance: catDef.distance,
-                  seasonId: activeSeason,
-                  affiliationType: raceAffiliation,
-                  podium: catArrivals.map((arr, i) => ({ ...arr, rank: i + 1 })),
-                  status: finalStatus,
-                  updatedAt: new Date().toISOString()
-                }
-              }));
-            }
-          }
-        }
-      }
-
-      // 3. Backup to localStorage directly so nothing can be lost
-      try {
-        localStorage.setItem(`cc_scanner_arrivals_${targetActiveKey}`, JSON.stringify(updatedArrivals));
-      } catch (e) {
-        console.warn('Local storage backup error:', e);
+      if (Object.keys(updatedResultsBatch).length > 0) {
+        setResultsMap(prev => ({
+          ...prev,
+          ...updatedResultsBatch
+        }));
       }
 
       if (onResultsUpdated) {
@@ -1253,21 +1456,28 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
     setIsClearing(true);
     try {
       if (clearScope === 'current') {
-        // 1. Clear arrivals for the currently active category only
+        // 1. Clear arrivals for all currently selected races
         setArrivals([]);
-        setElapsedMs(0);
-        setTimerRunning(false);
+        arrivalsRef.current = [];
+        resetMasterTimer();
         setPhase('setup');
-        const targetClearKey = raceAffiliation === 'club_affiliated' ? `${activeCategory.id}_club` : activeCategory.id;
-        await DataService.clearCrossCountryCategoryResult(targetClearKey);
+        phaseRef.current = 'setup';
+        for (const raceId of selectedRaceIds) {
+          const targetClearKey = raceAffiliation === 'club_affiliated' ? `${raceId}_club` : raceId;
+          await DataService.clearCrossCountryCategoryResult(targetClearKey);
+        }
         if (onResultsUpdated) onResultsUpdated();
-        toast.success(`تم تفريغ نتائج سباق (${activeCategory.titleAr}) وحذف التوقيت بنجاح 🗑️`);
+        const clearedLabel = selectedRaceIds.length > 1
+          ? `${selectedRaceIds.length} سباقات محددة`
+          : activeCategory.titleAr;
+        toast.success(`تم تفريغ نتائج (${clearedLabel}) وحذف التوقيت بنجاح 🗑️`);
       } else if (clearScope === 'all_races') {
         // 2. Clear all 8 cross country races
         setArrivals([]);
-        setElapsedMs(0);
-        setTimerRunning(false);
+        arrivalsRef.current = [];
+        resetMasterTimer();
         setPhase('setup');
+        phaseRef.current = 'setup';
         await DataService.clearAllCrossCountryResults();
         if (onResultsUpdated) onResultsUpdated();
         toast.success('تم تفريغ نتائج جميع سباقات العدو الريفي الـ 8 بالكامل 🔄');
@@ -1279,12 +1489,13 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
       } else if (clearScope === 'everything') {
         // 4. Factory reset: clear all 8 races + participants
         setArrivals([]);
-        setElapsedMs(0);
-        setTimerRunning(false);
+        arrivalsRef.current = [];
+        resetMasterTimer();
         await DataService.clearAllCrossCountryResults();
         const removedCount = await DataService.clearCrossCountryParticipants();
         setAllStudents([]);
         setPhase('setup');
+        phaseRef.current = 'setup';
         if (onResultsUpdated) onResultsUpdated();
         toast.success(`تم تفريغ وإعادة ضبط تطبيق المسح بالكامل (كافة السباقات + ${removedCount} مشارك) بنجاح ✨`);
       }
@@ -1297,29 +1508,67 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
     }
   };
 
-  // Start the race officially
+  // Start the race(s) officially (supports 1 or 2+ races simultaneously)
   const handleStartRace = async (clearExisting = false) => {
+    const now = Date.now();
+    const activeRaceIds = selectedRaceIdsRef.current;
+
     if (clearExisting) {
       setArrivals([]);
       arrivalsRef.current = [];
-      setElapsedMs(0);
       elapsedMsRef.current = 0;
+      setElapsedMs(0);
     }
+
+    masterStartBaseRef.current = now - (clearExisting ? 0 : elapsedMsRef.current);
     setTimerRunning(true);
+
+    const nextTimers: Record<string, RaceTimerEntry> = {};
+    activeRaceIds.forEach(id => {
+      const prevElapsed = clearExisting ? 0 : (raceTimersRef.current[id]?.elapsedMs ?? elapsedMsRef.current);
+      raceStartBaseRef.current[id] = now - prevElapsed;
+      nextTimers[id] = { running: true, elapsedMs: prevElapsed };
+    });
+    raceTimersRef.current = nextTimers;
+    setRaceTimers(nextTimers);
+
+    setViewCategoryFilter('ALL');
+    setSummaryCategoryTab(activeRaceIds[0] || activeCategory.id);
     setPhase('running');
+    phaseRef.current = 'running';
     
-    // Notify platform that race has started (Green Dot logic)
+    // Notify platform that all selected races have started (Green Dot logic)
     await saveLiveResults(clearExisting ? [] : arrivalsRef.current, false, 'running');
     
-    toast.success(`انطلق سباق (${activeCategory.titleAr})! بالتوفيق لجميع المشاركين 🏃‍♂️💨`);
+    if (activeRaceIds.length > 1) {
+      toast.success(`انطلقت ${activeRaceIds.length} سباقات معاً وتفعل التوقيت المباشر! بالتوفيق للجميع 🏃‍♂️💨`);
+    } else {
+      toast.success(`انطلق سباق (${activeCategory.titleAr})! بالتوفيق لجميع المشاركين 🏃‍♂️💨`);
+    }
   };
 
-  // End the Race & Transition to Summary View
+  // End the Race(s) & Transition to Summary View
   const handleEndRace = async () => {
+    masterStartBaseRef.current = null;
     setTimerRunning(false);
+    const pausedTimers: Record<string, RaceTimerEntry> = {};
+    Object.keys(raceTimersRef.current).forEach((id) => {
+      const entry = raceTimersRef.current[id];
+      pausedTimers[id] = { running: false, elapsedMs: getRaceElapsedMs(id) || entry?.elapsedMs || 0 };
+      delete raceStartBaseRef.current[id];
+    });
+    raceTimersRef.current = pausedTimers;
+    setRaceTimers(pausedTimers);
+
+    setSummaryCategoryTab(selectedRaceIds[0] || activeCategory.id);
     setPhase('summary');
-    await saveLiveResults(arrivals, false, 'completed');
-    toast.success(`تم إنهاء السباق بنجاح! تم حفظ النتائج والترتيب النهائي للفئة 🏆`);
+    phaseRef.current = 'summary';
+    await saveLiveResults(arrivalsRef.current, false, 'completed');
+    toast.success(
+      selectedRaceIds.length > 1
+        ? `تم إنهاء الـ ${selectedRaceIds.length} سباقات بنجاح! تم حفظ النتائج والترتيب النهائي لكل فئة 🏆`
+        : `تم إنهاء السباق بنجاح! تم حفظ النتائج والترتيب النهائي للفئة 🏆`
+    );
   };
 
   // Merge Save & Adopt Results in one unified action
@@ -1328,11 +1577,23 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
       toast.error('لا يوجد أي واصلين مسجلين لحفظهم واعتماد نتائجهم');
       return;
     }
+    masterStartBaseRef.current = null;
     setTimerRunning(false);
+    const pausedTimers: Record<string, RaceTimerEntry> = {};
+    Object.keys(raceTimersRef.current).forEach((id) => {
+      const entry = raceTimersRef.current[id];
+      pausedTimers[id] = { running: false, elapsedMs: getRaceElapsedMs(id) || entry?.elapsedMs || 0 };
+      delete raceStartBaseRef.current[id];
+    });
+    raceTimersRef.current = pausedTimers;
+    setRaceTimers(pausedTimers);
+
     setIsSavingLive(true);
     try {
-      await saveLiveResults(arrivals, false, 'completed');
+      await saveLiveResults(arrivalsRef.current, false, 'completed');
+      setSummaryCategoryTab(selectedRaceIds[0] || activeCategory.id);
       setPhase('summary');
+      phaseRef.current = 'summary';
       toast.success(`تم حفظ جميع الواصلين (${arrivals.length}) واعتماد النتائج والترتيب النهائي بنجاح! 🏆💾`);
     } catch {
       toast.error('حدث خطأ أثناء حفظ واعتماد النتائج');
@@ -1341,12 +1602,13 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
     }
   };
 
-  // Transition to Another Race (Resets states for another category)
+  // Transition to Another Race (Resets states for another category or set of categories)
   const handleTransitionToAnotherRace = () => {
     setPhase('setup');
+    phaseRef.current = 'setup';
     setArrivals([]);
-    setElapsedMs(0);
-    setTimerRunning(false);
+    arrivalsRef.current = [];
+    resetMasterTimer();
   };
 
   // Calculate live team standings matching public results space rules:
@@ -1355,16 +1617,23 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
   // 3. Runners ranked within category (1, 2, 3...)
   // 4. Only runners with participationType === 'school_team'
   // 5. Team total points = sum of top 4 runner ranks (lowest points = 1st place)
+  const effectiveTeamCatId = useMemo(() => {
+    if (phase === 'summary') {
+      return selectedRaceIds.includes(summaryCategoryTab) ? summaryCategoryTab : (selectedRaceIds[0] || activeCategory.id);
+    }
+    if (viewCategoryFilter !== 'ALL') {
+      return viewCategoryFilter;
+    }
+    return selectedRaceIds[0] || activeCategory.id;
+  }, [phase, summaryCategoryTab, viewCategoryFilter, selectedRaceIds, activeCategory.id]);
+
   const liveTeamRankings = useMemo(() => {
     if (raceAffiliation === 'club_affiliated') return [];
 
-    const targetCatId = viewCategoryFilter !== 'ALL' ? viewCategoryFilter : activeCategory.id;
+    const targetCatId = effectiveTeamCatId;
     const catArrivals = arrivals.filter(a => {
-      const aCatId = (a.categoryId || '').replace(/_club(_affiliated)?$/, '');
-      if (viewCategoryFilter !== 'ALL') {
-        return aCatId === targetCatId;
-      }
-      return !a.categoryId || aCatId === activeCategory.id;
+      const aCatId = normalizeBaseCatId(a.categoryId);
+      return aCatId === targetCatId || (!aCatId && targetCatId === activeCategory.id);
     });
 
     const nonClubRunners = catArrivals.filter(a => {
@@ -1373,15 +1642,15 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
       return !isClub;
     });
 
-    const rankedNonClub = nonClubRunners.map((r) => ({
+    const rankedNonClub = nonClubRunners.map((r, idx) => ({
       ...r,
       participationType: resolveRunnerParticipationType(r, allStudents),
-      rank: r.rank,
-      overallRank: r.overallRank || r.rank
+      rank: r.rank || idx + 1,
+      overallRank: r.overallRank || r.rank || idx + 1
     }));
 
     return calculateTeamRankings(rankedNonClub, allStudents, true);
-  }, [arrivals, allStudents, raceAffiliation, viewCategoryFilter, activeCategory.id]);
+  }, [arrivals, allStudents, raceAffiliation, effectiveTeamCatId, activeCategory.id]);
 
   // Robust matching helper to count participants for any category
   const getCategoryRunnersCount = (cat: CrossCountryCategoryDef, aff?: 'non_club' | 'club_affiliated') => {
@@ -1394,10 +1663,7 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
     }).length;
   };
 
-  // Filter students for the selected active category
-  const filteredStudentsCount = getCategoryRunnersCount(activeCategory);
-
-  // Active Race Registered Students list (respecting category & affiliation)
+  // Active Race Registered Students list (respecting category(s) & affiliation)
   const activeRaceRegisteredStudents = useMemo(() => {
     return allStudents.filter(s => {
       const sAff = s.affiliationType || 'non_club';
@@ -1409,6 +1675,46 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
       return resolved === activeCategory.id;
     });
   }, [allStudents, raceAffiliation, selectedRaceIds, activeCategory.id]);
+
+  // Filter students count for active selected race(s)
+  const filteredStudentsCount = activeRaceRegisteredStudents.length;
+
+  // Filtered arrivals for Phase 2 live table when viewing a specific category tab
+  const displayedArrivals = useMemo(() => {
+    return arrivals
+      .map((runner, originalIndex) => ({ runner, originalIndex }))
+      .filter(({ runner }) => {
+        if (viewCategoryFilter === 'ALL') return true;
+        const baseCat = normalizeBaseCatId(runner.categoryId) || activeCategory.id;
+        return baseCat === viewCategoryFilter;
+      });
+  }, [arrivals, viewCategoryFilter, activeCategory.id]);
+
+  // Active view registered students count (scoped by viewCategoryFilter when active)
+  const scopedRegisteredCount = useMemo(() => {
+    if (viewCategoryFilter === 'ALL' || selectedRaceIds.length <= 1) {
+      return activeRaceRegisteredStudents.length;
+    }
+    return activeRaceRegisteredStudents.filter(s => resolveStudentCategoryId(s) === viewCategoryFilter).length;
+  }, [activeRaceRegisteredStudents, viewCategoryFilter, selectedRaceIds.length]);
+
+  // Summary view arrivals scoped to the selected summary tab
+  const summaryTargetCatId = useMemo(() => {
+    return selectedRaceIds.includes(summaryCategoryTab)
+      ? summaryCategoryTab
+      : (selectedRaceIds[0] || activeCategory.id);
+  }, [selectedRaceIds, summaryCategoryTab, activeCategory.id]);
+
+  const summaryTargetCatDef = useMemo(() => {
+    return CROSS_COUNTRY_CATEGORIES.find(c => c.id === summaryTargetCatId) || activeCategory;
+  }, [summaryTargetCatId, activeCategory]);
+
+  const summaryCatArrivals = useMemo(() => {
+    return arrivals.filter(a => {
+      const baseCat = normalizeBaseCatId(a.categoryId) || activeCategory.id;
+      return baseCat === summaryTargetCatId;
+    });
+  }, [arrivals, summaryTargetCatId, activeCategory.id]);
 
   // Check if current race/category has school team participants
   const hasSchoolTeamParticipants = useMemo(() => {
@@ -1778,10 +2084,75 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
                     </div>
 
                     <div>
-                      <label className="text-xs font-black text-slate-700 dark:text-slate-300 block mb-1.5">اختر الفئة والعمر والجنس للسباق:</label>
+                      <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                        <label className="text-xs font-black text-slate-700 dark:text-slate-300">
+                          اختر الفئة أو السباقات المراد تفعيلها ({selectedRaceIds.length} محدد):
+                        </label>
+                        {/* Toggle Single vs Multi-race */}
+                        <div className="flex items-center gap-1 bg-white dark:bg-slate-900 p-0.5 rounded-lg border border-slate-200 dark:border-slate-700 text-[10px]">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setMultiRaceMode(false);
+                              if (selectedRaceIds.length > 1) {
+                                selectSingleRace(selectedRaceIds[0]);
+                              }
+                            }}
+                            className={`px-2 py-1 rounded-md font-bold transition-all cursor-pointer ${
+                              !multiRaceMode && selectedRaceIds.length === 1
+                                ? 'bg-blue-600 text-white shadow-2xs'
+                                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+                            }`}
+                          >
+                            سباق واحد
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setMultiRaceMode(true)}
+                            className={`px-2 py-1 rounded-md font-bold transition-all cursor-pointer ${
+                              multiRaceMode || selectedRaceIds.length > 1
+                                ? 'bg-indigo-600 text-white shadow-2xs'
+                                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+                            }`}
+                          >
+                            سباقان فأكثر ⚡
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Quick Multi-Race Presets */}
+                      <div className="flex flex-wrap items-center gap-1.5 mb-2">
+                        <button
+                          type="button"
+                          onClick={selectFemaleRaces}
+                          className="px-2 py-1 rounded-lg bg-pink-50 dark:bg-pink-950/50 hover:bg-pink-100 text-pink-800 dark:text-pink-300 border border-pink-200 dark:border-pink-800 text-[10px] font-black cursor-pointer transition-colors"
+                        >
+                          👧 فئات الإناث (4)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={selectMaleRaces}
+                          className="px-2 py-1 rounded-lg bg-sky-50 dark:bg-sky-950/50 hover:bg-sky-100 text-sky-800 dark:text-sky-300 border border-sky-200 dark:border-sky-800 text-[10px] font-black cursor-pointer transition-colors"
+                        >
+                          👦 فئات الذكور (4)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={selectAllRaces}
+                          className="px-2 py-1 rounded-lg bg-indigo-50 dark:bg-indigo-950/50 hover:bg-indigo-100 text-indigo-800 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 text-[10px] font-black cursor-pointer transition-colors"
+                        >
+                          🌐 جميع السباقات (8)
+                        </button>
+                        {selectedRaceIds.length > 1 && (
+                          <span className="text-[10px] font-bold text-indigo-700 dark:text-indigo-300 bg-indigo-100/80 dark:bg-indigo-950/70 px-2 py-0.5 rounded-full">
+                            محدد: {selectedRaceIds.length} سباقات
+                          </span>
+                        )}
+                      </div>
+
                       <div className="grid grid-cols-1 gap-2 max-h-[260px] overflow-y-auto pr-1">
                         {CROSS_COUNTRY_CATEGORIES.map((cat) => {
-                          const isSelected = selectedRaceId === cat.id;
+                          const isSelected = selectedRaceIds.includes(cat.id);
                           const count = getCategoryRunnersCount(cat, raceAffiliation);
                           const targetKey = raceAffiliation === 'club_affiliated' ? `${cat.id}_club` : cat.id;
                           const catResult = resultsMap[targetKey];
@@ -1789,9 +2160,15 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
                           const isRunning = catResult?.status === 'running';
 
                           return (
-                            <button
+                            <div
                               key={cat.id}
-                              onClick={() => selectSingleRace(cat.id)}
+                              onClick={() => {
+                                if (multiRaceMode || selectedRaceIds.length > 1) {
+                                  toggleRaceSelection(cat.id);
+                                } else {
+                                  selectSingleRace(cat.id);
+                                }
+                              }}
                               className={`p-2.5 rounded-xl text-right text-xs transition-all flex items-center justify-between border cursor-pointer group ${
                                 isSelected
                                   ? 'bg-blue-600 border-blue-700 dark:border-blue-500 text-white font-black shadow-sm ring-2 ring-blue-400/40'
@@ -1802,10 +2179,23 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
                                   : 'bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200'
                               }`}
                             >
-                              <div className="flex items-center gap-2.5">
-                                <span className={`text-xl shrink-0 ${isCompleted || isRunning ? 'grayscale-0' : 'grayscale group-hover:grayscale-0 transition-all'}`}>{cat.icon}</span>
-                                <div>
-                                  <div className="flex items-center gap-1.5">
+                              <div className="flex items-center gap-2 min-w-0">
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    toggleRaceSelection(cat.id);
+                                  }}
+                                  title={isSelected ? 'إلغاء تحديد هذا السباق' : 'إضافة هذا السباق للتشغيل المشترك'}
+                                  className={`p-0.5 rounded-md transition-colors cursor-pointer shrink-0 ${
+                                    isSelected ? 'text-white hover:bg-white/20' : 'text-slate-400 hover:text-blue-600 hover:bg-slate-100 dark:hover:bg-slate-800'
+                                  }`}
+                                >
+                                  {isSelected ? <CheckSquare className="w-4 h-4" /> : <Square className="w-4 h-4" />}
+                                </button>
+                                <span className={`text-xl shrink-0 ${isSelected || isCompleted || isRunning ? 'grayscale-0' : 'grayscale group-hover:grayscale-0 transition-all'}`}>{cat.icon}</span>
+                                <div className="min-w-0">
+                                  <div className="flex items-center gap-1.5 flex-wrap">
                                     <span className="block text-[11px] font-black">{cat.titleAr}</span>
                                     {isCompleted && (
                                       <span className="inline-flex items-center gap-0.5 text-[9px] bg-white text-emerald-700 px-1.5 py-0.2 rounded-md font-bold shadow-xs">
@@ -1841,7 +2231,7 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
                                 {!isSelected && isCompleted && <CheckCircle2 className="w-4 h-4 text-white" />}
                                 {!isSelected && isRunning && <Activity className="w-4 h-4 text-white animate-pulse" />}
                               </div>
-                            </button>
+                            </div>
                           );
                         })}
                       </div>
@@ -1853,7 +2243,7 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
                     <div className="bg-amber-50 dark:bg-amber-950/50 border border-amber-200 dark:border-amber-800 p-2.5 rounded-xl flex items-center justify-between gap-2 text-xs">
                       <div className="flex items-center gap-2 text-amber-950 dark:text-amber-200">
                         <AlertCircle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
-                        <span>يتوفر هذا السباق على <strong>{arrivals.length}</strong> واصل(ة) مسجل(ة) مسبقاً.</span>
+                        <span>يتوفر {selectedRaceIds.length > 1 ? `السباقات المحددة (${selectedRaceIds.length})` : 'هذا السباق'} على <strong>{arrivals.length}</strong> واصل(ة) مسجل(ة) مسبقاً.</span>
                       </div>
                       <button
                         type="button"
@@ -1864,14 +2254,18 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
                         className="px-2.5 py-1 bg-red-600 hover:bg-red-700 text-white rounded-lg text-[11px] font-bold shrink-0 cursor-pointer shadow-xs transition-colors flex items-center gap-1"
                       >
                         <Trash2 className="w-3 h-3" />
-                        <span>تفريغ نتائج السباق</span>
+                        <span>تفريغ النتائج</span>
                       </button>
                     </div>
                   )}
 
                   {/* Registered Count Banner */}
                   <div className="bg-white dark:bg-slate-900 p-3 rounded-xl border border-blue-200 dark:border-slate-700 flex items-center justify-between text-xs shadow-xs">
-                    <span className="font-bold text-slate-600 dark:text-slate-400">المسجلين المؤهلين لهذه الفئة:</span>
+                    <span className="font-bold text-slate-600 dark:text-slate-400">
+                      {selectedRaceIds.length > 1
+                        ? `المسجلين في السباقات المحددة (${selectedRaceIds.length}):`
+                        : 'المسجلين المؤهلين لهذه الفئة:'}
+                    </span>
                     <button
                       type="button"
                       onClick={() => {
@@ -1894,7 +2288,11 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
                       className="w-full py-3 bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 hover:from-emerald-700 hover:to-teal-800 text-white font-black text-sm rounded-xl shadow-md transition-all active:scale-95 flex items-center justify-center gap-2 cursor-pointer border border-emerald-400/30"
                     >
                       <Play className="w-5 h-5 fill-white" />
-                      <span>متابعة تسجيل الواصلين ({arrivals.length} عداء مسجل حالياً) ▶️</span>
+                      <span>
+                        {selectedRaceIds.length > 1
+                          ? `متابعة تسجيل الواصلين لـ ${selectedRaceIds.length} سباقات (${arrivals.length} مسجل حالياً) ▶️`
+                          : `متابعة تسجيل الواصلين (${arrivals.length} عداء مسجل حالياً) ▶️`}
+                      </span>
                     </button>
                     <button
                       onClick={() => handleStartRace(true)}
@@ -1910,7 +2308,11 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
                     className="w-full py-3 bg-gradient-to-r from-blue-600 via-indigo-700 to-indigo-800 hover:from-blue-700 hover:to-indigo-950 text-white font-black text-sm rounded-xl shadow-md transition-all active:scale-95 flex items-center justify-center gap-2 cursor-pointer border border-blue-400/20"
                   >
                     <Play className="w-5 h-5" />
-                    <span>بدء تسجيل واصلي السباق وتفعيل ساعة التوقيت 🚀</span>
+                    <span>
+                      {selectedRaceIds.length > 1
+                        ? `بدء تسجيل واصلي (${selectedRaceIds.length} سباقات) وتفعيل التوقيت 🚀`
+                        : 'بدء تسجيل واصلي السباق وتفعيل ساعة التوقيت 🚀'}
+                    </span>
                   </button>
                 )}
               </div>
@@ -1922,58 +2324,122 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
         {phase === 'running' && (
           <>
             {/* Race & Stopwatch Bar */}
-            <div className="bg-slate-100 dark:bg-slate-800/90 p-2.5 sm:p-4 border-b border-slate-200 dark:border-slate-700 flex flex-col sm:flex-row items-center justify-between gap-2 sm:gap-3 shrink-0">
-              <div className="flex items-center gap-2 w-full sm:w-auto">
-                <span className="text-[10px] sm:text-xs font-bold text-slate-600 dark:text-slate-300 shrink-0 hidden xs:inline">السباق المفعل:</span>
-                <span className="px-2.5 py-1 bg-blue-600 text-white rounded-lg text-[10px] sm:text-xs font-black truncate flex-1 sm:flex-none">
-                  {activeCategory.icon} {activeCategory.titleAr} ({activeCategory.distance})
-                </span>
-                <span className={`px-2.5 py-0.5 rounded-full text-[9px] sm:text-[10px] font-black whitespace-nowrap border shadow-xs ${
-                  raceAffiliation === 'club_affiliated'
-                    ? 'bg-amber-400 text-slate-950 border-amber-500 ring-1 ring-amber-300'
-                    : 'bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 border-slate-300 dark:border-slate-700'
-                }`}>
-                  {raceAffiliation === 'club_affiliated' ? '🟡 المنتمين للأندية' : '⚪ غير المنتمين (مدرسي)'}
-                </span>
-                <span className="px-2 py-0.5 rounded-full text-[9px] sm:text-[10px] bg-red-100 dark:bg-red-950/80 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800 font-extrabold animate-pulse whitespace-nowrap">
-                  جارٍ 🏃‍♂️
-                </span>
-              </div>
-
-              {/* Master Race Stopwatch */}
-              <div className="flex items-center gap-2 sm:gap-3 bg-white dark:bg-slate-900 px-3 sm:px-4 py-1.5 sm:py-2 rounded-xl sm:rounded-2xl border border-slate-200 dark:border-slate-700 shadow-3xs w-full sm:w-auto justify-between sm:justify-end">
-                <div className="flex items-center gap-1.5 sm:gap-2">
-                  <span className="text-[9px] sm:text-[10px] font-extrabold text-slate-500 dark:text-slate-400 uppercase tracking-wider">الساعة:</span>
-                  <span className="font-mono text-sm sm:text-lg font-black text-blue-900 dark:text-blue-400 tracking-wider">
-                    {formatElapsedTime(elapsedMs)}
+            <div className="bg-slate-100 dark:bg-slate-800/90 p-2.5 sm:p-4 border-b border-slate-200 dark:border-slate-700 space-y-2.5 shrink-0">
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 sm:gap-3">
+                <div className="flex items-center gap-2 flex-wrap flex-1 min-w-0">
+                  <span className="text-[10px] sm:text-xs font-bold text-slate-600 dark:text-slate-300 shrink-0 hidden xs:inline">
+                    {selectedRaceIds.length > 1 ? `السباقات المفعلة (${selectedRaceIds.length}):` : 'السباق المفعل:'}
+                  </span>
+                  {selectedRaceIds.length === 1 ? (
+                    <span className="px-2.5 py-1 bg-blue-600 text-white rounded-lg text-[10px] sm:text-xs font-black truncate">
+                      {activeCategory.icon} {activeCategory.titleAr} ({activeCategory.distance})
+                    </span>
+                  ) : (
+                    <span className="px-2.5 py-1 bg-indigo-600 text-white rounded-lg text-[10px] sm:text-xs font-black">
+                      🏁 توقيت مشترك لـ {selectedRaceIds.length} سباقات
+                    </span>
+                  )}
+                  <span className={`px-2.5 py-0.5 rounded-full text-[9px] sm:text-[10px] font-black whitespace-nowrap border shadow-xs ${
+                    raceAffiliation === 'club_affiliated'
+                      ? 'bg-amber-400 text-slate-950 border-amber-500 ring-1 ring-amber-300'
+                      : 'bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 border-slate-300 dark:border-slate-700'
+                  }`}>
+                    {raceAffiliation === 'club_affiliated' ? '🟡 المنتمين للأندية' : '⚪ غير المنتمين (مدرسي)'}
+                  </span>
+                  <span className="px-2 py-0.5 rounded-full text-[9px] sm:text-[10px] bg-red-100 dark:bg-red-950/80 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800 font-extrabold animate-pulse whitespace-nowrap">
+                    جارٍ 🏃‍♂️
                   </span>
                 </div>
 
-                <div className="flex items-center gap-1.5">
-                  <button
-                    onClick={() => setTimerRunning(!timerRunning)}
-                    className={`p-1 sm:p-1.5 rounded-lg sm:rounded-xl font-bold text-[10px] sm:text-xs flex items-center gap-1 transition-all cursor-pointer ${
-                      timerRunning
-                        ? 'bg-amber-100 dark:bg-amber-950/80 text-amber-900 dark:text-amber-200 border border-amber-300 dark:border-amber-700'
-                        : 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-2xs'
-                    }`}
-                  >
-                    {timerRunning ? <Pause className="w-3 sm:w-3.5 h-3 sm:h-3.5" /> : <Play className="w-3 sm:w-3.5 h-3 sm:h-3.5" />}
-                    <span>{timerRunning ? 'إيقاف' : 'بدء'}</span>
-                  </button>
+                {/* Master Race Stopwatch */}
+                <div className="flex items-center gap-2 sm:gap-3 bg-white dark:bg-slate-900 px-3 sm:px-4 py-1.5 sm:py-2 rounded-xl sm:rounded-2xl border border-slate-200 dark:border-slate-700 shadow-3xs justify-between sm:justify-end shrink-0">
+                  <div className="flex items-center gap-1.5 sm:gap-2">
+                    <span className="text-[9px] sm:text-[10px] font-extrabold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                      {selectedRaceIds.length > 1 ? 'الساعة الرئيسية:' : 'الساعة:'}
+                    </span>
+                    <span className="font-mono text-sm sm:text-lg font-black text-blue-900 dark:text-blue-400 tracking-wider">
+                      {formatElapsedTime(elapsedMs)}
+                    </span>
+                  </div>
 
-                  <button
-                    onClick={() => {
-                      setTimerRunning(false);
-                      setElapsedMs(0);
-                    }}
-                    title="حذف التوقيت"
-                    className="p-1 sm:p-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-lg sm:rounded-xl transition-colors cursor-pointer"
-                  >
-                    <RotateCcw className="w-3 sm:w-3.5 h-3 sm:h-3.5" />
-                  </button>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={toggleMasterTimer}
+                      className={`p-1 sm:p-1.5 rounded-lg sm:rounded-xl font-bold text-[10px] sm:text-xs flex items-center gap-1 transition-all cursor-pointer ${
+                        anyRaceTimerRunning
+                          ? 'bg-amber-100 dark:bg-amber-950/80 text-amber-900 dark:text-amber-200 border border-amber-300 dark:border-amber-700'
+                          : 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-2xs'
+                      }`}
+                    >
+                      {anyRaceTimerRunning ? <Pause className="w-3 sm:w-3.5 h-3 sm:h-3.5" /> : <Play className="w-3 sm:w-3.5 h-3 sm:h-3.5" />}
+                      <span>{anyRaceTimerRunning ? 'إيقاف' : 'بدء'}</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={resetMasterTimer}
+                      title="حذف التوقيت"
+                      className="p-1 sm:p-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-lg sm:rounded-xl transition-colors cursor-pointer"
+                    >
+                      <RotateCcw className="w-3 sm:w-3.5 h-3 sm:h-3.5" />
+                    </button>
+                  </div>
                 </div>
               </div>
+
+              {/* Per-Race Independent Clocks Bar (when 2+ races are active simultaneously) */}
+              {selectedRaceIds.length > 1 && (
+                <div className="flex items-center gap-2 overflow-x-auto pb-0.5">
+                  {selectedRaceIds.map(raceId => {
+                    const cat = CROSS_COUNTRY_CATEGORIES.find(c => c.id === raceId);
+                    if (!cat) return null;
+                    const rt = raceTimers[raceId] || { running: timerRunning, elapsedMs };
+                    const catCount = arrivals.filter(a => (normalizeBaseCatId(a.categoryId) || activeCategory.id) === raceId).length;
+                    return (
+                      <div
+                        key={raceId}
+                        className={`flex items-center gap-2 px-2.5 py-1.5 rounded-xl border text-[10px] shrink-0 transition-all ${
+                          rt.running
+                            ? 'bg-white dark:bg-slate-900 border-emerald-300 dark:border-emerald-700 shadow-2xs'
+                            : 'bg-slate-50 dark:bg-slate-800/70 border-slate-200 dark:border-slate-700'
+                        }`}
+                      >
+                        <span className="font-black text-slate-800 dark:text-slate-100 flex items-center gap-1">
+                          <span>{cat.icon}</span>
+                          <span>{cat.titleAr}</span>
+                          <span className="bg-blue-100 dark:bg-blue-900/70 text-blue-800 dark:text-blue-200 px-1.5 py-0.2 rounded-full font-mono text-[9px]">
+                            {catCount}
+                          </span>
+                        </span>
+                        <span className="font-mono font-black text-xs text-emerald-700 dark:text-emerald-400">
+                          {formatElapsedTime(rt.elapsedMs)}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => toggleSingleRaceTimer(raceId)}
+                          title={rt.running ? `إيقاف توقيت ${cat.titleAr}` : `تشغيل توقيت ${cat.titleAr}`}
+                          className={`p-1 rounded-md cursor-pointer transition-colors ${
+                            rt.running
+                              ? 'bg-amber-100 text-amber-800 hover:bg-amber-200'
+                              : 'bg-emerald-600 text-white hover:bg-emerald-700'
+                          }`}
+                        >
+                          {rt.running ? <Pause className="w-3 h-3" /> : <Play className="w-3 h-3" />}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => resetSingleRaceTimer(raceId)}
+                          title={`تصفير توقيت ${cat.titleAr}`}
+                          className="p-1 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 cursor-pointer"
+                        >
+                          <RotateCcw className="w-3 h-3" />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
 
             {/* Main Content Area: Left Input/Camera Panel + Right Stream */}
@@ -2081,6 +2547,25 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
                           className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-2.5 py-1.5 text-xs text-slate-800 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500"
                         />
                       </div>
+                      {selectedRaceIds.length > 1 && (
+                        <div className="col-span-2">
+                          <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 block mb-1">الفئة الافتراضية (للعدائين غير المسجلين يدوياً):</label>
+                          <select
+                            value={manualCategory}
+                            onChange={(e) => setManualCategory(e.target.value)}
+                            className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl px-2.5 py-1.5 text-xs font-bold text-slate-800 dark:text-slate-100 cursor-pointer"
+                          >
+                            {selectedRaceIds.map(id => {
+                              const c = CROSS_COUNTRY_CATEGORIES.find(cat => cat.id === id);
+                              return (
+                                <option key={id} value={id}>
+                                  {c ? `${c.icon} ${c.titleAr}` : id}
+                                </option>
+                              );
+                            })}
+                          </select>
+                        </div>
+                      )}
                     </div>
 
                     {/* Touch Onscreen Keypad for Quick Mobile / Tablet Use (Hidden on phone view as requested) */}
@@ -2320,7 +2805,7 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
                         title="انقر لعرض لائحة المسجلين في السباق الحالي"
                       >
                         <span className="text-[9px] font-black text-slate-400 dark:text-slate-400 block group-hover:text-blue-600">إجمالي المسجلين 📋</span>
-                        <span className="text-xs font-black text-blue-950 dark:text-blue-300 font-mono group-hover:underline">{filteredStudentsCount}</span>
+                        <span className="text-xs font-black text-blue-950 dark:text-blue-300 font-mono group-hover:underline">{scopedRegisteredCount}</span>
                         <span className="text-[9px] text-slate-400 dark:text-slate-400 font-medium mr-1">عداء</span>
                       </button>
 
@@ -2334,9 +2819,9 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
                         title="انقر لعرض لائحة الواصلين في السباق الحالي"
                       >
                         <span className="text-[9px] font-black text-slate-400 dark:text-slate-400 block group-hover:text-emerald-600">الواصلين حالياً 🏁</span>
-                        <span className="text-xs font-black text-emerald-700 dark:text-emerald-400 font-mono group-hover:underline">{arrivals.length}</span>
+                        <span className="text-xs font-black text-emerald-700 dark:text-emerald-400 font-mono group-hover:underline">{displayedArrivals.length}</span>
                         <span className="text-[9px] text-emerald-600/80 dark:text-emerald-400/80 font-bold mr-1 font-mono">
-                          ({filteredStudentsCount > 0 ? Math.min(100, Math.round((arrivals.length / filteredStudentsCount) * 100)) : 0}%)
+                          ({scopedRegisteredCount > 0 ? Math.min(100, Math.round((displayedArrivals.length / scopedRegisteredCount) * 100)) : 0}%)
                         </span>
                       </button>
 
@@ -2351,7 +2836,7 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
                       >
                         <span className="text-[9px] font-black text-slate-400 dark:text-slate-400 block group-hover:text-amber-600">المتبقي في السباق ⏳</span>
                         <span className="text-xs font-black text-amber-700 dark:text-amber-400 font-mono group-hover:underline">
-                          {Math.max(0, filteredStudentsCount - arrivals.length)}
+                          {Math.max(0, scopedRegisteredCount - displayedArrivals.length)}
                         </span>
                         <span className="text-[9px] text-slate-400 dark:text-slate-400 font-medium mr-1">عداء</span>
                       </button>
@@ -2359,19 +2844,69 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
                       <div className="bg-white dark:bg-slate-800 p-2 rounded-lg border border-slate-100 dark:border-slate-700 shadow-3xs">
                         <span className="text-[9px] font-black text-slate-400 dark:text-slate-400 block">المؤسسات المشاركة</span>
                         <span className="text-xs font-black text-indigo-950 dark:text-indigo-300 font-mono font-bold">
-                          {new Set(arrivals.map(r => r.schoolName).filter(Boolean)).size}
+                          {new Set(displayedArrivals.map(({ runner }) => runner.schoolName).filter(Boolean)).size}
                         </span>
                         <span className="text-[9px] text-slate-400 dark:text-slate-400 font-medium mr-1">مؤسسة</span>
                       </div>
                     </div>
                   )}
 
+                  {/* Category Filter Tabs (when 2+ races run simultaneously) */}
+                  {selectedRaceIds.length > 1 && (
+                    <div className="flex items-center gap-1.5 overflow-x-auto pb-2 mb-2">
+                      <button
+                        type="button"
+                        onClick={() => setViewCategoryFilter('ALL')}
+                        className={`px-2.5 py-1.5 rounded-xl text-[10px] font-black shrink-0 cursor-pointer border transition-all ${
+                          viewCategoryFilter === 'ALL'
+                            ? 'bg-slate-900 text-white border-slate-900 shadow-xs'
+                            : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-50'
+                        }`}
+                      >
+                        الكل ({arrivals.length})
+                      </button>
+                      {selectedRaceIds.map(raceId => {
+                        const cat = CROSS_COUNTRY_CATEGORIES.find(c => c.id === raceId);
+                        if (!cat) return null;
+                        const catCount = arrivals.filter(a => (normalizeBaseCatId(a.categoryId) || activeCategory.id) === raceId).length;
+                        const isActiveTab = viewCategoryFilter === raceId;
+                        return (
+                          <button
+                            key={raceId}
+                            type="button"
+                            onClick={() => setViewCategoryFilter(raceId)}
+                            className={`px-2.5 py-1.5 rounded-xl text-[10px] font-black shrink-0 cursor-pointer border transition-all flex items-center gap-1 ${
+                              isActiveTab
+                                ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
+                                : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-50'
+                            }`}
+                          >
+                            <span>{cat.icon}</span>
+                            <span>{cat.titleAr}</span>
+                            <span className={`px-1.5 py-0.2 rounded-full font-mono text-[9px] ${
+                              isActiveTab ? 'bg-white/20 text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300'
+                            }`}>
+                              {catCount}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+
                   {/* Live Winning Teams Dashboard - Show only if participation condition is school team */}
                   {showWinningTeams && hasSchoolTeamParticipants && (
                     <div className="bg-amber-50/50 dark:bg-amber-950/30 border border-amber-200/50 dark:border-amber-800/50 p-2.5 rounded-xl mb-3 space-y-1.5 shadow-3xs">
-                      <div className="flex items-center gap-1 text-[10px] font-black text-amber-950 dark:text-amber-200">
-                        <span>🏆</span>
-                        <span>الترتيب المؤقت للفرق الفائزة (اكتمال 4 عداءين):</span>
+                      <div className="flex items-center justify-between gap-2 text-[10px] font-black text-amber-950 dark:text-amber-200">
+                        <div className="flex items-center gap-1">
+                          <span>🏆</span>
+                          <span>الترتيب المؤقت للفرق الفائزة (اكتمال 4 عداءين):</span>
+                        </div>
+                        {selectedRaceIds.length > 1 && (
+                          <span className="px-2 py-0.5 rounded-md bg-white/80 dark:bg-slate-800 text-amber-900 dark:text-amber-200 border border-amber-200 dark:border-amber-800">
+                            {CROSS_COUNTRY_CATEGORIES.find(c => c.id === effectiveTeamCatId)?.titleAr}
+                          </span>
+                        )}
                       </div>
                       {liveTeamRankings.filter(t => t.isValidTeam).length === 0 ? (
                         <p className="text-[10px] text-amber-800/70 dark:text-amber-300/70 font-medium">في انتظار وصول 4 عداءين من أي مؤسسة لاحتساب ترتيب الفرق.</p>
@@ -2411,10 +2946,12 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
                     </div>
                   )}
 
-                  {arrivals.length === 0 ? (
+                  {displayedArrivals.length === 0 ? (
                     <div className="p-8 text-center bg-white dark:bg-slate-900 rounded-2xl border-2 border-dashed border-slate-200 dark:border-slate-700 text-slate-400 dark:text-slate-400 space-y-2">
                       <Trophy className="w-10 h-10 mx-auto text-slate-300 dark:text-slate-600" />
-                      <p className="text-xs font-bold text-slate-600 dark:text-slate-300">لم يتم تسجيل أي وصول عند خط النهاية بعد</p>
+                      <p className="text-xs font-bold text-slate-600 dark:text-slate-300">
+                        {arrivals.length === 0 ? 'لم يتم تسجيل أي وصول عند خط النهاية بعد' : 'لم يتم تسجيل أي وصول في هذه الفئة بعد'}
+                      </p>
                       <p className="text-[11px] text-slate-400 dark:text-slate-400">امسح كود الصدرية بالكاميرا أو اكتب رقم الصدرية يدوياً بالجانب الأيمن.</p>
                     </div>
                   ) : (
@@ -2425,82 +2962,90 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
                             <th className="p-2 sm:p-2.5 text-center">الرتبة</th>
                             <th className="p-2 sm:p-2.5">الصدرية</th>
                             <th className="p-2 sm:p-2.5">العداء(ة)</th>
+                            {selectedRaceIds.length > 1 && <th className="p-2 sm:p-2.5">الفئة</th>}
                             <th className="p-2 sm:p-2.5 hidden xs:table-cell">المؤسسة</th>
-                            <th className="p-2 sm:p-2.5 text-center">نوع المشاركة</th>
+                            <th className="p-2 sm:p-2.5 text-center">التوقيت</th>
                             <th className="p-2 sm:p-2.5 text-center">تعديل</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                          {arrivals.map((runner, index) => (
-                            <tr
-                              key={index}
-                              className={`transition-colors ${
-                                index === 0
-                                  ? 'bg-amber-50/60 dark:bg-amber-950/40 hover:bg-amber-100/60 dark:hover:bg-amber-900/50 font-bold'
-                                  : index === 1
-                                  ? 'bg-slate-50/80 dark:bg-slate-800/60 hover:bg-slate-100/80 dark:hover:bg-slate-700/60 font-bold'
-                                  : index === 2
-                                  ? 'bg-amber-50/30 dark:bg-amber-950/20 hover:bg-amber-100/30 dark:hover:bg-amber-900/30'
-                                  : 'hover:bg-slate-50 dark:hover:bg-slate-800/50'
-                              }`}
-                            >
-                              <td className="p-2 sm:p-2.5 text-center font-black text-slate-800 dark:text-slate-200">
-                                {index === 0 ? '🥇 1' : index === 1 ? '🥈 2' : index === 2 ? '🥉 3' : `#${index + 1}`}
-                              </td>
+                          {displayedArrivals.map(({ runner, originalIndex }, displayIdx) => {
+                            const catRank = runner.rank || (displayIdx + 1);
+                            const catDef = CROSS_COUNTRY_CATEGORIES.find(c => c.id === normalizeBaseCatId(runner.categoryId));
+                            return (
+                              <tr
+                                key={`${runner.bibNumber}-${runner.categoryId}-${originalIndex}`}
+                                className={`transition-colors ${
+                                  catRank === 1
+                                    ? 'bg-amber-50/60 dark:bg-amber-950/40 hover:bg-amber-100/60 dark:hover:bg-amber-900/50 font-bold'
+                                    : catRank === 2
+                                    ? 'bg-slate-50/80 dark:bg-slate-800/60 hover:bg-slate-100/80 dark:hover:bg-slate-700/60 font-bold'
+                                    : catRank === 3
+                                    ? 'bg-amber-50/30 dark:bg-amber-950/20 hover:bg-amber-100/30 dark:hover:bg-amber-900/30'
+                                    : 'hover:bg-slate-50 dark:hover:bg-slate-800/50'
+                                }`}
+                              >
+                                <td className="p-2 sm:p-2.5 text-center font-black text-slate-800 dark:text-slate-200 whitespace-nowrap">
+                                  {catRank === 1 ? '🥇 1' : catRank === 2 ? '🥈 2' : catRank === 3 ? '🥉 3' : `#${catRank}`}
+                                </td>
 
-                              <td className="p-2 sm:p-2.5 font-mono font-black text-blue-900 dark:text-blue-400">
-                                #{runner.bibNumber || '-'}
-                              </td>
+                                <td className="p-2 sm:p-2.5 font-mono font-black text-blue-900 dark:text-blue-400 whitespace-nowrap">
+                                  #{runner.bibNumber || '-'}
+                                </td>
 
-                              <td className="p-2 sm:p-2.5 font-bold text-slate-900 dark:text-slate-100 truncate max-w-[80px] sm:max-w-none">
-                                {runner.fullName}
-                              </td>
+                                <td className="p-2 sm:p-2.5 font-bold text-slate-900 dark:text-slate-100 truncate max-w-[95px] sm:max-w-none">
+                                  <div>{runner.fullName}</div>
+                                  <div className="text-[9px] text-slate-500 xs:hidden truncate">{runner.schoolName}</div>
+                                </td>
 
-                              <td className="p-2 sm:p-2.5 text-slate-600 dark:text-slate-400 text-[10px] sm:text-[11px] hidden xs:table-cell truncate max-w-[100px]">
-                                {runner.schoolName}
-                              </td>
+                                {selectedRaceIds.length > 1 && (
+                                  <td className="p-2 sm:p-2.5 whitespace-nowrap">
+                                    <span className="px-2 py-0.5 rounded-full text-[9px] font-black bg-indigo-50 dark:bg-indigo-950/70 text-indigo-800 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800">
+                                      {catDef?.icon || ''} {catDef?.shortLabel || runner.categoryTitle || '-'}
+                                    </span>
+                                  </td>
+                                )}
 
-                              <td className="p-2 sm:p-2.5 text-center">
-                                <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold ${
-                                  resolveRunnerParticipationType(runner, allStudents) === 'school_team'
-                                    ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300'
-                                    : 'bg-amber-50 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300'
-                                }`}>
-                                  {resolveRunnerParticipationType(runner, allStudents) === 'school_team' ? 'فريق المؤسسة' : 'فردي'}
-                                </span>
-                              </td>
+                                <td className="p-2 sm:p-2.5 text-slate-600 dark:text-slate-400 text-[10px] sm:text-[11px] hidden xs:table-cell truncate max-w-[110px]">
+                                  {runner.schoolName}
+                                </td>
 
-                              <td className="p-2 sm:p-2.5 text-center">
-                                <div className="flex items-center justify-center gap-0.5 sm:gap-1">
-                                  <button
-                                    onClick={() => handleMoveArrival(index, 'up')}
-                                    disabled={index === 0}
-                                    title="تقديم مرتبة"
-                                    className="p-1 hover:bg-slate-200 dark:hover:bg-slate-700 rounded text-slate-600 dark:text-slate-400 disabled:opacity-20 cursor-pointer"
-                                  >
-                                    <ArrowUp className="w-3 sm:w-3.5 h-3 sm:h-3.5" />
-                                  </button>
+                                <td className="p-2 sm:p-2.5 text-center font-mono text-[10px] font-black text-emerald-700 dark:text-emerald-400 whitespace-nowrap">
+                                  {runner.time || '-'}
+                                </td>
 
-                                  <button
-                                    onClick={() => handleMoveArrival(index, 'down')}
-                                    disabled={index === arrivals.length - 1}
-                                    title="تأخير مرتبة"
-                                    className="p-1 hover:bg-slate-200 dark:hover:bg-slate-700 rounded text-slate-600 dark:text-slate-400 disabled:opacity-20 cursor-pointer"
-                                  >
-                                    <ArrowDown className="w-3 sm:w-3.5 h-3 sm:h-3.5" />
-                                  </button>
+                                <td className="p-2 sm:p-2.5 text-center">
+                                  <div className="flex items-center justify-center gap-0.5 sm:gap-1">
+                                    <button
+                                      onClick={() => handleMoveArrival(originalIndex, 'up')}
+                                      disabled={displayIdx === 0}
+                                      title="تقديم مرتبة"
+                                      className="p-1 hover:bg-slate-200 dark:hover:bg-slate-700 rounded text-slate-600 dark:text-slate-400 disabled:opacity-20 cursor-pointer"
+                                    >
+                                      <ArrowUp className="w-3 sm:w-3.5 h-3 sm:h-3.5" />
+                                    </button>
 
-                                  <button
-                                    onClick={() => handleRemoveArrival(index)}
-                                    title="حذف"
-                                    className="p-1 hover:bg-red-100 dark:hover:bg-red-900/50 text-red-600 dark:text-red-400 rounded transition-colors cursor-pointer"
-                                  >
-                                    <Trash2 className="w-3 sm:w-3.5 h-3 sm:h-3.5" />
-                                  </button>
-                                </div>
-                              </td>
-                            </tr>
-                          ))}
+                                    <button
+                                      onClick={() => handleMoveArrival(originalIndex, 'down')}
+                                      disabled={displayIdx === displayedArrivals.length - 1}
+                                      title="تأخير مرتبة"
+                                      className="p-1 hover:bg-slate-200 dark:hover:bg-slate-700 rounded text-slate-600 dark:text-slate-400 disabled:opacity-20 cursor-pointer"
+                                    >
+                                      <ArrowDown className="w-3 sm:w-3.5 h-3 sm:h-3.5" />
+                                    </button>
+
+                                    <button
+                                      onClick={() => handleRemoveArrival(originalIndex)}
+                                      title="حذف"
+                                      className="p-1 hover:bg-red-100 dark:hover:bg-red-900/50 text-red-600 dark:text-red-400 rounded transition-colors cursor-pointer"
+                                    >
+                                      <Trash2 className="w-3 sm:w-3.5 h-3 sm:h-3.5" />
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
                         </tbody>
                       </table>
                     </div>
@@ -2554,24 +3099,55 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
               </div>
               <h3 className="text-lg font-black text-slate-900 dark:text-slate-100">انتهى السباق وتم توثيق البوديوم والترتيب</h3>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                لقد تم حفظ نتائج فئة (<strong className="text-slate-800 dark:text-slate-200">{activeCategory.titleAr}</strong>) بنجاح وبشكل فوري داخل قاعدة البيانات المركزية لوزارة التربية الوطنية والتعليم الأولي والرياضة.
+                لقد تم حفظ نتائج {selectedRaceIds.length > 1 ? `${selectedRaceIds.length} سباقات (المعروضة حالياً: ${summaryTargetCatDef.titleAr})` : `فئة (${summaryTargetCatDef.titleAr})`} بنجاح وبشكل فوري داخل قاعدة البيانات المركزية لوزارة التربية الوطنية والتعليم الأولي والرياضة.
               </p>
             </div>
 
+            {selectedRaceIds.length > 1 && (
+              <div className="flex items-center justify-center gap-2 flex-wrap">
+                {selectedRaceIds.map(raceId => {
+                  const cat = CROSS_COUNTRY_CATEGORIES.find(c => c.id === raceId);
+                  if (!cat) return null;
+                  const catCount = arrivals.filter(a => (normalizeBaseCatId(a.categoryId) || activeCategory.id) === raceId).length;
+                  const isActive = summaryTargetCatId === raceId;
+                  return (
+                    <button
+                      key={raceId}
+                      type="button"
+                      onClick={() => setSummaryCategoryTab(raceId)}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-black cursor-pointer border transition-all flex items-center gap-1.5 ${
+                        isActive
+                          ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
+                          : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-200'
+                      }`}
+                    >
+                      <span>{cat.icon}</span>
+                      <span>{cat.titleAr}</span>
+                      <span className={`px-1.5 py-0.2 rounded-full font-mono text-[10px] ${
+                        isActive ? 'bg-white/20 text-white' : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300'
+                      }`}>
+                        {catCount}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               
-              {/* Podium podium visual (Individual) */}
+              {/* Podium visual (Individual) */}
               <div className="bg-slate-50 dark:bg-slate-800/80 p-4 rounded-2xl border border-slate-200 dark:border-slate-700 space-y-3">
                 <h4 className="text-xs font-black text-slate-900 dark:text-slate-100 flex items-center gap-1.5 border-b border-slate-200 dark:border-slate-700 pb-2">
                   <Trophy className="w-4 h-4 text-amber-500" />
-                  <span>منصة التتويج الفردي المعتمدة (Top 3):</span>
+                  <span>منصة التتويج الفردي المعتمدة (Top 3 — {summaryTargetCatDef.titleAr}):</span>
                 </h4>
 
-                {arrivals.slice(0, 3).length === 0 ? (
-                  <p className="text-xs text-slate-400 text-center py-6">لا يتوفر واصلين حالياً.</p>
+                {summaryCatArrivals.slice(0, 3).length === 0 ? (
+                  <p className="text-xs text-slate-400 text-center py-6">لا يتوفر واصلين حالياً في هذه الفئة.</p>
                 ) : (
                   <div className="space-y-2">
-                    {arrivals.slice(0, 3).map((runner, index) => (
+                    {summaryCatArrivals.slice(0, 3).map((runner, index) => (
                       <div
                         key={index}
                         className="bg-white dark:bg-slate-900 p-3 rounded-xl border border-slate-200 dark:border-slate-700 flex items-center justify-between text-xs font-bold"
@@ -2722,14 +3298,16 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
                 <div className="flex-1 text-right">
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-black text-slate-900 dark:text-slate-100">
-                      تفريغ نتائج السباق الحالي فقط ({activeCategory.titleAr})
+                      {selectedRaceIds.length > 1
+                        ? `تفريغ نتائج السباقات المحددة (${selectedRaceIds.length} سباقات)`
+                        : `تفريغ نتائج السباق الحالي فقط (${activeCategory.titleAr})`}
                     </span>
                     <span className="text-[10px] bg-red-100 dark:bg-red-950/80 text-red-800 dark:text-red-300 font-bold px-2 py-0.5 rounded-full font-mono">
                       {arrivals.length} واصلين
                     </span>
                   </div>
                   <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
-                    يمسح جدول واصلي خط النهاية للفئة الحالية فقط، يصفر ساعة التوقيت، ويسجل نتيجة فارغة في قاعدة البيانات المركزية.
+                    يمسح جدول واصلي خط النهاية للسباقات المحددة فقط، يصفر ساعة التوقيت، ويسجل نتيجة فارغة في قاعدة البيانات المركزية.
                   </p>
                 </div>
               </div>
@@ -2884,7 +3462,9 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
                     </span>
                   </h3>
                   <p className="text-xs text-indigo-200">
-                    {activeCategory.icon} {activeCategory.titleAr} ({raceAffiliation === 'club_affiliated' ? 'منتمين للأندية' : 'مدرسي'})
+                    {selectedRaceIds.length > 1
+                      ? `🏁 ${selectedRaceIds.length} سباقات مفعلة (${raceAffiliation === 'club_affiliated' ? 'منتمين للأندية' : 'مدرسي'})`
+                      : `${activeCategory.icon} ${activeCategory.titleAr} (${raceAffiliation === 'club_affiliated' ? 'منتمين للأندية' : 'مدرسي'})`}
                   </p>
                 </div>
               </div>
@@ -2961,7 +3541,9 @@ export const FinishLineScannerModal: React.FC<FinishLineScannerModalProps> = ({
                     onChange={(e) => setDetailsScope(e.target.value as any)}
                     className="bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 text-xs font-bold rounded-xl px-3 py-2 border border-slate-300 dark:border-slate-700 cursor-pointer"
                   >
-                    <option value="current_race">مسجلي السباق الحالي ({activeCategory.titleAr})</option>
+                    <option value="current_race">
+                      {selectedRaceIds.length > 1 ? `مسجلي السباقات المفعلة (${selectedRaceIds.length})` : `مسجلي السباق الحالي (${activeCategory.titleAr})`}
+                    </option>
                     <option value="all_races">كافة مسجلي البطولة ({allStudents.length})</option>
                   </select>
                 )}

@@ -775,33 +775,46 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
 
   return (
     <div className={`fixed inset-0 z-50 flex items-center justify-center bg-slate-900/70 backdrop-blur-xs dir-rtl ${
-      isFullScreen ? 'p-0 overflow-hidden' : 'p-2 sm:p-4 overflow-y-auto'
+      isFullScreen ? 'p-0 overflow-hidden' : 'p-1.5 sm:p-4 overflow-hidden'
     }`}>
       <div
         className={`w-full bg-white shadow-2xl flex flex-col overflow-hidden transition-all duration-300 ${
-          isFullScreen ? 'h-[100dvh] max-w-none m-0 rounded-none border-0' : 'rounded-3xl border border-slate-200 max-w-6xl max-h-[92vh] my-4'
+          isFullScreen ? 'h-[100dvh] max-w-none m-0 rounded-none border-0' : 'rounded-2xl sm:rounded-3xl border border-slate-200 max-w-6xl max-h-[94dvh] sm:max-h-[92vh] my-auto'
         }`}
       >
         {/* Modal Header */}
-        <div className="px-4 sm:px-5 py-3.5 sm:py-4 bg-gradient-to-r from-emerald-800 via-teal-900 to-slate-900 text-white flex flex-col xs:flex-row xs:items-center justify-between gap-3 border-b border-white/10 shrink-0">
-          <div className="flex items-center gap-2.5 min-w-0">
-            <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-2xl bg-gradient-to-br from-amber-400 to-amber-600 flex items-center justify-center text-xl sm:text-2xl shadow-md border border-amber-300/40 shrink-0">
-              {sport.icon || '🏆'}
-            </div>
-            <div className="min-w-0 text-right">
-              <div className="flex items-center gap-1.5 flex-wrap">
-                <span className="text-[9px] sm:text-[10px] font-black px-2 py-0.5 rounded-md bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 whitespace-nowrap">
-                  نتائج ومباريات الرياضة
-                </span>
-                <span className="text-[9px] sm:text-[10px] text-emerald-100 font-bold whitespace-nowrap">{activeSeason}</span>
+        <div className="px-3 sm:px-5 py-3 sm:py-4 bg-gradient-to-r from-emerald-800 via-teal-900 to-slate-900 text-white flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 sm:gap-3 border-b border-white/10 shrink-0">
+          <div className="flex items-start sm:items-center justify-between gap-2.5 min-w-0 w-full sm:w-auto">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="w-9 h-9 sm:w-11 sm:h-11 rounded-xl sm:rounded-2xl bg-gradient-to-br from-amber-400 to-amber-600 flex items-center justify-center text-lg sm:text-2xl shadow-md border border-amber-300/40 shrink-0">
+                {sport.icon || '🏆'}
               </div>
-              <h2 className="text-sm sm:text-base md:text-lg font-black text-white mt-0.5 truncate">
-                البطولة الإقليمية المدرسية لـ {sport.name}
-              </h2>
+              <div className="min-w-0 text-right">
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="text-[9px] sm:text-[10px] font-black px-2 py-0.5 rounded-md bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 whitespace-nowrap">
+                    نتائج ومباريات الرياضة
+                  </span>
+                  <span className="text-[9px] sm:text-[10px] text-emerald-100 font-bold whitespace-nowrap">{activeSeason}</span>
+                </div>
+                <h2 className="text-xs sm:text-base md:text-lg font-black text-white mt-0.5 leading-snug break-words">
+                  البطولة الإقليمية المدرسية لـ {sport.name}
+                </h2>
+              </div>
+            </div>
+
+            <div className="flex sm:hidden items-center gap-1 shrink-0">
+              <button
+                type="button"
+                onClick={onClose}
+                className="text-slate-300 hover:text-white p-1.5 rounded-xl bg-white/10 hover:bg-white/20 transition-colors cursor-pointer min-w-[34px] min-h-[34px] flex items-center justify-center"
+                title="إغلاق"
+              >
+                <X className="h-4.5 w-4.5" />
+              </button>
             </div>
           </div>
 
-          <div className="flex items-center gap-1.5 justify-end w-full xs:w-auto shrink-0">
+          <div className="flex items-center gap-1.5 justify-end w-full sm:w-auto shrink-0">
             {canManage && (
               sport.id === 'cross_country' ? (
                 <span className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 bg-amber-500/20 text-amber-300 border border-amber-400/30 rounded-xl text-[11px] font-black">
@@ -812,11 +825,10 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
                 <button
                   type="button"
                   onClick={() => onCreateMatch(sport.id, selectedAffiliation)}
-                  className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-[11px] font-black shadow-xs transition-all cursor-pointer flex items-center gap-1.5"
+                  className="flex-1 sm:flex-none justify-center px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-[11px] font-black shadow-xs transition-all cursor-pointer flex items-center gap-1.5"
                 >
                   <Plus className="w-3.5 h-3.5" />
-                  <span className="hidden sm:inline">برمجة مباراة جديدة</span>
-                  <span className="sm:hidden">إضافة</span>
+                  <span>برمجة مباراة جديدة</span>
                 </button>
               )
             )}
@@ -824,7 +836,7 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
             <button
               type="button"
               onClick={() => setIsFullScreen(!isFullScreen)}
-              className="text-slate-300 hover:text-white p-1.5 rounded-xl hover:bg-white/10 transition-colors cursor-pointer min-w-[36px] min-h-[36px] flex items-center justify-center"
+              className="hidden sm:flex text-slate-300 hover:text-white p-1.5 rounded-xl hover:bg-white/10 transition-colors cursor-pointer min-w-[36px] min-h-[36px] items-center justify-center"
               title={isFullScreen ? 'استعادة الحجم الطبيعي' : 'ملء الشاشة'}
             >
               {isFullScreen ? <Minimize2 className="h-4.5 w-4.5" /> : <Maximize2 className="h-4.5 w-4.5" />}
@@ -833,7 +845,7 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
             <button
               type="button"
               onClick={onClose}
-              className="text-slate-400 hover:text-white p-1.5 rounded-xl hover:bg-white/10 transition-colors cursor-pointer min-w-[36px] min-h-[36px] flex items-center justify-center"
+              className="hidden sm:flex text-slate-400 hover:text-white p-1.5 rounded-xl hover:bg-white/10 transition-colors cursor-pointer min-w-[36px] min-h-[36px] items-center justify-center"
               title="إغلاق"
             >
               <X className="h-5 w-5" />
@@ -842,7 +854,7 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
         </div>
 
         {/* Modal Scrollable Content */}
-        <div className="p-4 sm:p-6 overflow-y-auto flex-1 bg-slate-50/60 space-y-6">
+        <div className="p-2.5 sm:p-6 overflow-y-auto overflow-x-hidden overscroll-contain flex-1 min-h-0 bg-slate-50/60 space-y-4 sm:space-y-6">
 
           {/* Special view for Athletics */}
           {sport.id === 'athletics' || sport.id === 'track_field' ? (
@@ -1117,12 +1129,12 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
 
               {/* INNER BRANCH MODAL WINDOW (نافذة نتائج الصنف المحددة) */}
               {activeBranchModal && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-2 sm:p-5 overflow-y-auto dir-rtl">
-                  <div className="w-full max-w-5xl bg-white rounded-3xl shadow-2xl border border-slate-200 overflow-hidden my-auto max-h-[92vh] flex flex-col">
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-1.5 sm:p-5 overflow-hidden dir-rtl">
+                  <div className="w-full max-w-5xl bg-white rounded-2xl sm:rounded-3xl shadow-2xl border border-slate-200 overflow-hidden my-auto max-h-[95dvh] sm:max-h-[92vh] flex flex-col">
                     {/* Inner Modal Header */}
                     <div
                       className={cn(
-                        "px-5 py-4 flex items-center justify-between border-b shrink-0 text-white",
+                        "px-3 py-3 sm:px-5 sm:py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 sm:gap-3 border-b shrink-0 text-white",
                         activeBranchModal === 'club_affiliated'
                           ? 'bg-gradient-to-r from-yellow-600 via-yellow-700 to-yellow-800 border-yellow-500/30'
                           : activeBranchModal === 'open'
@@ -1130,36 +1142,54 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
                           : 'bg-gradient-to-r from-blue-700 via-indigo-800 to-slate-900 border-blue-500/30'
                       )}
                     >
-                      <div className="flex items-center gap-3">
-                        <div className="w-11 h-11 rounded-2xl bg-white/20 backdrop-blur-xs flex items-center justify-center text-2xl shadow-inner border border-white/20">
-                          {activeBranchModal === 'club_affiliated' ? '🟡' : activeBranchModal === 'open' ? '🟢' : '⚪'}
-                        </div>
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <span className="text-[10px] font-black px-2.5 py-0.5 rounded-md bg-white/20 text-white">
-                              {activeBranchModal === 'club_affiliated' ? 'بطولة المنتمين للأندية' : activeBranchModal === 'open' ? 'البطولة المفتوحة' : 'بطولة غير المنتمين للأندية'}
-                            </span>
-                            <span className="text-[10px] text-white/80 font-bold">{sport.name} - {activeSeason}</span>
+                      <div className="flex items-start sm:items-center justify-between gap-2.5 min-w-0 w-full sm:w-auto">
+                        <div className="flex items-start sm:items-center gap-2.5 sm:gap-3 min-w-0">
+                          <div className="w-9 h-9 sm:w-11 sm:h-11 rounded-xl sm:rounded-2xl bg-white/20 backdrop-blur-xs flex items-center justify-center text-lg sm:text-2xl shadow-inner border border-white/20 shrink-0">
+                            {activeBranchModal === 'club_affiliated' ? '🟡' : activeBranchModal === 'open' ? '🟢' : '⚪'}
                           </div>
-                          <h3 className="text-sm sm:text-base font-black text-white mt-0.5">
-                            {activeBranchModal === 'club_affiliated'
-                              ? `نافذة نتائج ومباريات صنف المنتمين للأندية والجمعيات (${clubMatchesCount} مباراة)`
-                              : activeBranchModal === 'open'
-                              ? `نافذة نتائج ومباريات البطولة المفتوحة (${openMatchesCount} مباراة)`
-                              : `نافذة نتائج ومباريات صنف غير المنتمين للأندية (${nonClubMatchesCount} مباراة)`}
-                          </h3>
+                          <div className="min-w-0 text-right">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="text-[10px] font-black px-2 py-0.5 rounded-md bg-white/20 text-white whitespace-nowrap">
+                                {activeBranchModal === 'club_affiliated' ? 'بطولة المنتمين للأندية' : activeBranchModal === 'open' ? 'البطولة المفتوحة' : 'بطولة غير المنتمين للأندية'}
+                              </span>
+                              <span className="text-[10px] text-white/85 font-bold whitespace-nowrap">{sport.name} - {activeSeason}</span>
+                            </div>
+                            <h3 className="text-xs sm:text-base font-black text-white mt-1 leading-snug break-words">
+                              {activeBranchModal === 'club_affiliated'
+                                ? `نافذة نتائج ومباريات صنف المنتمين للأندية والجمعيات (${clubMatchesCount} مباراة)`
+                                : activeBranchModal === 'open'
+                                ? `نافذة نتائج ومباريات البطولة المفتوحة (${openMatchesCount} مباراة)`
+                                : `نافذة نتائج ومباريات صنف غير المنتمين للأندية (${nonClubMatchesCount} مباراة)`}
+                            </h3>
+                          </div>
                         </div>
+
+                        {/* Mobile Close Button pinned cleanly to top corner */}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setPendingBranchReset(null);
+                            setActiveBranchModal(null);
+                          }}
+                          className="sm:hidden p-1.5 bg-white/15 hover:bg-white/25 text-white rounded-full transition-colors cursor-pointer border border-white/25 shrink-0"
+                          title="إغلاق"
+                        >
+                          <X className="w-4.5 h-4.5" />
+                        </button>
                       </div>
 
-                      <div className="flex items-center gap-2 flex-wrap">
+                      <div className={cn(
+                        "items-center gap-1.5 sm:gap-2 shrink-0",
+                        canManage ? "grid grid-cols-2 sm:flex w-full sm:w-auto" : "hidden sm:flex"
+                      )}>
                         {canManage && onOpenElectronicDraw && (
                           <button
                             type="button"
                             onClick={() => onOpenElectronicDraw(sport.id)}
-                            className="px-3.5 py-2 bg-white/15 hover:bg-white/25 text-white border border-white/25 rounded-xl text-xs font-black shadow-xs transition-all cursor-pointer flex items-center gap-1.5"
+                            className="px-2.5 py-1.5 sm:px-3.5 sm:py-2 bg-white/15 hover:bg-white/25 text-white border border-white/25 rounded-xl text-[11px] sm:text-xs font-black shadow-xs transition-all cursor-pointer flex items-center justify-center gap-1.5 whitespace-nowrap"
                             title="فتح القرعة الإلكترونية لإعادة برمجة هذا الفرع"
                           >
-                            <Shuffle className="w-4 h-4" />
+                            <Shuffle className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
                             <span>القرعة الإلكترونية</span>
                           </button>
                         )}
@@ -1167,10 +1197,11 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
                           <button
                             type="button"
                             onClick={() => onCreateMatch(sport.id, activeBranchModal)}
-                            className="px-3.5 py-2 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl text-xs font-black shadow-xs transition-all cursor-pointer flex items-center gap-1.5"
+                            className="px-2.5 py-1.5 sm:px-3.5 sm:py-2 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl text-[11px] sm:text-xs font-black shadow-xs transition-all cursor-pointer flex items-center justify-center gap-1.5 whitespace-nowrap"
                           >
-                            <Plus className="w-4 h-4" />
-                            <span>برمجة مباراة بهذا الصنف</span>
+                            <Plus className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
+                            <span className="sm:hidden">برمجة مباراة</span>
+                            <span className="hidden sm:inline">برمجة مباراة بهذا الصنف</span>
                           </button>
                         )}
 
@@ -1180,7 +1211,7 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
                             setPendingBranchReset(null);
                             setActiveBranchModal(null);
                           }}
-                          className="p-2 bg-white/10 hover:bg-white/20 text-white rounded-full transition-colors cursor-pointer border border-white/25"
+                          className="hidden sm:flex p-2 bg-white/10 hover:bg-white/20 text-white rounded-full transition-colors cursor-pointer border border-white/25 shrink-0"
                           title="إغلاق"
                         >
                           <X className="w-5 h-5" />
@@ -1189,54 +1220,68 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
                     </div>
 
                     {/* Inner Modal Content */}
-                    <div className="p-4 sm:p-6 overflow-y-auto flex-1 bg-slate-50 space-y-5">
+                    <div className="p-3 sm:p-6 overflow-y-auto overscroll-contain flex-1 min-h-0 bg-slate-50 space-y-4 sm:space-y-5">
                       {/* Branch Tournaments Management Box for Central Admin & Tech Head */}
                       {canManage && (
-                        <div className="p-4 bg-gradient-to-r from-blue-900/10 via-indigo-900/10 to-slate-900/10 rounded-2xl border border-blue-200/80 flex flex-wrap items-center justify-between gap-3">
-                          <div className="flex items-center gap-2">
-                            <ShieldCheck className="w-5 h-5 text-blue-700" />
-                            <div>
-                              <h5 className="text-xs font-black text-slate-800">
-                                إدارة بطولات {sport.name} ({activeBranchModal === 'club_affiliated' ? 'المنتمين للأندية' : 'غير المنتمين للأندية'})
+                        <div className="p-3 sm:p-4 bg-gradient-to-r from-blue-900/10 via-indigo-900/10 to-slate-900/10 rounded-2xl border border-blue-200/80 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 sm:gap-3">
+                          <div className="flex items-start sm:items-center gap-2 min-w-0">
+                            <ShieldCheck className="w-4.5 h-4.5 sm:w-5 sm:h-5 text-blue-700 shrink-0 mt-0.5 sm:mt-0" />
+                            <div className="min-w-0">
+                              <h5 className="text-xs font-black text-slate-800 leading-snug">
+                                إدارة بطولات {sport.name} ({activeBranchModal === 'club_affiliated' ? 'المنتمين للأندية' : activeBranchModal === 'open' ? 'البطولة المفتوحة' : 'غير المنتمين للأندية'})
                               </h5>
-                              <p className="text-[11px] text-slate-600 font-medium">
+                              <p className="text-[11px] text-slate-600 font-medium leading-snug">
                                 يمكنك تعديل بيانات البطولات المحدثة لهذا الصنف أو حذفها نهائياً
                               </p>
                             </div>
                           </div>
 
-                          <div className="flex flex-wrap items-center gap-2">
-                            {(activeBranchModal === 'non_club' ? nonClubTournaments : activeBranchModal === 'club_affiliated' ? clubTournaments : openTournaments).map(t => (
-                              <div key={t.id} className="flex items-center gap-1 px-2.5 py-1 bg-white rounded-xl border border-slate-300 shadow-2xs text-xs font-bold text-slate-800">
-                                <span className="truncate max-w-[150px]">{t.name}</span>
-                                {onEditTournament && (
-                                  <button
-                                    type="button"
-                                    onClick={() => onEditTournament(t)}
-                                    className="p-1 text-blue-600 hover:bg-blue-50 rounded-md transition-colors"
-                                    title="تعديل البطولة"
-                                  >
-                                    <Pencil className="w-3.5 h-3.5" />
-                                  </button>
-                                )}
-                                {onDeleteTournament && (
-                                  <button
-                                    type="button"
-                                    onClick={() => onDeleteTournament(t)}
-                                    className="p-1 text-red-600 hover:bg-red-50 rounded-md transition-colors"
-                                    title="حذف البطولة"
-                                  >
-                                    <Trash2 className="w-3.5 h-3.5" />
-                                  </button>
-                                )}
-                              </div>
-                            ))}
+                          <div className="flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-center gap-1.5 sm:gap-2 w-full sm:w-auto">
+                            {(activeBranchModal === 'non_club' ? nonClubTournaments : activeBranchModal === 'club_affiliated' ? clubTournaments : openTournaments).map(t => {
+                              const tCatLabel = t.ageCategory ? getCategoryName(normalizeCategoryKey(t.ageCategory)) : '';
+                              const tGenLabel = t.gender && GENDER_MAP[t.gender] ? GENDER_MAP[t.gender].name : '';
+                              const hasMetaInName = tCatLabel && t.name.includes(tCatLabel);
+                              return (
+                                <div key={t.id} className="flex items-center justify-between sm:justify-start gap-2 px-2.5 py-1.5 sm:py-1 bg-white rounded-xl border border-slate-300 shadow-2xs text-[11px] sm:text-xs font-bold text-slate-800">
+                                  <span className="break-words leading-snug min-w-0">
+                                    {t.name}
+                                    {!hasMetaInName && (tCatLabel || tGenLabel) ? (
+                                      <span className="text-[10px] font-semibold text-slate-500 mr-1">
+                                        ({[tCatLabel, tGenLabel].filter(Boolean).join(' • ')})
+                                      </span>
+                                    ) : null}
+                                  </span>
+                                  <div className="flex items-center gap-0.5 shrink-0">
+                                    {onEditTournament && (
+                                      <button
+                                        type="button"
+                                        onClick={() => onEditTournament(t)}
+                                        className="p-1 text-blue-600 hover:bg-blue-50 rounded-md transition-colors cursor-pointer"
+                                        title="تعديل البطولة"
+                                      >
+                                        <Pencil className="w-3.5 h-3.5" />
+                                      </button>
+                                    )}
+                                    {onDeleteTournament && (
+                                      <button
+                                        type="button"
+                                        onClick={() => onDeleteTournament(t)}
+                                        className="p-1 text-red-600 hover:bg-red-50 rounded-md transition-colors cursor-pointer"
+                                        title="حذف البطولة"
+                                      >
+                                        <Trash2 className="w-3.5 h-3.5" />
+                                      </button>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })}
                           </div>
                         </div>
                       )}
 
                       {/* Filter Controls for Level 3 (Category Tabs, Gender, Search) */}
-                      <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs space-y-3">
+                      <div className="bg-white p-3 sm:p-4 rounded-2xl border border-slate-200 shadow-2xs space-y-2.5 sm:space-y-3">
                         <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3">
                           {/* Category Pills */}
                           <div className="relative flex items-center gap-1.5 w-full">
@@ -1291,12 +1336,12 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
                           </div>
 
                           {/* Gender & Status Filters */}
-                          <div className="flex flex-wrap items-center gap-2 shrink-0">
-                            <div className="flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200">
+                          <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto shrink-0">
+                            <div className="flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200 flex-1 sm:flex-none justify-between sm:justify-start">
                               <button
                                 type="button"
                                 onClick={() => setSelectedGender('ALL')}
-                                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                                className={`flex-1 sm:flex-none px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
                                   selectedGender === 'ALL' ? 'bg-white text-slate-900 shadow-2xs ring-1 ring-slate-300 dark:ring-blue-500/60' : 'text-slate-600 hover:text-slate-900'
                                 }`}
                               >
@@ -1305,7 +1350,7 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
                               <button
                                 type="button"
                                 onClick={() => setSelectedGender('Male')}
-                                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                                className={`flex-1 sm:flex-none px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
                                   selectedGender === 'Male' ? 'bg-white text-blue-700 shadow-2xs ring-1 ring-blue-300 dark:ring-blue-500/60' : 'text-slate-600 hover:text-slate-900'
                                 }`}
                               >
@@ -1314,7 +1359,7 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
                               <button
                                 type="button"
                                 onClick={() => setSelectedGender('Female')}
-                                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                                className={`flex-1 sm:flex-none px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
                                   selectedGender === 'Female' ? 'bg-white text-pink-700 shadow-2xs ring-1 ring-pink-300 dark:ring-pink-500/60' : 'text-slate-600 hover:text-slate-900'
                                 }`}
                               >
@@ -1327,7 +1372,7 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
                               onChange={(e) => setStatusFilter(e.target.value)}
                               aria-label="تصفية حسب حالة المباراة"
                               className={cn(
-                                "px-3 py-1.5 text-xs font-bold rounded-xl border focus:outline-none focus:ring-2 cursor-pointer transition-colors",
+                                "flex-1 sm:flex-none min-w-[140px] px-3 py-1.5 text-xs font-bold rounded-xl border focus:outline-none focus:ring-2 cursor-pointer transition-colors",
                                 statusFilter === 'Ongoing'
                                   ? 'bg-red-50 text-red-700 border-red-300 focus:ring-red-400'
                                   : statusFilter === 'Scheduled'
@@ -1455,8 +1500,8 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
                                           <table className="w-full text-[11px] text-right">
                                             <thead className="bg-white border-b border-slate-200 text-slate-500 font-black">
                                               <tr>
-                                                <th className="py-2 px-2 text-center w-8">#</th>
-                                                <th className="py-2 px-2">المؤسسة</th>
+                                                <th className="py-2 px-2 text-center w-8 whitespace-nowrap">#</th>
+                                                <th className="py-2 px-2 min-w-[120px] whitespace-nowrap">المؤسسة</th>
                                                 <th className="py-2 px-1.5 text-center">ل</th>
                                                 <th className="py-2 px-1.5 text-center">ف</th>
                                                 <th className="py-2 px-1.5 text-center">ت</th>
@@ -1626,18 +1671,18 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
                                           </div>
                                           <div className="space-y-1 text-[11px] font-bold">
                                             <div className={cn(
-                                              'flex items-center justify-between px-2 py-1 rounded-lg border',
+                                              'flex items-center justify-between gap-2 px-2 py-1 rounded-lg border',
                                               kW1 ? 'bg-emerald-50 border-emerald-300 text-emerald-950 font-black' : 'bg-white border-slate-200 text-slate-800'
                                             )}>
-                                              <span className="truncate">{kt1}</span>
-                                              <span className="font-mono">{km.status === 'Completed' || km.status === 'Ongoing' ? ks1 : '—'}</span>
+                                              <span className="break-words leading-snug">{kt1}</span>
+                                              <span className="font-mono shrink-0">{km.status === 'Completed' || km.status === 'Ongoing' ? ks1 : '—'}</span>
                                             </div>
                                             <div className={cn(
-                                              'flex items-center justify-between px-2 py-1 rounded-lg border',
+                                              'flex items-center justify-between gap-2 px-2 py-1 rounded-lg border',
                                               kW2 ? 'bg-emerald-50 border-emerald-300 text-emerald-950 font-black' : 'bg-white border-slate-200 text-slate-800'
                                             )}>
-                                              <span className="truncate">{kt2}</span>
-                                              <span className="font-mono">{km.status === 'Completed' || km.status === 'Ongoing' ? ks2 : '—'}</span>
+                                              <span className="break-words leading-snug">{kt2}</span>
+                                              <span className="font-mono shrink-0">{km.status === 'Completed' || km.status === 'Ongoing' ? ks2 : '—'}</span>
                                             </div>
                                           </div>
                                         </div>
@@ -1987,12 +2032,12 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
                                       {/* Team 1 (Top Row on Mobile) */}
                                       <div className="flex items-center justify-between gap-2">
                                         <div className="flex items-center gap-1.5 min-w-0">
-                                          <span className="w-4.5 h-4.5 rounded-full bg-blue-50 text-blue-700 text-[9px] flex items-center justify-center border border-blue-100 shrink-0 font-bold">
+                                          <span className="w-5 h-5 rounded-full bg-blue-50 text-blue-700 text-[9px] flex items-center justify-center border border-blue-100 shrink-0 font-bold">
                                             🏫
                                           </span>
                                           <span
                                             className={cn(
-                                              "text-[11px] font-black text-slate-800 truncate leading-tight",
+                                              "text-[11px] font-black text-slate-800 break-words leading-snug",
                                               isCompleted && isT1Winner && "text-blue-700"
                                             )}
                                             title={t1Name}
@@ -2006,7 +2051,7 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
                                         <div className="shrink-0 font-mono text-[11px] font-black">
                                           {isCompleted || isOngoing ? (
                                             <span className={cn(
-                                              "px-1.5 py-0.5 rounded border block text-center min-w-[20px]",
+                                              "px-1.5 py-0.5 rounded border block text-center min-w-[22px]",
                                               isCompleted && isT1Winner ? "bg-blue-50 text-blue-700 border-blue-100" : "bg-white text-slate-600 border-slate-200"
                                             )}>
                                               {m.score1 ?? 0}
@@ -2020,12 +2065,12 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
                                       {/* Team 2 (Bottom Row on Mobile) */}
                                       <div className="flex items-center justify-between gap-2">
                                         <div className="flex items-center gap-1.5 min-w-0">
-                                          <span className="w-4.5 h-4.5 rounded-full bg-blue-50 text-blue-700 text-[9px] flex items-center justify-center border border-blue-100 shrink-0 font-bold">
+                                          <span className="w-5 h-5 rounded-full bg-blue-50 text-blue-700 text-[9px] flex items-center justify-center border border-blue-100 shrink-0 font-bold">
                                             🏫
                                           </span>
                                           <span
                                             className={cn(
-                                              "text-[11px] font-black text-slate-800 truncate leading-tight",
+                                              "text-[11px] font-black text-slate-800 break-words leading-snug",
                                               isCompleted && isT2Winner && "text-blue-700"
                                             )}
                                             title={t2Name}
@@ -2039,7 +2084,7 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
                                         <div className="shrink-0 font-mono text-[11px] font-black">
                                           {isCompleted || isOngoing ? (
                                             <span className={cn(
-                                              "px-1.5 py-0.5 rounded border block text-center min-w-[20px]",
+                                              "px-1.5 py-0.5 rounded border block text-center min-w-[22px]",
                                               isCompleted && isT2Winner ? "bg-blue-50 text-blue-700 border-blue-100" : "bg-white text-slate-600 border-slate-200"
                                             )}>
                                               {m.score2 ?? 0}
@@ -2054,14 +2099,14 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
 
                                   {/* Penalties or Scorers compact details */}
                                   {(m.penalty1 !== undefined || m.penalty2 !== undefined || m.scorers) && (
-                                    <div className="text-[9px] text-slate-500 font-bold bg-amber-50/55 border border-amber-100 p-1.5 rounded-lg flex flex-col gap-0.5">
+                                    <div className="text-[10px] sm:text-[9px] text-slate-500 font-bold bg-amber-50/55 border border-amber-100 p-1.5 rounded-lg flex flex-col gap-0.5">
                                       {(m.penalty1 !== undefined || m.penalty2 !== undefined) && (
                                         <div className="flex items-center justify-center gap-1 text-amber-900 font-black">
                                           🎯 ركلات الترجيح: ({m.penalty1 ?? 0} - {m.penalty2 ?? 0})
                                         </div>
                                       )}
                                       {m.scorers && (
-                                        <div className="text-center truncate" title={m.scorers}>
+                                        <div className="text-center break-words leading-snug" title={m.scorers}>
                                           ⚽ الهدافون: <span className="font-medium text-slate-600">{m.scorers}</span>
                                         </div>
                                       )}
@@ -2190,11 +2235,11 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
                                           }}
                                           className="w-full py-2 px-3 rounded-xl bg-gradient-to-l from-emerald-600 via-teal-600 to-emerald-700 hover:from-emerald-700 hover:to-teal-800 text-white shadow-2xs transition-all cursor-pointer flex items-center justify-between gap-2 active:scale-[0.99]"
                                         >
-                                          <span className="flex items-center gap-1.5 text-[11px] font-black min-w-0">
+                                          <span className="flex items-center gap-1.5 text-[11px] font-black min-w-0 text-right">
                                             <MessageCircle className="w-3.5 h-3.5 shrink-0" />
-                                            <span className="truncate">إشعار المعنيين ببرمجة المقابلة</span>
+                                            <span className="leading-snug break-words">إشعار المعنيين ببرمجة المقابلة</span>
                                           </span>
-                                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-white/15 border border-white/25 text-[9px] font-extrabold shrink-0" dir="ltr">
+                                          <span className="hidden xs:inline-flex sm:inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-white/15 border border-white/25 text-[9px] font-extrabold shrink-0" dir="ltr">
                                             <Share2 className="w-2.5 h-2.5" />
                                             <span>Nouvelle diffusion</span>
                                           </span>
@@ -2236,11 +2281,11 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
                                           }}
                                           className="w-full py-2 px-3 rounded-xl bg-gradient-to-l from-blue-600 via-indigo-600 to-blue-700 hover:from-blue-700 hover:to-indigo-800 text-white shadow-2xs transition-all cursor-pointer flex items-center justify-between gap-2 active:scale-[0.99]"
                                         >
-                                          <span className="flex items-center gap-1.5 text-[11px] font-black min-w-0">
+                                          <span className="flex items-center gap-1.5 text-[11px] font-black min-w-0 text-right">
                                             <Trophy className="w-3.5 h-3.5 shrink-0 text-amber-300" />
-                                            <span className="truncate">إخبار المعنيين بالنتيجة النهائية المصادق عليها</span>
+                                            <span className="leading-snug break-words">إخبار المعنيين بالنتيجة النهائية المصادق عليها</span>
                                           </span>
-                                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-white/15 border border-white/25 text-[9px] font-extrabold shrink-0">
+                                          <span className="hidden xs:inline-flex sm:inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-white/15 border border-white/25 text-[9px] font-extrabold shrink-0">
                                             6 فئات معنية
                                           </span>
                                         </button>
@@ -2315,10 +2360,10 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
                                   )}
 
                                   {/* Venue, Date & Compact Action Buttons Footer */}
-                                  <div className="flex flex-col sm:flex-row sm:items-center justify-between text-[10px] text-slate-500 font-bold pt-1.5 border-t border-slate-100/70 gap-2">
-                                    <div className="flex items-center gap-1.5 text-slate-400 truncate w-full sm:max-w-[55%]">
+                                  <div className="flex flex-col sm:flex-row sm:items-center justify-between text-[10px] text-slate-500 font-bold pt-2 border-t border-slate-100/70 gap-2">
+                                    <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-slate-500 w-full sm:flex-1 min-w-0">
                                       <MapPin className="w-3 h-3 text-slate-400 shrink-0" />
-                                      <span className="truncate" title={vName}>{vName}</span>
+                                      <span className="break-words sm:truncate" title={vName}>{vName}</span>
                                       <span className="text-slate-300 shrink-0">•</span>
                                       <span className="shrink-0">{formatMatchDate(m.date)}</span>
                                       {m.startTime && (
@@ -2331,7 +2376,7 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
 
                                     {/* Inline Actions */}
                                     {(canManage || canShowScoreButtons) ? (
-                                      <div className="flex items-center gap-1 shrink-0 self-end sm:self-center flex-wrap justify-end">
+                                      <div className="flex items-center gap-1.5 shrink-0 w-full sm:w-auto flex-wrap justify-end">
                                         {canShowScoreButtons && !hasPendingSlot && !isCompleted && (
                                           <button
                                             type="button"
@@ -2339,7 +2384,7 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
                                             onClick={() => handleToggleLiveMatchStatus(m, isOngoing ? 'Scheduled' : 'Ongoing')}
                                             title={isOngoing ? 'إعادة الحالة إلى مبرمجة' : 'تشغيل وضع المباراة الجارية الآن (مباشر)'}
                                             className={cn(
-                                              "px-2 py-1 rounded-lg text-[9px] font-black transition-all flex items-center gap-1 shadow-3xs cursor-pointer disabled:opacity-50",
+                                              "px-2.5 py-1.5 sm:px-2 sm:py-1 rounded-lg text-[10px] sm:text-[9px] font-black transition-all flex items-center gap-1 shadow-3xs cursor-pointer disabled:opacity-50",
                                               isOngoing
                                                 ? "bg-red-100 hover:bg-red-200 text-red-700 border border-red-300"
                                                 : "bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200"
@@ -2356,7 +2401,7 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
                                             onClick={() => onEditScore(m)}
                                             title={hasPendingSlot ? 'بانتظار حسم المباراة السابقة لتحديد المتأهل' : 'تسجيل أو تعديل النتيجة'}
                                             className={cn(
-                                              "px-2.5 py-1 rounded-lg text-[9px] font-black transition-all flex items-center gap-1 shadow-3xs",
+                                              "px-2.5 py-1.5 sm:py-1 rounded-lg text-[10px] sm:text-[9px] font-black transition-all flex items-center gap-1 shadow-3xs",
                                               hasPendingSlot
                                                 ? "bg-slate-200 text-slate-500 cursor-not-allowed"
                                                 : isTechHeadForMatchSport
@@ -2364,7 +2409,7 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
                                                 : "bg-amber-600 hover:bg-amber-700 text-white cursor-pointer"
                                             )}
                                           >
-                                            <Edit3 className="w-2.5 h-2.5" />
+                                            <Edit3 className="w-3 h-3 sm:w-2.5 sm:h-2.5" />
                                             <span>
                                               {hasPendingSlot
                                                 ? 'بانتظار المتأهل'
@@ -2383,10 +2428,10 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
                                           <button
                                             type="button"
                                             onClick={() => onEditMatch(m)}
-                                            className="p-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg transition-all cursor-pointer"
+                                            className="p-1.5 sm:p-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg transition-all cursor-pointer"
                                             title="تعديل تفاصيل المباراة"
                                           >
-                                            <Pencil className="w-3 h-3" />
+                                            <Pencil className="w-3.5 h-3.5 sm:w-3 sm:h-3" />
                                           </button>
                                         )}
 
@@ -2394,10 +2439,10 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
                                           <button
                                             type="button"
                                             onClick={() => onDeleteMatch(m)}
-                                            className="p-1 bg-red-50 hover:bg-red-100 text-red-600 rounded-lg transition-all cursor-pointer"
+                                            className="p-1.5 sm:p-1 bg-red-50 hover:bg-red-100 text-red-600 rounded-lg transition-all cursor-pointer"
                                             title="حذف المباراة والنتيجة"
                                           >
-                                            <Trash2 className="w-3 h-3" />
+                                            <Trash2 className="w-3.5 h-3.5 sm:w-3 sm:h-3" />
                                           </button>
                                         )}
                                       </div>

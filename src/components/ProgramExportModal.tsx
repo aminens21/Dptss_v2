@@ -5,24 +5,27 @@ import {
   Printer,
   Download,
   Calendar,
+  CalendarDays,
   CheckCircle2,
   Filter,
   Layers,
   Sparkles,
   Info,
-  ChevronDown
+  Hash,
+  Trophy
 } from 'lucide-react';
 import { Tournament, Match, School, Sport, Venue, Referee, User } from '../types';
 import { SPORTS_CONFIG } from '../config/sportsConfig';
-import { DataService, SPORTS_MAP } from '../lib/dataService';
+import { DataService, SPORTS_MAP, normalizeDateToYmd } from '../lib/dataService';
 import {
   buildAllCalendarEvents,
   downloadProgramAsPdf,
   downloadProgramAsWord,
   printProgram,
   ProgramAffiliationFilter,
+  ProgramSortCriterion,
   AFFILIATION_LABELS,
-  sortCalendarEvents,
+  filterCalendarEvents,
   getEventCategoryGenderTuple,
   formatTargetCategoryWithGender,
   formatYmdToDmy
@@ -102,7 +105,11 @@ export const ProgramExportModal: React.FC<ProgramExportModalProps> = ({
 
   const [scopeFilter, setScopeFilter] = useState<'ALL' | 'provincial' | 'regional' | 'national'>(initialScopeFilter);
   const [affiliationFilter, setAffiliationFilter] = useState<ProgramAffiliationFilter>(initialAffiliationFilter);
+  const [filterCriterion, setFilterCriterion] = useState<ProgramSortCriterion>('category');
+  const [selectedDate, setSelectedDate] = useState<string>('ALL');
   const [categoryFilter, setCategoryFilter] = useState<string>('ALL');
+  const [selectedSportFilter, setSelectedSportFilter] = useState<string>('ALL');
+  const [matchNumberQuery, setMatchNumberQuery] = useState<string>('');
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
   const [loadedVenues, setLoadedVenues] = useState<Venue[]>([]);
   const [loadedReferees, setLoadedReferees] = useState<Referee[]>([]);
@@ -142,7 +149,11 @@ export const ProgramExportModal: React.FC<ProgramExportModalProps> = ({
         setScopeFilter(initialScopeFilter);
       }
       setAffiliationFilter(initialAffiliationFilter || 'ALL');
+      setFilterCriterion('category');
+      setSelectedDate('ALL');
       setCategoryFilter('ALL');
+      setSelectedSportFilter('ALL');
+      setMatchNumberQuery('');
 
       if (!propVenues || propVenues.length === 0) {
         DataService.getVenues().then(setLoadedVenues).catch(() => {});
@@ -315,21 +326,114 @@ export const ProgramExportModal: React.FC<ProgramExportModalProps> = ({
     });
   }, [sportScopeAffiliationEvents]);
 
-  // Reset categoryFilter if selected category no longer has matches under current sport/scope/affiliation
+  // Reset categoryFilter if no longer valid
   useEffect(() => {
     if (categoryFilter !== 'ALL' && !availableCategoryOptions.some(o => o.id === categoryFilter)) {
       setCategoryFilter('ALL');
     }
   }, [categoryFilter, availableCategoryOptions]);
 
-  // Filter events for preview and count, sorted by category, gender, and match number
-  const filteredEvents = useMemo(() => {
-    let list = sportScopeAffiliationEvents.slice();
-    if (categoryFilter !== 'ALL') {
-      list = list.filter(ev => getEventCategoryGenderTuple(ev).filterKey === categoryFilter);
+  // Available dates sorted chronologically within current sport/scope/affiliation
+  const availableDateOptions = useMemo(() => {
+    const counts = new Map<string, number>();
+    sportScopeAffiliationEvents.forEach(ev => {
+      const ymd = normalizeDateToYmd(ev.date) || ev.date || '';
+      if (!ymd) return;
+      counts.set(ymd, (counts.get(ymd) || 0) + 1);
+    });
+    return Array.from(counts.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([date, count]) => ({
+        date,
+        label: formatYmdToDmy(date),
+        count
+      }));
+  }, [sportScopeAffiliationEvents]);
+
+  // Reset selectedDate if no longer valid
+  useEffect(() => {
+    if (selectedDate !== 'ALL' && !availableDateOptions.some(o => o.date === selectedDate)) {
+      setSelectedDate('ALL');
     }
-    return sortCalendarEvents(list);
-  }, [sportScopeAffiliationEvents, categoryFilter]);
+  }, [selectedDate, availableDateOptions]);
+
+  // Available sports within current scope & affiliation
+  const availableSportFilterOptions = useMemo(() => {
+    const map = new Map<string, { id: string; name: string; icon: string; count: number }>();
+    sportScopeAffiliationEvents.forEach(ev => {
+      const existing = map.get(ev.sportId);
+      if (existing) {
+        existing.count += 1;
+      } else {
+        map.set(ev.sportId, {
+          id: ev.sportId,
+          name: ev.sportName || SPORTS_MAP[ev.sportId]?.name || ev.sportId,
+          icon: ev.sportIcon || SPORTS_MAP[ev.sportId]?.icon || '🏆',
+          count: 1
+        });
+      }
+    });
+    return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name, 'ar'));
+  }, [sportScopeAffiliationEvents]);
+
+  // Reset selectedSportFilter if no longer valid
+  useEffect(() => {
+    if (selectedSportFilter !== 'ALL' && !availableSportFilterOptions.some(o => o.id === selectedSportFilter)) {
+      setSelectedSportFilter('ALL');
+    }
+  }, [selectedSportFilter, availableSportFilterOptions]);
+
+  const handleChangeCriterion = (criterion: ProgramSortCriterion) => {
+    setFilterCriterion(criterion);
+    setSelectedDate('ALL');
+    setCategoryFilter('ALL');
+    setSelectedSportFilter('ALL');
+    setMatchNumberQuery('');
+  };
+
+  const effectiveSelectedSportIds = useMemo(() => {
+    if (filterCriterion === 'sport' && selectedSportFilter !== 'ALL') {
+      return [selectedSportFilter];
+    }
+    return activeSelectedSportIds;
+  }, [filterCriterion, selectedSportFilter, activeSelectedSportIds]);
+
+  // Unified filtered & sorted events using exact same pipeline as PDF/Word/Print export
+  const {
+    filtered: filteredEvents,
+    resolvedMatchNumbers,
+    selectedCategoryLabels,
+    parsedMatchQuery
+  } = useMemo(() => {
+    return filterCalendarEvents({
+      events: allEvents,
+      selectedSportIds: effectiveSelectedSportIds,
+      scopeFilter,
+      affiliationFilter,
+      categoryFilter: filterCriterion === 'category' ? categoryFilter : 'ALL',
+      selectedDates: filterCriterion === 'date' && selectedDate !== 'ALL' ? [selectedDate] : [],
+      matchNumberQuery: filterCriterion === 'matchNumber' ? matchNumberQuery : '',
+      sortBy: filterCriterion
+    });
+  }, [
+    allEvents,
+    effectiveSelectedSportIds,
+    scopeFilter,
+    affiliationFilter,
+    filterCriterion,
+    categoryFilter,
+    selectedDate,
+    matchNumberQuery
+  ]);
+
+  const sortOrderLabel =
+    filterCriterion === 'date'
+      ? 'مرتب حسب التاريخ'
+      : filterCriterion === 'matchNumber'
+      ? 'مرتب حسب رقم المقابلة'
+      : filterCriterion === 'sport'
+      ? 'مرتب حسب الرياضة'
+      : 'مرتب حسب الفئة';
 
   const showNotesColumn = useMemo(
     () => filteredEvents.some(ev => Boolean(ev.notes && ev.notes.trim().length > 0)),
@@ -353,10 +457,13 @@ export const ProgramExportModal: React.FC<ProgramExportModalProps> = ({
   // Export handlers
   const getExportOptions = () => ({
     events: allEvents,
-    selectedSportIds: activeSelectedSportIds,
+    selectedSportIds: effectiveSelectedSportIds,
     scopeFilter,
     affiliationFilter,
-    categoryFilter,
+    categoryFilter: filterCriterion === 'category' ? categoryFilter : 'ALL',
+    selectedDates: filterCriterion === 'date' && selectedDate !== 'ALL' ? [selectedDate] : [],
+    matchNumberQuery: filterCriterion === 'matchNumber' ? matchNumberQuery : '',
+    sortBy: filterCriterion,
     activeSeason
   });
 
@@ -396,13 +503,13 @@ export const ProgramExportModal: React.FC<ProgramExportModalProps> = ({
       <div className="bg-white rounded-none border-0 shadow-2xl w-full h-[100dvh] flex flex-col overflow-hidden my-0">
         
         {/* Modal Header */}
-        <div className="bg-gradient-to-r from-blue-900 via-indigo-900 to-slate-900 text-white p-4 sm:p-5 flex items-center justify-between gap-3 shrink-0">
-          <div className="flex items-center gap-3">
+        <div className="bg-gradient-to-r from-blue-900 via-indigo-900 to-slate-900 text-white p-3.5 sm:p-5 flex items-center justify-between gap-2.5 shrink-0">
+          <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
             <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-xl bg-white/10 border border-white/20 flex items-center justify-center text-xl shrink-0">
               📥
             </div>
-            <div>
-              <div className="flex items-center gap-2">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-1.5">
                 <span className="text-[10px] bg-blue-500/25 border border-blue-400/30 text-blue-200 font-bold px-2 py-0.5 rounded-full">
                   الموسم الدراسي {activeSeason}
                 </span>
@@ -410,7 +517,7 @@ export const ProgramExportModal: React.FC<ProgramExportModalProps> = ({
                   تصدير وطباعة رسمي
                 </span>
               </div>
-              <h2 className="text-base sm:text-lg font-black text-white mt-1">
+              <h2 className="text-sm sm:text-lg font-black text-white mt-1 leading-snug">
                 تحميل وبرمجة رزنامة البطولات (PDF / Word / طباعة)
               </h2>
             </div>
@@ -418,7 +525,7 @@ export const ProgramExportModal: React.FC<ProgramExportModalProps> = ({
 
           <button
             onClick={onClose}
-            className="text-slate-300 hover:text-white p-1.5 rounded-xl hover:bg-white/10 transition-colors cursor-pointer"
+            className="text-slate-300 hover:text-white p-1.5 rounded-xl hover:bg-white/10 transition-colors cursor-pointer shrink-0"
             title="إغلاق"
           >
             <X className="h-5 w-5" />
@@ -426,7 +533,7 @@ export const ProgramExportModal: React.FC<ProgramExportModalProps> = ({
         </div>
 
         {/* Modal Body */}
-        <div className="p-4 sm:p-6 overflow-y-auto space-y-5 text-slate-800 text-xs">
+        <div className="p-3.5 sm:p-6 overflow-y-auto overflow-x-hidden space-y-5 text-slate-800 text-xs flex-1">
           
           {/* Section 1: Selection Mode (الشامل vs بطولة واحدة vs بطولتان أو أكثر) */}
           {isScopedToTechHead && availableSports.length <= 1 ? (
@@ -659,60 +766,149 @@ export const ProgramExportModal: React.FC<ProgramExportModalProps> = ({
             </div>
           )}
 
-          {/* Section 4: Specific Age Category & Gender Filter */}
-          {availableCategoryOptions.length > 0 && (
-            <div className="space-y-2">
+          {/* Section 4: Simple 4-Criteria Filter & Sort Selector (Date / Category / Match Number / Sport) */}
+          {sportScopeAffiliationEvents.length > 0 && (
+            <div className="space-y-2.5">
               <label className="text-xs font-black text-slate-800 flex items-center gap-2">
-                <Calendar className="h-4 w-4 text-purple-600" />
-                <span>الفئة المعنية والجنس (لتحميل البرنامج كاملاً مرتباً أو برنامج فئة محددة فقط):</span>
+                <Filter className="h-4 w-4 text-purple-600 shrink-0" />
+                <span>تصفية وترتيب البرنامج حسب:</span>
               </label>
-              <div className="flex flex-wrap items-center gap-2">
+
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                 <button
                   type="button"
-                  onClick={() => setCategoryFilter('ALL')}
-                  className={`py-2 px-3 rounded-xl font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer border ${
-                    categoryFilter === 'ALL'
+                  onClick={() => handleChangeCriterion('date')}
+                  className={`py-2.5 px-2 sm:px-3 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer border ${
+                    filterCriterion === 'date'
+                      ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
+                      : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                  }`}
+                >
+                  <CalendarDays className="h-4 w-4 shrink-0" />
+                  <span>التاريخ</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleChangeCriterion('category')}
+                  className={`py-2.5 px-2 sm:px-3 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer border ${
+                    filterCriterion === 'category'
                       ? 'bg-purple-600 text-white border-purple-600 shadow-xs'
                       : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
                   }`}
                 >
-                  <span>🌐</span>
-                  <span>جميع الفئات ({sportScopeAffiliationEvents.length})</span>
+                  <Calendar className="h-4 w-4 shrink-0" />
+                  <span>الفئة</span>
                 </button>
-                {availableCategoryOptions.map(opt => {
-                  const isActive = categoryFilter === opt.id;
-                  const icon = opt.genderKey === 'Female' ? '👧' : opt.genderKey === 'Male' ? '👦' : '🤝';
-                  return (
-                    <button
-                      key={opt.id}
-                      type="button"
-                      onClick={() => setCategoryFilter(opt.id)}
-                      className={`py-2 px-3 rounded-xl font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer border ${
-                        isActive
-                          ? 'bg-purple-600 text-white border-purple-600 shadow-xs'
-                          : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
-                      }`}
-                    >
-                      <span>{icon}</span>
-                      <span>{opt.label} ({opt.count})</span>
-                    </button>
-                  );
-                })}
+
+                <button
+                  type="button"
+                  onClick={() => handleChangeCriterion('matchNumber')}
+                  className={`py-2.5 px-2 sm:px-3 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer border ${
+                    filterCriterion === 'matchNumber'
+                      ? 'bg-sky-600 text-white border-sky-600 shadow-xs'
+                      : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                  }`}
+                >
+                  <Hash className="h-4 w-4 shrink-0" />
+                  <span>رقم المقابلة</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleChangeCriterion('sport')}
+                  className={`py-2.5 px-2 sm:px-3 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer border ${
+                    filterCriterion === 'sport'
+                      ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
+                      : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                  }`}
+                >
+                  <Trophy className="h-4 w-4 shrink-0" />
+                  <span>الرياضة</span>
+                </button>
               </div>
+
+              {/* Single compact value selector for the chosen criterion */}
+              {filterCriterion === 'date' && (
+                <select
+                  value={selectedDate}
+                  onChange={e => setSelectedDate(e.target.value)}
+                  className="w-full px-3 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-slate-800 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 cursor-pointer"
+                >
+                  <option value="ALL">جميع التواريخ ({sportScopeAffiliationEvents.length})</option>
+                  {availableDateOptions.map(opt => (
+                    <option key={opt.date} value={opt.date}>
+                      {opt.label} ({opt.count})
+                    </option>
+                  ))}
+                </select>
+              )}
+
+              {filterCriterion === 'category' && (
+                <select
+                  value={categoryFilter}
+                  onChange={e => setCategoryFilter(e.target.value)}
+                  className="w-full px-3 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-slate-800 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-purple-500/30 focus:border-purple-500 cursor-pointer"
+                >
+                  <option value="ALL">جميع الفئات ({sportScopeAffiliationEvents.length})</option>
+                  {availableCategoryOptions.map(opt => (
+                    <option key={opt.id} value={opt.id}>
+                      {opt.label} ({opt.count})
+                    </option>
+                  ))}
+                </select>
+              )}
+
+              {filterCriterion === 'matchNumber' && (
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={matchNumberQuery}
+                    onChange={e => setMatchNumberQuery(e.target.value)}
+                    placeholder="جميع المقابلات — أو أدخل رقم المقابلة (مثال: 5 أو 1-8)"
+                    className="w-full px-3 py-2.5 pl-9 rounded-xl border border-slate-200 bg-slate-50 text-slate-900 text-xs font-bold placeholder:text-slate-400 placeholder:font-normal focus:outline-none focus:ring-2 focus:ring-sky-500/30 focus:border-sky-500"
+                  />
+                  {matchNumberQuery.trim() && (
+                    <button
+                      type="button"
+                      onClick={() => setMatchNumberQuery('')}
+                      className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
+                      title="مسح"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {filterCriterion === 'sport' && (
+                <select
+                  value={selectedSportFilter}
+                  onChange={e => setSelectedSportFilter(e.target.value)}
+                  className="w-full px-3 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-slate-800 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-emerald-500/30 focus:border-emerald-500 cursor-pointer"
+                >
+                  <option value="ALL">جميع الرياضات ({sportScopeAffiliationEvents.length})</option>
+                  {availableSportFilterOptions.map(opt => (
+                    <option key={opt.id} value={opt.id}>
+                      {opt.icon} {opt.name} ({opt.count})
+                    </option>
+                  ))}
+                </select>
+              )}
             </div>
           )}
 
           {/* Summary Indicator Box */}
           <div className="bg-gradient-to-r from-blue-50 via-indigo-50 to-slate-50 p-3.5 rounded-xl border border-blue-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div className="flex items-center gap-2.5">
-              <span className="w-8 h-8 rounded-lg bg-blue-600 text-white flex items-center justify-center font-black text-xs">
+              <span className="w-8 h-8 rounded-lg bg-blue-600 text-white flex items-center justify-center font-black text-xs shrink-0">
                 {filteredEvents.length}
               </span>
               <div>
                 <h5 className="font-black text-slate-900 text-xs">
-                  {filteredEvents.length > 0 ? 'مباريات ومواعيد جاهزة للتصدير' : 'البرنامج فارغ حالياً — لا توجد مباريات مبرمجة'}
+                  {filteredEvents.length > 0 ? 'مباريات ومواعيد جاهزة للتصدير' : 'لا توجد مباريات تطابق الاختيار المحدد'}
                 </h5>
-                <p className="text-[11px] text-slate-500">
+                <p className="text-[11px] text-slate-500 leading-relaxed">
                   {mode === 'ALL_SPORTS'
                     ? 'البرنامج الشامل لكافة الرياضات'
                     : mode === 'SINGLE_SPORT'
@@ -721,8 +917,17 @@ export const ProgramExportModal: React.FC<ProgramExportModalProps> = ({
                   {' • '}
                   {scopeFilter === 'ALL' ? 'جميع المستويات' : scopeFilter === 'provincial' ? 'إقليمي' : scopeFilter === 'regional' ? 'جهوي' : 'وطني'}
                   {affiliationFilter !== 'ALL' ? ` • ${AFFILIATION_LABELS[affiliationFilter]}` : ''}
-                  {categoryFilter !== 'ALL'
-                    ? ` • فئة: ${availableCategoryOptions.find(o => o.id === categoryFilter)?.label || categoryFilter}`
+                  {filterCriterion === 'category' && selectedCategoryLabels.length > 0
+                    ? ` • الفئة: ${selectedCategoryLabels[0]}`
+                    : ''}
+                  {filterCriterion === 'date' && selectedDate !== 'ALL'
+                    ? ` • التاريخ: ${formatYmdToDmy(selectedDate)}`
+                    : ''}
+                  {filterCriterion === 'matchNumber' && parsedMatchQuery.hasQuery
+                    ? ` • رقم المقابلة: ${parsedMatchQuery.normalizedDisplay}`
+                    : ''}
+                  {filterCriterion === 'sport' && selectedSportFilter !== 'ALL'
+                    ? ` • الرياضة: ${SPORTS_MAP[selectedSportFilter]?.name || selectedSportFilter}`
                     : ''}
                 </p>
               </div>
@@ -730,22 +935,55 @@ export const ProgramExportModal: React.FC<ProgramExportModalProps> = ({
 
             <div className="text-[11px] text-slate-600 flex items-center gap-1.5 font-medium bg-white px-3 py-1.5 rounded-lg border border-slate-200">
               <Info className="h-3.5 w-3.5 text-blue-600 shrink-0" />
-              <span>مرتب حسب الفئة المعنية ورقم المقابلة</span>
+              <span>{sortOrderLabel}</span>
             </div>
           </div>
 
-          {/* Preview Table or Empty Notice */}
+          {/* Preview Table (Desktop) & Cards (Mobile) or Empty Notice */}
           {filteredEvents.length === 0 ? (
             <div className="border border-dashed border-slate-200 rounded-xl p-6 text-center bg-slate-50 text-slate-500 text-xs font-bold">
-              لا توجد مباريات مبرمجة حالياً لهذه الرياضة أو الفئة (البرنامج فارغ).
+              لا توجد مباريات مبرمجة تطابق الاختيار المحدد حالياً.
             </div>
           ) : (
             <div className="border border-slate-200 rounded-xl overflow-hidden">
-              <div className="bg-slate-100 px-3 py-2 border-b border-slate-200 font-bold text-slate-700 flex items-center justify-between text-[11px]">
+              <div className="bg-slate-100 px-3 py-2 border-b border-slate-200 font-bold text-slate-700 flex items-center justify-between gap-2 flex-wrap text-[11px]">
                 <span>معاينة محتوى الجدول الرسمي (أول {Math.min(filteredEvents.length, 15)} مواعيد من أصل {filteredEvents.length}):</span>
-                <span className="text-blue-700 font-bold">مرتب حسب الفئة ورقم المقابلة 📄</span>
+                <span className="text-blue-700 font-bold">{sortOrderLabel} 📄</span>
               </div>
-              <div className="max-h-48 overflow-y-auto">
+
+              {/* Mobile Compact Preview Cards */}
+              <div className="sm:hidden max-h-60 overflow-y-auto divide-y divide-slate-100 bg-white">
+                {filteredEvents.slice(0, 15).map((ev, idx) => {
+                  const matchNum = ev.matchNumber ?? resolvedMatchNumbers.get(ev.id) ?? idx + 1;
+                  return (
+                    <div key={ev.id} className="p-3 space-y-1.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-sky-50 text-sky-700 border border-sky-200 font-black text-[11px]">
+                          مقابلة #{matchNum}
+                        </span>
+                        <span className="font-bold text-blue-800 text-[11px]">
+                          {formatYmdToDmy(ev.date)}{ev.time ? ` • ${ev.time}` : ''}
+                        </span>
+                      </div>
+                      <div className="font-bold text-slate-900 text-xs leading-snug">
+                        {ev.title}
+                      </div>
+                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-600">
+                        <span className="font-bold text-purple-800">
+                          {formatTargetCategoryWithGender(ev.category, ev.gender, ev.sportId)}
+                        </span>
+                        {mode !== 'SINGLE_SPORT' && (
+                          <span className="text-slate-700 font-semibold">{ev.sportName}</span>
+                        )}
+                        <span>📍 {ev.venue}</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Desktop / Tablet Preview Table */}
+              <div className="hidden sm:block max-h-52 overflow-y-auto overflow-x-auto">
                 <table className="w-full text-right text-[11px]">
                   <thead className="bg-slate-50 text-slate-600 border-b border-slate-200 sticky top-0">
                     <tr>
@@ -763,7 +1001,7 @@ export const ProgramExportModal: React.FC<ProgramExportModalProps> = ({
                     {filteredEvents.slice(0, 15).map((ev, idx) => (
                       <tr key={ev.id} className="hover:bg-slate-50">
                         <td className="p-2 text-center font-black text-sky-700 whitespace-nowrap">
-                          {ev.matchNumber ? ev.matchNumber : idx + 1}
+                          {ev.matchNumber ?? resolvedMatchNumbers.get(ev.id) ?? idx + 1}
                         </td>
                         <td className="p-2 font-bold text-blue-800 whitespace-nowrap">{formatYmdToDmy(ev.date)}</td>
                         <td className="p-2 font-bold text-purple-800 whitespace-nowrap">
@@ -822,7 +1060,7 @@ export const ProgramExportModal: React.FC<ProgramExportModalProps> = ({
               type="button"
               onClick={handlePrint}
               disabled={filteredEvents.length === 0}
-              className="flex-1 sm:flex-initial flex items-center justify-center gap-2 px-4 py-2.5 bg-slate-800 hover:bg-slate-900 text-white rounded-xl text-xs font-bold shadow-sm transition-all cursor-pointer border border-slate-700"
+              className="flex-1 sm:flex-initial flex items-center justify-center gap-2 px-4 py-2.5 bg-slate-800 hover:bg-slate-900 disabled:opacity-50 text-white rounded-xl text-xs font-bold shadow-sm transition-all cursor-pointer border border-slate-700"
               title="فتح شاشة الطباعة الفورية وإرسال الأمر للطابعة الورقية"
             >
               <Printer className="h-4 w-4" />
