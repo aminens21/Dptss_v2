@@ -105,7 +105,18 @@ export const ProgramExportModal: React.FC<ProgramExportModalProps> = ({
 
   const [scopeFilter, setScopeFilter] = useState<'ALL' | 'provincial' | 'regional' | 'national'>(initialScopeFilter);
   const [affiliationFilter, setAffiliationFilter] = useState<ProgramAffiliationFilter>(initialAffiliationFilter);
-  const [filterCriterion, setFilterCriterion] = useState<ProgramSortCriterion>('category');
+  const [sortBy, setSortBy] = useState<ProgramSortCriterion>('category');
+  const [activeFilters, setActiveFilters] = useState<{
+    date: boolean;
+    category: boolean;
+    matchNumber: boolean;
+    sport: boolean;
+  }>({
+    date: false,
+    category: true,
+    matchNumber: false,
+    sport: false
+  });
   const [selectedDate, setSelectedDate] = useState<string>('ALL');
   const [categoryFilter, setCategoryFilter] = useState<string>('ALL');
   const [selectedSportFilter, setSelectedSportFilter] = useState<string>('ALL');
@@ -149,7 +160,13 @@ export const ProgramExportModal: React.FC<ProgramExportModalProps> = ({
         setScopeFilter(initialScopeFilter);
       }
       setAffiliationFilter(initialAffiliationFilter || 'ALL');
-      setFilterCriterion('category');
+      setSortBy('category');
+      setActiveFilters({
+        date: false,
+        category: true,
+        matchNumber: false,
+        sport: false
+      });
       setSelectedDate('ALL');
       setCategoryFilter('ALL');
       setSelectedSportFilter('ALL');
@@ -383,20 +400,19 @@ export const ProgramExportModal: React.FC<ProgramExportModalProps> = ({
     }
   }, [selectedSportFilter, availableSportFilterOptions]);
 
-  const handleChangeCriterion = (criterion: ProgramSortCriterion) => {
-    setFilterCriterion(criterion);
-    setSelectedDate('ALL');
-    setCategoryFilter('ALL');
-    setSelectedSportFilter('ALL');
-    setMatchNumberQuery('');
+  const toggleFilterCriterion = (criterion: 'date' | 'category' | 'matchNumber' | 'sport') => {
+    setActiveFilters(prev => ({
+      ...prev,
+      [criterion]: !prev[criterion]
+    }));
   };
 
   const effectiveSelectedSportIds = useMemo(() => {
-    if (filterCriterion === 'sport' && selectedSportFilter !== 'ALL') {
+    if (activeFilters.sport && selectedSportFilter !== 'ALL') {
       return [selectedSportFilter];
     }
     return activeSelectedSportIds;
-  }, [filterCriterion, selectedSportFilter, activeSelectedSportIds]);
+  }, [activeFilters.sport, selectedSportFilter, activeSelectedSportIds]);
 
   // Unified filtered & sorted events using exact same pipeline as PDF/Word/Print export
   const {
@@ -410,28 +426,30 @@ export const ProgramExportModal: React.FC<ProgramExportModalProps> = ({
       selectedSportIds: effectiveSelectedSportIds,
       scopeFilter,
       affiliationFilter,
-      categoryFilter: filterCriterion === 'category' ? categoryFilter : 'ALL',
-      selectedDates: filterCriterion === 'date' && selectedDate !== 'ALL' ? [selectedDate] : [],
-      matchNumberQuery: filterCriterion === 'matchNumber' ? matchNumberQuery : '',
-      sortBy: filterCriterion
+      categoryFilter: activeFilters.category ? categoryFilter : 'ALL',
+      selectedDates: activeFilters.date && selectedDate !== 'ALL' ? [selectedDate] : [],
+      matchNumberQuery: activeFilters.matchNumber ? matchNumberQuery : '',
+      sortBy
     });
   }, [
     allEvents,
     effectiveSelectedSportIds,
     scopeFilter,
     affiliationFilter,
-    filterCriterion,
+    activeFilters,
     categoryFilter,
     selectedDate,
-    matchNumberQuery
+    matchNumberQuery,
+    selectedSportFilter,
+    sortBy
   ]);
 
   const sortOrderLabel =
-    filterCriterion === 'date'
+    sortBy === 'date'
       ? 'مرتب حسب التاريخ'
-      : filterCriterion === 'matchNumber'
+      : sortBy === 'matchNumber'
       ? 'مرتب حسب رقم المقابلة'
-      : filterCriterion === 'sport'
+      : sortBy === 'sport'
       ? 'مرتب حسب الرياضة'
       : 'مرتب حسب الفئة';
 
@@ -460,10 +478,10 @@ export const ProgramExportModal: React.FC<ProgramExportModalProps> = ({
     selectedSportIds: effectiveSelectedSportIds,
     scopeFilter,
     affiliationFilter,
-    categoryFilter: filterCriterion === 'category' ? categoryFilter : 'ALL',
-    selectedDates: filterCriterion === 'date' && selectedDate !== 'ALL' ? [selectedDate] : [],
-    matchNumberQuery: filterCriterion === 'matchNumber' ? matchNumberQuery : '',
-    sortBy: filterCriterion,
+    categoryFilter: activeFilters.category ? categoryFilter : 'ALL',
+    selectedDates: activeFilters.date && selectedDate !== 'ALL' ? [selectedDate] : [],
+    matchNumberQuery: activeFilters.matchNumber ? matchNumberQuery : '',
+    sortBy,
     activeSeason
   });
 
@@ -766,135 +784,149 @@ export const ProgramExportModal: React.FC<ProgramExportModalProps> = ({
             </div>
           )}
 
-          {/* Section 4: Simple 4-Criteria Filter & Sort Selector (Date / Category / Match Number / Sport) */}
+          {/* Section 4: Multi-Criteria Filter & Sort Selector */}
           {sportScopeAffiliationEvents.length > 0 && (
-            <div className="space-y-2.5">
-              <label className="text-xs font-black text-slate-800 flex items-center gap-2">
-                <Filter className="h-4 w-4 text-purple-600 shrink-0" />
-                <span>تصفية وترتيب البرنامج حسب:</span>
-              </label>
-
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                <button
-                  type="button"
-                  onClick={() => handleChangeCriterion('date')}
-                  className={`py-2.5 px-2 sm:px-3 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer border ${
-                    filterCriterion === 'date'
-                      ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
-                      : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
-                  }`}
-                >
-                  <CalendarDays className="h-4 w-4 shrink-0" />
-                  <span>التاريخ</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => handleChangeCriterion('category')}
-                  className={`py-2.5 px-2 sm:px-3 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer border ${
-                    filterCriterion === 'category'
-                      ? 'bg-purple-600 text-white border-purple-600 shadow-xs'
-                      : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
-                  }`}
-                >
-                  <Calendar className="h-4 w-4 shrink-0" />
-                  <span>الفئة</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => handleChangeCriterion('matchNumber')}
-                  className={`py-2.5 px-2 sm:px-3 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer border ${
-                    filterCriterion === 'matchNumber'
-                      ? 'bg-sky-600 text-white border-sky-600 shadow-xs'
-                      : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
-                  }`}
-                >
-                  <Hash className="h-4 w-4 shrink-0" />
-                  <span>رقم المقابلة</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => handleChangeCriterion('sport')}
-                  className={`py-2.5 px-2 sm:px-3 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer border ${
-                    filterCriterion === 'sport'
-                      ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
-                      : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
-                  }`}
-                >
-                  <Trophy className="h-4 w-4 shrink-0" />
-                  <span>الرياضة</span>
-                </button>
+            <div className="space-y-3">
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <label className="text-xs font-black text-slate-800 flex items-center gap-2">
+                  <Filter className="h-4 w-4 text-purple-600 shrink-0" />
+                  <span>تصفية البرنامج (يمكن تفعيل معيارين أو أكثر في نفس الوقت):</span>
+                </label>
+                <div className="flex items-center gap-1.5 text-[11px] text-slate-500 font-medium">
+                  <span>ترتيب حسب:</span>
+                  <select
+                    value={sortBy}
+                    onChange={e => setSortBy(e.target.value as ProgramSortCriterion)}
+                    className="px-2 py-1 rounded-lg border border-slate-200 bg-white text-slate-800 font-bold text-xs focus:outline-none focus:ring-1 focus:ring-purple-500 cursor-pointer"
+                  >
+                    <option value="category">الفئة</option>
+                    <option value="date">التاريخ</option>
+                    <option value="matchNumber">رقم المقابلة</option>
+                    <option value="sport">الرياضة</option>
+                  </select>
+                </div>
               </div>
 
-              {/* Single compact value selector for the chosen criterion */}
-              {filterCriterion === 'date' && (
-                <select
-                  value={selectedDate}
-                  onChange={e => setSelectedDate(e.target.value)}
-                  className="w-full px-3 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-slate-800 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 cursor-pointer"
-                >
-                  <option value="ALL">جميع التواريخ ({sportScopeAffiliationEvents.length})</option>
-                  {availableDateOptions.map(opt => (
-                    <option key={opt.date} value={opt.date}>
-                      {opt.label} ({opt.count})
-                    </option>
-                  ))}
-                </select>
-              )}
-
-              {filterCriterion === 'category' && (
-                <select
-                  value={categoryFilter}
-                  onChange={e => setCategoryFilter(e.target.value)}
-                  className="w-full px-3 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-slate-800 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-purple-500/30 focus:border-purple-500 cursor-pointer"
-                >
-                  <option value="ALL">جميع الفئات ({sportScopeAffiliationEvents.length})</option>
-                  {availableCategoryOptions.map(opt => (
-                    <option key={opt.id} value={opt.id}>
-                      {opt.label} ({opt.count})
-                    </option>
-                  ))}
-                </select>
-              )}
-
-              {filterCriterion === 'matchNumber' && (
-                <div className="relative">
-                  <input
-                    type="text"
-                    value={matchNumberQuery}
-                    onChange={e => setMatchNumberQuery(e.target.value)}
-                    placeholder="جميع المقابلات — أو أدخل رقم المقابلة (مثال: 5 أو 1-8)"
-                    className="w-full px-3 py-2.5 pl-9 rounded-xl border border-slate-200 bg-slate-50 text-slate-900 text-xs font-bold placeholder:text-slate-400 placeholder:font-normal focus:outline-none focus:ring-2 focus:ring-sky-500/30 focus:border-sky-500"
-                  />
-                  {matchNumberQuery.trim() && (
+              {/* Multi-Select Filter Criteria Toggles */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                {[
+                  { id: 'date', label: 'التاريخ', icon: CalendarDays },
+                  { id: 'category', label: 'الفئة', icon: Calendar },
+                  { id: 'matchNumber', label: 'رقم المقابلة', icon: Hash },
+                  { id: 'sport', label: 'الرياضة', icon: Trophy },
+                ].map(criterion => {
+                  const Icon = criterion.icon;
+                  const isActive = (activeFilters as any)[criterion.id];
+                  return (
                     <button
+                      key={criterion.id}
                       type="button"
-                      onClick={() => setMatchNumberQuery('')}
-                      className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
-                      title="مسح"
+                      onClick={() => toggleFilterCriterion(criterion.id as any)}
+                      className={`py-2 px-2.5 rounded-xl font-bold text-xs flex items-center justify-between gap-1.5 transition-all cursor-pointer border ${
+                        isActive
+                          ? 'bg-purple-600 text-white border-purple-600 shadow-xs ring-2 ring-purple-500/20'
+                          : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                      }`}
                     >
-                      <X className="h-4 w-4" />
+                      <div className="flex items-center gap-1.5 truncate">
+                        <Icon className="h-4 w-4 shrink-0" />
+                        <span className="truncate">{criterion.label}</span>
+                      </div>
+                      <span className={`w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-black shrink-0 ${isActive ? 'bg-white text-purple-700' : 'bg-slate-200 text-slate-500'}`}>
+                        {isActive ? '✓' : '+'}
+                      </span>
                     </button>
-                  )}
-                </div>
-              )}
+                  );
+                })}
+              </div>
 
-              {filterCriterion === 'sport' && (
-                <select
-                  value={selectedSportFilter}
-                  onChange={e => setSelectedSportFilter(e.target.value)}
-                  className="w-full px-3 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-slate-800 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-emerald-500/30 focus:border-emerald-500 cursor-pointer"
-                >
-                  <option value="ALL">جميع الرياضات ({sportScopeAffiliationEvents.length})</option>
-                  {availableSportFilterOptions.map(opt => (
-                    <option key={opt.id} value={opt.id}>
-                      {opt.icon} {opt.name} ({opt.count})
-                    </option>
-                  ))}
-                </select>
-              )}
+              {/* Inputs for active filters (all active ones appear simultaneously) */}
+              <div className="space-y-2.5 pt-1">
+                {activeFilters.date && (
+                  <div className="space-y-1">
+                    <span className="text-[11px] font-bold text-slate-600 block">فلترة حسب التاريخ:</span>
+                    <select
+                      value={selectedDate}
+                      onChange={e => setSelectedDate(e.target.value)}
+                      className="w-full px-3 py-2.5 rounded-xl border border-blue-200 bg-blue-50/50 text-slate-800 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 cursor-pointer"
+                    >
+                      <option value="ALL">جميع التواريخ ({sportScopeAffiliationEvents.length})</option>
+                      {availableDateOptions.map(opt => (
+                        <option key={opt.date} value={opt.date}>
+                          {opt.label} ({opt.count})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                {activeFilters.category && (
+                  <div className="space-y-1">
+                    <span className="text-[11px] font-bold text-slate-600 block">فلترة حسب الفئة:</span>
+                    <select
+                      value={categoryFilter}
+                      onChange={e => setCategoryFilter(e.target.value)}
+                      className="w-full px-3 py-2.5 rounded-xl border border-purple-200 bg-purple-50/50 text-slate-800 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-purple-500/30 focus:border-purple-500 cursor-pointer"
+                    >
+                      <option value="ALL">جميع الفئات ({sportScopeAffiliationEvents.length})</option>
+                      {availableCategoryOptions.map(opt => (
+                        <option key={opt.id} value={opt.id}>
+                          {opt.label} ({opt.count})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                {activeFilters.matchNumber && (
+                  <div className="space-y-1">
+                    <span className="text-[11px] font-bold text-slate-600 block">فلترة حسب رقم المقابلة:</span>
+                    <div className="relative">
+                      <input
+                        type="text"
+                        value={matchNumberQuery}
+                        onChange={e => setMatchNumberQuery(e.target.value)}
+                        placeholder="أدخل رقم المقابلة (مثال: 5 أو 1-8)"
+                        className="w-full px-3 py-2.5 pl-9 rounded-xl border border-sky-200 bg-sky-50/50 text-slate-900 text-xs font-bold placeholder:text-slate-400 placeholder:font-normal focus:outline-none focus:ring-2 focus:ring-sky-500/30 focus:border-sky-500"
+                      />
+                      {matchNumberQuery.trim() && (
+                        <button
+                          type="button"
+                          onClick={() => setMatchNumberQuery('')}
+                          className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
+                          title="مسح"
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {activeFilters.sport && (
+                  <div className="space-y-1">
+                    <span className="text-[11px] font-bold text-slate-600 block">فلترة حسب الرياضة:</span>
+                    <select
+                      value={selectedSportFilter}
+                      onChange={e => setSelectedSportFilter(e.target.value)}
+                      className="w-full px-3 py-2.5 rounded-xl border border-emerald-200 bg-emerald-50/50 text-slate-800 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-emerald-500/30 focus:border-emerald-500 cursor-pointer"
+                    >
+                      <option value="ALL">جميع الرياضات ({sportScopeAffiliationEvents.length})</option>
+                      {availableSportFilterOptions.map(opt => (
+                        <option key={opt.id} value={opt.id}>
+                          {opt.icon} {opt.name} ({opt.count})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                {!activeFilters.date && !activeFilters.category && !activeFilters.matchNumber && !activeFilters.sport && (
+                  <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200 text-center text-[11px] text-slate-500 font-medium">
+                    لم يتم تفعيل أي معيار فلترة فرعي (يعرض البرنامج كاملاً حسب النطاق والنوع). انقر على الأزرار أعلاه لتفعيل معيارين أو أكثر في نفس الوقت.
+                  </div>
+                )}
+              </div>
             </div>
           )}
 
@@ -917,16 +949,16 @@ export const ProgramExportModal: React.FC<ProgramExportModalProps> = ({
                   {' • '}
                   {scopeFilter === 'ALL' ? 'جميع المستويات' : scopeFilter === 'provincial' ? 'إقليمي' : scopeFilter === 'regional' ? 'جهوي' : 'وطني'}
                   {affiliationFilter !== 'ALL' ? ` • ${AFFILIATION_LABELS[affiliationFilter]}` : ''}
-                  {filterCriterion === 'category' && selectedCategoryLabels.length > 0
+                  {activeFilters.category && selectedCategoryLabels.length > 0
                     ? ` • الفئة: ${selectedCategoryLabels[0]}`
                     : ''}
-                  {filterCriterion === 'date' && selectedDate !== 'ALL'
+                  {activeFilters.date && selectedDate !== 'ALL'
                     ? ` • التاريخ: ${formatYmdToDmy(selectedDate)}`
                     : ''}
-                  {filterCriterion === 'matchNumber' && parsedMatchQuery.hasQuery
+                  {activeFilters.matchNumber && parsedMatchQuery.hasQuery
                     ? ` • رقم المقابلة: ${parsedMatchQuery.normalizedDisplay}`
                     : ''}
-                  {filterCriterion === 'sport' && selectedSportFilter !== 'ALL'
+                  {activeFilters.sport && selectedSportFilter !== 'ALL'
                     ? ` • الرياضة: ${SPORTS_MAP[selectedSportFilter]?.name || selectedSportFilter}`
                     : ''}
                 </p>

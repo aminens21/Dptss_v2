@@ -1522,12 +1522,12 @@ export const SportChampionshipModal: React.FC<SportChampionshipModalProps> = ({
 
   return (
     <div className={`fixed inset-0 z-50 flex items-center justify-center bg-slate-900/70 backdrop-blur-xs ${
-      isFullScreen ? 'p-0 overflow-hidden' : 'p-2 sm:p-4 overflow-y-auto'
+      isFullScreen ? 'p-0 overflow-hidden w-screen h-[100dvh]' : 'p-2 sm:p-4 overflow-y-auto'
     }`} dir="rtl">
-      <div className={`bg-white dark:bg-slate-900 shadow-2xl w-full flex flex-col overflow-hidden animate-in fade-in duration-150 transition-all text-slate-900 dark:text-slate-100 ${
+      <div className={`bg-white dark:bg-slate-900 shadow-2xl flex flex-col overflow-hidden animate-in fade-in duration-150 transition-all text-slate-900 dark:text-slate-100 ${
         isFullScreen
-          ? 'max-w-none h-[100dvh] max-h-none rounded-none border-0 my-0'
-          : 'rounded-2xl border border-slate-200 dark:border-slate-800 my-auto max-w-6xl xl:max-w-7xl h-[92vh] sm:h-[85vh] max-h-[96vh] sm:max-h-[92vh]'
+          ? 'w-screen h-[100dvh] max-w-none max-h-[100dvh] rounded-none border-0 my-0 mx-0'
+          : 'w-full rounded-2xl border border-slate-200 dark:border-slate-800 my-auto max-w-6xl xl:max-w-7xl h-[92vh] sm:h-[85vh] max-h-[96vh] sm:max-h-[92vh]'
       }`}>
         
         {/* Top Header - Responsive & Centered on Mobile */}

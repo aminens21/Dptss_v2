@@ -128,9 +128,9 @@ export function generateBibsPrintHtml(
           <!-- Column 1 (Left): Category, Birth, Gender, Commune -->
           <div class="bib-col bib-col-left" style="border-left-width: ${borderThickness};">
             <div class="bib-cell" style="font-size: ${textPt}pt; font-weight: 800;">${runner.categoryLabel || ''}</div>
-            <div class="bib-cell font-mono" style="font-size: ${textPt}pt; font-weight: 700;">${runner.birthDate || runner.birthYear || ''}</div>
-            <div class="bib-cell" style="font-size: ${textPt}pt; font-weight: 800;">${runner.genderLabel || ''}</div>
-            ${rowCount === 4 ? `<div class="bib-cell" style="font-size: ${textSmallPt}pt; font-weight: 700;">${runner.commune || runner.directorateName || ''}</div>` : ''}
+            <div class="bib-cell font-mono" style="font-size: ${textPt}pt; font-weight: 700;">${runner.isBlankSlot ? '' : (runner.birthDate || runner.birthYear || '')}</div>
+            <div class="bib-cell" style="font-size: ${textPt}pt; font-weight: 800;">${runner.isBlankSlot ? '' : (runner.genderLabel || '')}</div>
+            ${rowCount === 4 ? `<div class="bib-cell" style="font-size: ${textSmallPt}pt; font-weight: 700;">${runner.isBlankSlot ? '' : (runner.commune || runner.directorateName || '')}</div>` : ''}
           </div>
 
           <!-- Column 2 (Center): QR Code -->
@@ -140,10 +140,10 @@ export function generateBibsPrintHtml(
 
           <!-- Column 3 (Right): Full Name, Massar, School, Directorate -->
           <div class="bib-col bib-col-right" style="border-right-width: ${borderThickness};">
-            <div class="bib-cell" style="font-size: ${textPt}pt; font-weight: 800;">${runner.fullName || ''}</div>
-            <div class="bib-cell font-mono" style="font-size: ${textPt}pt; font-weight: 700;">${runner.massarNumber || ''}</div>
-            <div class="bib-cell" style="font-size: ${textSmallPt}pt; font-weight: 700;">${runner.schoolName || ''}</div>
-            ${rowCount === 4 ? `<div class="bib-cell" style="font-size: ${textSmallPt}pt; font-weight: 700;">${runner.affiliationTypeLabel || runner.directorateName || ''}</div>` : ''}
+            <div class="bib-cell" style="font-size: ${textPt}pt; font-weight: 800;">${runner.isBlankSlot ? '' : (runner.fullName || '')}</div>
+            <div class="bib-cell font-mono" style="font-size: ${textPt}pt; font-weight: 700;">${runner.isBlankSlot ? '' : (runner.massarNumber || '')}</div>
+            <div class="bib-cell" style="font-size: ${textSmallPt}pt; font-weight: 700;">${runner.isBlankSlot ? '' : (runner.schoolName || '')}</div>
+            ${rowCount === 4 ? `<div class="bib-cell" style="font-size: ${textSmallPt}pt; font-weight: 700;">${runner.isBlankSlot ? '' : (runner.affiliationTypeLabel || runner.directorateName || '')}</div>` : ''}
           </div>
 
         </div>

@@ -125,6 +125,7 @@ export interface CrossCountryBibRunnerData {
   participationType?: 'individual' | 'school_team';
   participationTypeLabel?: string;
   qrDataUrl?: string;
+  isBlankSlot?: boolean;
 }
 
 /**
@@ -288,7 +289,10 @@ export function computeCrossCountrySequentialBibs(
   const categoryOrderMap = new Map<string, number>();
   CROSS_COUNTRY_CATEGORIES.forEach((c, idx) => categoryOrderMap.set(c.id, idx));
 
-  const prepared = ccPool.map((student, idx) => {
+  const categoryGroups = new Map<string, Array<{ student: Student; originalIdx: number; catDef: CrossCountryCategoryDef; catOrder: number; schoolName: string; commune: string; isFemale: boolean; genderLabel: string; categoryLabel: string }>>();
+  CROSS_COUNTRY_CATEGORIES.forEach(c => categoryGroups.set(c.id, []));
+
+  ccPool.forEach((student, idx) => {
     const catDef = resolveCrossCountryCategoryDef(student);
     const school = student.schoolId ? schoolMap.get(student.schoolId) : undefined;
     const schoolName = student.schoolName || school?.name || 'مؤسسة تعليمية';
@@ -296,44 +300,106 @@ export function computeCrossCountrySequentialBibs(
     const isFemale = catDef.gender === 'Female';
     const genderLabel = isFemale ? 'أنثى' : 'ذكر';
     const categoryLabel = catDef.titleAr.replace('سباق ', '');
-    const catOrder = categoryOrderMap.get(catDef.id) ?? 99;
 
-    return {
+    const group = categoryGroups.get(catDef.id) || categoryGroups.get(CROSS_COUNTRY_CATEGORIES[0].id)!;
+    group.push({
       student,
       originalIdx: idx,
       catDef,
-      catOrder,
+      catOrder: categoryOrderMap.get(catDef.id) ?? 0,
       schoolName,
       commune,
       isFemale,
       genderLabel,
       categoryLabel
-    };
+    });
   });
 
-  prepared.sort((a, b) => {
-    if (a.catOrder !== b.catOrder) return a.catOrder - b.catOrder;
-    const schCmp = (a.schoolName || '').localeCompare(b.schoolName || '', 'ar');
-    if (schCmp !== 0) return schCmp;
-    const nameCmp = (a.student.fullName || a.student.name || '').localeCompare(
-      b.student.fullName || b.student.name || '',
-      'ar'
-    );
-    if (nameCmp !== 0) return nameCmp;
-    const keyA = String(a.student.massarNumber || a.student.id || '');
-    const keyB = String(b.student.massarNumber || b.student.id || '');
-    const keyCmp = keyA.localeCompare(keyB);
-    if (keyCmp !== 0) return keyCmp;
-    return a.originalIdx - b.originalIdx;
+  const orderedItems: Array<{
+    isPlaceholder?: boolean;
+    student?: Student;
+    originalIdx?: number;
+    catDef: CrossCountryCategoryDef;
+    schoolName: string;
+    commune: string;
+    isFemale: boolean;
+    genderLabel: string;
+    categoryLabel: string;
+  }> = [];
+
+  CROSS_COUNTRY_CATEGORIES.forEach(catDef => {
+    const list = categoryGroups.get(catDef.id) || [];
+    list.sort((a, b) => {
+      const schCmp = (a.schoolName || '').localeCompare(b.schoolName || '', 'ar');
+      if (schCmp !== 0) return schCmp;
+      const nameCmp = (a.student.fullName || a.student.name || '').localeCompare(
+        b.student.fullName || b.student.name || '',
+        'ar'
+      );
+      if (nameCmp !== 0) return nameCmp;
+      const keyA = String(a.student.massarNumber || a.student.id || '');
+      const keyB = String(b.student.massarNumber || b.student.id || '');
+      const keyCmp = keyA.localeCompare(keyB);
+      if (keyCmp !== 0) return keyCmp;
+      return a.originalIdx - b.originalIdx;
+    });
+
+    list.forEach(item => orderedItems.push(item));
+
+    // Add 10 blank runner slots per category
+    for (let b = 1; b <= 10; b++) {
+      orderedItems.push({
+        isPlaceholder: true,
+        catDef,
+        schoolName: '',
+        commune: '',
+        isFemale: catDef.gender === 'Female',
+        genderLabel: catDef.gender === 'Female' ? 'أنثى' : 'ذكر',
+        categoryLabel: catDef.titleAr.replace('سباق ', '')
+      });
+    }
   });
 
   const ranges: Record<string, { start: string; end: string; count: number }> = {};
   const bibByStudentId: Record<string, string> = {};
   const categoryIdByStudentId: Record<string, string> = {};
 
-  const runners: CrossCountryBibRunnerData[] = prepared.map((item, seqIdx) => {
-    const { student, originalIdx, catDef, schoolName, commune, isFemale, genderLabel, categoryLabel } = item;
+  const runners: CrossCountryBibRunnerData[] = orderedItems.map((item, seqIdx) => {
     const sequentialBib = String(seqIdx + 1).padStart(4, '0');
+    const catDef = item.catDef;
+
+    if (item.isPlaceholder) {
+      if (!ranges[catDef.id]) {
+        ranges[catDef.id] = { start: sequentialBib, end: sequentialBib, count: 1 };
+      } else {
+        ranges[catDef.id].end = sequentialBib;
+        ranges[catDef.id].count += 1;
+      }
+
+      return {
+        id: `blank-${catDef.id}-${seqIdx}`,
+        bibNumber: sequentialBib,
+        fullName: '',
+        massarNumber: '',
+        birthDate: '',
+        birthYear: '',
+        schoolId: '',
+        schoolName: '',
+        commune: '',
+        directorateName,
+        category: catDef.id,
+        categoryLabel: item.categoryLabel,
+        gender: item.isFemale ? 'Female' : 'Male',
+        genderLabel: item.genderLabel,
+        affiliationType: '',
+        affiliationTypeLabel: '',
+        participationTypeLabel: '',
+        isBlankSlot: true
+      };
+    }
+
+    const student = item.student!;
+    const originalIdx = item.originalIdx!;
     const runnerId = student.id || `runner-${originalIdx}`;
 
     if (student.id) {
@@ -369,13 +435,13 @@ export function computeCrossCountrySequentialBibs(
         (student as any).birthYear ||
         (normalizedBirthYmd ? normalizedBirthYmd.split('-')[0] : '2012'),
       schoolId: student.schoolId || '',
-      schoolName,
-      commune,
+      schoolName: item.schoolName,
+      commune: item.commune,
       directorateName,
       category: catDef.id,
-      categoryLabel,
-      gender: isFemale ? 'Female' : 'Male',
-      genderLabel,
+      categoryLabel: item.categoryLabel,
+      gender: item.isFemale ? 'Female' : 'Male',
+      genderLabel: item.genderLabel,
       affiliationType: student.affiliationType || 'non_club',
       affiliationTypeLabel: student.affiliationType === 'club_affiliated' ? 'منتمي لنادي' : participationLabel,
       participationType: resolvedParticipation,

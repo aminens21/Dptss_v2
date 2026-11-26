@@ -1520,13 +1520,13 @@ export const BibGeneratorModal: React.FC<BibGeneratorModalProps> = ({
                             {/* Left Column (3 Rows): الفئة / تاريخ الازدياد / الجنس */}
                             <div className="col-span-4 border-l border-black flex flex-col justify-between text-center font-black text-slate-950 bg-white divide-y border-black divide-black">
                               <div className="flex-1 flex items-center justify-center px-1 truncate leading-tight text-slate-950" style={textBaseStyle}>
-                                {runner.categoryLabel}
+                                {runner.isBlankSlot ? '' : runner.categoryLabel}
                               </div>
                               <div className="flex-1 flex items-center justify-center px-1 font-mono leading-tight text-slate-950" style={textBaseStyle}>
-                                {runner.birthDate || runner.birthYear}
+                                {runner.isBlankSlot ? '' : (runner.birthDate || runner.birthYear)}
                               </div>
                               <div className="flex-1 flex items-center justify-center px-1 leading-tight text-slate-950" style={textBaseStyle}>
-                                {runner.genderLabel}
+                                {runner.isBlankSlot ? '' : runner.genderLabel}
                               </div>
                             </div>
 
@@ -1554,13 +1554,13 @@ export const BibGeneratorModal: React.FC<BibGeneratorModalProps> = ({
                             {/* Right Column (3 Rows): الاسم الكامل / رقم مسار / المؤسسة */}
                             <div className="col-span-4 border-r border-black flex flex-col justify-between text-center font-black text-slate-950 bg-white divide-y border-black divide-black">
                               <div className="flex-1 flex items-center justify-center px-1 truncate leading-tight text-slate-950" style={textBaseStyle}>
-                                {runner.fullName}
+                                {runner.isBlankSlot ? '' : runner.fullName}
                               </div>
                               <div className="flex-1 flex items-center justify-center px-1 font-mono leading-tight text-slate-950" style={textBaseStyle}>
-                                {runner.massarNumber}
+                                {runner.isBlankSlot ? '' : runner.massarNumber}
                               </div>
                               <div className="flex-1 flex items-center justify-center px-1 truncate leading-tight text-slate-950" style={textSmallStyle}>
-                                {runner.schoolName}
+                                {runner.isBlankSlot ? '' : runner.schoolName}
                               </div>
                             </div>
 
@@ -1607,16 +1607,16 @@ export const BibGeneratorModal: React.FC<BibGeneratorModalProps> = ({
                             {/* Left Column (4 Rows): الفئة / تاريخ الازدياد / الجنس / الجماعة */}
                             <div className="col-span-4 border-l-2 border-black flex flex-col justify-between text-center font-black text-slate-950 bg-white divide-y-2 divide-black">
                               <div className="flex-1 flex items-center justify-center px-1 truncate leading-tight text-slate-950" style={textBaseStyle}>
-                                {runner.categoryLabel}
+                                {runner.isBlankSlot ? '' : runner.categoryLabel}
                               </div>
                               <div className="flex-1 flex items-center justify-center px-1 font-mono leading-tight text-slate-950" style={textBaseStyle}>
-                                {runner.birthDate || runner.birthYear}
+                                {runner.isBlankSlot ? '' : (runner.birthDate || runner.birthYear)}
                               </div>
                               <div className="flex-1 flex items-center justify-center px-1 leading-tight text-slate-950" style={textBaseStyle}>
-                                {runner.genderLabel}
+                                {runner.isBlankSlot ? '' : runner.genderLabel}
                               </div>
                               <div className="flex-1 flex items-center justify-center px-1 truncate leading-tight text-slate-950" style={textSmallStyle}>
-                                {runner.commune || runner.directorateName}
+                                {runner.isBlankSlot ? '' : (runner.commune || runner.directorateName)}
                               </div>
                             </div>
 
@@ -1644,16 +1644,16 @@ export const BibGeneratorModal: React.FC<BibGeneratorModalProps> = ({
                             {/* Right Column (4 Rows): الاسم الكامل / رقم مسار / المؤسسة / المديرية */}
                             <div className="col-span-4 border-r-2 border-black flex flex-col justify-between text-center font-black text-slate-950 bg-white divide-y-2 divide-black">
                               <div className="flex-1 flex items-center justify-center px-1 truncate leading-tight text-slate-950" style={textBaseStyle}>
-                                {runner.fullName}
+                                {runner.isBlankSlot ? '' : runner.fullName}
                               </div>
                               <div className="flex-1 flex items-center justify-center px-1 font-mono leading-tight text-slate-950" style={textBaseStyle}>
-                                {runner.massarNumber}
+                                {runner.isBlankSlot ? '' : runner.massarNumber}
                               </div>
                               <div className="flex-1 flex items-center justify-center px-1 truncate leading-tight text-slate-950" style={textSmallStyle}>
-                                {runner.schoolName}
+                                {runner.isBlankSlot ? '' : runner.schoolName}
                               </div>
                               <div className="flex-1 flex items-center justify-center px-1 truncate leading-tight text-slate-950" style={textSmallStyle}>
-                                {runner.affiliationTypeLabel || runner.directorateName}
+                                {runner.isBlankSlot ? '' : (runner.affiliationTypeLabel || runner.directorateName)}
                               </div>
                             </div>
 
@@ -1699,10 +1699,10 @@ export const BibGeneratorModal: React.FC<BibGeneratorModalProps> = ({
                             
                             {/* Left Column (4 Rows) */}
                             <div className="col-span-4 border-l-2 border-black flex flex-col justify-between text-center font-black text-slate-900 bg-inherit divide-y-2 divide-black">
-                              <div className="flex-1 flex items-center justify-center px-1 truncate leading-tight" style={textBaseStyle}>{runner.categoryLabel}</div>
-                              <div className="flex-1 flex items-center justify-center px-1 font-mono leading-tight" style={textBaseStyle}>{runner.birthDate || runner.birthYear}</div>
-                              <div className="flex-1 flex items-center justify-center px-1 leading-tight" style={textBaseStyle}>{runner.genderLabel}</div>
-                              <div className="flex-1 flex items-center justify-center px-1 truncate leading-tight" style={textSmallStyle}>{runner.commune || runner.directorateName}</div>
+                              <div className="flex-1 flex items-center justify-center px-1 truncate leading-tight" style={textBaseStyle}>{runner.isBlankSlot ? '' : runner.categoryLabel}</div>
+                              <div className="flex-1 flex items-center justify-center px-1 font-mono leading-tight" style={textBaseStyle}>{runner.isBlankSlot ? '' : (runner.birthDate || runner.birthYear)}</div>
+                              <div className="flex-1 flex items-center justify-center px-1 leading-tight" style={textBaseStyle}>{runner.isBlankSlot ? '' : runner.genderLabel}</div>
+                              <div className="flex-1 flex items-center justify-center px-1 truncate leading-tight" style={textSmallStyle}>{runner.isBlankSlot ? '' : (runner.commune || runner.directorateName)}</div>
                             </div>
 
                             {/* Center Column: QR Code */}
@@ -1712,10 +1712,10 @@ export const BibGeneratorModal: React.FC<BibGeneratorModalProps> = ({
 
                             {/* Right Column (4 Rows) */}
                             <div className="col-span-4 border-r-2 border-black flex flex-col justify-between text-center font-black text-slate-900 bg-inherit divide-y-2 divide-black">
-                              <div className="flex-1 flex items-center justify-center px-1 truncate leading-tight" style={textBaseStyle}>{runner.fullName}</div>
-                              <div className="flex-1 flex items-center justify-center px-1 font-mono leading-tight" style={textBaseStyle}>{runner.massarNumber}</div>
-                              <div className="flex-1 flex items-center justify-center px-1 truncate leading-tight" style={textSmallStyle}>{runner.schoolName}</div>
-                              <div className="flex-1 flex items-center justify-center px-1 truncate leading-tight" style={textSmallStyle}>{runner.affiliationTypeLabel || runner.directorateName}</div>
+                              <div className="flex-1 flex items-center justify-center px-1 truncate leading-tight" style={textBaseStyle}>{runner.isBlankSlot ? '' : runner.fullName}</div>
+                              <div className="flex-1 flex items-center justify-center px-1 font-mono leading-tight" style={textBaseStyle}>{runner.isBlankSlot ? '' : runner.massarNumber}</div>
+                              <div className="flex-1 flex items-center justify-center px-1 truncate leading-tight" style={textSmallStyle}>{runner.isBlankSlot ? '' : runner.schoolName}</div>
+                              <div className="flex-1 flex items-center justify-center px-1 truncate leading-tight" style={textSmallStyle}>{runner.isBlankSlot ? '' : (runner.affiliationTypeLabel || runner.directorateName)}</div>
                             </div>
                           </div>
 
