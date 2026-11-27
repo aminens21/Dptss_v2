@@ -346,11 +346,11 @@ export const AppLayout: React.FC = () => {
 
   const [rolePermissions, setRolePermissions] = useState<RoleSidebarPermissions>(() => {
     const defaults: RoleSidebarPermissions = {
-      CENTRAL_ADMIN: ['/dashboard', '/tournaments', '/schools', '/teachers', '/tech-committee', '/referees', '/matches', '/helper-apps', '/posters-certificates', '/statistics', '/directorates', '/sports-config', '/permissions'],
-      TECH_COMMITTEE_HEAD: ['/dashboard', '/tournaments', '/schools', '/teachers', '/tech-committee', '/referees', '/matches', '/helper-apps', '/posters-certificates', '/statistics', '/sports-config'],
-      SPORT_MANAGER: ['/dashboard', '/tournaments', '/schools', '/teachers', '/referees', '/matches', '/helper-apps', '/posters-certificates', '/statistics'],
-      TEACHER: ['/dashboard', '/tournaments', '/schools', '/matches', '/posters-certificates', '/statistics'],
-      REFEREE: ['/dashboard', '/matches', '/statistics']
+      CENTRAL_ADMIN: ['/dashboard', '/tournaments', '/schools', '/teachers', '/tech-committee', '/referees', '/matches', '/documentation', '/helper-apps', '/posters-certificates', '/statistics', '/directorates', '/sports-config', '/permissions'],
+      TECH_COMMITTEE_HEAD: ['/dashboard', '/tournaments', '/schools', '/teachers', '/tech-committee', '/referees', '/matches', '/documentation', '/helper-apps', '/posters-certificates', '/statistics', '/sports-config'],
+      SPORT_MANAGER: ['/dashboard', '/tournaments', '/schools', '/teachers', '/referees', '/matches', '/documentation', '/helper-apps', '/posters-certificates', '/statistics'],
+      TEACHER: ['/dashboard', '/tournaments', '/schools', '/matches', '/documentation', '/posters-certificates', '/statistics'],
+      REFEREE: ['/dashboard', '/matches', '/documentation', '/statistics']
     };
     try {
       const saved = localStorage.getItem('taourirt_role_sidebar_permissions');
@@ -587,7 +587,7 @@ export const AppLayout: React.FC = () => {
     { name: 'رؤساء اللجن التقنية', href: '/tech-committee', icon: ShieldCheck },
     { name: 'الحكام', href: '/referees', icon: UserCheck },
     { name: 'المباريات والنتائج', href: '/matches', icon: CalendarDays },
-    { name: 'فضاء التوثيق والأنشطة', href: '/documentation', icon: Camera },
+    { name: 'التوثيق والصور', href: '/documentation', icon: Camera },
     { name: 'تطبيقات مساعدة', href: '/helper-apps', icon: Boxes },
     { name: 'الملصقات والشواهد التقديرية', href: '/posters-certificates', icon: Award },
     { name: 'إحصائيات عامة', href: '/statistics', icon: BarChart3 },

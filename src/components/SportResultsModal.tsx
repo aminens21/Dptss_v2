@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { Sport, Tournament, Match, School, Venue, Student, User, Referee, AffiliationDisplayConfig } from '../types';
-import { DataService, isClubTournament, GENDER_MAP, SPORTS_MAP, getAgeCategoriesForSeason, normalizeCategoryKey, canUserApproveSportResult, areSportIdsEquivalent, normalizeCanonicalSportId, normalizeTournamentAffiliation, isAffiliationAllowedByDisplayConfig, canUserEnterMatchScore, isUserTechHeadForSport, isMatchProgramPendingApproval } from '../lib/dataService';
+import { DataService, isClubTournament, GENDER_MAP, SPORTS_MAP, getAgeCategoriesForSeason, normalizeCategoryKey, canUserApproveSportResult, areSportIdsEquivalent, normalizeCanonicalSportId, normalizeTournamentAffiliation, isAffiliationAllowedByDisplayConfig, canUserEnterMatchScore, isUserTechHeadForSport, isMatchProgramPendingApproval, isTeamSport } from '../lib/dataService';
 import { computeGroupStandings, formatTeamDisplayName, isPlaceholderTeamId, isKnockoutBracketMatch, ComputedGroupStandings, hasValidMatchTeams, extractMatchGroupLabel } from '../lib/drawTournamentUtils';
 import { CrossCountryPodiumView } from './CrossCountryPodiumView';
 import { AthleticsResultsView } from './AthleticsResultsView';
@@ -138,6 +138,15 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
   }, []);
 
   const handleToggleLiveMatchStatus = async (match: Match, nextStatus: 'Ongoing' | 'Scheduled') => {
+    const matchWithSport = match.sportId ? match : { ...match, sportId: sport?.id || '' };
+    if (!canUserEnterMatchScore(userProfile, matchWithSport, effectiveReferees, effectiveUsers)) {
+      toast.error(
+        isTeamSport(matchWithSport.sportId || '')
+          ? 'تحديث حالة أو نتيجة مقابلات الرياضات الجماعية مقتصر فقط على رئيس اللجنة التقنية المعنية'
+          : 'غير مصرح بتعديل حالة هذه المباراة'
+      );
+      return;
+    }
     setTogglingLiveMatchId(match.id);
     try {
       await DataService.updateMatch(match.id, {
@@ -1872,7 +1881,8 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
                               const matchReferees = rawResolvedRefs.allRefs;
                               const visibleMatchReferees = visibleResolvedRefs.allRefs;
                               const isProgramPending = isMatchProgramPendingApproval(m);
-                              const canScoreThisMatch = canUserEnterMatchScore(userProfile, m, effectiveReferees, effectiveUsers);
+                              const matchForPermCheck = m.sportId ? m : { ...m, sportId: sport.id };
+                              const canScoreThisMatch = canUserEnterMatchScore(userProfile, matchForPermCheck, effectiveReferees, effectiveUsers);
                               const isTechHeadForMatchSport = isUserTechHeadForSport(userProfile, m.sportId || sport.id, effectiveUsers);
 
                               const normalizedMatchStatus = String(m.status || 'Scheduled').trim().toLowerCase();

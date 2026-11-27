@@ -1009,7 +1009,9 @@ export function sortCalendarEvents(
     const tB = getEventCategoryGenderTuple(b);
 
     if (sortBy === 'date') {
-      const dateCmp = dateA.localeCompare(dateB);
+      const descA = a.date || '0000-00-00';
+      const descB = b.date || '0000-00-00';
+      const dateCmp = descB.localeCompare(descA);
       if (dateCmp !== 0) return dateCmp;
       if (timeA !== timeB) return timeA - timeB;
       if (numA !== numB) return numA - numB;

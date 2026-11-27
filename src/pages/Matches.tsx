@@ -2,7 +2,7 @@ import React, { useEffect, useState, useMemo } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import clsx from 'clsx';
 import { useAuth, isSuperAdminEmail } from '../contexts/AuthContext';
-import { DataService, SPORTS_MAP, GENDER_MAP, deduplicateById, AGE_CATEGORIES, isClubTournament, getAgeCategoriesForSeason, normalizeCategoryKey, getCustomCategoryName, getCustomCategoryDetails, canUserApproveSportResult, canUserEnterMatchScore, isUserTechHeadForSport, normalizeCanonicalSportId, areSportIdsEquivalent, normalizeArabicMatchText, isAffiliationAllowedByDisplayConfig, normalizeTournamentAffiliation, resolveEffectiveTeacherCadre, isTeacherLevelAllowedForTournament, isCrossCountryU15OpenToPrimary, isSchoolSectorAllowedForTournament, schoolNamesMatch, getMatchEducationalCycles, findAllBlockedPeriodsForDate, isMatchProgramPendingApproval, isTrackOrCrossCountrySport } from '../lib/dataService';
+import { DataService, SPORTS_MAP, GENDER_MAP, deduplicateById, AGE_CATEGORIES, isClubTournament, getAgeCategoriesForSeason, normalizeCategoryKey, getCustomCategoryName, getCustomCategoryDetails, canUserApproveSportResult, canUserEnterMatchScore, isUserTechHeadForSport, normalizeCanonicalSportId, areSportIdsEquivalent, normalizeArabicMatchText, isAffiliationAllowedByDisplayConfig, normalizeTournamentAffiliation, resolveEffectiveTeacherCadre, isTeacherLevelAllowedForTournament, isCrossCountryU15OpenToPrimary, isSchoolSectorAllowedForTournament, schoolNamesMatch, getMatchEducationalCycles, findAllBlockedPeriodsForDate, isMatchProgramPendingApproval, isTrackOrCrossCountrySport, isTeamSport } from '../lib/dataService';
 import { formatTeamDisplayName, hasValidMatchTeams } from '../lib/drawTournamentUtils';
 import { Match, School, Venue, Tournament, Sport, Student, User, Referee, AffiliationDisplayConfig } from '../types';
 import { CountdownTimer } from '../components/CountdownTimer';
@@ -549,7 +549,11 @@ export const Matches: React.FC = () => {
   const openScoreModalGuarded = (match: Match) => {
     const userDirectory = allUsers.length > 0 ? allUsers : teachers;
     if (!canUserEnterMatchScore(effectiveUserProfile, match, referees, userDirectory)) {
-      toast.error('إدخال نتائج المباريات مقتصر فقط على الحكام المعينين في هذه المباراة أو رئيس اللجنة التقنية المختص');
+      toast.error(
+        isTeamSport(match.sportId || '')
+          ? 'تدوين نتائج مقابلات الرياضات الجماعية مقتصر فقط على رئيس اللجنة التقنية المعنية'
+          : 'إدخال نتائج المباريات مقتصر فقط على الحكام المعينين في هذه المباراة أو رئيس اللجنة التقنية المختص'
+      );
       return;
     }
     const isTechHeadForSport = isUserTechHeadForSport(effectiveUserProfile, match.sportId, userDirectory);
@@ -582,7 +586,11 @@ export const Matches: React.FC = () => {
     const targetMatch = matches.find(m => m.id === matchId) || selectedMatchForScore;
     const userDirectory = allUsers.length > 0 ? allUsers : teachers;
     if (targetMatch && !canUserEnterMatchScore(effectiveUserProfile, targetMatch, referees, userDirectory)) {
-      toast.error('إدخال أو تعديل نتائج المباريات مقتصر فقط على الحكام المعينين في هذه المباراة أو رئيس اللجنة التقنية المختص');
+      toast.error(
+        isTeamSport(targetMatch.sportId || '')
+          ? 'تدوين أو تعديل نتائج مقابلات الرياضات الجماعية مقتصر فقط على رئيس اللجنة التقنية المعنية'
+          : 'إدخال أو تعديل نتائج المباريات مقتصر فقط على الحكام المعينين في هذه المباراة أو رئيس اللجنة التقنية المختص'
+      );
       return;
     }
     try {

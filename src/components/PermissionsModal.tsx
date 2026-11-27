@@ -26,23 +26,23 @@ export const PermissionsModal: React.FC<PermissionsModalProps> = ({ isOpen, onCl
   const { userProfile } = useAuth();
   const [rolePermissions, setRolePermissions] = useState<RoleSidebarPermissions>({
     CENTRAL_ADMIN: [
-      '/dashboard', '/schools', '/tournaments', '/teachers', '/tech-committee', '/referees', '/matches', '/helper-apps', '/posters-certificates', '/statistics', '/sports-config', '/permissions',
+      '/dashboard', '/schools', '/tournaments', '/teachers', '/tech-committee', '/referees', '/matches', '/documentation', '/helper-apps', '/posters-certificates', '/statistics', '/sports-config', '/permissions',
       'action:export_data', 'action:import_data', 'action:edit_results', 'action:register_students', 'action:manage_schedule', 'action:delete_records'
     ],
     TECH_COMMITTEE_HEAD: [
-      '/dashboard', '/schools', '/tournaments', '/teachers', '/tech-committee', '/referees', '/matches', '/helper-apps', '/posters-certificates', '/statistics', '/sports-config',
+      '/dashboard', '/schools', '/tournaments', '/teachers', '/tech-committee', '/referees', '/matches', '/documentation', '/helper-apps', '/posters-certificates', '/statistics', '/sports-config',
       'action:export_data', 'action:edit_results', 'action:register_students', 'action:manage_schedule'
     ],
     SPORT_MANAGER: [
-      '/dashboard', '/schools', '/tournaments', '/teachers', '/referees', '/matches', '/helper-apps', '/posters-certificates', '/statistics',
+      '/dashboard', '/schools', '/tournaments', '/teachers', '/referees', '/matches', '/documentation', '/helper-apps', '/posters-certificates', '/statistics',
       'action:export_data', 'action:edit_results', 'action:register_students', 'action:manage_schedule'
     ],
     TEACHER: [
-      '/dashboard', '/schools', '/tournaments', '/matches', '/posters-certificates', '/statistics',
+      '/dashboard', '/schools', '/tournaments', '/matches', '/documentation', '/posters-certificates', '/statistics',
       'action:export_data', 'action:register_students'
     ],
     REFEREE: [
-      '/dashboard', '/matches', '/statistics',
+      '/dashboard', '/matches', '/documentation', '/statistics',
       'action:edit_results'
     ]
   });
@@ -81,6 +81,7 @@ export const PermissionsModal: React.FC<PermissionsModalProps> = ({ isOpen, onCl
     { href: '/tech-committee', label: 'رؤساء اللجن التقنية', icon: '🛡️', desc: 'إدارة وتعيين مسؤولي اللجان التقنية حسب الرياضات' },
     { href: '/referees', label: 'الحكام وقضاة الملاعب', icon: '🏁', desc: 'سجل وتنظيم الحكام المعتمدين وتعيينات المباريات' },
     { href: '/matches', label: 'المباريات والنتائج', icon: '⚽', desc: 'برمجة وتدقيق وتسجيل نتائج المباريات المدرسية' },
+    { href: '/documentation', label: 'التوثيق والصور', icon: '📸', desc: 'إضافة ونشر الدلائل والمحاضر وصور المقابلات للعموم' },
     { href: '/helper-apps', label: 'تطبيقات مساعدة', icon: '🛠️', desc: 'مجموعة من التطبيقات المساعدة من بينها ماسح الصدريات لخط النهاية' },
     { href: '/posters-certificates', label: 'الملصقات والشواهد التقديرية', icon: '🎨', desc: 'توليد ملصقات البطولات المبرمجة والشواهد التقديرية للمشاركين' },
     { href: '/statistics', label: 'إحصائيات عامة والترتيب', icon: '📊', desc: 'مؤشرات الأداء، ونسب المشاركة، والتحليلات البيانية وترتيب فرق المؤسسات' },

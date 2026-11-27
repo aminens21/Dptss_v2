@@ -335,7 +335,8 @@ export function isUserTechHeadForSport(
 
 /**
  * Strict score-entry permission check:
- * ONLY referees assigned to this match OR the Technical Committee Head for this sport can enter/update match results.
+ * - For team sports (الرياضات الجماعية): ONLY the Technical Committee Head for this sport can enter/update match results.
+ * - For other match sports: referees assigned to this match OR the Technical Committee Head for this sport.
  */
 export function canUserEnterMatchScore(
   user?: User | null,
@@ -344,6 +345,9 @@ export function canUserEnterMatchScore(
   teachersList?: User[]
 ): boolean {
   if (!user || !match) return false;
+  if (isTeamSport(match.sportId || '')) {
+    return isUserTechHeadForSport(user, match.sportId, teachersList);
+  }
   return (
     isUserTechHeadForSport(user, match.sportId, teachersList) ||
     isUserAssignedRefereeToMatch(user, match, refereesList, teachersList)
@@ -7687,25 +7691,40 @@ export const DataService = {
   async getRoleSidebarPermissions(): Promise<RoleSidebarPermissions> {
     const DEFAULT_PERMISSIONS: RoleSidebarPermissions = {
       CENTRAL_ADMIN: [
-        '/dashboard', '/schools', '/tournaments', '/teachers', '/tech-committee', '/referees', '/matches', '/helper-apps', '/posters-certificates', '/statistics', '/sports-config', '/permissions',
+        '/dashboard', '/schools', '/tournaments', '/teachers', '/tech-committee', '/referees', '/matches', '/documentation', '/helper-apps', '/posters-certificates', '/statistics', '/sports-config', '/permissions',
         'action:export_data', 'action:import_data', 'action:edit_results', 'action:register_students', 'action:manage_schedule', 'action:delete_records'
       ],
       TECH_COMMITTEE_HEAD: [
-        '/dashboard', '/schools', '/tournaments', '/teachers', '/tech-committee', '/referees', '/matches', '/helper-apps', '/posters-certificates', '/statistics', '/sports-config',
+        '/dashboard', '/schools', '/tournaments', '/teachers', '/tech-committee', '/referees', '/matches', '/documentation', '/helper-apps', '/posters-certificates', '/statistics', '/sports-config',
         'action:export_data', 'action:edit_results', 'action:register_students', 'action:manage_schedule'
       ],
       SPORT_MANAGER: [
-        '/dashboard', '/schools', '/tournaments', '/teachers', '/referees', '/matches', '/helper-apps', '/posters-certificates', '/statistics',
+        '/dashboard', '/schools', '/tournaments', '/teachers', '/referees', '/matches', '/documentation', '/helper-apps', '/posters-certificates', '/statistics',
         'action:export_data', 'action:edit_results', 'action:register_students', 'action:manage_schedule'
       ],
       TEACHER: [
-        '/dashboard', '/schools', '/tournaments', '/matches', '/posters-certificates', '/statistics',
+        '/dashboard', '/schools', '/tournaments', '/matches', '/documentation', '/posters-certificates', '/statistics',
         'action:export_data', 'action:register_students'
       ],
       REFEREE: [
-        '/dashboard', '/matches', '/statistics',
+        '/dashboard', '/matches', '/documentation', '/statistics',
         'action:edit_results'
       ]
+    };
+
+    const ensureDocumentationRoute = (perms: any): RoleSidebarPermissions => {
+      const merged: any = { ...DEFAULT_PERMISSIONS, ...perms };
+      if (!merged._vDocumentationNav) {
+        (['CENTRAL_ADMIN', 'TECH_COMMITTEE_HEAD', 'SPORT_MANAGER', 'TEACHER', 'REFEREE'] as const).forEach(role => {
+          const list = Array.isArray(merged[role]) ? [...merged[role]] : [...DEFAULT_PERMISSIONS[role]];
+          if (!list.includes('/documentation')) {
+            list.push('/documentation');
+          }
+          merged[role] = list;
+        });
+        merged._vDocumentationNav = true;
+      }
+      return merged as RoleSidebarPermissions;
     };
 
     try {
@@ -7713,7 +7732,7 @@ export const DataService = {
       if (docSnap.exists()) {
         const firestoreData = docSnap.data() as RoleSidebarPermissions;
         if (firestoreData && typeof firestoreData === 'object') {
-          const merged = { ...DEFAULT_PERMISSIONS, ...firestoreData };
+          const merged = ensureDocumentationRoute(firestoreData);
           localStorage.setItem('taourirt_role_sidebar_permissions', JSON.stringify(merged));
           return merged;
         }
@@ -7727,7 +7746,7 @@ export const DataService = {
       if (local) {
         const parsed = JSON.parse(local);
         if (parsed && typeof parsed === 'object') {
-          return { ...DEFAULT_PERMISSIONS, ...parsed };
+          return ensureDocumentationRoute(parsed);
         }
       }
     } catch (e) {
@@ -7859,11 +7878,19 @@ export const DataService = {
     const docRef = doc(db, 'settings', 'role_sidebar_permissions');
     return onSnapshot(docRef, (docSnap) => {
       if (docSnap.exists()) {
-        const data = docSnap.data() as RoleSidebarPermissions;
+        const data = docSnap.data() as any;
         if (data && typeof data === 'object') {
-          const res = { ...data };
+          const res: any = { ...data };
+          if (!res._vDocumentationNav) {
+            (['CENTRAL_ADMIN', 'TECH_COMMITTEE_HEAD', 'SPORT_MANAGER', 'TEACHER', 'REFEREE'] as const).forEach(role => {
+              if (Array.isArray(res[role]) && !res[role].includes('/documentation')) {
+                res[role] = [...res[role], '/documentation'];
+              }
+            });
+            res._vDocumentationNav = true;
+          }
           localStorage.setItem('taourirt_role_sidebar_permissions', JSON.stringify(res));
-          callback(res);
+          callback(res as RoleSidebarPermissions);
           window.dispatchEvent(new CustomEvent('sidebarPermissionsChanged', { detail: res }));
         }
       }
@@ -7873,13 +7900,14 @@ export const DataService = {
   },
 
   async saveRoleSidebarPermissions(permissions: RoleSidebarPermissions): Promise<void> {
+    const payload = { ...permissions, _vDocumentationNav: true };
     try {
-      localStorage.setItem('taourirt_role_sidebar_permissions', JSON.stringify(permissions));
-      await setDoc(doc(db, 'settings', 'role_sidebar_permissions'), permissions, { merge: true });
-      window.dispatchEvent(new CustomEvent('sidebarPermissionsChanged', { detail: permissions }));
+      localStorage.setItem('taourirt_role_sidebar_permissions', JSON.stringify(payload));
+      await setDoc(doc(db, 'settings', 'role_sidebar_permissions'), payload, { merge: true });
+      window.dispatchEvent(new CustomEvent('sidebarPermissionsChanged', { detail: payload }));
     } catch (e) {
       console.warn("Saved permissions locally; Firestore sync pending:", e);
-      window.dispatchEvent(new CustomEvent('sidebarPermissionsChanged', { detail: permissions }));
+      window.dispatchEvent(new CustomEvent('sidebarPermissionsChanged', { detail: payload }));
     }
   },
 
@@ -12456,19 +12484,30 @@ export function isAffiliationAllowedByDisplayConfig(
   return true;
 }
 
+export type DocumentationItemType = 'match_photo' | 'guide_minutes';
+
 export interface DocumentationPhoto {
   id: string;
+  itemType?: DocumentationItemType; // 'match_photo' (صور المقابلات) or 'guide_minutes' (دلائل ومحاضر)
   title: string;
   sportId: string; // 'ALL' or specific sport id
-  imageCode: string; // compressed base64 / data URL code
+  imageCode: string; // compressed base64 / data URL code (for photos or image documents)
+  fileDataUrl?: string; // base64 Data URL for PDF / Word / Document uploads
+  fileName?: string;
+  fileMimeType?: string;
+  externalUrl?: string;
+  matchId?: string;
+  matchLabel?: string;
   description?: string;
   date: string;
   authorName: string;
+  authorRole?: string;
   authorEmail?: string;
   directorateId?: string;
+  createdAt?: string;
 }
 
-export function compressImageFileToCode(file: File, maxWidth = 800, quality = 0.6): Promise<string> {
+export function compressImageFileToCode(file: File, maxWidth = 960, quality = 0.7): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = (e) => {
@@ -12500,43 +12539,163 @@ export function compressImageFileToCode(file: File, maxWidth = 800, quality = 0.
   });
 }
 
-// In DataService extension or class static methods
+const DOC_LOCAL_STORAGE_KEY = 'taourirt_documentation_photos';
+
+const sortDocumentationItems = (items: DocumentationPhoto[]): DocumentationPhoto[] => {
+  return [...items].sort((a, b) => {
+    const tA = new Date(a.createdAt || a.date || 0).getTime();
+    const tB = new Date(b.createdAt || b.date || 0).getTime();
+    return (isNaN(tB) ? 0 : tB) - (isNaN(tA) ? 0 : tA);
+  });
+};
+
+const filterByDirectorate = (items: DocumentationPhoto[], directorateId?: string): DocumentationPhoto[] => {
+  if (!directorateId || directorateId === 'all') return items;
+  return items.filter(p => (p.directorateId || 'taourirt') === directorateId);
+};
+
+// Persists in Firestore (settings/documentation_gallery/items) with localStorage fallback
 export class DocumentationService {
-  static async getDocumentationPhotos(directorateId = 'taourirt'): Promise<DocumentationPhoto[]> {
+  static getLocalItems(): DocumentationPhoto[] {
     try {
-      const local = localStorage.getItem('taourirt_documentation_photos');
+      const local = localStorage.getItem(DOC_LOCAL_STORAGE_KEY);
       if (local) {
         const parsed = JSON.parse(local);
         if (Array.isArray(parsed)) return parsed;
       }
-    } catch (e) {}
+    } catch {}
     return [];
   }
 
-  static async saveDocumentationPhoto(photo: DocumentationPhoto): Promise<void> {
-    const photos = await this.getDocumentationPhotos(photo.directorateId || 'taourirt');
-    const existingIndex = photos.findIndex(p => p.id === photo.id);
-    if (existingIndex >= 0) {
-      photos[existingIndex] = photo;
-    } else {
-      photos.unshift(photo);
-    }
+  static saveLocalItems(items: DocumentationPhoto[]): void {
     try {
-      localStorage.setItem('taourirt_documentation_photos', JSON.stringify(photos));
-      window.dispatchEvent(new Event('taourirt_documentation_updated'));
+      localStorage.setItem(DOC_LOCAL_STORAGE_KEY, JSON.stringify(items));
+    } catch {}
+  }
+
+  static async getDocumentationPhotos(directorateId = 'taourirt'): Promise<DocumentationPhoto[]> {
+    const localItems = this.getLocalItems();
+    try {
+      const colRef = collection(db, 'settings', 'documentation_gallery', 'items');
+      const snap = await getDocs(colRef);
+      const cloudItems = snap.docs
+        .filter((d: any) => !isRecentlyDeleted('documentation_items', d.id))
+        .map((d: any) => ({ id: d.id, ...d.data() } as DocumentationPhoto));
+
+      const pendingLocal = localItems.filter(
+        p => p && p.id && !isRecentlyDeleted('documentation_items', p.id) && isPendingWrite('documentation_items', p.id)
+      );
+      const mergedAll = deduplicateById([...pendingLocal, ...cloudItems]);
+      this.saveLocalItems(mergedAll);
+      return sortDocumentationItems(filterByDirectorate(mergedAll, directorateId));
     } catch (e) {
-      console.error("Error saving documentation photo:", e);
+      console.warn('Firestore fetch documentation items failed; using local cache:', e);
+    }
+    return sortDocumentationItems(
+      filterByDirectorate(
+        localItems.filter(p => p && !isRecentlyDeleted('documentation_items', p.id)),
+        directorateId
+      )
+    );
+  }
+
+  static subscribeToDocumentationPhotos(
+    callback: (items: DocumentationPhoto[]) => void,
+    directorateId = 'taourirt'
+  ): () => void {
+    const emitFromLocal = () => {
+      const filtered = filterByDirectorate(
+        this.getLocalItems().filter(p => p && !isRecentlyDeleted('documentation_items', p.id)),
+        directorateId
+      );
+      callback(sortDocumentationItems(filtered));
+    };
+
+    const handleLocalEvent = () => emitFromLocal();
+    if (typeof window !== 'undefined') {
+      window.addEventListener('taourirt_documentation_updated', handleLocalEvent);
+    }
+
+    let unsubFirestore: (() => void) | null = null;
+    try {
+      if (isCloudSyncPaused()) emitFromLocal();
+      const colRef = collection(db, 'settings', 'documentation_gallery', 'items');
+      unsubFirestore = onSnapshot(
+        colRef,
+        (snap) => {
+          const cloudItems = snap.docs
+            .filter((d: any) => !isRecentlyDeleted('documentation_items', d.id))
+            .map((d: any) => ({ id: d.id, ...d.data() } as DocumentationPhoto));
+          const pendingLocal = this.getLocalItems().filter(
+            p => p && p.id && !isRecentlyDeleted('documentation_items', p.id) && isPendingWrite('documentation_items', p.id)
+          );
+          const mergedAll = deduplicateById([...pendingLocal, ...cloudItems]);
+          this.saveLocalItems(mergedAll);
+          callback(sortDocumentationItems(filterByDirectorate(mergedAll, directorateId)));
+        },
+        (err) => {
+          console.warn('Firestore subscription error for documentation items:', err);
+          emitFromLocal();
+        }
+      );
+    } catch (e) {
+      console.warn('Error setting up documentation snapshot:', e);
+      emitFromLocal();
+    }
+
+    return () => {
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('taourirt_documentation_updated', handleLocalEvent);
+      }
+      if (unsubFirestore) unsubFirestore();
+    };
+  }
+
+  static async saveDocumentationPhoto(photo: DocumentationPhoto): Promise<void> {
+    const normalized: DocumentationPhoto = {
+      ...photo,
+      itemType: photo.itemType || 'match_photo',
+      directorateId: photo.directorateId || DataService.getActiveDirectorateId() || 'taourirt',
+      createdAt: photo.createdAt || new Date().toISOString()
+    };
+
+    const allLocal = this.getLocalItems();
+    const existingIndex = allLocal.findIndex(p => p.id === normalized.id);
+    if (existingIndex >= 0) {
+      allLocal[existingIndex] = normalized;
+    } else {
+      allLocal.unshift(normalized);
+    }
+    this.saveLocalItems(allLocal);
+    markPendingWrite('documentation_items', normalized.id);
+
+    try {
+      const cleanPayload = stripUndefinedDeep(normalized);
+      await setDoc(doc(db, 'settings', 'documentation_gallery', 'items', normalized.id), cleanPayload, { merge: true });
+      clearPendingWrite('documentation_items', normalized.id);
+    } catch (e) {
+      console.warn('Documentation item saved locally; Firestore sync pending:', e);
+      throw e;
+    } finally {
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('taourirt_documentation_updated'));
+      }
     }
   }
 
   static async deleteDocumentationPhoto(id: string, directorateId = 'taourirt'): Promise<void> {
-    const photos = await this.getDocumentationPhotos(directorateId);
-    const filtered = photos.filter(p => p.id !== id);
+    markRecentlyDeleted('documentation_items', id);
+    const allLocal = this.getLocalItems().filter(p => p.id !== id);
+    this.saveLocalItems(allLocal);
+
     try {
-      localStorage.setItem('taourirt_documentation_photos', JSON.stringify(filtered));
-      window.dispatchEvent(new Event('taourirt_documentation_updated'));
+      await deleteDoc(doc(db, 'settings', 'documentation_gallery', 'items', id));
     } catch (e) {
-      console.error("Error deleting documentation photo:", e);
+      console.warn('Error deleting documentation item from Firestore:', e);
+    }
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('taourirt_documentation_updated'));
     }
   }
 }

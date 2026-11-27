@@ -1,6 +1,6 @@
 import React from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { AuthProvider } from './contexts/AuthContext';
+import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom';
+import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { NotificationProvider } from './contexts/NotificationContext';
 import { ThemeProvider } from './contexts/ThemeContext';
 import { ProtectedRoute } from './components/ProtectedRoute';
@@ -26,6 +26,27 @@ import { DocumentationGallery } from './pages/DocumentationGallery';
 
 import { Toaster } from 'react-hot-toast';
 
+const DocumentationLayoutSwitch: React.FC = () => {
+  const { currentUser, loading } = useAuth();
+  if (loading) {
+    return (
+      <div className="flex h-screen w-full items-center justify-center bg-gray-50">
+        <div className="h-10 w-10 animate-spin rounded-full border-4 border-indigo-600 border-t-transparent"></div>
+      </div>
+    );
+  }
+  if (currentUser) {
+    return <AppLayout />;
+  }
+  return (
+    <div className="min-h-screen bg-slate-50 px-3 py-4 sm:p-6">
+      <div className="max-w-7xl mx-auto">
+        <Outlet />
+      </div>
+    </div>
+  );
+};
+
 export default function App() {
   return (
     <ThemeProvider>
@@ -35,7 +56,9 @@ export default function App() {
             <Routes>
               <Route path="/login" element={<Login />} />
               <Route path="/results" element={<PublicResults />} />
-              <Route path="/documentation" element={<DocumentationGallery />} />
+              <Route path="/documentation" element={<DocumentationLayoutSwitch />}>
+                <Route index element={<DocumentationGallery />} />
+              </Route>
               <Route
                 path="/"
                 element={
@@ -60,7 +83,6 @@ export default function App() {
                 <Route path="tech-committee" element={<TechCommitteeHeads />} />
                 <Route path="posters-certificates" element={<PostersCertificates />} />
                 <Route path="statistics" element={<Statistics />} />
-                <Route path="documentation" element={<DocumentationGallery />} />
               </Route>
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>

@@ -482,11 +482,11 @@ export const SportsConfig: React.FC = () => {
 
   // Role Permissions State
   const [rolePermissions, setRolePermissions] = useState<RoleSidebarPermissions>({
-    CENTRAL_ADMIN: ['/dashboard', '/schools', '/tournaments', '/teachers', '/tech-committee', '/referees', '/matches', '/helper-apps', '/posters-certificates', '/statistics', '/sports-config', '/permissions'],
-    TECH_COMMITTEE_HEAD: ['/dashboard', '/schools', '/tournaments', '/teachers', '/tech-committee', '/referees', '/matches', '/helper-apps', '/posters-certificates', '/statistics', '/sports-config'],
-    SPORT_MANAGER: ['/dashboard', '/schools', '/tournaments', '/teachers', '/referees', '/matches', '/helper-apps', '/posters-certificates', '/statistics'],
-    TEACHER: ['/dashboard', '/schools', '/tournaments', '/matches', '/posters-certificates', '/statistics'],
-    REFEREE: ['/dashboard', '/matches', '/statistics']
+    CENTRAL_ADMIN: ['/dashboard', '/schools', '/tournaments', '/teachers', '/tech-committee', '/referees', '/matches', '/documentation', '/helper-apps', '/posters-certificates', '/statistics', '/sports-config', '/permissions'],
+    TECH_COMMITTEE_HEAD: ['/dashboard', '/schools', '/tournaments', '/teachers', '/tech-committee', '/referees', '/matches', '/documentation', '/helper-apps', '/posters-certificates', '/statistics', '/sports-config'],
+    SPORT_MANAGER: ['/dashboard', '/schools', '/tournaments', '/teachers', '/referees', '/matches', '/documentation', '/helper-apps', '/posters-certificates', '/statistics'],
+    TEACHER: ['/dashboard', '/schools', '/tournaments', '/matches', '/documentation', '/posters-certificates', '/statistics'],
+    REFEREE: ['/dashboard', '/matches', '/documentation', '/statistics']
   });
   const [savingPermissions, setSavingPermissions] = useState(false);
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'PROGRAMMED' | 'UNPROGRAMMED'>('ALL');
@@ -941,11 +941,11 @@ export const SportsConfig: React.FC = () => {
 
   const handleResetRolePermissions = () => {
     const DEFAULT_PERMISSIONS: RoleSidebarPermissions = {
-      CENTRAL_ADMIN: ['/dashboard', '/tournaments', '/schools', '/teachers', '/tech-committee', '/referees', '/matches', '/helper-apps', '/statistics', '/sports-config', '/permissions'],
-      TECH_COMMITTEE_HEAD: ['/dashboard', '/tournaments', '/schools', '/teachers', '/tech-committee', '/referees', '/matches', '/helper-apps', '/statistics', '/sports-config'],
-      SPORT_MANAGER: ['/dashboard', '/tournaments', '/schools', '/teachers', '/referees', '/matches', '/helper-apps', '/statistics'],
-      TEACHER: ['/dashboard', '/tournaments', '/schools', '/matches', '/statistics'],
-      REFEREE: ['/dashboard', '/matches', '/statistics']
+      CENTRAL_ADMIN: ['/dashboard', '/tournaments', '/schools', '/teachers', '/tech-committee', '/referees', '/matches', '/documentation', '/helper-apps', '/statistics', '/sports-config', '/permissions'],
+      TECH_COMMITTEE_HEAD: ['/dashboard', '/tournaments', '/schools', '/teachers', '/tech-committee', '/referees', '/matches', '/documentation', '/helper-apps', '/statistics', '/sports-config'],
+      SPORT_MANAGER: ['/dashboard', '/tournaments', '/schools', '/teachers', '/referees', '/matches', '/documentation', '/helper-apps', '/statistics'],
+      TEACHER: ['/dashboard', '/tournaments', '/schools', '/matches', '/documentation', '/statistics'],
+      REFEREE: ['/dashboard', '/matches', '/documentation', '/statistics']
     };
     setRolePermissions(DEFAULT_PERMISSIONS);
     toast.success('تمت إعادة ضبط الصلاحيات إلى القيم الافتراضية. لا تنس الضغط على حفظ.');
@@ -1427,6 +1427,7 @@ export const SportsConfig: React.FC = () => {
                 { href: '/tech-committee', label: 'رؤساء اللجن التقنية', icon: '🛡️', desc: 'إدارة وتعيين مسؤولي اللجان التقنية حسب الرياضات' },
                 { href: '/referees', label: 'الحكام', icon: '🏁', desc: 'سجل وتنظيم الحكام المعتمدين وتعيينات المباريات' },
                 { href: '/matches', label: 'المباريات والنتائج', icon: '⚽', desc: 'برمجة وتدقيق وتسجيل نتائج المباريات المدرسية' },
+                { href: '/documentation', label: 'التوثيق والصور', icon: '📸', desc: 'إضافة ونشر الدلائل والمحاضر وصور المقابلات للعموم' },
                 { href: '/helper-apps', label: 'تطبيقات مساعدة', icon: '🛠️', desc: 'مجموعة من التطبيقات المساعدة من بينها ماسح الصدريات لخط النهاية' },
                 { href: '/posters-certificates', label: 'الملصقات والشواهد التقديرية', icon: '🎨', desc: 'توليد ملصقات البطولات المبرمجة والشواهد التقديرية للمشاركين' },
                 { href: '/statistics', label: 'إحصائيات عامة', icon: '📊', desc: 'مؤشرات الأداء، ونسب المشاركة، والتحليلات البيانية' },

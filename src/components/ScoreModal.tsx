@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Match, School, Venue, Referee, User } from '../types';
 import { X, CheckCircle2, ShieldAlert, Plus, Minus, Database, Megaphone, CalendarClock, ShieldCheck } from 'lucide-react';
-import { SPORTS_MAP, GENDER_MAP, canUserEnterMatchScore, isUserTechHeadForSport } from '../lib/dataService';
+import { SPORTS_MAP, GENDER_MAP, canUserEnterMatchScore, isUserTechHeadForSport, isTeamSport } from '../lib/dataService';
 import { formatTeamDisplayName, doesMatchRequirePenaltyOnDraw } from '../lib/drawTournamentUtils';
 import { useAuth } from '../contexts/AuthContext';
 import toast from 'react-hot-toast';
@@ -184,7 +184,11 @@ export const ScoreModal: React.FC<ScoreModalProps> = ({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!canEnterThisMatchScore) {
-      toast.error('إدخال نتائج المباريات مقتصر فقط على الحكام المعينين في هذه المباراة أو رئيس اللجنة التقنية المختص');
+      toast.error(
+        isTeamSport(match.sportId || '')
+          ? 'تدوين نتائج مقابلات الرياضات الجماعية مقتصر فقط على رئيس اللجنة التقنية المعنية'
+          : 'إدخال نتائج المباريات مقتصر فقط على الحكام المعينين في هذه المباراة أو رئيس اللجنة التقنية المختص'
+      );
       return;
     }
     if (!validatePenaltyResolution(status)) return;
@@ -296,9 +300,19 @@ export const ScoreModal: React.FC<ScoreModalProps> = ({
               <div className="p-2.5 sm:p-3 bg-rose-50 border border-rose-300 rounded-xl flex items-start gap-2 text-[11px] sm:text-xs text-rose-950">
                 <ShieldAlert className="h-4 w-4 text-rose-600 shrink-0 mt-0.5" />
                 <div className="leading-relaxed">
-                  <span className="font-black">غير مصرح بإدخال النتيجة:</span> إدخال نتائج المباريات مقتصر فقط على{' '}
-                  <span className="underline font-black">الحكام المعينين في هذه المباراة</span> أو{' '}
-                  <span className="underline font-black">رئيس اللجنة التقنية المختص</span>.
+                  <span className="font-black">غير مصرح بإدخال النتيجة:</span>{' '}
+                  {isTeamSport(match.sportId || '') ? (
+                    <>
+                      تدوين نتائج مقابلات الرياضات الجماعية مقتصر فقط على{' '}
+                      <span className="underline font-black">رئيس اللجنة التقنية المعنية</span>.
+                    </>
+                  ) : (
+                    <>
+                      إدخال نتائج المباريات مقتصر فقط على{' '}
+                      <span className="underline font-black">الحكام المعينين في هذه المباراة</span> أو{' '}
+                      <span className="underline font-black">رئيس اللجنة التقنية المختص</span>.
+                    </>
+                  )}
                 </div>
               </div>
             ) : !effectiveCanApprove ? (

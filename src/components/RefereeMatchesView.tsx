@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { Match, School, Venue, Tournament, User, Referee } from '../types';
-import { DataService, SPORTS_MAP, normalizeArabicMatchText } from '../lib/dataService';
+import { DataService, SPORTS_MAP, normalizeArabicMatchText, canUserEnterMatchScore, isUserTechHeadForSport, isTeamSport } from '../lib/dataService';
 import { formatTeamDisplayName, hasValidMatchTeams } from '../lib/drawTournamentUtils';
 import { resolveMatchRefereesInfo, isOpaqueEntityId } from '../lib/programExportService';
 import { AthleticsService } from '../lib/athleticsService';
@@ -301,7 +301,7 @@ export const RefereeMatchesView: React.FC<RefereeMatchesViewProps> = ({
                 الكابتن: {userProfile?.fullName || refereeName}
               </h2>
               <p className="text-[11px] sm:text-xs text-slate-300 font-medium mt-1 leading-relaxed">
-                مرحباً بك في فضائك الرقمي للتحكيم. يمكنك هنا متابعة جميع مبارياتك المبرمجة وتسجيل نتائجها مباشرة وبسرعة.
+                مرحباً بك في فضائك الرقمي للتحكيم. يمكنك هنا متابعة جميع مبارياتك المبرمجة وتفاصيل التحكيم والنتائج المسجلة.
               </p>
             </div>
           </div>
@@ -593,21 +593,48 @@ export const RefereeMatchesView: React.FC<RefereeMatchesViewProps> = ({
                       : 'طاقم التحكيم المعين لاسمك'}
                   </span>
 
-                  {isCompleted && m.approvalStatus === 'approved' ? (
-                    <span className="inline-flex items-center justify-center gap-1 px-3 py-1.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-xl text-[11px] font-black w-full sm:w-auto">
-                      <CheckCircle className="w-3.5 h-3.5 shrink-0" />
-                      <span>نتيجة معتمدة رسمياً</span>
-                    </span>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => onEditScore(m)}
-                      className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 sm:py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-black shadow-3xs hover:shadow-xs transition-all cursor-pointer w-full sm:w-auto whitespace-nowrap"
-                    >
-                      <Edit3 className="w-3.5 h-3.5 shrink-0" />
-                      <span>{isCompleted ? 'تعديل النتيجة الأولية' : 'تدوين النتيجة الأولية 📝'}</span>
-                    </button>
-                  )}
+                  {(() => {
+                    const canScore = canUserEnterMatchScore(userProfile, m, refereesList, usersDirectory);
+                    const isTechHead = isUserTechHeadForSport(userProfile, m.sportId, usersDirectory);
+                    const isTeam = isTeamSport(m.sportId || '');
+
+                    if (isCompleted && m.approvalStatus === 'approved') {
+                      return (
+                        <span className="inline-flex items-center justify-center gap-1 px-3 py-1.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-xl text-[11px] font-black w-full sm:w-auto">
+                          <CheckCircle className="w-3.5 h-3.5 shrink-0" />
+                          <span>نتيجة معتمدة رسمياً</span>
+                        </span>
+                      );
+                    }
+
+                    if (!canScore) {
+                      return (
+                        <span className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 bg-slate-100 text-slate-600 border border-slate-200 rounded-xl text-[11px] font-bold w-full sm:w-auto text-center">
+                          <ShieldAlert className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                          <span>
+                            {isTeam
+                              ? 'تدوين النتيجة مقتصر على رئيس اللجنة التقنية المعنية'
+                              : 'غير مصرح بتدوين النتيجة'}
+                          </span>
+                        </span>
+                      );
+                    }
+
+                    return (
+                      <button
+                        type="button"
+                        onClick={() => onEditScore(m)}
+                        className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 sm:py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-black shadow-3xs hover:shadow-xs transition-all cursor-pointer w-full sm:w-auto whitespace-nowrap"
+                      >
+                        <Edit3 className="w-3.5 h-3.5 shrink-0" />
+                        <span>
+                          {isTechHead
+                            ? (isCompleted ? 'تعديل النتيجة' : 'تسجيل النتيجة')
+                            : (isCompleted ? 'تعديل النتيجة الأولية' : 'تدوين النتيجة الأولية 📝')}
+                        </span>
+                      </button>
+                    );
+                  })()}
                 </div>
               </div>
             );

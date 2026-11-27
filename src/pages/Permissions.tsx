@@ -25,11 +25,11 @@ import toast from 'react-hot-toast';
 export const Permissions: React.FC = () => {
   const { userProfile } = useAuth();
   const [rolePermissions, setRolePermissions] = useState<RoleSidebarPermissions>({
-    CENTRAL_ADMIN: ['/dashboard', '/schools', '/tournaments', '/teachers', '/tech-committee', '/referees', '/matches', '/helper-apps', '/posters-certificates', '/statistics', '/sports-config', '/permissions'],
-    TECH_COMMITTEE_HEAD: ['/dashboard', '/schools', '/tournaments', '/teachers', '/tech-committee', '/referees', '/matches', '/helper-apps', '/posters-certificates', '/statistics', '/sports-config'],
-    SPORT_MANAGER: ['/dashboard', '/schools', '/tournaments', '/teachers', '/referees', '/matches', '/helper-apps', '/posters-certificates', '/statistics'],
-    TEACHER: ['/dashboard', '/schools', '/tournaments', '/matches', '/posters-certificates', '/statistics'],
-    REFEREE: ['/dashboard', '/matches', '/statistics']
+    CENTRAL_ADMIN: ['/dashboard', '/schools', '/tournaments', '/teachers', '/tech-committee', '/referees', '/matches', '/documentation', '/helper-apps', '/posters-certificates', '/statistics', '/sports-config', '/permissions'],
+    TECH_COMMITTEE_HEAD: ['/dashboard', '/schools', '/tournaments', '/teachers', '/tech-committee', '/referees', '/matches', '/documentation', '/helper-apps', '/posters-certificates', '/statistics', '/sports-config'],
+    SPORT_MANAGER: ['/dashboard', '/schools', '/tournaments', '/teachers', '/referees', '/matches', '/documentation', '/helper-apps', '/posters-certificates', '/statistics'],
+    TEACHER: ['/dashboard', '/schools', '/tournaments', '/matches', '/documentation', '/posters-certificates', '/statistics'],
+    REFEREE: ['/dashboard', '/matches', '/documentation', '/statistics']
   });
   const [loading, setLoading] = useState(true);
   const [savingPermissions, setSavingPermissions] = useState(false);
@@ -63,6 +63,7 @@ export const Permissions: React.FC = () => {
     { href: '/tech-committee', label: 'رؤساء اللجن التقنية', icon: '🛡️', desc: 'إدارة وتعيين مسؤولي اللجان التقنية حسب الرياضات' },
     { href: '/referees', label: 'الحكام وقضاة الملاعب', icon: '🏁', desc: 'سجل وتنظيم الحكام المعتمدين وتعيينات المباريات' },
     { href: '/matches', label: 'المباريات والنتائج', icon: '⚽', desc: 'برمجة وتدقيق وتسجيل نتائج المباريات المدرسية' },
+    { href: '/documentation', label: 'التوثيق والصور', icon: '📸', desc: 'إضافة ونشر الدلائل والمحاضر وصور المقابلات للعموم' },
     { href: '/helper-apps', label: 'تطبيقات مساعدة', icon: '🛠️', desc: 'مجموعة من التطبيقات المساعدة من بينها ماسح الصدريات لخط النهاية' },
     { href: '/posters-certificates', label: 'الملصقات والشواهد التقديرية', icon: '🎨', desc: 'توليد ملصقات البطولات المبرمجة والشواهد التقديرية للمشاركين' },
     { href: '/statistics', label: 'إحصائيات عامة والترتيب', icon: '📊', desc: 'مؤشرات الأداء، ونسب المشاركة، والتحليلات البيانية وترتيب فرق المؤسسات' },
@@ -165,11 +166,11 @@ export const Permissions: React.FC = () => {
       return;
     }
     const DEFAULT_PERMISSIONS: RoleSidebarPermissions = {
-      CENTRAL_ADMIN: ['/dashboard', '/schools', '/tournaments', '/teachers', '/tech-committee', '/referees', '/matches', '/helper-apps', '/posters-certificates', '/statistics', '/sports-config', '/permissions'],
-      TECH_COMMITTEE_HEAD: ['/dashboard', '/schools', '/tournaments', '/teachers', '/tech-committee', '/referees', '/matches', '/helper-apps', '/posters-certificates', '/statistics', '/sports-config'],
-      SPORT_MANAGER: ['/dashboard', '/schools', '/tournaments', '/teachers', '/referees', '/matches', '/helper-apps', '/posters-certificates', '/statistics'],
-      TEACHER: ['/dashboard', '/schools', '/tournaments', '/matches', '/posters-certificates', '/statistics'],
-      REFEREE: ['/dashboard', '/matches', '/statistics']
+      CENTRAL_ADMIN: ['/dashboard', '/schools', '/tournaments', '/teachers', '/tech-committee', '/referees', '/matches', '/documentation', '/helper-apps', '/posters-certificates', '/statistics', '/sports-config', '/permissions'],
+      TECH_COMMITTEE_HEAD: ['/dashboard', '/schools', '/tournaments', '/teachers', '/tech-committee', '/referees', '/matches', '/documentation', '/helper-apps', '/posters-certificates', '/statistics', '/sports-config'],
+      SPORT_MANAGER: ['/dashboard', '/schools', '/tournaments', '/teachers', '/referees', '/matches', '/documentation', '/helper-apps', '/posters-certificates', '/statistics'],
+      TEACHER: ['/dashboard', '/schools', '/tournaments', '/matches', '/documentation', '/posters-certificates', '/statistics'],
+      REFEREE: ['/dashboard', '/matches', '/documentation', '/statistics']
     };
     setRolePermissions(DEFAULT_PERMISSIONS);
     toast.success('تمت استعادة الصلاحيات الافتراضية للنظام بنجاح. يرجى الضغط على حفظ لتأكيد التغييرات.');

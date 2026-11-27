@@ -46,7 +46,9 @@ import {
   Info,
   Menu,
   MoreHorizontal,
-  Undo2
+  Undo2,
+  FileText,
+  Download
 } from 'lucide-react';
 import {
   GoogleAuthProvider,
@@ -58,7 +60,7 @@ import { CommunicationWidget } from '../components/CommunicationWidget';
 import { doc, setDoc, getDoc, serverTimestamp, query, collection, where, getDocs } from 'firebase/firestore';
 import { auth, db } from '../firebase/config';
 import { User, Role, Directorate, School, Tournament, Match, Student, CrossCountryCategoryResult, AthleticsCategoryResult, AthleticsWinner, Sport, Referee, AffiliationDisplayConfig, BlockedSchedulePeriod } from '../types';
-import { DataService, SPORTS_MAP, getAgeCategoriesForSeason, getCategoryYearsLabel, normalizeCategoryKey, normalizeTournamentAffiliation, resolveEffectiveAffiliationMode, isAffiliationAllowedByDisplayConfig, findAllBlockedPeriodsForDate, isMatchProgramPendingApproval, isTrackOrCrossCountrySport } from '../lib/dataService';
+import { DataService, SPORTS_MAP, getAgeCategoriesForSeason, getCategoryYearsLabel, normalizeCategoryKey, normalizeTournamentAffiliation, resolveEffectiveAffiliationMode, isAffiliationAllowedByDisplayConfig, findAllBlockedPeriodsForDate, isMatchProgramPendingApproval, isTrackOrCrossCountrySport, DocumentationService, DocumentationPhoto, areSportIdsEquivalent } from '../lib/dataService';
 import { calculateTeamRankings, resolveRunnerParticipationType } from '../lib/crossCountryConfig';
 import { hasValidMatchTeams, formatTeamDisplayName, extractMatchGroupLabel, isPlaceholderTeamId, computeGroupStandings } from '../lib/drawTournamentUtils';
 import { resolveMatchAffiliation, resolveMatchRefereesInfo, getOrdinalRefLabel } from '../lib/programExportService';
@@ -116,6 +118,10 @@ export const Login: React.FC = () => {
   const [referees, setReferees] = useState<Referee[]>([]);
   const [usersDirectory, setUsersDirectory] = useState<User[]>([]);
   const [blockedPeriods, setBlockedPeriods] = useState<BlockedSchedulePeriod[]>([]);
+  const [documentationItems, setDocumentationItems] = useState<DocumentationPhoto[]>([]);
+  const [isPublicGalleryOpen, setIsPublicGalleryOpen] = useState(false);
+  const [publicGalleryInitialTab, setPublicGalleryInitialTab] = useState<'match_photo' | 'guide_minutes'>('match_photo');
+  const [selectedPublicDocItem, setSelectedPublicDocItem] = useState<DocumentationPhoto | null>(null);
   const [loadingData, setLoadingData] = useState(true);
 
   // Public Filters
@@ -407,7 +413,7 @@ export const Login: React.FC = () => {
         setActiveDirectorate(activeDir);
       }
 
-      const [dirs, schs, tours, mtchs, stds, ccRes, athRes, sps, refs, usrs, blkd] = await Promise.all([
+      const [dirs, schs, tours, mtchs, stds, ccRes, athRes, sps, refs, usrs, blkd, docItems] = await Promise.all([
         DataService.getDirectorates(),
         DataService.getSchools(effectiveDirId),
         DataService.getTournaments(effectiveDirId),
@@ -418,7 +424,8 @@ export const Login: React.FC = () => {
         DataService.getSportsConfig(),
         DataService.getReferees().catch(() => [] as Referee[]),
         DataService.getUsers().catch(() => [] as User[]),
-        DataService.getBlockedScheduleDates(effectiveDirId).catch(() => [] as BlockedSchedulePeriod[])
+        DataService.getBlockedScheduleDates(effectiveDirId).catch(() => [] as BlockedSchedulePeriod[]),
+        DocumentationService.getDocumentationPhotos(effectiveDirId).catch(() => [] as DocumentationPhoto[])
       ]);
 
       setDirectorates(dirs || []);
@@ -428,6 +435,7 @@ export const Login: React.FC = () => {
       setReferees(refs || []);
       setUsersDirectory(usrs || []);
       setBlockedPeriods(blkd || []);
+      setDocumentationItems(docItems || []);
       setMatches(mtchs || []);
       setStudents(stds || []);
       setCrossCountryResults(ccRes || {});
@@ -471,6 +479,10 @@ export const Login: React.FC = () => {
     const unsubAthletics = DataService.subscribeAthleticsResults((ar) => setAthleticsResults(ar));
     const unsubAffiliationCfg = DataService.subscribeToAffiliationDisplayConfig((cfg) => setAffiliationDisplayConfig(cfg));
     const unsubBlockedDates = DataService.subscribeToBlockedScheduleDates((periods) => setBlockedPeriods(periods));
+    const unsubDocumentation = DocumentationService.subscribeToDocumentationPhotos((docs) => {
+      const dir = activeDirIdRef.current;
+      setDocumentationItems(!dir || dir === 'all' ? docs : docs.filter(item => !item.directorateId || item.directorateId === dir));
+    }, activeDirIdRef.current);
 
     const handleRefreshPublicData = () => {
       loadAllData(activeDirIdRef.current);
@@ -514,6 +526,7 @@ export const Login: React.FC = () => {
       unsubAthletics();
       unsubAffiliationCfg();
       unsubBlockedDates();
+      unsubDocumentation();
       unsubReferees();
       unsubUsers();
       window.removeEventListener('resultsChanged', handleRefreshPublicData);
@@ -2380,47 +2393,141 @@ export const Login: React.FC = () => {
         {renderMonthlyProgramWidget(false)}
       </div>
 
-      {/* Tournament Guides Button */}
-      <button
-        type="button"
-        onClick={() => {
-          setActivePublicTab('TOURNAMENTS');
-          const resultsSection = document.getElementById('public-results-section');
-          resultsSection?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        }}
-        className={`w-full py-3.5 px-4 rounded-2xl text-xs font-black transition-all cursor-pointer flex items-center justify-between border-2 shadow-xs ${
-          activePublicTab === 'TOURNAMENTS'
-            ? 'bg-emerald-600 text-white border-emerald-500 shadow-md ring-2 ring-emerald-400/20'
-            : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800'
-        }`}
-      >
-        <div className="flex items-center gap-2">
-          <Layers className={`w-4 h-4 ${activePublicTab === 'TOURNAMENTS' ? 'text-white' : 'text-emerald-600 dark:text-emerald-400'}`} />
-          <span>دليل البطولات والمحاضر</span>
-        </div>
-        <span className="text-[10px] font-mono font-bold bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-full text-slate-600 dark:text-slate-300">
-          {filteredTournaments.length}
-        </span>
-      </button>
+      {/* دلائل ومحاضر (Public Guides & Minutes Widget + Tournaments Button) */}
+      {(() => {
+        const publicGuides = documentationItems.filter(item => {
+          if (item.itemType !== 'guide_minutes') return false;
+          if (selectedSport === 'ALL') return true;
+          return item.sportId === 'ALL' || areSportIdsEquivalent(item.sportId, selectedSport);
+        });
+        const publicPhotos = documentationItems.filter(item => {
+          if ((item.itemType || 'match_photo') !== 'match_photo') return false;
+          if (selectedSport === 'ALL') return true;
+          return item.sportId === 'ALL' || areSportIdsEquivalent(item.sportId, selectedSport);
+        });
 
-      {/* Sport Gallery (نافذة الصور الصغيرة) */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-sm space-y-2.5">
-        <div className="flex items-center gap-1.5 border-b border-slate-100 dark:border-slate-800 pb-2">
-          <Camera className="w-4 h-4 text-amber-600" />
-          <h4 className="text-xs font-black text-slate-800 dark:text-slate-100">
-            ألبوم صور {selectedSport !== 'ALL' ? SPORTS_MAP[selectedSport]?.name : 'البطولة'}
-          </h4>
-        </div>
-        <div className="grid grid-cols-2 gap-1.5">
-          <img src="https://images.unsplash.com/photo-1517466787929-bc90951d0974?w=200&h=200&fit=crop" className="rounded-xl w-full h-16 object-cover bg-slate-100" alt="Gallery 1" />
-          <img src="https://images.unsplash.com/photo-1544644181-1484b3fdfc62?w=200&h=200&fit=crop" className="rounded-xl w-full h-16 object-cover bg-slate-100" alt="Gallery 2" />
-          <img src="https://images.unsplash.com/photo-1511886929837-354d827aae26?w=200&h=200&fit=crop" className="rounded-xl w-full h-16 object-cover bg-slate-100" alt="Gallery 3" />
-          <img src="https://images.unsplash.com/photo-1574629810360-7efbbe195018?w=200&h=200&fit=crop" className="rounded-xl w-full h-16 object-cover bg-slate-100" alt="Gallery 4" />
-        </div>
-        <button className="w-full py-1 bg-slate-100 dark:bg-slate-800 text-[10px] font-bold rounded-lg text-slate-600 dark:text-slate-300">
-          عرض معرض الصور بالكامل
-        </button>
-      </div>
+        return (
+          <>
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-3.5 shadow-sm space-y-2.5">
+              <button
+                type="button"
+                onClick={() => {
+                  setActivePublicTab('TOURNAMENTS');
+                  const resultsSection = document.getElementById('public-results-section');
+                  resultsSection?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }}
+                className={`w-full py-2.5 px-3.5 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center justify-between border ${
+                  activePublicTab === 'TOURNAMENTS'
+                    ? 'bg-emerald-600 text-white border-emerald-500 shadow-sm'
+                    : 'bg-emerald-50/60 dark:bg-slate-800 text-slate-800 dark:text-slate-100 border-emerald-200/80 dark:border-slate-700 hover:bg-emerald-50'
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <FileText className={`w-4 h-4 ${activePublicTab === 'TOURNAMENTS' ? 'text-white' : 'text-emerald-600 dark:text-emerald-400'}`} />
+                  <span>دلائل ومحاضر</span>
+                </div>
+                <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-full ${
+                  activePublicTab === 'TOURNAMENTS'
+                    ? 'bg-white/20 text-white'
+                    : 'bg-white dark:bg-slate-900 text-emerald-700 dark:text-emerald-300 border border-emerald-200/70 dark:border-slate-700'
+                }`}>
+                  {publicGuides.length}
+                </span>
+              </button>
+
+              {publicGuides.length > 0 ? (
+                <div className="space-y-1.5">
+                  {publicGuides.slice(0, 3).map(guide => (
+                    <button
+                      key={guide.id}
+                      type="button"
+                      onClick={() => setSelectedPublicDocItem(guide)}
+                      className="w-full text-right p-2 rounded-xl bg-slate-50 dark:bg-slate-800/70 hover:bg-emerald-50/70 dark:hover:bg-emerald-950/30 border border-slate-100 dark:border-slate-800 hover:border-emerald-200 transition-all flex items-center justify-between gap-2 cursor-pointer group"
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <FileText className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                        <span className="text-[11px] font-bold text-slate-800 dark:text-slate-200 truncate group-hover:text-emerald-700 dark:group-hover:text-emerald-300">
+                          {guide.title}
+                        </span>
+                      </div>
+                      <span className="text-[10px] text-slate-400 shrink-0 font-mono">{guide.date}</span>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 font-medium text-center py-1">
+                  لا توجد دلائل أو محاضر منشورة حالياً
+                </p>
+              )}
+
+              <button
+                type="button"
+                onClick={() => {
+                  setPublicGalleryInitialTab('guide_minutes');
+                  setIsPublicGalleryOpen(true);
+                }}
+                className="w-full py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-[10px] font-bold rounded-lg text-slate-700 dark:text-slate-300 transition-colors cursor-pointer"
+              >
+                عرض جميع الدلائل والمحاضر ({publicGuides.length})
+              </button>
+            </div>
+
+            {/* Sport Gallery (ألبوم صور المقابلات للعموم) */}
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-sm space-y-2.5">
+              <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-2">
+                <div className="flex items-center gap-1.5">
+                  <Camera className="w-4 h-4 text-amber-600" />
+                  <h4 className="text-xs font-black text-slate-800 dark:text-slate-100">
+                    ألبوم صور {selectedSport !== 'ALL' ? SPORTS_MAP[selectedSport]?.name : 'البطولة'}
+                  </h4>
+                </div>
+                <span className="text-[10px] font-mono font-bold bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 px-2 py-0.5 rounded-full border border-amber-200/70 dark:border-amber-800">
+                  {publicPhotos.length}
+                </span>
+              </div>
+
+              {publicPhotos.length > 0 ? (
+                <div className="grid grid-cols-2 gap-1.5">
+                  {publicPhotos.slice(0, 4).map((photo) => (
+                    <button
+                      key={photo.id}
+                      type="button"
+                      onClick={() => setSelectedPublicDocItem(photo)}
+                      className="group relative rounded-xl overflow-hidden bg-slate-100 dark:bg-slate-800 aspect-[4/3] cursor-pointer border border-slate-200/60 dark:border-slate-700"
+                      title={photo.title}
+                    >
+                      <img
+                        src={photo.imageCode}
+                        alt={photo.title}
+                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
+                        loading="lazy"
+                      />
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <div className="py-5 px-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-dashed border-slate-200 dark:border-slate-700 text-center space-y-1">
+                  <Camera className="w-6 h-6 text-slate-300 dark:text-slate-600 mx-auto" />
+                  <p className="text-[11px] font-bold text-slate-500 dark:text-slate-400">
+                    لم يتم نشر صور مقابلات بعد في هذا القسم
+                  </p>
+                </div>
+              )}
+
+              <button
+                type="button"
+                onClick={() => {
+                  setPublicGalleryInitialTab('match_photo');
+                  setIsPublicGalleryOpen(true);
+                }}
+                className="w-full py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-[10px] font-bold rounded-lg text-slate-700 dark:text-slate-300 transition-colors cursor-pointer"
+              >
+                عرض معرض الصور بالكامل
+              </button>
+            </div>
+          </>
+        );
+      })()}
     </div>
   );
 
@@ -3943,61 +4050,158 @@ export const Login: React.FC = () => {
               </div>
             )}
 
-            {/* TAB 3: TOURNAMENTS CATALOG */}
+            {/* TAB 3: TOURNAMENTS CATALOG & GUIDES / MINUTES */}
             {activePublicTab === 'TOURNAMENTS' && (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {filteredTournaments.length === 0 ? (
-                  <div className="sm:col-span-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-8 text-center space-y-3 shadow-xs transition-colors">
-                    <Trophy className="w-12 h-12 text-slate-300 dark:text-slate-700 mx-auto" />
-                    <p className="text-sm font-bold text-slate-700 dark:text-slate-300">
-                      لا توجد بطولات مسجلة حالياً
-                    </p>
-                  </div>
-                ) : (
-                  filteredTournaments.map((t) => (
-                    <div
-                      key={t.id}
-                      onClick={() => setSelectedTournamentDetail(t)}
-                      className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:border-emerald-500 dark:hover:border-emerald-500 rounded-3xl p-4 shadow-sm hover:shadow-md transition-all cursor-pointer space-y-3 group"
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="flex items-center gap-2">
-                          <span className="text-2xl p-2 bg-emerald-50 dark:bg-emerald-950/60 rounded-2xl">
-                            {SPORTS_MAP[t.sportId]?.icon || '🏆'}
-                          </span>
-                          <div>
-                            <h4 className="text-xs sm:text-sm font-black text-slate-900 dark:text-white group-hover:text-emerald-600 transition-colors">
-                              {t.title}
-                            </h4>
-                            <p className="text-[11px] text-slate-500 dark:text-slate-400 font-bold">
-                              {t.sportName || 'بطولة مدرسية'}
-                            </p>
-                          </div>
-                        </div>
+              <div className="space-y-6">
+                {/* Published Guides & Minutes Section (دلائل ومحاضر) */}
+                {(() => {
+                  const tabGuides = documentationItems.filter(item => {
+                    if (item.itemType !== 'guide_minutes') return false;
+                    if (selectedSport === 'ALL') return true;
+                    return item.sportId === 'ALL' || areSportIdsEquivalent(item.sportId, selectedSport);
+                  });
 
-                        <span className="px-2.5 py-1 bg-amber-100 dark:bg-amber-950 text-amber-900 dark:text-amber-300 rounded-full text-[10px] font-black shrink-0">
-                          {t.level === 'NATIONAL' ? 'وطنية' : t.level === 'REGIONAL' ? 'جهوية' : 'إقليمية'}
+                  return (
+                    <div className="bg-white dark:bg-slate-900 border border-emerald-200/80 dark:border-slate-800 rounded-3xl p-4 sm:p-5 shadow-sm space-y-3">
+                      <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-2.5">
+                        <div className="flex items-center gap-2">
+                          <FileText className="w-5 h-5 text-emerald-600" />
+                          <h3 className="text-sm font-black text-slate-900 dark:text-white">
+                            دلائل ومحاضر رسمية
+                          </h3>
+                        </div>
+                        <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
+                          {tabGuides.length} وثيقة
                         </span>
                       </div>
 
-                      <div className="text-xs text-slate-600 dark:text-slate-300 space-y-1">
-                        <div className="flex items-center gap-1.5 text-[11px]">
-                          <Calendar className="w-3.5 h-3.5 text-emerald-600" />
-                          <span>التاريخ: {t.startDate || '2026'}</span>
+                      {tabGuides.length === 0 ? (
+                        <p className="text-xs text-slate-500 dark:text-slate-400 font-medium text-center py-4">
+                          لا توجد دلائل أو محاضر منشورة حالياً لهذا التخصص.
+                        </p>
+                      ) : (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          {tabGuides.map(guide => {
+                            const spName = guide.sportId === 'ALL' ? 'عام' : (SPORTS_MAP[guide.sportId]?.name || guide.sportId);
+                            const downloadHref = guide.fileDataUrl || guide.imageCode || '';
+                            return (
+                              <div
+                                key={guide.id}
+                                className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700 flex flex-col justify-between gap-2.5"
+                              >
+                                <div className="space-y-1">
+                                  <div className="flex items-start justify-between gap-2">
+                                    <h4 className="text-xs font-black text-slate-900 dark:text-white leading-snug">
+                                      {guide.title}
+                                    </h4>
+                                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-lg bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 shrink-0">
+                                      {spName}
+                                    </span>
+                                  </div>
+                                  {guide.description && (
+                                    <p className="text-[11px] text-slate-600 dark:text-slate-300 line-clamp-2">
+                                      {guide.description}
+                                    </p>
+                                  )}
+                                  <p className="text-[10px] text-slate-400 font-bold">
+                                    {guide.authorName} • {guide.date}
+                                  </p>
+                                </div>
+                                <div className="flex flex-wrap items-center gap-1.5 pt-2 border-t border-slate-200/70 dark:border-slate-700">
+                                  <button
+                                    type="button"
+                                    onClick={() => setSelectedPublicDocItem(guide)}
+                                    className="px-2.5 py-1 bg-white dark:bg-slate-900 hover:bg-slate-100 text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700 rounded-lg text-[11px] font-bold flex items-center gap-1 cursor-pointer"
+                                  >
+                                    <Eye className="w-3 h-3" />
+                                    <span>معاينة</span>
+                                  </button>
+                                  {downloadHref && (
+                                    <a
+                                      href={downloadHref}
+                                      download={guide.fileName || `${guide.title}.pdf`}
+                                      className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[11px] font-bold flex items-center gap-1"
+                                    >
+                                      <Download className="w-3 h-3" />
+                                      <span>تحميل</span>
+                                    </a>
+                                  )}
+                                  {guide.externalUrl && (
+                                    <a
+                                      href={guide.externalUrl}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-[11px] font-bold flex items-center gap-1"
+                                    >
+                                      <ExternalLink className="w-3 h-3" />
+                                      <span>فتح الرابط</span>
+                                    </a>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
                         </div>
-                        <div className="flex items-center gap-1.5 text-[11px]">
-                          <MapPin className="w-3.5 h-3.5 text-emerald-600" />
-                          <span>المكان: {t.venue || 'المؤسسة المستقبلة'}</span>
-                        </div>
-                      </div>
-
-                      <div className="pt-2 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-[11px] font-bold text-emerald-700 dark:text-emerald-400">
-                        <span>معاينة التفاصيل الكاملة</span>
-                        <ChevronLeft className="w-4 h-4 group-hover:-translate-x-1 transition-transform" />
-                      </div>
+                      )}
                     </div>
-                  ))
-                )}
+                  );
+                })()}
+
+                {/* Programmed Tournaments Catalog */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {filteredTournaments.length === 0 ? (
+                    <div className="sm:col-span-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-8 text-center space-y-3 shadow-xs transition-colors">
+                      <Trophy className="w-12 h-12 text-slate-300 dark:text-slate-700 mx-auto" />
+                      <p className="text-sm font-bold text-slate-700 dark:text-slate-300">
+                        لا توجد بطولات مسجلة حالياً
+                      </p>
+                    </div>
+                  ) : (
+                    filteredTournaments.map((t) => (
+                      <div
+                        key={t.id}
+                        onClick={() => setSelectedTournamentDetail(t)}
+                        className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:border-emerald-500 dark:hover:border-emerald-500 rounded-3xl p-4 shadow-sm hover:shadow-md transition-all cursor-pointer space-y-3 group"
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex items-center gap-2">
+                            <span className="text-2xl p-2 bg-emerald-50 dark:bg-emerald-950/60 rounded-2xl">
+                              {SPORTS_MAP[t.sportId]?.icon || '🏆'}
+                            </span>
+                            <div>
+                              <h4 className="text-xs sm:text-sm font-black text-slate-900 dark:text-white group-hover:text-emerald-600 transition-colors">
+                                {t.title}
+                              </h4>
+                              <p className="text-[11px] text-slate-500 dark:text-slate-400 font-bold">
+                                {t.sportName || 'بطولة مدرسية'}
+                              </p>
+                            </div>
+                          </div>
+
+                          <span className="px-2.5 py-1 bg-amber-100 dark:bg-amber-950 text-amber-900 dark:text-amber-300 rounded-full text-[10px] font-black shrink-0">
+                            {t.level === 'NATIONAL' ? 'وطنية' : t.level === 'REGIONAL' ? 'جهوية' : 'إقليمية'}
+                          </span>
+                        </div>
+
+                        <div className="text-xs text-slate-600 dark:text-slate-300 space-y-1">
+                          <div className="flex items-center gap-1.5 text-[11px]">
+                            <Calendar className="w-3.5 h-3.5 text-emerald-600" />
+                            <span>التاريخ: {t.startDate || '2026'}</span>
+                          </div>
+                          <div className="flex items-center gap-1.5 text-[11px]">
+                            <MapPin className="w-3.5 h-3.5 text-emerald-600" />
+                            <span>المكان: {t.venue || 'المؤسسة المستقبلة'}</span>
+                          </div>
+                        </div>
+
+                        <div className="pt-2 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-[11px] font-bold text-emerald-700 dark:text-emerald-400">
+                          <span>معاينة التفاصيل الكاملة</span>
+                          <ChevronLeft className="w-4 h-4 group-hover:-translate-x-1 transition-transform" />
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
               </div>
             )}
 
@@ -4141,6 +4345,230 @@ export const Login: React.FC = () => {
               students={students}
               selectedAffiliation="ALL"
             />
+          </div>
+        </div>
+      )}
+
+      {/* PUBLIC GALLERY & GUIDES MODAL */}
+      {isPublicGalleryOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-2 sm:p-4" dir="rtl">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl w-full max-w-5xl max-h-[90vh] flex flex-col overflow-hidden border border-slate-200 dark:border-slate-800 shadow-2xl">
+            <div className="p-4 sm:p-5 bg-slate-900 text-white flex flex-wrap items-center justify-between gap-3 shrink-0">
+              <div className="flex items-center gap-2.5">
+                <Camera className="w-5 h-5 text-amber-400" />
+                <div>
+                  <h3 className="text-sm sm:text-base font-black">
+                    {publicGalleryInitialTab === 'guide_minutes' ? 'دلائل ومحاضر البطولات' : 'معرض صور المقابلات والبطولات'}
+                  </h3>
+                  <p className="text-[11px] text-slate-300">
+                    {selectedSport !== 'ALL' ? `التصفية الحالية: ${SPORTS_MAP[selectedSport]?.name || selectedSport}` : 'جميع الرياضات المبرمجة'}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setPublicGalleryInitialTab('match_photo')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-black cursor-pointer transition-colors ${
+                    publicGalleryInitialTab === 'match_photo' ? 'bg-blue-600 text-white' : 'bg-white/10 text-slate-200 hover:bg-white/20'
+                  }`}
+                >
+                  📸 ألبوم الصور
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPublicGalleryInitialTab('guide_minutes')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-black cursor-pointer transition-colors ${
+                    publicGalleryInitialTab === 'guide_minutes' ? 'bg-emerald-600 text-white' : 'bg-white/10 text-slate-200 hover:bg-white/20'
+                  }`}
+                >
+                  📄 دلائل ومحاضر
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsPublicGalleryOpen(false)}
+                  className="p-2 rounded-xl bg-white/10 hover:bg-white/20 text-white cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+
+            <div className="p-4 sm:p-6 overflow-y-auto flex-1">
+              {(() => {
+                const modalItems = documentationItems.filter(item => {
+                  const t = item.itemType || 'match_photo';
+                  if (t !== publicGalleryInitialTab) return false;
+                  if (selectedSport === 'ALL') return true;
+                  return item.sportId === 'ALL' || areSportIdsEquivalent(item.sportId, selectedSport);
+                });
+
+                if (modalItems.length === 0) {
+                  return (
+                    <div className="py-12 text-center space-y-2">
+                      <Camera className="w-10 h-10 text-slate-300 dark:text-slate-600 mx-auto" />
+                      <p className="text-sm font-black text-slate-700 dark:text-slate-200">
+                        {publicGalleryInitialTab === 'guide_minutes'
+                          ? 'لا توجد دلائل أو محاضر منشورة حالياً'
+                          : 'لا توجد صور مقابلات منشورة حالياً'}
+                      </p>
+                    </div>
+                  );
+                }
+
+                return (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {modalItems.map(item => {
+                      const spName = item.sportId === 'ALL' ? 'عام' : (SPORTS_MAP[item.sportId]?.name || item.sportId);
+                      const downloadHref = item.fileDataUrl || item.imageCode || '';
+                      return (
+                        <div
+                          key={item.id}
+                          className="bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-2xl overflow-hidden flex flex-col justify-between"
+                        >
+                          {item.imageCode ? (
+                            <div
+                              onClick={() => setSelectedPublicDocItem(item)}
+                              className="aspect-[4/3] bg-slate-900 overflow-hidden cursor-pointer relative"
+                            >
+                              <img src={item.imageCode} alt={item.title} className="w-full h-full object-cover hover:scale-105 transition-transform" />
+                              <span className="absolute top-2 right-2 bg-slate-900/80 text-white text-[10px] font-bold px-2 py-0.5 rounded-lg">
+                                {spName}
+                              </span>
+                            </div>
+                          ) : (
+                            <div
+                              onClick={() => setSelectedPublicDocItem(item)}
+                              className="p-5 bg-emerald-50 dark:bg-emerald-950/30 flex items-center justify-between cursor-pointer border-b border-emerald-100 dark:border-slate-700"
+                            >
+                              <div className="flex items-center gap-2">
+                                <FileText className="w-6 h-6 text-emerald-600" />
+                                <span className="text-xs font-black text-emerald-900 dark:text-emerald-200">وثيقة رسمية</span>
+                              </div>
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-lg bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200">
+                                {spName}
+                              </span>
+                            </div>
+                          )}
+
+                          <div className="p-3.5 space-y-2">
+                            <h4 className="text-xs font-black text-slate-900 dark:text-white line-clamp-2">{item.title}</h4>
+                            {item.matchLabel && (
+                              <p className="text-[10px] font-bold text-blue-600 dark:text-blue-400">{item.matchLabel}</p>
+                            )}
+                            {item.description && (
+                              <p className="text-[11px] text-slate-600 dark:text-slate-300 line-clamp-2">{item.description}</p>
+                            )}
+                            <div className="flex items-center justify-between pt-2 border-t border-slate-200/70 dark:border-slate-700 text-[10px] text-slate-500">
+                              <span>{item.authorName} • {item.date}</span>
+                              <div className="flex items-center gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => setSelectedPublicDocItem(item)}
+                                  className="px-2 py-1 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-bold cursor-pointer"
+                                >
+                                  معاينة
+                                </button>
+                                {downloadHref && (
+                                  <a
+                                    href={downloadHref}
+                                    download={item.fileName || `${item.title}`}
+                                    className="px-2 py-1 rounded-lg bg-emerald-600 text-white font-bold"
+                                  >
+                                    تحميل
+                                  </a>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* SINGLE PUBLIC PHOTO / GUIDE PREVIEW MODAL */}
+      {selectedPublicDocItem && (
+        <div className="fixed inset-0 z-[60] bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-6" dir="rtl">
+          <div className="bg-white dark:bg-slate-900 w-full max-w-4xl rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[92vh] border border-slate-200 dark:border-slate-800">
+            <div className="p-4 bg-slate-900 text-white flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <h3 className="text-sm sm:text-base font-black truncate">{selectedPublicDocItem.title}</h3>
+                <span className="text-[11px] text-blue-300 font-medium">
+                  {selectedPublicDocItem.authorName} • {selectedPublicDocItem.date}
+                </span>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                {(selectedPublicDocItem.fileDataUrl || selectedPublicDocItem.imageCode) && (
+                  <a
+                    href={selectedPublicDocItem.fileDataUrl || selectedPublicDocItem.imageCode}
+                    download={selectedPublicDocItem.fileName || `${selectedPublicDocItem.title}`}
+                    className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black flex items-center gap-1.5"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>تحميل</span>
+                  </a>
+                )}
+                {selectedPublicDocItem.externalUrl && (
+                  <a
+                    href={selectedPublicDocItem.externalUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black flex items-center gap-1.5"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" />
+                    <span>فتح الرابط</span>
+                  </a>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setSelectedPublicDocItem(null)}
+                  className="p-2 rounded-xl bg-white/10 hover:bg-white/20 text-white cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+
+            <div className="bg-slate-950 flex-1 flex items-center justify-center p-2 sm:p-4 overflow-auto min-h-[220px]">
+              {selectedPublicDocItem.imageCode ? (
+                <img
+                  src={selectedPublicDocItem.imageCode}
+                  alt={selectedPublicDocItem.title}
+                  className="max-h-[70vh] max-w-full object-contain rounded-xl"
+                />
+              ) : selectedPublicDocItem.fileDataUrl && (selectedPublicDocItem.fileDataUrl.startsWith('data:application/pdf') || (selectedPublicDocItem.fileName || '').toLowerCase().endsWith('.pdf')) ? (
+                <iframe
+                  src={selectedPublicDocItem.fileDataUrl}
+                  title={selectedPublicDocItem.title}
+                  className="w-full h-[65vh] rounded-xl bg-white"
+                />
+              ) : (
+                <div className="bg-white dark:bg-slate-900 rounded-2xl p-6 max-w-lg w-full text-center space-y-3">
+                  <FileText className="w-12 h-12 text-emerald-600 mx-auto" />
+                  <p className="text-sm font-black text-slate-900 dark:text-white">
+                    {selectedPublicDocItem.fileName || selectedPublicDocItem.title}
+                  </p>
+                  {selectedPublicDocItem.description && (
+                    <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed whitespace-pre-line text-right bg-slate-50 dark:bg-slate-800 p-3 rounded-xl">
+                      {selectedPublicDocItem.description}
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {selectedPublicDocItem.description && selectedPublicDocItem.imageCode && (
+              <div className="p-4 bg-slate-50 dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 text-xs text-slate-700 dark:text-slate-300 font-medium whitespace-pre-line">
+                {selectedPublicDocItem.description}
+              </div>
+            )}
           </div>
         </div>
       )}
