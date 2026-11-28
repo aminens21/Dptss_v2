@@ -107,7 +107,9 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
   const [customVenueName, setCustomVenueName] = useState<string>('');
   const [savedVenues, setSavedVenues] = useState<Venue[]>(venues);
   const [isSavingCustomVenue, setIsSavingCustomVenue] = useState<boolean>(false);
-  const [referees, setReferees] = useState<string[]>(['']);
+  const [fieldReferees, setFieldReferees] = useState<string[]>(['']);
+  const [tableReferees, setTableReferees] = useState<string[]>(['']);
+  const [quickAddRole, setQuickAddRole] = useState<'field' | 'table'>('field');
   const [allReferees, setAllReferees] = useState<Referee[]>([]);
   const [allUsers, setAllUsers] = useState<User[]>([]);
   const [status, setStatus] = useState<Match['status']>('Scheduled');
@@ -283,7 +285,8 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
     if (lastInitializedSessionKeyRef.current === sessionKey) {
       if (editingMatch && !hasUserEditedRefereesRef.current) {
         const resolvedRefs = resolveMatchRefereesInfo(editingMatch, allReferees, userDirectory);
-        setReferees(resolvedRefs.allRefs.length > 0 ? resolvedRefs.allRefs : ['']);
+        setFieldReferees(resolvedRefs.fieldRefs.length > 0 ? resolvedRefs.fieldRefs : ['']);
+        setTableReferees(resolvedRefs.tableRefs.length > 0 ? resolvedRefs.tableRefs : ['']);
       }
       return;
     }
@@ -322,19 +325,19 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
         setCustomVenueName(editingMatch.venueName || matchedVen?.name || safeVenueId || '');
       }
       
-      // Resolve existing referees to readable names without exposing opaque entity IDs
+      // Resolve existing referees separately into field referees (حكام الساحة) and table referees (حكام الطاولة)
       const resolvedRefs = resolveMatchRefereesInfo(editingMatch, allReferees, userDirectory);
-      if (resolvedRefs.allRefs.length > 0) {
-        setReferees(resolvedRefs.allRefs);
-      } else {
-        setReferees(['']);
-      }
+      setFieldReferees(resolvedRefs.fieldRefs.length > 0 ? resolvedRefs.fieldRefs : ['']);
+      setTableReferees(resolvedRefs.tableRefs.length > 0 ? resolvedRefs.tableRefs : ['']);
+      setQuickAddRole('field');
       
       setStatus(editingMatch.status);
       setNotes(editingMatch.notes || '');
       if (editingMatch.affiliationType) setAffiliationType(editingMatch.affiliationType);
     } else {
-      setReferees(['']);
+      setFieldReferees(['']);
+      setTableReferees(['']);
+      setQuickAddRole('field');
       setNotes('');
       if (schools.length > 0) {
         setVenueMode('school');
@@ -721,20 +724,23 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
     return schools.find(s => s.id === id)?.name || 'مؤسسة تعليمية';
   };
 
-  const handleAddRefereeQuick = (refName: string) => {
+  const handleAddRefereeQuick = (refName: string, targetRole: 'field' | 'table' = quickAddRole) => {
     hasUserEditedRefereesRef.current = true;
-    // Check if already in the list
-    if (referees.includes(refName)) {
-      toast('هذا الحكم مضاف بالفعل إلى الطاقم', { icon: 'ℹ️' });
+    const isField = targetRole === 'field';
+    const currentList = isField ? fieldReferees : tableReferees;
+    const setList = isField ? setFieldReferees : setTableReferees;
+    const roleLabel = isField ? 'حكام الساحة' : 'حكام الطاولة';
+
+    if (currentList.includes(refName)) {
+      toast(`هذا الحكم مضاف بالفعل إلى ${roleLabel}`, { icon: 'ℹ️' });
       return;
     }
-    // If first element is empty string, replace it, otherwise append
-    if (referees.length === 1 && referees[0] === '') {
-      setReferees([refName]);
+    if (currentList.length === 1 && currentList[0] === '') {
+      setList([refName]);
     } else {
-      setReferees([...referees, refName]);
+      setList([...currentList, refName]);
     }
-    toast.success(`تمت إضافة الحكم: ${refName}`);
+    toast.success(`تمت إضافة ${refName} إلى ${roleLabel}`);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -807,10 +813,6 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
       const selectedTourn = availableTournaments.find(t => t.id === tournamentId);
       const stripTeacherTag = (val: string) =>
         (val || '').replace(/\s*\(أستاذ\)\s*/g, '').replace(/\s+/g, ' ').trim();
-      const cleanReferees: string[] = Array.from(
-        new Set<string>(referees.map(r => stripTeacherTag(r)).filter(Boolean))
-      );
-      const cleanRefSet = new Set<string>(cleanReferees.map(r => normalizeArabicSearch(r)));
       const userDirectory = allUsers.length > 0 ? allUsers : teachers;
       const resolveStoredRefDisplay = (rawEntry: string): string => {
         const clean = stripTeacherTag(rawEntry);
@@ -836,19 +838,16 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
         if (userObj?.fullName) return stripTeacherTag(userObj.fullName);
         return clean;
       };
-      const keepIfStillAssigned = (arr?: string[]): string[] => {
-        if (!Array.isArray(arr) || cleanReferees.length === 0) return [];
-        return arr
-          .map(v => String(v || '').trim())
-          .filter(raw => {
-            if (!raw) return false;
-            const resolved = resolveStoredRefDisplay(raw);
-            return cleanRefSet.has(normalizeArabicSearch(resolved)) || cleanRefSet.has(normalizeArabicSearch(stripTeacherTag(raw)));
-          });
-      };
 
-      const nextTableReferees = editingMatch ? keepIfStillAssigned(editingMatch.tableReferees) : [];
-      const nextFieldReferees = editingMatch ? keepIfStillAssigned(editingMatch.fieldReferees) : [];
+      const nextFieldNames: string[] = Array.from(
+        new Set<string>(fieldReferees.map(r => resolveStoredRefDisplay(r)).filter(Boolean))
+      );
+      const nextTableNames: string[] = Array.from(
+        new Set<string>(tableReferees.map(r => resolveStoredRefDisplay(r)).filter(Boolean))
+      );
+      const cleanReferees: string[] = Array.from(
+        new Set<string>([...nextFieldNames, ...nextTableNames])
+      );
       const normalizedDate = normalizeDateToYmd(date) || date;
 
       await onSave({
@@ -868,11 +867,11 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
         venueName: resolvedVenueName,
         hostSchoolId: resolvedHostSchoolId,
         referees: cleanReferees,
-        refereeNames: cleanReferees.map(resolveStoredRefDisplay),
-        tableReferees: nextTableReferees,
-        tableRefereeNames: nextTableReferees.map(resolveStoredRefDisplay),
-        fieldReferees: nextFieldReferees,
-        fieldRefereeNames: nextFieldReferees.map(resolveStoredRefDisplay),
+        refereeNames: cleanReferees,
+        tableReferees: nextTableNames,
+        tableRefereeNames: nextTableNames,
+        fieldReferees: nextFieldNames,
+        fieldRefereeNames: nextFieldNames,
         referee1Id: cleanReferees[0] || '',
         referee2Id: cleanReferees[1] || '',
         status,
@@ -900,6 +899,8 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
         dateStr: normalizedDate,
         timeStr: startTime || '10:00',
         referees: cleanReferees,
+        fieldReferees: nextFieldNames,
+        tableReferees: nextTableNames,
         notes: notes.trim() || undefined
       });
     } finally {
@@ -1505,50 +1506,77 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
             </div>
           )}
 
-          {/* Referees Assignment Section */}
+          {/* Referees Assignment Section (Separated into Field Referees & Table Referees) */}
           <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 space-y-3">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="flex items-center gap-2">
                 <ShieldCheck className="h-4 w-4 text-blue-600" />
                 <label className="block text-xs font-bold text-slate-800">
-                  طاقم التحكيم (اختيار مباشر من قائمة حكام التخصص)
+                  تعيين طاقم التحكيم (حكام الساحة وحكام الطاولة)
                 </label>
               </div>
-              <button
-                type="button"
-                onClick={() => {
-                  hasUserEditedRefereesRef.current = true;
-                  setReferees([...referees, '']);
-                }}
-                className="text-[11px] font-bold text-blue-600 hover:text-blue-700 flex items-center gap-1 bg-white hover:bg-blue-50 border border-slate-200 px-2.5 py-1 rounded-lg transition-colors cursor-pointer shadow-2xs"
-              >
-                <Plus className="h-3 w-3" />
-                <span>إضافة حكم</span>
-              </button>
+              <div className="flex items-center gap-1.5 text-[10px] font-black">
+                <span className="px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-800 border border-emerald-200">
+                  🏁 الساحة: {fieldReferees.filter(r => r.trim()).length}
+                </span>
+                <span className="px-2 py-0.5 rounded-md bg-sky-100 text-sky-800 border border-sky-200">
+                  📋 الطاولة: {tableReferees.filter(r => r.trim()).length}
+                </span>
+              </div>
             </div>
 
-            {/* Specialized Referees Quick Tags */}
+            {/* Specialized Referees Quick Tags with Role Target Switcher */}
             {specializedReferees.length > 0 && (
-              <div className="space-y-1.5 bg-white p-2.5 rounded-lg border border-blue-100">
-                <p className="text-[10px] font-bold text-blue-800 flex items-center gap-1">
-                  <span>🎯 حكام مسجلون متخصصون في ({sportInfo.name} {sportInfo.icon}):</span>
-                  <span className="bg-blue-100 text-blue-700 px-1.5 py-0.2 rounded font-extrabold">{specializedReferees.length}</span>
-                </p>
+              <div className="space-y-2 bg-white p-2.5 rounded-lg border border-blue-100">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-[10px] font-bold text-blue-800 flex items-center gap-1">
+                    <span>🎯 حكام متخصصون في ({sportInfo.name} {sportInfo.icon}):</span>
+                    <span className="bg-blue-100 text-blue-700 px-1.5 py-0.2 rounded font-extrabold">{specializedReferees.length}</span>
+                  </p>
+                  <div className="flex items-center gap-1 bg-slate-100 p-0.5 rounded-lg text-[10px] font-black">
+                    <button
+                      type="button"
+                      onClick={() => setQuickAddRole('field')}
+                      className={`px-2 py-1 rounded-md transition-all cursor-pointer ${
+                        quickAddRole === 'field'
+                          ? 'bg-emerald-600 text-white shadow-2xs'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      🏁 إلى الساحة
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setQuickAddRole('table')}
+                      className={`px-2 py-1 rounded-md transition-all cursor-pointer ${
+                        quickAddRole === 'table'
+                          ? 'bg-sky-600 text-white shadow-2xs'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      📋 إلى الطاولة
+                    </button>
+                  </div>
+                </div>
                 <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto">
                   {specializedReferees.map((ref, rIdx) => {
-                    const isAlreadyAssigned = referees.includes(ref.fullName);
+                    const inField = fieldReferees.includes(ref.fullName);
+                    const inTable = tableReferees.includes(ref.fullName);
+                    const isAssignedToTarget = quickAddRole === 'field' ? inField : inTable;
                     return (
                       <button
                         key={`quick-ref-${ref.id}-${rIdx}`}
                         type="button"
-                        onClick={() => handleAddRefereeQuick(ref.fullName)}
+                        onClick={() => handleAddRefereeQuick(ref.fullName, quickAddRole)}
                         className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-bold transition-all cursor-pointer ${
-                          isAlreadyAssigned
+                          isAssignedToTarget
                             ? 'bg-emerald-50 text-emerald-700 border border-emerald-300 ring-1 ring-emerald-200'
+                            : inField || inTable
+                            ? 'bg-sky-50 text-sky-800 border border-sky-200'
                             : 'bg-blue-50/70 hover:bg-blue-100 text-blue-700 border border-blue-200 hover:border-blue-300'
                         }`}
                       >
-                        <span>{isAlreadyAssigned ? '✓' : '+'}</span>
+                        <span>{inField ? '🏁' : inTable ? '📋' : '+'}</span>
                         <span>{ref.fullName}</span>
                       </button>
                     );
@@ -1557,116 +1585,262 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
               </div>
             )}
 
-            {/* Referee Slots Inputs with Dropdown, Manual Input & Direct WhatsApp Notification */}
-            <div className="space-y-2">
-              {referees.map((ref, idx) => {
-                const userDirectory = allUsers.length > 0 ? allUsers : teachers;
-                const contact = ref.trim()
-                  ? findRefereeContact(ref.trim(), allReferees, userDirectory)
-                  : null;
-                const resolvedContactName = contact?.name || (!isOpaqueEntityId(ref.trim()) ? ref.trim() : '');
-                const refWhatsappMsg = contact && resolvedContactName
-                  ? generateRefereeMatchNotificationMessage({
-                      refereeName: resolvedContactName,
-                      sportName: sportInfo.name,
-                      ageCategory,
-                      gender: GENDER_MAP[gender]?.name || gender,
-                      stageName: stage,
-                      team1SchoolName: getSchoolName(team1Id),
-                      team2SchoolName: getSchoolName(team2Id),
-                      dateStr: date,
-                      timeStr: startTime || '10:00',
-                      venueName: effectiveVenueDisplayName
-                    })
-                  : '';
+            {/* 1. Field Referees (حكام الساحة) */}
+            <div className="bg-emerald-50/60 border border-emerald-200 rounded-xl p-2.5 space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <span className="inline-flex items-center gap-1.5 text-xs font-black text-emerald-950">
+                  <span>🏁</span>
+                  <span>حكام الساحة</span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    hasUserEditedRefereesRef.current = true;
+                    setFieldReferees([...fieldReferees, '']);
+                  }}
+                  className="text-[11px] font-bold text-emerald-700 hover:text-emerald-800 flex items-center gap-1 bg-white hover:bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-lg transition-colors cursor-pointer shadow-2xs"
+                >
+                  <Plus className="h-3 w-3" />
+                  <span>إضافة حكم ساحة</span>
+                </button>
+              </div>
+              <div className="space-y-2">
+                {fieldReferees.map((ref, idx) => {
+                  const userDirectory = allUsers.length > 0 ? allUsers : teachers;
+                  const contact = ref.trim()
+                    ? findRefereeContact(ref.trim(), allReferees, userDirectory)
+                    : null;
+                  const resolvedContactName = contact?.name || (!isOpaqueEntityId(ref.trim()) ? ref.trim() : '');
+                  const refWhatsappMsg = contact && resolvedContactName
+                    ? generateRefereeMatchNotificationMessage({
+                        refereeName: resolvedContactName,
+                        sportName: sportInfo.name,
+                        ageCategory,
+                        gender: GENDER_MAP[gender]?.name || gender,
+                        stageName: stage,
+                        team1SchoolName: getSchoolName(team1Id),
+                        team2SchoolName: getSchoolName(team2Id),
+                        dateStr: date,
+                        timeStr: startTime || '10:00',
+                        venueName: effectiveVenueDisplayName,
+                        refereeRole: 'حكم الساحة'
+                      })
+                    : '';
 
-                return (
-                <div key={`ref-slot-${idx}`} className="flex items-center gap-2">
-                  <div className="w-6 h-6 rounded-full bg-slate-200 text-slate-700 text-[10px] font-bold flex items-center justify-center shrink-0">
-                    {idx + 1}
-                  </div>
-                  <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    {/* Dropdown selector */}
-                    <select
-                      value={allReferees.some(r => r.fullName === ref) ? ref : ''}
-                      onChange={(e) => {
-                        hasUserEditedRefereesRef.current = true;
-                        const val = e.target.value;
-                        const newRefs = [...referees];
-                        newRefs[idx] = val;
-                        setReferees(newRefs);
-                      }}
-                      className="w-full text-xs rounded-lg border border-slate-200 px-2.5 py-2 text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium"
-                    >
-                      <option value="">-- اختيار من لائحة الحكام --</option>
-                      {specializedReferees.length > 0 && (
-                        <optgroup label={`حكام تخصص ${sportInfo.name} (${specializedReferees.length})`}>
-                          {specializedReferees.map((r, sIdx) => (
-                            <option key={`opt-spec-${r.id}-${sIdx}`} value={r.fullName}>
-                              ⭐ {r.fullName} ({r.phone})
-                            </option>
-                          ))}
-                        </optgroup>
+                  return (
+                    <div key={`field-ref-slot-${idx}`} className="flex items-center gap-2">
+                      <div className="w-6 h-6 rounded-full bg-emerald-600 text-white text-[10px] font-black flex items-center justify-center shrink-0">
+                        {idx + 1}
+                      </div>
+                      <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        <select
+                          value={allReferees.some(r => r.fullName === ref) ? ref : ''}
+                          onChange={(e) => {
+                            hasUserEditedRefereesRef.current = true;
+                            const newRefs = [...fieldReferees];
+                            newRefs[idx] = e.target.value;
+                            setFieldReferees(newRefs);
+                          }}
+                          className="w-full text-xs rounded-lg border border-emerald-200 px-2.5 py-2 text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500 font-medium"
+                        >
+                          <option value="">-- اختيار حكم الساحة --</option>
+                          {specializedReferees.length > 0 && (
+                            <optgroup label={`حكام تخصص ${sportInfo.name} (${specializedReferees.length})`}>
+                              {specializedReferees.map((r, sIdx) => (
+                                <option key={`f-spec-${r.id}-${sIdx}`} value={r.fullName}>
+                                  ⭐ {r.fullName} ({r.phone})
+                                </option>
+                              ))}
+                            </optgroup>
+                          )}
+                          {otherReferees.length > 0 && (
+                            <optgroup label="باقي الحكام والأساتذة المسجلين">
+                              {otherReferees.map((r, oIdx) => (
+                                <option key={`f-oth-${r.id}-${oIdx}`} value={r.fullName}>
+                                  👤 {r.fullName}
+                                </option>
+                              ))}
+                            </optgroup>
+                          )}
+                        </select>
+
+                        <input
+                          type="text"
+                          value={ref}
+                          onChange={(e) => {
+                            hasUserEditedRefereesRef.current = true;
+                            const newRefs = [...fieldReferees];
+                            newRefs[idx] = e.target.value;
+                            setFieldReferees(newRefs);
+                          }}
+                          placeholder={`أو اكتب اسم حكم الساحة ${idx + 1} يدوياً`}
+                          className="w-full text-xs rounded-lg border border-emerald-200 px-3 py-2 text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500 font-medium"
+                        />
+                      </div>
+
+                      {contact && resolvedContactName && (
+                        <a
+                          href={getWhatsAppUrl(contact.phone, refWhatsappMsg)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          title={contact.phone ? `إرسال إشعار واتساب لحكم الساحة ${resolvedContactName} (${contact.phone})` : `إرسال إشعار واتساب لحكم الساحة ${resolvedContactName}`}
+                          className="px-2 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[10px] font-bold flex items-center gap-1 shrink-0 transition-colors shadow-2xs"
+                        >
+                          <MessageCircle className="h-3.5 w-3.5" />
+                          <span className="hidden sm:inline">واتساب</span>
+                        </a>
                       )}
-                      {otherReferees.length > 0 && (
-                        <optgroup label="باقي الحكام والأساتذة المسجلين">
-                          {otherReferees.map((r, oIdx) => (
-                            <option key={`opt-oth-${r.id}-${oIdx}`} value={r.fullName}>
-                              👤 {r.fullName}
-                            </option>
-                          ))}
-                        </optgroup>
+
+                      {(fieldReferees.length > 1 || ref.trim() !== '') && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            hasUserEditedRefereesRef.current = true;
+                            if (fieldReferees.length > 1) {
+                              setFieldReferees(fieldReferees.filter((_, i) => i !== idx));
+                            } else {
+                              setFieldReferees(['']);
+                            }
+                          }}
+                          className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors cursor-pointer shrink-0"
+                          title="حذف حكم الساحة"
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
                       )}
-                    </select>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
 
-                    {/* Text input / Custom Name */}
-                    <input
-                      type="text"
-                      value={ref}
-                      onChange={(e) => {
-                        hasUserEditedRefereesRef.current = true;
-                        const newRefs = [...referees];
-                        newRefs[idx] = e.target.value;
-                        setReferees(newRefs);
-                      }}
-                      placeholder={`أو اكتب اسم الحكم ${idx + 1} يدوياً`}
-                      className="w-full text-xs rounded-lg border border-slate-200 px-3 py-2 text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium"
-                    />
-                  </div>
+            {/* 2. Table Referees (حكام الطاولة) */}
+            <div className="bg-sky-50/60 border border-sky-200 rounded-xl p-2.5 space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <span className="inline-flex items-center gap-1.5 text-xs font-black text-sky-950">
+                  <span>📋</span>
+                  <span>حكام الطاولة</span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    hasUserEditedRefereesRef.current = true;
+                    setTableReferees([...tableReferees, '']);
+                  }}
+                  className="text-[11px] font-bold text-sky-700 hover:text-sky-800 flex items-center gap-1 bg-white hover:bg-sky-50 border border-sky-200 px-2.5 py-1 rounded-lg transition-colors cursor-pointer shadow-2xs"
+                >
+                  <Plus className="h-3 w-3" />
+                  <span>إضافة حكم طاولة</span>
+                </button>
+              </div>
+              <div className="space-y-2">
+                {tableReferees.map((ref, idx) => {
+                  const userDirectory = allUsers.length > 0 ? allUsers : teachers;
+                  const contact = ref.trim()
+                    ? findRefereeContact(ref.trim(), allReferees, userDirectory)
+                    : null;
+                  const resolvedContactName = contact?.name || (!isOpaqueEntityId(ref.trim()) ? ref.trim() : '');
+                  const refWhatsappMsg = contact && resolvedContactName
+                    ? generateRefereeMatchNotificationMessage({
+                        refereeName: resolvedContactName,
+                        sportName: sportInfo.name,
+                        ageCategory,
+                        gender: GENDER_MAP[gender]?.name || gender,
+                        stageName: stage,
+                        team1SchoolName: getSchoolName(team1Id),
+                        team2SchoolName: getSchoolName(team2Id),
+                        dateStr: date,
+                        timeStr: startTime || '10:00',
+                        venueName: effectiveVenueDisplayName,
+                        refereeRole: 'حكم الطاولة'
+                      })
+                    : '';
 
-                  {contact && resolvedContactName && (
-                    <a
-                      href={getWhatsAppUrl(contact.phone, refWhatsappMsg)}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      title={contact.phone ? `إرسال إشعار واتساب للحكم ${resolvedContactName} (${contact.phone})` : `إرسال إشعار واتساب للحكم ${resolvedContactName} (تحديد الرقم في واتساب)`}
-                      className="px-2 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[10px] font-bold flex items-center gap-1 shrink-0 transition-colors shadow-2xs"
-                    >
-                      <MessageCircle className="h-3.5 w-3.5" />
-                      <span className="hidden sm:inline">واتساب</span>
-                    </a>
-                  )}
+                  return (
+                    <div key={`table-ref-slot-${idx}`} className="flex items-center gap-2">
+                      <div className="w-6 h-6 rounded-full bg-sky-600 text-white text-[10px] font-black flex items-center justify-center shrink-0">
+                        {idx + 1}
+                      </div>
+                      <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        <select
+                          value={allReferees.some(r => r.fullName === ref) ? ref : ''}
+                          onChange={(e) => {
+                            hasUserEditedRefereesRef.current = true;
+                            const newRefs = [...tableReferees];
+                            newRefs[idx] = e.target.value;
+                            setTableReferees(newRefs);
+                          }}
+                          className="w-full text-xs rounded-lg border border-sky-200 px-2.5 py-2 text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-sky-500 font-medium"
+                        >
+                          <option value="">-- اختيار حكم الطاولة --</option>
+                          {specializedReferees.length > 0 && (
+                            <optgroup label={`حكام تخصص ${sportInfo.name} (${specializedReferees.length})`}>
+                              {specializedReferees.map((r, sIdx) => (
+                                <option key={`t-spec-${r.id}-${sIdx}`} value={r.fullName}>
+                                  ⭐ {r.fullName} ({r.phone})
+                                </option>
+                              ))}
+                            </optgroup>
+                          )}
+                          {otherReferees.length > 0 && (
+                            <optgroup label="باقي الحكام والأساتذة المسجلين">
+                              {otherReferees.map((r, oIdx) => (
+                                <option key={`t-oth-${r.id}-${oIdx}`} value={r.fullName}>
+                                  👤 {r.fullName}
+                                </option>
+                              ))}
+                            </optgroup>
+                          )}
+                        </select>
 
-                  {(referees.length > 1 || ref.trim() !== '') && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        hasUserEditedRefereesRef.current = true;
-                        if (referees.length > 1) {
-                          setReferees(referees.filter((_, i) => i !== idx));
-                        } else {
-                          setReferees(['']);
-                        }
-                      }}
-                      className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors cursor-pointer shrink-0"
-                      title="حذف هذا الحكم"
-                    >
-                      <X className="h-4 w-4" />
-                    </button>
-                  )}
-                </div>
-                );
-              })}
+                        <input
+                          type="text"
+                          value={ref}
+                          onChange={(e) => {
+                            hasUserEditedRefereesRef.current = true;
+                            const newRefs = [...tableReferees];
+                            newRefs[idx] = e.target.value;
+                            setTableReferees(newRefs);
+                          }}
+                          placeholder={`أو اكتب اسم حكم الطاولة ${idx + 1} يدوياً`}
+                          className="w-full text-xs rounded-lg border border-sky-200 px-3 py-2 text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-sky-500 font-medium"
+                        />
+                      </div>
+
+                      {contact && resolvedContactName && (
+                        <a
+                          href={getWhatsAppUrl(contact.phone, refWhatsappMsg)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          title={contact.phone ? `إرسال إشعار واتساب لحكم الطاولة ${resolvedContactName} (${contact.phone})` : `إرسال إشعار واتساب لحكم الطاولة ${resolvedContactName}`}
+                          className="px-2 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[10px] font-bold flex items-center gap-1 shrink-0 transition-colors shadow-2xs"
+                        >
+                          <MessageCircle className="h-3.5 w-3.5" />
+                          <span className="hidden sm:inline">واتساب</span>
+                        </a>
+                      )}
+
+                      {(tableReferees.length > 1 || ref.trim() !== '') && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            hasUserEditedRefereesRef.current = true;
+                            if (tableReferees.length > 1) {
+                              setTableReferees(tableReferees.filter((_, i) => i !== idx));
+                            } else {
+                              setTableReferees(['']);
+                            }
+                          }}
+                          className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors cursor-pointer shrink-0"
+                          title="حذف حكم الطاولة"
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           </div>
 
@@ -1786,21 +1960,29 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
               <button
                 type="button"
                 onClick={() => {
-                  const cleanRefs = referees.map(r => r.trim()).filter(Boolean);
+                  const cleanField = Array.from(new Set(fieldReferees.map(r => r.trim()).filter(Boolean)));
+                  const cleanTable = Array.from(new Set(tableReferees.map(r => r.trim()).filter(Boolean)));
+                  const cleanRefs = Array.from(new Set([...cleanField, ...cleanTable]));
                   setSavedMatchSummary({
+                    matchId: editingMatch.id,
+                    sportId: currentSport,
                     sportName: sportInfo.name,
                     ageCategory,
-                    genderLabel: GENDER_MAP[gender]?.name || gender,
+                    gender: GENDER_MAP[gender]?.name || gender,
                     stageName: stage,
                     team1Id,
                     team2Id,
                     team1Name: getSchoolName(team1Id),
                     team2Name: getSchoolName(team2Id),
                     hostSchoolId: venueMode === 'school' ? hostSchoolId : undefined,
+                    venueId: venueMode === 'school' ? hostSchoolId : venueId,
                     venueName: effectiveVenueDisplayName,
                     dateStr: normalizeDateToYmd(date) || date,
                     timeStr: startTime || '10:00',
-                    referees: cleanRefs
+                    referees: cleanRefs,
+                    fieldReferees: cleanField,
+                    tableReferees: cleanTable,
+                    notes: notes.trim() || undefined
                   });
                 }}
                 className="px-3 py-2 text-xs font-bold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-xl flex items-center gap-1.5 transition-colors cursor-pointer"

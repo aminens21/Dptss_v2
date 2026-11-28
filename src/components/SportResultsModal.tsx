@@ -2123,33 +2123,85 @@ export const SportResultsModal: React.FC<SportResultsModalProps> = ({
                                     </div>
                                   )}
 
-                                  {/* Assigned Referees Summary */}
+                                  {/* Assigned Referees Summary (Separated into Field & Table Referees) */}
                                   <div className={cn(
-                                    "border rounded-xl px-2.5 py-1.5 flex flex-wrap items-center gap-1.5",
+                                    "border rounded-xl px-2.5 py-2 space-y-1.5",
                                     isProgramPending ? "bg-slate-100/80 border-slate-300 grayscale opacity-80" : "bg-slate-50 border-slate-200/80"
                                   )}>
-                                    <span className="inline-flex items-center gap-1 text-[10px] font-black text-slate-700">
-                                      <ShieldCheck className="w-3 h-3 text-emerald-600 shrink-0" />
-                                      <span>الحكام:</span>
-                                    </span>
-                                    {visibleMatchReferees.length > 0 ? (
-                                      visibleMatchReferees.map((refEntry, rIdx) => {
-                                        const contact = findRefereeContact(refEntry, effectiveReferees, effectiveUsers);
-                                        const displayName = contact.name || (!isOpaqueEntityId(refEntry) ? refEntry : '');
-                                        if (!displayName) return null;
-                                        return (
-                                          <span
-                                            key={`${m.id}-ref-${rIdx}`}
-                                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-white border border-slate-200 text-[10px] font-bold text-slate-700"
-                                          >
-                                            <span>🏁 {displayName}</span>
-                                          </span>
-                                        );
-                                      })
+                                    {(visibleResolvedRefs.fieldRefs.length > 0 || visibleResolvedRefs.tableRefs.length > 0) ? (
+                                      <>
+                                        {visibleResolvedRefs.fieldRefs.length > 0 && (
+                                          <div className="flex flex-wrap items-center gap-1.5">
+                                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-emerald-100 text-emerald-800 border border-emerald-200 text-[10px] font-black shrink-0">
+                                              <ShieldCheck className="w-3 h-3 text-emerald-700 shrink-0" />
+                                              <span>حكام الساحة:</span>
+                                            </span>
+                                            {visibleResolvedRefs.fieldRefs.map((refEntry, rIdx) => {
+                                              const contact = findRefereeContact(refEntry, effectiveReferees, effectiveUsers);
+                                              const displayName = contact.name || (!isOpaqueEntityId(refEntry) ? refEntry : '');
+                                              if (!displayName) return null;
+                                              return (
+                                                <span
+                                                  key={`${m.id}-field-ref-${rIdx}`}
+                                                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-white border border-emerald-200/80 text-[10px] font-bold text-slate-700"
+                                                >
+                                                  <span>🏁 {displayName}</span>
+                                                </span>
+                                              );
+                                            })}
+                                          </div>
+                                        )}
+                                        {visibleResolvedRefs.tableRefs.length > 0 && (
+                                          <div className="flex flex-wrap items-center gap-1.5">
+                                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-sky-100 text-sky-800 border border-sky-200 text-[10px] font-black shrink-0">
+                                              <span>📋 حكام الطاولة:</span>
+                                            </span>
+                                            {visibleResolvedRefs.tableRefs.map((refEntry, rIdx) => {
+                                              const contact = findRefereeContact(refEntry, effectiveReferees, effectiveUsers);
+                                              const displayName = contact.name || (!isOpaqueEntityId(refEntry) ? refEntry : '');
+                                              if (!displayName) return null;
+                                              return (
+                                                <span
+                                                  key={`${m.id}-table-ref-${rIdx}`}
+                                                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-white border border-sky-200/80 text-[10px] font-bold text-slate-700"
+                                                >
+                                                  <span>📋 {displayName}</span>
+                                                </span>
+                                              );
+                                            })}
+                                          </div>
+                                        )}
+                                      </>
+                                    ) : visibleMatchReferees.length > 0 ? (
+                                      <div className="flex flex-wrap items-center gap-1.5">
+                                        <span className="inline-flex items-center gap-1 text-[10px] font-black text-slate-700">
+                                          <ShieldCheck className="w-3 h-3 text-emerald-600 shrink-0" />
+                                          <span>الحكام:</span>
+                                        </span>
+                                        {visibleMatchReferees.map((refEntry, rIdx) => {
+                                          const contact = findRefereeContact(refEntry, effectiveReferees, effectiveUsers);
+                                          const displayName = contact.name || (!isOpaqueEntityId(refEntry) ? refEntry : '');
+                                          if (!displayName) return null;
+                                          return (
+                                            <span
+                                              key={`${m.id}-ref-${rIdx}`}
+                                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-white border border-slate-200 text-[10px] font-bold text-slate-700"
+                                            >
+                                              <span>🏁 {displayName}</span>
+                                            </span>
+                                          );
+                                        })}
+                                      </div>
                                     ) : (
-                                      <span className="inline-flex items-center px-2 py-0.5 rounded-lg bg-amber-50 border border-amber-200 text-[10px] font-black text-amber-800">
-                                        يعين لاحقاً
-                                      </span>
+                                      <div className="flex items-center gap-1.5">
+                                        <span className="inline-flex items-center gap-1 text-[10px] font-black text-slate-700">
+                                          <ShieldCheck className="w-3 h-3 text-emerald-600 shrink-0" />
+                                          <span>التحكيم:</span>
+                                        </span>
+                                        <span className="inline-flex items-center px-2 py-0.5 rounded-lg bg-amber-50 border border-amber-200 text-[10px] font-black text-amber-800">
+                                          يعين لاحقاً
+                                        </span>
+                                      </div>
                                     )}
                                   </div>
 

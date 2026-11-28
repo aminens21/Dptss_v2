@@ -22,6 +22,7 @@ import {
   Eye,
   EyeOff,
   ChevronDown,
+  ChevronUp,
   Search,
   Check,
   Trophy,
@@ -60,7 +61,7 @@ import { CommunicationWidget } from '../components/CommunicationWidget';
 import { doc, setDoc, getDoc, serverTimestamp, query, collection, where, getDocs } from 'firebase/firestore';
 import { auth, db } from '../firebase/config';
 import { User, Role, Directorate, School, Tournament, Match, Student, CrossCountryCategoryResult, AthleticsCategoryResult, AthleticsWinner, Sport, Referee, AffiliationDisplayConfig, BlockedSchedulePeriod } from '../types';
-import { DataService, SPORTS_MAP, getAgeCategoriesForSeason, getCategoryYearsLabel, normalizeCategoryKey, normalizeTournamentAffiliation, resolveEffectiveAffiliationMode, isAffiliationAllowedByDisplayConfig, findAllBlockedPeriodsForDate, isMatchProgramPendingApproval, isTrackOrCrossCountrySport, DocumentationService, DocumentationPhoto, areSportIdsEquivalent } from '../lib/dataService';
+import { DataService, SPORTS_MAP, getAgeCategoriesForSeason, getCategoryYearsLabel, normalizeCategoryKey, normalizeTournamentAffiliation, resolveEffectiveAffiliationMode, isAffiliationAllowedByDisplayConfig, findAllBlockedPeriodsForDate, isMatchProgramPendingApproval, isTrackOrCrossCountrySport, DocumentationService, DocumentationPhoto, areSportIdsEquivalent, getAlbumPhotoLimitForSport, applySportAlbumPhotoLimits, normalizeCanonicalSportId } from '../lib/dataService';
 import { calculateTeamRankings, resolveRunnerParticipationType } from '../lib/crossCountryConfig';
 import { hasValidMatchTeams, formatTeamDisplayName, extractMatchGroupLabel, isPlaceholderTeamId, computeGroupStandings } from '../lib/drawTournamentUtils';
 import { resolveMatchAffiliation, resolveMatchRefereesInfo, getOrdinalRefLabel } from '../lib/programExportService';
@@ -69,6 +70,55 @@ import { SportsIntroAnimation } from '../components/SportsIntroAnimation';
 import { CrossCountryPodiumView } from '../components/CrossCountryPodiumView';
 import toast from 'react-hot-toast';
 import { cn, isFlexibleEmailMatch, normalizeDateToYmd, formatMatchDate, isAmineSanoussiIdentity, normalizeCentralAdminUser } from '../lib/utils';
+
+const AutoScrollAlbumTitle: React.FC<{ title: string; className?: string }> = ({ title, className }) => {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const textRef = useRef<HTMLHeadingElement>(null);
+  const [overflowPx, setOverflowPx] = useState(0);
+
+  useEffect(() => {
+    const measure = () => {
+      if (!containerRef.current || !textRef.current) return;
+      const diff = textRef.current.scrollWidth - containerRef.current.clientWidth;
+      setOverflowPx(diff > 4 ? Math.ceil(diff + 10) : 0);
+    };
+    measure();
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(measure) : null;
+    if (ro && containerRef.current) ro.observe(containerRef.current);
+    if (ro && textRef.current) ro.observe(textRef.current);
+    return () => ro?.disconnect();
+  }, [title]);
+
+  const durationSec = overflowPx > 0 ? Math.max(5.5, Number((overflowPx / 32 + 3.2).toFixed(1))) : 0;
+
+  return (
+    <div
+      ref={containerRef}
+      className="flex-1 min-w-0 overflow-hidden text-right py-0.5"
+      dir="rtl"
+      title={title}
+    >
+      <h4
+        ref={textRef}
+        style={
+          overflowPx > 0
+            ? ({
+                '--album-scroll-distance': `${overflowPx}px`,
+                '--album-scroll-duration': `${durationSec}s`
+              } as React.CSSProperties)
+            : undefined
+        }
+        className={cn(
+          'inline-block whitespace-nowrap',
+          overflowPx > 0 ? 'animate-album-title-scroll' : '',
+          className
+        )}
+      >
+        {title}
+      </h4>
+    </div>
+  );
+};
 
 export const Login: React.FC = () => {
   const { currentUser, userProfile, loading, updateProfileState } = useAuth();
@@ -135,6 +185,125 @@ export const Login: React.FC = () => {
   const [filterMatchesByDate, setFilterMatchesByDate] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [activePublicTab, setActivePublicTab] = useState<'CC_PODIUM' | 'ATHLETICS' | 'MATCHES' | 'TOURNAMENTS'>('MATCHES');
+  const [showAllPublicMatchesMobile, setShowAllPublicMatchesMobile] = useState(false);
+  const [albumSlideIndex, setAlbumSlideIndex] = useState(0);
+  const [albumSlideDirection, setAlbumSlideDirection] = useState<'next' | 'prev'>('next');
+  const [isAlbumHovered, setIsAlbumHovered] = useState(false);
+  const [modalGalleryPage, setModalGalleryPage] = useState(0);
+  const [modalGalleryDirection, setModalGalleryDirection] = useState<'next' | 'prev'>('next');
+
+  useEffect(() => {
+    setShowAllPublicMatchesMobile(false);
+  }, [selectedSport, selectedCategory, selectedGender, selectedAffiliation, filterMatchesByDate, selectedDate, activePublicTab]);
+
+  useEffect(() => {
+    setAlbumSlideIndex(0);
+    setAlbumSlideDirection('next');
+  }, [selectedSport]);
+
+  useEffect(() => {
+    setModalGalleryPage(0);
+    setModalGalleryDirection('next');
+  }, [selectedSport, publicGalleryInitialTab, isPublicGalleryOpen]);
+
+  const publicAlbumData = useMemo(() => {
+    const rawPhotos = documentationItems.filter(item => {
+      if ((item.itemType || 'match_photo') !== 'match_photo') return false;
+      if (selectedSport === 'ALL') return true;
+      return item.sportId === 'ALL' || areSportIdsEquivalent(item.sportId, selectedSport, sportsConfig);
+    });
+
+    const limitedPhotos = applySportAlbumPhotoLimits<DocumentationPhoto>(rawPhotos, sportsConfig);
+    const selectedCanonical = selectedSport !== 'ALL'
+      ? normalizeCanonicalSportId(selectedSport, sportsConfig)
+      : 'ALL';
+    const sportLimit = selectedCanonical !== 'ALL' && isTrackOrCrossCountrySport(selectedCanonical)
+      ? getAlbumPhotoLimitForSport(selectedCanonical)
+      : null;
+
+    type AlbumSlide = {
+      photos: DocumentationPhoto[];
+      sportKey: string;
+      sportName: string;
+      sportIcon: string;
+      albumTitle: string;
+      batchNumber: number;
+      totalBatchesInSport: number;
+    };
+
+    const resolveSlideTitle = (batch: DocumentationPhoto[], sportKey: string, sportName: string): string => {
+      const first = batch[0];
+      const matchLabel = batch.find(p => p.matchLabel && p.matchLabel.trim())?.matchLabel?.trim() || '';
+      const rawTitle = (first?.title || '').trim();
+      if (matchLabel) {
+        return rawTitle.startsWith('لقطات') ? rawTitle : `لقطات من المقابلة: ${matchLabel}`;
+      }
+      if (rawTitle) {
+        if (rawTitle.startsWith('لقطات')) return rawTitle;
+        return isTrackOrCrossCountrySport(sportKey)
+          ? `لقطات من ${sportName}: ${rawTitle}`
+          : `لقطات من المقابلة: ${rawTitle}`;
+      }
+      return isTrackOrCrossCountrySport(sportKey)
+        ? `لقطات من ${sportName}`
+        : `لقطات من المقابلة (${sportName})`;
+    };
+
+    const slides: AlbumSlide[] = [];
+    const groupedBuckets = new Map<string, { sportKey: string; photos: DocumentationPhoto[] }>();
+
+    limitedPhotos.forEach((item) => {
+      const sportKey = !item.sportId || item.sportId === 'ALL'
+        ? 'ALL'
+        : normalizeCanonicalSportId(item.sportId, sportsConfig);
+      const matchIdentity =
+        (item.matchId && item.matchId.trim()) ||
+        (item.matchLabel && item.matchLabel.trim()) ||
+        '';
+      const bucketKey = matchIdentity
+        ? `match::${sportKey}::${matchIdentity}`
+        : `sport::${sportKey}`;
+      if (!groupedBuckets.has(bucketKey)) {
+        groupedBuckets.set(bucketKey, { sportKey, photos: [] });
+      }
+      groupedBuckets.get(bucketKey)!.photos.push(item);
+    });
+
+    groupedBuckets.forEach(({ sportKey, photos: groupPhotos }) => {
+      const spObj = sportKey === 'ALL' ? null : sportsConfig.find(s => areSportIdsEquivalent(s.id, sportKey, sportsConfig));
+      const sportName = sportKey === 'ALL' ? 'البطولة' : (spObj?.name || SPORTS_MAP[sportKey]?.name || sportKey);
+      const sportIcon = sportKey === 'ALL' ? '🏆' : (spObj?.icon || SPORTS_MAP[sportKey]?.icon || '🏆');
+      const totalBatches = Math.max(1, Math.ceil(groupPhotos.length / 4));
+      for (let i = 0; i < groupPhotos.length; i += 4) {
+        const batch = groupPhotos.slice(i, i + 4);
+        slides.push({
+          photos: batch,
+          sportKey,
+          sportName,
+          sportIcon,
+          albumTitle: resolveSlideTitle(batch, sportKey, sportName),
+          batchNumber: Math.floor(i / 4) + 1,
+          totalBatchesInSport: totalBatches
+        });
+      }
+    });
+
+    return {
+      photos: limitedPhotos,
+      slides,
+      sportLimit
+    };
+  }, [documentationItems, selectedSport, sportsConfig]);
+
+  useEffect(() => {
+    if (publicAlbumData.slides.length <= 1) return;
+    if (isAlbumHovered || isPublicGalleryOpen || selectedPublicDocItem) return;
+    const timer = window.setInterval(() => {
+      setAlbumSlideDirection('next');
+      setAlbumSlideIndex((prev) => (prev + 1) % publicAlbumData.slides.length);
+    }, 6500);
+    return () => window.clearInterval(timer);
+  }, [publicAlbumData.slides.length, isAlbumHovered, isPublicGalleryOpen, selectedPublicDocItem]);
   
   // Refs for horizontal scrolling containers
   const categoryScrollRef = useRef<HTMLDivElement>(null);
@@ -2311,9 +2480,9 @@ export const Login: React.FC = () => {
   };
 
   const renderRightSidebar = () => (
-    <div className="space-y-5">
+    <div className="flex flex-col gap-5">
       {/* Weather Widget (نافذة الطقس الصغيرة) */}
-      <div className="bg-linear-to-br from-blue-600 via-sky-600 to-indigo-800 dark:from-blue-700 dark:via-sky-800 dark:to-indigo-950 rounded-2xl p-4 text-white shadow-md space-y-2.5 border border-blue-400/30">
+      <div className="order-4 lg:order-1 bg-linear-to-br from-blue-600 via-sky-600 to-indigo-800 dark:from-blue-700 dark:via-sky-800 dark:to-indigo-950 rounded-2xl p-4 text-white shadow-md space-y-2.5 border border-blue-400/30">
         <div className="flex items-center justify-between">
           <div className="space-y-0.5">
             <div className="flex items-center gap-1.5 text-xs font-bold opacity-90">
@@ -2353,7 +2522,7 @@ export const Login: React.FC = () => {
       </div>
 
       {/* Prayer Times Widget (نافذة مواقيت الصلاة الصغيرة) */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-sm space-y-3 transition-colors">
+      <div className="order-3 lg:order-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-sm space-y-3 transition-colors">
         <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-2">
           <div className="flex items-center gap-1.5">
             <Clock className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
@@ -2389,143 +2558,233 @@ export const Login: React.FC = () => {
       </div>
 
       {/* Monthly Program & Interactive Monthly Calendar (نافذة اليومية الشهرية - معروضة هنا في الحاسوب فقط) */}
-      <div className="hidden lg:block">
+      <div className="hidden lg:block lg:order-3">
         {renderMonthlyProgramWidget(false)}
       </div>
 
-      {/* دلائل ومحاضر (Public Guides & Minutes Widget + Tournaments Button) */}
+      {/* Sport Gallery (ألبوم صور المقابلات للعموم - مستقل تماماً) */}
       {(() => {
-        const publicGuides = documentationItems.filter(item => {
-          if (item.itemType !== 'guide_minutes') return false;
-          if (selectedSport === 'ALL') return true;
-          return item.sportId === 'ALL' || areSportIdsEquivalent(item.sportId, selectedSport);
-        });
-        const publicPhotos = documentationItems.filter(item => {
-          if ((item.itemType || 'match_photo') !== 'match_photo') return false;
-          if (selectedSport === 'ALL') return true;
-          return item.sportId === 'ALL' || areSportIdsEquivalent(item.sportId, selectedSport);
-        });
+        const { photos: publicPhotos, slides: albumSlides, sportLimit } = publicAlbumData;
+        const totalSlides = albumSlides.length;
+        const safeSlideIndex = totalSlides > 0 ? albumSlideIndex % totalSlides : 0;
+        const currentSlide = totalSlides > 0 ? albumSlides[safeSlideIndex] : null;
+        const goToAlbumSlide = (nextIdx: number, dir: 'next' | 'prev') => {
+          if (totalSlides <= 1) return;
+          setAlbumSlideDirection(dir);
+          setAlbumSlideIndex((nextIdx + totalSlides) % totalSlides);
+        };
 
         return (
-          <>
-            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-3.5 shadow-sm space-y-2.5">
-              <button
-                type="button"
-                onClick={() => {
-                  setActivePublicTab('TOURNAMENTS');
-                  const resultsSection = document.getElementById('public-results-section');
-                  resultsSection?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                }}
-                className={`w-full py-2.5 px-3.5 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center justify-between border ${
-                  activePublicTab === 'TOURNAMENTS'
-                    ? 'bg-emerald-600 text-white border-emerald-500 shadow-sm'
-                    : 'bg-emerald-50/60 dark:bg-slate-800 text-slate-800 dark:text-slate-100 border-emerald-200/80 dark:border-slate-700 hover:bg-emerald-50'
-                }`}
-              >
-                <div className="flex items-center gap-2">
-                  <FileText className={`w-4 h-4 ${activePublicTab === 'TOURNAMENTS' ? 'text-white' : 'text-emerald-600 dark:text-emerald-400'}`} />
-                  <span>دلائل ومحاضر</span>
-                </div>
-                <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-full ${
-                  activePublicTab === 'TOURNAMENTS'
-                    ? 'bg-white/20 text-white'
-                    : 'bg-white dark:bg-slate-900 text-emerald-700 dark:text-emerald-300 border border-emerald-200/70 dark:border-slate-700'
-                }`}>
-                  {publicGuides.length}
-                </span>
-              </button>
-
-              {publicGuides.length > 0 ? (
-                <div className="space-y-1.5">
-                  {publicGuides.slice(0, 3).map(guide => (
-                    <button
-                      key={guide.id}
-                      type="button"
-                      onClick={() => setSelectedPublicDocItem(guide)}
-                      className="w-full text-right p-2 rounded-xl bg-slate-50 dark:bg-slate-800/70 hover:bg-emerald-50/70 dark:hover:bg-emerald-950/30 border border-slate-100 dark:border-slate-800 hover:border-emerald-200 transition-all flex items-center justify-between gap-2 cursor-pointer group"
-                    >
-                      <div className="flex items-center gap-2 min-w-0">
-                        <FileText className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                        <span className="text-[11px] font-bold text-slate-800 dark:text-slate-200 truncate group-hover:text-emerald-700 dark:group-hover:text-emerald-300">
-                          {guide.title}
-                        </span>
-                      </div>
-                      <span className="text-[10px] text-slate-400 shrink-0 font-mono">{guide.date}</span>
-                    </button>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-[11px] text-slate-500 dark:text-slate-400 font-medium text-center py-1">
-                  لا توجد دلائل أو محاضر منشورة حالياً
-                </p>
-              )}
-
-              <button
-                type="button"
-                onClick={() => {
-                  setPublicGalleryInitialTab('guide_minutes');
-                  setIsPublicGalleryOpen(true);
-                }}
-                className="w-full py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-[10px] font-bold rounded-lg text-slate-700 dark:text-slate-300 transition-colors cursor-pointer"
-              >
-                عرض جميع الدلائل والمحاضر ({publicGuides.length})
-              </button>
-            </div>
-
-            {/* Sport Gallery (ألبوم صور المقابلات للعموم) */}
-            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-sm space-y-2.5">
-              <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-2">
-                <div className="flex items-center gap-1.5">
-                  <Camera className="w-4 h-4 text-amber-600" />
-                  <h4 className="text-xs font-black text-slate-800 dark:text-slate-100">
-                    ألبوم صور {selectedSport !== 'ALL' ? SPORTS_MAP[selectedSport]?.name : 'البطولة'}
-                  </h4>
-                </div>
-                <span className="text-[10px] font-mono font-bold bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 px-2 py-0.5 rounded-full border border-amber-200/70 dark:border-amber-800">
-                  {publicPhotos.length}
+          <div
+            onMouseEnter={() => setIsAlbumHovered(true)}
+            onMouseLeave={() => setIsAlbumHovered(false)}
+            onTouchStart={() => setIsAlbumHovered(true)}
+            onTouchEnd={() => setIsAlbumHovered(false)}
+            className="order-1 lg:order-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-sm space-y-2.5"
+          >
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-2 gap-2">
+              <div className="flex items-center gap-1.5">
+                <Camera className="w-4 h-4 text-amber-600 shrink-0" />
+                <span className="text-xs font-black text-slate-800 dark:text-slate-100">
+                  ألبوم الصور
                 </span>
               </div>
-
-              {publicPhotos.length > 0 ? (
-                <div className="grid grid-cols-2 gap-1.5">
-                  {publicPhotos.slice(0, 4).map((photo) => (
+              <div className="flex items-center gap-1.5">
+                {totalSlides > 1 && (
+                  <div className="flex items-center gap-1">
                     <button
-                      key={photo.id}
                       type="button"
-                      onClick={() => setSelectedPublicDocItem(photo)}
-                      className="group relative rounded-xl overflow-hidden bg-slate-100 dark:bg-slate-800 aspect-[4/3] cursor-pointer border border-slate-200/60 dark:border-slate-700"
-                      title={photo.title}
+                      onClick={() => goToAlbumSlide(safeSlideIndex - 1, 'prev')}
+                      title="الأربع صور السابقة"
+                      className="w-6 h-6 rounded-lg bg-slate-100 hover:bg-amber-100 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 flex items-center justify-center transition-colors cursor-pointer border border-slate-200/70 dark:border-slate-700"
                     >
-                      <img
-                        src={photo.imageCode}
-                        alt={photo.title}
-                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
-                        loading="lazy"
-                      />
+                      <ChevronRight className="w-3.5 h-3.5" />
                     </button>
-                  ))}
+                    <button
+                      type="button"
+                      onClick={() => goToAlbumSlide(safeSlideIndex + 1, 'next')}
+                      title="الأربع صور التالية"
+                      className="w-6 h-6 rounded-lg bg-slate-100 hover:bg-amber-100 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 flex items-center justify-center transition-colors cursor-pointer border border-slate-200/70 dark:border-slate-700"
+                    >
+                      <ChevronLeft className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                )}
+                <span className="text-[10px] font-mono font-bold bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 px-2 py-0.5 rounded-full border border-amber-200/70 dark:border-amber-800">
+                  {sportLimit !== null ? `${publicPhotos.length}/${sportLimit}` : publicPhotos.length}
+                </span>
+              </div>
+            </div>
+
+            {currentSlide && currentSlide.photos.length > 0 ? (
+              <div className="space-y-2.5">
+                <div className="overflow-hidden rounded-xl">
+                  <div
+                    key={`sidebar-album-slide-${safeSlideIndex}-${currentSlide.sportKey}`}
+                    className={cn(
+                      'grid grid-cols-2 gap-1.5',
+                      albumSlideDirection === 'next' ? 'animate-album-next' : 'animate-album-prev'
+                    )}
+                  >
+                    {currentSlide.photos.map((photo, tileIdx) => (
+                      <button
+                        key={photo.id}
+                        type="button"
+                        onClick={() => setSelectedPublicDocItem(photo)}
+                        style={{ animationDelay: `${tileIdx * 65}ms` }}
+                        className="group relative rounded-xl overflow-hidden bg-slate-100 dark:bg-slate-800 aspect-[4/3] cursor-pointer border border-slate-200/60 dark:border-slate-700 animate-album-tile"
+                        title={photo.title}
+                      >
+                        <img
+                          src={photo.imageCode}
+                          alt={photo.title}
+                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                          loading="lazy"
+                        />
+                      </button>
+                    ))}
+                  </div>
                 </div>
-              ) : (
+
+                {/* عنوان الألبوم تحت الأربع صور - تمرير تلقائي للنصوص الطويلة */}
+                <div
+                  key={`sidebar-album-title-${safeSlideIndex}-${currentSlide.sportKey}`}
+                  className="flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-amber-50/90 dark:bg-amber-950/40 border border-amber-200/80 dark:border-amber-800/60 animate-album-tile"
+                >
+                  <span className="text-sm shrink-0">{currentSlide.sportIcon}</span>
+                  <AutoScrollAlbumTitle
+                    title={currentSlide.albumTitle}
+                    className="text-xs font-black text-slate-900 dark:text-slate-100"
+                  />
+                  {totalSlides > 1 && (
+                    <span className="text-[10px] font-mono font-black text-amber-800 dark:text-amber-300 bg-white/80 dark:bg-slate-900/70 px-1.5 py-0.5 rounded-md border border-amber-200/70 dark:border-amber-800 shrink-0">
+                      {safeSlideIndex + 1}/{totalSlides}
+                    </span>
+                  )}
+                </div>
+
+                {totalSlides > 1 && (
+                  <div className="flex items-center justify-center gap-1.5 pt-0.5">
+                    {albumSlides.map((slide, sIdx) => (
+                      <button
+                        key={`dot-${sIdx}-${slide.sportKey}`}
+                        type="button"
+                        onClick={() => goToAlbumSlide(sIdx, sIdx >= safeSlideIndex ? 'next' : 'prev')}
+                        aria-label={`${slide.albumTitle} (${sIdx + 1})`}
+                        className={cn(
+                          'h-1.5 rounded-full transition-all duration-300 cursor-pointer',
+                          sIdx === safeSlideIndex
+                            ? 'w-5 bg-amber-600 dark:bg-amber-400'
+                            : 'w-1.5 bg-slate-300 dark:bg-slate-700 hover:bg-amber-400'
+                        )}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="space-y-2.5">
                 <div className="py-5 px-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-dashed border-slate-200 dark:border-slate-700 text-center space-y-1">
                   <Camera className="w-6 h-6 text-slate-300 dark:text-slate-600 mx-auto" />
                   <p className="text-[11px] font-bold text-slate-500 dark:text-slate-400">
                     لم يتم نشر صور مقابلات بعد في هذا القسم
                   </p>
                 </div>
-              )}
+                <div className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800/70 border border-slate-200/70 dark:border-slate-700">
+                  <Camera className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                  <h4 className="text-xs font-black text-slate-800 dark:text-slate-100 truncate">
+                    ألبوم صور {selectedSport !== 'ALL' ? (SPORTS_MAP[selectedSport]?.name || selectedSport) : 'البطولة'}
+                  </h4>
+                </div>
+              </div>
+            )}
 
-              <button
-                type="button"
-                onClick={() => {
-                  setPublicGalleryInitialTab('match_photo');
-                  setIsPublicGalleryOpen(true);
-                }}
-                className="w-full py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-[10px] font-bold rounded-lg text-slate-700 dark:text-slate-300 transition-colors cursor-pointer"
-              >
-                عرض معرض الصور بالكامل
-              </button>
-            </div>
-          </>
+            <button
+              type="button"
+              onClick={() => {
+                setPublicGalleryInitialTab('match_photo');
+                setIsPublicGalleryOpen(true);
+              }}
+              className="w-full py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-[10px] font-bold rounded-lg text-slate-700 dark:text-slate-300 transition-colors cursor-pointer"
+            >
+              عرض معرض الصور بالكامل
+            </button>
+          </div>
+        );
+      })()}
+
+      {/* دلائل ومحاضر (Public Guides & Minutes Widget) */}
+      {(() => {
+        const publicGuides = documentationItems.filter(item => {
+          if (item.itemType !== 'guide_minutes') return false;
+          if (selectedSport === 'ALL') return true;
+          return item.sportId === 'ALL' || areSportIdsEquivalent(item.sportId, selectedSport);
+        });
+
+        return (
+          <div className="order-2 lg:order-5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-3.5 shadow-sm space-y-2.5">
+            <button
+              type="button"
+              onClick={() => {
+                setActivePublicTab('TOURNAMENTS');
+                const resultsSection = document.getElementById('public-results-section');
+                resultsSection?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+              }}
+              className={`w-full py-2.5 px-3.5 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center justify-between border ${
+                activePublicTab === 'TOURNAMENTS'
+                  ? 'bg-emerald-600 text-white border-emerald-500 shadow-sm'
+                  : 'bg-emerald-50/60 dark:bg-slate-800 text-slate-800 dark:text-slate-100 border-emerald-200/80 dark:border-slate-700 hover:bg-emerald-50'
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <FileText className={`w-4 h-4 ${activePublicTab === 'TOURNAMENTS' ? 'text-white' : 'text-emerald-600 dark:text-emerald-400'}`} />
+                <span>دلائل ومحاضر</span>
+              </div>
+              <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-full ${
+                activePublicTab === 'TOURNAMENTS'
+                  ? 'bg-white/20 text-white'
+                  : 'bg-white dark:bg-slate-900 text-emerald-700 dark:text-emerald-300 border border-emerald-200/70 dark:border-slate-700'
+              }`}>
+                {publicGuides.length}
+              </span>
+            </button>
+
+            {publicGuides.length > 0 ? (
+              <div className="space-y-1.5">
+                {publicGuides.slice(0, 3).map(guide => (
+                  <button
+                    key={guide.id}
+                    type="button"
+                    onClick={() => setSelectedPublicDocItem(guide)}
+                    className="w-full text-right p-2 rounded-xl bg-slate-50 dark:bg-slate-800/70 hover:bg-emerald-50/70 dark:hover:bg-emerald-950/30 border border-slate-100 dark:border-slate-800 hover:border-emerald-200 transition-all flex items-center justify-between gap-2 cursor-pointer group"
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      <FileText className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                      <span className="text-[11px] font-bold text-slate-800 dark:text-slate-200 truncate group-hover:text-emerald-700 dark:group-hover:text-emerald-300">
+                        {guide.title}
+                      </span>
+                    </div>
+                    <span className="text-[10px] text-slate-400 shrink-0 font-mono">{guide.date}</span>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <p className="text-[11px] text-slate-500 dark:text-slate-400 font-medium text-center py-1">
+                لا توجد دلائل أو محاضر منشورة حالياً
+              </p>
+            )}
+
+            <button
+              type="button"
+              onClick={() => {
+                setPublicGalleryInitialTab('guide_minutes');
+                setIsPublicGalleryOpen(true);
+              }}
+              className="w-full py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-[10px] font-bold rounded-lg text-slate-700 dark:text-slate-300 transition-colors cursor-pointer"
+            >
+              عرض جميع الدلائل والمحاضر ({publicGuides.length})
+            </button>
+          </div>
         );
       })()}
     </div>
@@ -3776,6 +4035,7 @@ export const Login: React.FC = () => {
                     )}
                   </div>
                 ) : (
+                  <>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     {publicTabMatches.map((m, idx) => {
                       const t1Display = formatTeamDisplayName(
@@ -3830,6 +4090,7 @@ export const Login: React.FC = () => {
                           key={m.id}
                           className={cn(
                             "rounded-2xl p-4 shadow-sm hover:shadow-md space-y-3 transition-all border",
+                            idx >= 3 && !showAllPublicMatchesMobile ? "hidden lg:block" : "",
                             isPendingProgramApproval
                               ? "bg-slate-200/95 dark:bg-slate-800/90 border-slate-300 dark:border-slate-700"
                               : "bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800"
@@ -4046,6 +4307,28 @@ export const Login: React.FC = () => {
                       );
                     })}
                   </div>
+                  {publicTabMatches.length > 3 && (
+                    <div className="lg:hidden flex justify-center pt-1">
+                      <button
+                        type="button"
+                        onClick={() => setShowAllPublicMatchesMobile((prev) => !prev)}
+                        className="w-full py-2.5 px-4 bg-white dark:bg-slate-900 hover:bg-emerald-50 dark:hover:bg-slate-800 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-slate-700 rounded-2xl text-xs font-black shadow-xs flex items-center justify-center gap-2 transition-colors cursor-pointer"
+                      >
+                        {showAllPublicMatchesMobile ? (
+                          <>
+                            <ChevronUp className="w-4 h-4 shrink-0" />
+                            <span>إظهار 3 مقابلات فقط</span>
+                          </>
+                        ) : (
+                          <>
+                            <ChevronDown className="w-4 h-4 shrink-0" />
+                            <span>إظهار جميع المقابلات ({publicTabMatches.length})</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  )}
+                </>
                 )}
               </div>
             )}
@@ -4397,6 +4680,151 @@ export const Login: React.FC = () => {
 
             <div className="p-4 sm:p-6 overflow-y-auto flex-1">
               {(() => {
+                if (publicGalleryInitialTab === 'match_photo') {
+                  const modalSlides = publicAlbumData.slides;
+                  if (modalSlides.length === 0) {
+                    return (
+                      <div className="py-12 text-center space-y-2">
+                        <Camera className="w-10 h-10 text-slate-300 dark:text-slate-600 mx-auto" />
+                        <p className="text-sm font-black text-slate-700 dark:text-slate-200">
+                          لا توجد صور مقابلات منشورة حالياً
+                        </p>
+                      </div>
+                    );
+                  }
+
+                  const safeModalPage = modalGalleryPage % modalSlides.length;
+                  const currentModalSlide = modalSlides[safeModalPage];
+                  const switchModalPage = (nextPage: number, dir: 'next' | 'prev') => {
+                    if (modalSlides.length <= 1) return;
+                    setModalGalleryDirection(dir);
+                    setModalGalleryPage((nextPage + modalSlides.length) % modalSlides.length);
+                  };
+
+                  return (
+                    <div className="space-y-4">
+                      <div className="overflow-hidden rounded-2xl">
+                        <div
+                          key={`modal-album-slide-${safeModalPage}-${currentModalSlide.sportKey}`}
+                          className={cn(
+                            'grid grid-cols-1 sm:grid-cols-2 gap-4',
+                            modalGalleryDirection === 'next' ? 'animate-album-next' : 'animate-album-prev'
+                          )}
+                        >
+                          {currentModalSlide.photos.map((item, tileIdx) => {
+                            const spName = item.sportId === 'ALL' ? 'عام' : (SPORTS_MAP[item.sportId]?.name || item.sportId);
+                            const downloadHref = item.fileDataUrl || item.imageCode || '';
+                            return (
+                              <div
+                                key={item.id}
+                                style={{ animationDelay: `${tileIdx * 70}ms` }}
+                                className="bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-2xl overflow-hidden flex flex-col justify-between animate-album-tile"
+                              >
+                                <div
+                                  onClick={() => setSelectedPublicDocItem(item)}
+                                  className="aspect-[4/3] bg-slate-900 overflow-hidden cursor-pointer relative"
+                                >
+                                  <img src={item.imageCode} alt={item.title} className="w-full h-full object-cover hover:scale-105 transition-transform duration-300" />
+                                  <span className="absolute top-2 right-2 bg-slate-900/80 text-white text-[10px] font-bold px-2 py-0.5 rounded-lg">
+                                    {spName}
+                                  </span>
+                                </div>
+
+                                <div className="p-3.5 space-y-2">
+                                  <h4 className="text-xs font-black text-slate-900 dark:text-white line-clamp-2">{item.title}</h4>
+                                  {item.matchLabel && (
+                                    <p className="text-[10px] font-bold text-blue-600 dark:text-blue-400">{item.matchLabel}</p>
+                                  )}
+                                  {item.description && (
+                                    <p className="text-[11px] text-slate-600 dark:text-slate-300 line-clamp-2">{item.description}</p>
+                                  )}
+                                  <div className="flex items-center justify-between pt-2 border-t border-slate-200/70 dark:border-slate-700 text-[10px] text-slate-500">
+                                    <span>{item.authorName} • {item.date}</span>
+                                    <div className="flex items-center gap-1.5">
+                                      <button
+                                        type="button"
+                                        onClick={() => setSelectedPublicDocItem(item)}
+                                        className="px-2 py-1 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-bold cursor-pointer"
+                                      >
+                                        معاينة
+                                      </button>
+                                      {downloadHref && (
+                                        <a
+                                          href={downloadHref}
+                                          download={item.fileName || `${item.title}`}
+                                          className="px-2 py-1 rounded-lg bg-emerald-600 text-white font-bold"
+                                        >
+                                          تحميل
+                                        </a>
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      {/* عنوان الألبوم تحت الأربع صور + أزرار التنقل بين المجموعات */}
+                      <div
+                        key={`modal-album-footer-${safeModalPage}-${currentModalSlide.sportKey}`}
+                        className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 rounded-2xl bg-amber-50/90 dark:bg-amber-950/40 border border-amber-200/80 dark:border-amber-800/60 animate-album-tile"
+                      >
+                        <div className="flex items-center gap-2 min-w-0 flex-1">
+                          <span className="text-lg shrink-0">{currentModalSlide.sportIcon}</span>
+                          <AutoScrollAlbumTitle
+                            title={currentModalSlide.albumTitle}
+                            className="text-sm font-black text-slate-900 dark:text-white"
+                          />
+                          {modalSlides.length > 1 && (
+                            <span className="text-[11px] font-mono font-black text-amber-800 dark:text-amber-300 bg-white/80 dark:bg-slate-900/70 px-2 py-0.5 rounded-lg border border-amber-200 dark:border-amber-800 shrink-0">
+                              {safeModalPage + 1} / {modalSlides.length}
+                            </span>
+                          )}
+                        </div>
+
+                        {modalSlides.length > 1 && (
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => switchModalPage(safeModalPage - 1, 'prev')}
+                              className="px-3 py-1.5 rounded-xl bg-white dark:bg-slate-900 hover:bg-amber-100 dark:hover:bg-slate-800 text-slate-800 dark:text-slate-100 border border-amber-200 dark:border-slate-700 text-xs font-black flex items-center gap-1 cursor-pointer transition-colors"
+                            >
+                              <ChevronRight className="w-4 h-4" />
+                              <span>السابق</span>
+                            </button>
+                            <div className="flex items-center gap-1">
+                              {modalSlides.map((sl, idx) => (
+                                <button
+                                  key={`modal-dot-${idx}-${sl.sportKey}`}
+                                  type="button"
+                                  onClick={() => switchModalPage(idx, idx >= safeModalPage ? 'next' : 'prev')}
+                                  aria-label={`${sl.albumTitle} (${idx + 1})`}
+                                  className={cn(
+                                    'h-2 rounded-full transition-all duration-300 cursor-pointer',
+                                    idx === safeModalPage
+                                      ? 'w-6 bg-amber-600 dark:bg-amber-400'
+                                      : 'w-2 bg-slate-300 dark:bg-slate-700 hover:bg-amber-400'
+                                  )}
+                                />
+                              ))}
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => switchModalPage(safeModalPage + 1, 'next')}
+                              className="px-3 py-1.5 rounded-xl bg-white dark:bg-slate-900 hover:bg-amber-100 dark:hover:bg-slate-800 text-slate-800 dark:text-slate-100 border border-amber-200 dark:border-slate-700 text-xs font-black flex items-center gap-1 cursor-pointer transition-colors"
+                            >
+                              <span>التالي</span>
+                              <ChevronLeft className="w-4 h-4" />
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                }
+
                 const modalItems = documentationItems.filter(item => {
                   const t = item.itemType || 'match_photo';
                   if (t !== publicGalleryInitialTab) return false;
@@ -4409,9 +4837,7 @@ export const Login: React.FC = () => {
                     <div className="py-12 text-center space-y-2">
                       <Camera className="w-10 h-10 text-slate-300 dark:text-slate-600 mx-auto" />
                       <p className="text-sm font-black text-slate-700 dark:text-slate-200">
-                        {publicGalleryInitialTab === 'guide_minutes'
-                          ? 'لا توجد دلائل أو محاضر منشورة حالياً'
-                          : 'لا توجد صور مقابلات منشورة حالياً'}
+                        لا توجد دلائل أو محاضر منشورة حالياً
                       </p>
                     </div>
                   );

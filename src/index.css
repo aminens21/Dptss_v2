@@ -523,3 +523,76 @@ html.dark .light-surface-always .border-slate-300 { border-color: #cbd5e1 !impor
   }
 }
 
+/* Dynamic Photo Album Transitions (4-photo batch switching) */
+@keyframes albumSlideNext {
+  0% {
+    opacity: 0;
+    transform: translateX(-28px) scale(0.95);
+    filter: blur(2px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+    filter: blur(0);
+  }
+}
+
+@keyframes albumSlidePrev {
+  0% {
+    opacity: 0;
+    transform: translateX(28px) scale(0.95);
+    filter: blur(2px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+    filter: blur(0);
+  }
+}
+
+@keyframes albumTilePop {
+  0% {
+    opacity: 0;
+    transform: translateY(10px) scale(0.92);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.animate-album-next {
+  animation: albumSlideNext 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.animate-album-prev {
+  animation: albumSlidePrev 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.animate-album-tile {
+  animation: albumTilePop 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes albumTitleScrollRtl {
+  0%, 14% {
+    transform: translateX(0);
+  }
+  52%, 68% {
+    transform: translateX(var(--album-scroll-distance, 0px));
+  }
+  88%, 100% {
+    transform: translateX(0);
+  }
+}
+
+.animate-album-title-scroll {
+  animation: albumTitleScrollRtl var(--album-scroll-duration, 7s) ease-in-out infinite;
+  will-change: transform;
+}
+
+.animate-album-title-scroll:hover {
+  animation-play-state: paused;
+}
+
+
+

@@ -25,7 +25,10 @@ import {
   compressImageFileToCode,
   DataService,
   SPORTS_MAP,
-  areSportIdsEquivalent
+  areSportIdsEquivalent,
+  normalizeCanonicalSportId,
+  isTeamSport,
+  isTrackOrCrossCountrySport
 } from '../lib/dataService';
 import { formatTeamDisplayName } from '../lib/drawTournamentUtils';
 import { useNavigate } from 'react-router-dom';
@@ -54,6 +57,9 @@ export const DocumentationGallery: React.FC = () => {
   const [selectedMatchId, setSelectedMatchId] = useState('');
   const [description, setDescription] = useState('');
   const [imagePreview, setImagePreview] = useState<string>('');
+  const [selectedPhotos, setSelectedPhotos] = useState<
+    Array<{ id: string; preview: string; fileName: string; fileMimeType: string }>
+  >([]);
   const [fileDataUrl, setFileDataUrl] = useState<string>('');
   const [fileName, setFileName] = useState<string>('');
   const [fileMimeType, setFileMimeType] = useState<string>('');
@@ -280,8 +286,23 @@ export const DocumentationGallery: React.FC = () => {
     }
     ctx.drawImage(video, 0, 0, width, height);
     const dataUrl = canvas.toDataURL('image/jpeg', 0.78);
-    setImagePreview(dataUrl);
     const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const quota = getRemainingPhotoSlots();
+    if (quota.remaining !== null && selectedPhotos.length >= quota.remaining) {
+      toast.error(`تم بلوغ الحد الأقصى المسموح به (${quota.limit} صور)`);
+      stopCameraStream();
+      return;
+    }
+    setImagePreview(dataUrl);
+    setSelectedPhotos(prev => [
+      ...prev,
+      {
+        id: `cam-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+        preview: dataUrl,
+        fileName: `camera_${stamp}.jpg`,
+        fileMimeType: 'image/jpeg'
+      }
+    ]);
     setFileName(`camera_${stamp}.jpg`);
     setFileMimeType('image/jpeg');
     stopCameraStream();
@@ -295,6 +316,7 @@ export const DocumentationGallery: React.FC = () => {
     setSelectedMatchId('');
     setDescription('');
     setImagePreview('');
+    setSelectedPhotos([]);
     setFileDataUrl('');
     setFileName('');
     setFileMimeType('');
@@ -353,24 +375,84 @@ export const DocumentationGallery: React.FC = () => {
     });
   }, [scopedItems, selectedTypeFilter, selectedSportFilter, sportsConfig]);
 
-  const handleImageChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    e.target.value = '';
-    if (!file) return;
-    if (file.size > 15 * 1024 * 1024) {
-      toast.error('حجم الصورة كبير جداً (الحد الأقصى 15 ميجابايت)');
-      return;
+  const getRemainingPhotoSlots = useCallback((): { limit: number | null; used: number; remaining: number | null } => {
+    const canonicalSport = sportId === 'ALL' ? 'ALL' : normalizeCanonicalSportId(sportId, sportsConfig);
+    if (canonicalSport !== 'ALL' && isTrackOrCrossCountrySport(canonicalSport)) {
+      const used = items.filter(
+        it => (it.itemType || 'match_photo') === 'match_photo' && areSportIdsEquivalent(it.sportId, canonicalSport, sportsConfig)
+      ).length;
+      return { limit: 16, used, remaining: Math.max(0, 16 - used) };
     }
+    if (canonicalSport !== 'ALL' && isTeamSport(canonicalSport)) {
+      if (selectedMatchId) {
+        const used = items.filter(
+          it => (it.itemType || 'match_photo') === 'match_photo' && it.matchId === selectedMatchId
+        ).length;
+        return { limit: 4, used, remaining: Math.max(0, 4 - used) };
+      }
+      const trimmedTitle = title.trim();
+      const used = trimmedTitle
+        ? items.filter(
+            it =>
+              (it.itemType || 'match_photo') === 'match_photo' &&
+              !it.matchId &&
+              areSportIdsEquivalent(it.sportId, canonicalSport, sportsConfig) &&
+              it.title.trim() === trimmedTitle
+          ).length
+        : 0;
+      return { limit: 4, used, remaining: Math.max(0, 4 - used) };
+    }
+    return { limit: null, used: 0, remaining: null };
+  }, [sportId, selectedMatchId, title, items, sportsConfig]);
+
+  const handleImageChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const pickedFiles: File[] = e.target.files ? Array.from<File>(e.target.files) : [];
+    e.target.value = '';
+    if (pickedFiles.length === 0) return;
+
+    const validSizeFiles = pickedFiles.filter(f => f.size <= 15 * 1024 * 1024);
+    if (validSizeFiles.length < pickedFiles.length) {
+      toast.error('تم تجاهل بعض الصور لأن حجمها يتجاوز 15 ميجابايت');
+    }
+    if (validSizeFiles.length === 0) return;
+
+    const quota = getRemainingPhotoSlots();
+    let filesToProcess = validSizeFiles;
+    if (quota.remaining !== null) {
+      const slotsLeft = Math.max(0, quota.remaining - selectedPhotos.length);
+      if (slotsLeft <= 0) {
+        toast.error(`تم بلوغ الحد الأقصى المسموح به (${quota.limit} صور)`);
+        return;
+      }
+      if (validSizeFiles.length > slotsLeft) {
+        filesToProcess = validSizeFiles.slice(0, slotsLeft);
+        toast.error(`الرصيد المتبقي يسمح بإضافة ${slotsLeft} صور فقط من أصل ${validSizeFiles.length}`);
+      }
+    }
+
     setIsProcessingFile(true);
     try {
-      const compressedCode = await compressImageFileToCode(file, 1000, 0.72);
-      setImagePreview(compressedCode);
-      setFileName(file.name || `photo_${Date.now()}.jpg`);
-      setFileMimeType('image/jpeg');
-      stopCameraStream();
+      const processed: Array<{ id: string; preview: string; fileName: string; fileMimeType: string }> = [];
+      for (let i = 0; i < filesToProcess.length; i++) {
+        const file = filesToProcess[i];
+        const compressedCode = await compressImageFileToCode(file, 1000, 0.72);
+        processed.push({
+          id: `img-${Date.now()}-${i}-${Math.random().toString(36).substring(2, 6)}`,
+          preview: compressedCode,
+          fileName: file.name || `photo_${Date.now()}_${i}.jpg`,
+          fileMimeType: 'image/jpeg'
+        });
+      }
+      if (processed.length > 0) {
+        setSelectedPhotos(prev => [...prev, ...processed]);
+        setImagePreview(processed[0].preview);
+        setFileName(processed[0].fileName);
+        setFileMimeType('image/jpeg');
+        stopCameraStream();
+      }
     } catch (err) {
-      console.error('Error compressing image:', err);
-      toast.error('حدث خطأ أثناء ضغط الصورة');
+      console.error('Error compressing images:', err);
+      toast.error('حدث خطأ أثناء ضغط الصور');
     } finally {
       setIsProcessingFile(false);
     }
@@ -430,8 +512,8 @@ export const DocumentationGallery: React.FC = () => {
     const t1 = formatTeamDisplayName(m.team1Id, m.team1Name, schools, m.team1Placeholder, m.team1SourceMatchNumber);
     const t2 = formatTeamDisplayName(m.team2Id, m.team2Name, schools, m.team2Placeholder, m.team2SourceMatchNumber);
     const label = `${t1} ≠ ${t2}${m.stage ? ` (${m.stage})` : ''}`;
-    if (!title.trim()) {
-      setTitle(`لقطات من مقابلة: ${t1} × ${t2}`);
+    if (!title.trim() || title.trim().startsWith('لقطات من')) {
+      setTitle(`لقطات من المقابلة: ${t1} × ${t2}`);
     }
     if (!description.trim() && m.ageCategory) {
       setDescription(`${SPORTS_MAP[m.sportId]?.name || ''} — ${m.ageCategory}${m.stage ? ` • ${m.stage}` : ''}`);
@@ -449,9 +531,47 @@ export const DocumentationGallery: React.FC = () => {
       toast.error('يرجى إدخال العنوان');
       return;
     }
-    if (itemType === 'match_photo' && !imagePreview) {
-      toast.error('يرجى إرفاق صورة للمقابلة');
-      return;
+    if (itemType === 'match_photo') {
+      if (selectedPhotos.length === 0) {
+        toast.error('يرجى إرفاق صورة واحدة على الأقل للمقابلة');
+        return;
+      }
+      const canonicalSport = sportId === 'ALL' ? 'ALL' : normalizeCanonicalSportId(sportId, sportsConfig);
+      if (canonicalSport !== 'ALL' && isTrackOrCrossCountrySport(canonicalSport)) {
+        const existingPhotosCount = items.filter(
+          it => (it.itemType || 'match_photo') === 'match_photo' && areSportIdsEquivalent(it.sportId, canonicalSport, sportsConfig)
+        ).length;
+        if (existingPhotosCount + selectedPhotos.length > 16) {
+          const sportLabel = SPORTS_MAP[canonicalSport]?.name || SPORTS_MAP[sportId]?.name || sportId;
+          const remaining = Math.max(0, 16 - existingPhotosCount);
+          toast.error(`لا يمكن نشر أكثر من 16 صورة لألبوم ${sportLabel} (المتبقي المتاح: ${remaining}).`);
+          return;
+        }
+      } else if (canonicalSport !== 'ALL' && isTeamSport(canonicalSport)) {
+        if (selectedMatchId) {
+          const existingForMatch = items.filter(
+            it => (it.itemType || 'match_photo') === 'match_photo' && it.matchId === selectedMatchId
+          ).length;
+          if (existingForMatch + selectedPhotos.length > 4) {
+            const remaining = Math.max(0, 4 - existingForMatch);
+            toast.error(`الحد الأقصى لهذه المقابلة هو 4 صور (المتبقي المتاح: ${remaining}).`);
+            return;
+          }
+        } else {
+          const existingSameTitle = items.filter(
+            it =>
+              (it.itemType || 'match_photo') === 'match_photo' &&
+              !it.matchId &&
+              areSportIdsEquivalent(it.sportId, canonicalSport, sportsConfig) &&
+              it.title.trim() === title.trim()
+          ).length;
+          if (existingSameTitle + selectedPhotos.length > 4) {
+            const remaining = Math.max(0, 4 - existingSameTitle);
+            toast.error(`الحد الأقصى لكل مقابلة هو 4 صور (المتبقي المتاح: ${remaining}).`);
+            return;
+          }
+        }
+      }
     }
     if (itemType === 'guide_minutes' && !fileDataUrl && !imagePreview && !externalUrl.trim() && !description.trim()) {
       toast.error('يرجى إرفاق ملف الدليل/المحضر أو رابط خارجي أو كتابة ملخص المحضر');
@@ -470,33 +590,65 @@ export const DocumentationGallery: React.FC = () => {
 
     setSubmitting(true);
     try {
-      const newItem: DocumentationPhoto = {
-        id: `doc-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
-        itemType,
-        title: title.trim(),
-        sportId,
-        imageCode: imagePreview || '',
-        fileDataUrl: fileDataUrl || undefined,
-        fileName: fileName || undefined,
-        fileMimeType: fileMimeType || undefined,
-        externalUrl: externalUrl.trim() || undefined,
-        matchId: selectedMatchId || undefined,
-        matchLabel,
-        description: description.trim() || undefined,
-        date: new Date().toISOString().split('T')[0],
-        authorName: userProfile?.fullName || currentUser?.displayName || (isCentralAdmin ? 'المسير المركزي' : 'رئيس اللجنة التقنية'),
-        authorRole: isCentralAdmin ? 'المسير المركزي' : 'رئيس اللجنة التقنية',
-        authorEmail: userProfile?.email || currentUser?.email || '',
-        directorateId: DataService.getActiveDirectorateId() || 'taourirt',
-        createdAt: new Date().toISOString()
-      };
+      const now = Date.now();
+      const baseDate = new Date(now).toISOString().split('T')[0];
+      const authorName = userProfile?.fullName || currentUser?.displayName || (isCentralAdmin ? 'المسير المركزي' : 'رئيس اللجنة التقنية');
+      const authorRole = isCentralAdmin ? 'المسير المركزي' : 'رئيس اللجنة التقنية';
+      const authorEmail = userProfile?.email || currentUser?.email || '';
+      const directorateId = DataService.getActiveDirectorateId() || 'taourirt';
 
-      await DocumentationService.saveDocumentationPhoto(newItem);
-      toast.success(
-        itemType === 'guide_minutes'
-          ? 'تم نشر الدليل/المحضر بنجاح في قسم دلائل ومحاضر للعموم ✅'
-          : 'تم نشر صورة المقابلة بنجاح في ألبوم الصور للعموم 📸'
-      );
+      if (itemType === 'match_photo') {
+        for (let idx = 0; idx < selectedPhotos.length; idx++) {
+          const photoItem = selectedPhotos[idx];
+          const newItem: DocumentationPhoto = {
+            id: `doc-${now}-${idx}-${Math.random().toString(36).substring(2, 7)}`,
+            itemType: 'match_photo',
+            title: title.trim(),
+            sportId,
+            imageCode: photoItem.preview,
+            fileName: photoItem.fileName || undefined,
+            fileMimeType: photoItem.fileMimeType || 'image/jpeg',
+            matchId: selectedMatchId || undefined,
+            matchLabel,
+            description: description.trim() || undefined,
+            date: baseDate,
+            authorName,
+            authorRole,
+            authorEmail,
+            directorateId,
+            createdAt: new Date(now + idx).toISOString()
+          };
+          await DocumentationService.saveDocumentationPhoto(newItem);
+        }
+        toast.success(
+          selectedPhotos.length > 1
+            ? `تم نشر ${selectedPhotos.length} صور بنجاح في ألبوم الصور للعموم 📸`
+            : 'تم نشر صورة المقابلة بنجاح في ألبوم الصور للعموم 📸'
+        );
+      } else {
+        const newItem: DocumentationPhoto = {
+          id: `doc-${now}-${Math.random().toString(36).substring(2, 7)}`,
+          itemType: 'guide_minutes',
+          title: title.trim(),
+          sportId,
+          imageCode: imagePreview || '',
+          fileDataUrl: fileDataUrl || undefined,
+          fileName: fileName || undefined,
+          fileMimeType: fileMimeType || undefined,
+          externalUrl: externalUrl.trim() || undefined,
+          matchId: selectedMatchId || undefined,
+          matchLabel,
+          description: description.trim() || undefined,
+          date: baseDate,
+          authorName,
+          authorRole,
+          authorEmail,
+          directorateId,
+          createdAt: new Date(now).toISOString()
+        };
+        await DocumentationService.saveDocumentationPhoto(newItem);
+        toast.success('تم نشر الدليل/المحضر بنجاح في قسم دلائل ومحاضر للعموم ✅');
+      }
       resetModalForm(itemType);
       setIsAddModalOpen(false);
     } catch (err) {
@@ -1010,6 +1162,38 @@ export const DocumentationGallery: React.FC = () => {
                     <option key={s.id} value={s.id}>{s.icon || '🏆'} {s.name}</option>
                   ))}
                 </select>
+                {itemType === 'match_photo' && sportId !== 'ALL' && (() => {
+                  const canonical = normalizeCanonicalSportId(sportId, sportsConfig);
+                  if (isTrackOrCrossCountrySport(canonical)) {
+                    const count = items.filter(
+                      it => (it.itemType || 'match_photo') === 'match_photo' && areSportIdsEquivalent(it.sportId, canonical, sportsConfig)
+                    ).length;
+                    const isFull = count >= 16;
+                    return (
+                      <div className={`mt-1.5 px-3 py-1.5 rounded-xl text-[11px] font-bold flex items-center justify-between border ${
+                        isFull
+                          ? 'bg-rose-50 text-rose-700 border-rose-200'
+                          : 'bg-blue-50 text-blue-800 border-blue-200'
+                      }`}>
+                        <span>
+                          {isFull
+                            ? 'تم بلوغ الحد الأقصى لألبوم هذه الرياضة (16 صورة)'
+                            : 'الرصيد المتاح في ألبوم هذه الرياضة:'}
+                        </span>
+                        <span className="font-mono font-black">{count} / 16</span>
+                      </div>
+                    );
+                  }
+                  if (isTeamSport(canonical)) {
+                    return (
+                      <div className="mt-1.5 px-3 py-1.5 rounded-xl text-[11px] font-bold flex items-center justify-between border bg-blue-50 text-blue-800 border-blue-200">
+                        <span>الرصيد المتاح في الألبوم:</span>
+                        <span className="font-black">4 صور لكل مقابلة</span>
+                      </div>
+                    );
+                  }
+                  return null;
+                })()}
               </div>
 
               {/* Optional match link for match photos */}
@@ -1025,13 +1209,36 @@ export const DocumentationGallery: React.FC = () => {
                     {sportMatchesForDropdown.map(m => {
                       const t1 = formatTeamDisplayName(m.team1Id, m.team1Name, schools, m.team1Placeholder, m.team1SourceMatchNumber);
                       const t2 = formatTeamDisplayName(m.team2Id, m.team2Name, schools, m.team2Placeholder, m.team2SourceMatchNumber);
+                      const matchPhotoCount = items.filter(
+                        it => (it.itemType || 'match_photo') === 'match_photo' && it.matchId === m.id
+                      ).length;
                       return (
                         <option key={m.id} value={m.id}>
-                          {SPORTS_MAP[m.sportId]?.icon || '🏆'} {t1} ≠ {t2} {m.ageCategory ? `(${m.ageCategory})` : ''}
+                          {SPORTS_MAP[m.sportId]?.icon || '🏆'} {t1} ≠ {t2} {m.ageCategory ? `(${m.ageCategory})` : ''} — [{matchPhotoCount}/4 صور]
                         </option>
                       );
                     })}
                   </select>
+                  {selectedMatchId && (() => {
+                    const matchCount = items.filter(
+                      it => (it.itemType || 'match_photo') === 'match_photo' && it.matchId === selectedMatchId
+                    ).length;
+                    const isMatchFull = matchCount >= 4;
+                    return (
+                      <div className={`mt-1.5 px-3 py-1.5 rounded-xl text-[11px] font-bold flex items-center justify-between border ${
+                        isMatchFull
+                          ? 'bg-rose-50 text-rose-700 border-rose-200'
+                          : 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                      }`}>
+                        <span>
+                          {isMatchFull
+                            ? 'تم بلوغ الحد الأقصى لهذه المقابلة (4 صور)'
+                            : 'الرصيد المتاح لهذه المقابلة:'}
+                        </span>
+                        <span className="font-mono font-black">{matchCount} / 4</span>
+                      </div>
+                    );
+                  })()}
                 </div>
               )}
 
@@ -1061,10 +1268,11 @@ export const DocumentationGallery: React.FC = () => {
                         <ImageIcon className="h-5 w-5" />
                       </div>
                       <span className="text-xs font-black text-slate-800">اختيار من المعرض / الجهاز</span>
-                      <span className="text-[10px] text-slate-500">ضغط تلقائي لتسريع العرض للعموم</span>
+                      <span className="text-[10px] text-slate-500">يمكنك تحديد أكثر من صورة دفعة واحدة</span>
                       <input
                         type="file"
                         accept="image/*"
+                        multiple
                         onChange={handleImageChange}
                         className="hidden"
                       />
@@ -1144,22 +1352,51 @@ export const DocumentationGallery: React.FC = () => {
                   )}
 
                   {isProcessingFile && (
-                    <p className="text-[11px] text-blue-600 font-bold mt-1.5">جاري ضغط ومعالجة الصورة...</p>
+                    <p className="text-[11px] text-blue-600 font-bold mt-1.5">جاري ضغط ومعالجة الصور المختارة...</p>
                   )}
-                  {imagePreview && (
-                    <div className="mt-2 relative aspect-video rounded-xl overflow-hidden border border-slate-200 bg-slate-900">
-                      <img src={imagePreview} alt="Preview" className="w-full h-full object-cover" />
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setImagePreview('');
-                          setFileName('');
-                        }}
-                        className="absolute top-2 left-2 px-2.5 py-1 bg-rose-600/90 hover:bg-rose-600 text-white text-[10px] font-black rounded-lg flex items-center gap-1 cursor-pointer shadow-sm"
-                      >
-                        <X className="h-3 w-3" />
-                        <span>إزالة الصورة</span>
-                      </button>
+                  {selectedPhotos.length > 0 && (
+                    <div className="mt-2 space-y-2">
+                      <div className="flex items-center justify-between text-[11px] font-black text-slate-700">
+                        <span>الصور المحددة للنشر ({selectedPhotos.length})</span>
+                        {selectedPhotos.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelectedPhotos([]);
+                              setImagePreview('');
+                              setFileName('');
+                            }}
+                            className="text-rose-600 hover:text-rose-700 font-bold cursor-pointer"
+                          >
+                            إزالة الكل
+                          </button>
+                        )}
+                      </div>
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                        {selectedPhotos.map((ph) => (
+                          <div
+                            key={ph.id}
+                            className="relative aspect-[4/3] rounded-xl overflow-hidden border border-slate-200 bg-slate-900"
+                          >
+                            <img src={ph.preview} alt={ph.fileName} className="w-full h-full object-cover" />
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSelectedPhotos(prev => {
+                                  const next = prev.filter(p => p.id !== ph.id);
+                                  setImagePreview(next[0]?.preview || '');
+                                  setFileName(next[0]?.fileName || '');
+                                  return next;
+                                });
+                              }}
+                              title="إزالة الصورة"
+                              className="absolute top-1.5 left-1.5 w-6 h-6 bg-rose-600/90 hover:bg-rose-600 text-white rounded-lg flex items-center justify-center cursor-pointer shadow-sm"
+                            >
+                              <X className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   )}
                 </div>
@@ -1265,7 +1502,13 @@ export const DocumentationGallery: React.FC = () => {
                     itemType === 'guide_minutes' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-blue-600 hover:bg-blue-700'
                   }`}
                 >
-                  {submitting ? 'جاري النشر...' : itemType === 'guide_minutes' ? 'نشر الدليل / المحضر للعموم' : 'نشر الصورة في الألبوم للعموم'}
+                  {submitting
+                    ? 'جاري النشر...'
+                    : itemType === 'guide_minutes'
+                    ? 'نشر الدليل / المحضر للعموم'
+                    : selectedPhotos.length > 1
+                    ? `نشر ${selectedPhotos.length} صور في الألبوم للعموم`
+                    : 'نشر الصورة في الألبوم للعموم'}
                 </button>
               </div>
             </form>

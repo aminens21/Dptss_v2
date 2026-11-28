@@ -930,6 +930,46 @@ export function isTeamSport(sportIdOrName: string): boolean {
   return false;
 }
 
+export function getAlbumPhotoLimitForSport(sportId?: string): number | null {
+  if (!sportId || sportId === 'ALL') return null;
+  if (isTrackOrCrossCountrySport(sportId)) return 16;
+  if (isTeamSport(sportId)) return 4;
+  return null;
+}
+
+export function applySportAlbumPhotoLimits<
+  T extends { sportId: string; matchId?: string; matchLabel?: string; title?: string; id?: string }
+>(
+  photos: T[],
+  sportsList?: Sport[]
+): T[] {
+  const counts = new Map<string, number>();
+  return photos.filter((photo) => {
+    const rawId = (photo.sportId || 'ALL').trim();
+    if (!rawId || rawId === 'ALL') return true;
+    const canonical = normalizeCanonicalSportId(rawId, sportsList);
+    if (isTrackOrCrossCountrySport(canonical)) {
+      const current = counts.get(`sport:${canonical}`) || 0;
+      if (current >= 16) return false;
+      counts.set(`sport:${canonical}`, current + 1);
+      return true;
+    }
+    if (isTeamSport(canonical)) {
+      const matchKey =
+        (photo.matchId && photo.matchId.trim()) ||
+        (photo.matchLabel && photo.matchLabel.trim()) ||
+        '';
+      if (!matchKey) return true;
+      const bucket = `match:${canonical}:${matchKey}`;
+      const current = counts.get(bucket) || 0;
+      if (current >= 4) return false;
+      counts.set(bucket, current + 1);
+      return true;
+    }
+    return true;
+  });
+}
+
 export function isRegistrationDeadlineExpired(deadline: any): boolean {
   if (!deadline) return false;
   try {
