@@ -12651,6 +12651,9 @@ export class DocumentationService {
       callback(sortDocumentationItems(filtered));
     };
 
+    // Emit local items instantly on subscribe
+    emitFromLocal();
+
     const handleLocalEvent = () => emitFromLocal();
     if (typeof window !== 'undefined') {
       window.addEventListener('taourirt_documentation_updated', handleLocalEvent);
@@ -12658,7 +12661,6 @@ export class DocumentationService {
 
     let unsubFirestore: (() => void) | null = null;
     try {
-      if (isCloudSyncPaused()) emitFromLocal();
       const colRef = collection(db, 'settings', 'documentation_gallery', 'items');
       unsubFirestore = onSnapshot(
         colRef,
@@ -12675,12 +12677,10 @@ export class DocumentationService {
         },
         (err) => {
           console.warn('Firestore subscription error for documentation items:', err);
-          emitFromLocal();
         }
       );
     } catch (e) {
       console.warn('Error setting up documentation snapshot:', e);
-      emitFromLocal();
     }
 
     return () => {
@@ -12709,17 +12709,22 @@ export class DocumentationService {
     this.saveLocalItems(allLocal);
     markPendingWrite('documentation_items', normalized.id);
 
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('taourirt_documentation_updated'));
+    }
+
+    // Sync to Firestore in background without blocking
     try {
       const cleanPayload = stripUndefinedDeep(normalized);
-      await setDoc(doc(db, 'settings', 'documentation_gallery', 'items', normalized.id), cleanPayload, { merge: true });
-      clearPendingWrite('documentation_items', normalized.id);
+      setDoc(doc(db, 'settings', 'documentation_gallery', 'items', normalized.id), cleanPayload, { merge: true })
+        .then(() => {
+          clearPendingWrite('documentation_items', normalized.id);
+        })
+        .catch((e) => {
+          console.warn('Background Firestore sync pending for documentation item:', e);
+        });
     } catch (e) {
-      console.warn('Documentation item saved locally; Firestore sync pending:', e);
-      throw e;
-    } finally {
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new Event('taourirt_documentation_updated'));
-      }
+      console.warn('Documentation item saved locally; background sync failed:', e);
     }
   }
 
